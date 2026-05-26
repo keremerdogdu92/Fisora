@@ -1,0 +1,3 @@
+transaction_date,description,amount,direction,balance_after,suggested_account_code
+2026-05-03,Sentetik Tedarikci A odeme,500.00,out,9500.00,320.01.001
+

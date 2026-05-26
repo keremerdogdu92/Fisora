@@ -1,0 +1,19 @@
+account_code,account_name,tax_id,tax_office
+100,Cash,,
+102,Banks,,
+102.001,Synthetic Bank Account,,
+120,Customers,,
+120.10,Domestic Customers,,
+120.10.001,Synthetic Customer B,8888888881,Ankara Test
+191,Purchase VAT,,
+191.20,Purchase VAT 20,,
+320,Suppliers,,
+320.10,Domestic Suppliers,,
+320.10.001,Synthetic Supplier B,9999999991,Ankara Test
+391,Sales VAT,,
+391.20,Sales VAT 20,,
+600,Sales Revenue,,
+600.10,Service Revenue,,
+770,Operating Expenses,,
+770.10,Office Expense,,
+

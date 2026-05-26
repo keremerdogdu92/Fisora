@@ -1,0 +1,21 @@
+{
+  "document_type": "mixed_vat_purchase_invoice",
+  "document_ref": "KDV-0001",
+  "issue_date": "2026-05-04",
+  "supplier_name": "Sentetik Tedarikci KDV",
+  "supplier_tax_id": "7777777777",
+  "items": [
+    {
+      "expense_account": "770.01",
+      "gross_total": "108.00",
+      "vat_rate": "0.08"
+    },
+    {
+      "expense_account": "770.02",
+      "gross_total": "120.00",
+      "vat_rate": "0.20"
+    }
+  ],
+  "risk_flags": ["mixed_vat_manual_review"]
+}
+

@@ -1,0 +1,11 @@
+{
+  "document_type": "purchase_invoice",
+  "document_ref": "AF-0001",
+  "issue_date": "2026-05-01",
+  "supplier_name": "Sentetik Tedarikci A",
+  "supplier_tax_id": "9999999999",
+  "expense_account": "770.01",
+  "gross_total": "1200.00",
+  "vat_rate": "0.20"
+}
+

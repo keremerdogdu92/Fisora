@@ -1,0 +1,19 @@
+Kod,Hesap Adi,Vergi No,Vergi Dairesi
+100,Kasa,,
+102,Banka,,
+102-01,Sentetik Banka Hesabi,,
+120,Alicilar,,
+120-01,Genel Alicilar,,
+120-01-001,Sentetik Musteri C,8888888882,Istanbul Test
+191,Indirilecek KDV,,
+191-01,Indirilecek KDV Genel,,
+320,Saticilar,,
+320-01,Genel Saticilar,,
+320-01-001,Sentetik Tedarikci C,9999999992,Istanbul Test
+391,Hesaplanan KDV,,
+391-01,Hesaplanan KDV Genel,,
+600,Satislar,,
+600-01,Satis Geliri,,
+770,Giderler,,
+770-01,Genel Gider,,
+

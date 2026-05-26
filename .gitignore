@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+*.pyc
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Local outputs
+exports/*
+!exports/.gitkeep
+private_samples/*
+!private_samples/.gitkeep
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# OS/editor
+.DS_Store
+Thumbs.db

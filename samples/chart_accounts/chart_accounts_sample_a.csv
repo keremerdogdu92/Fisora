@@ -1,0 +1,20 @@
+hesap_kodu,hesap_adi,vkn,vergi_dairesi
+100,Kasa,,
+102,Bankalar,,
+102.01,Test Bankasi TR Sentetik,,
+120,Alicilar,,
+120.01,Yurt Ici Alicilar,,
+120.01.001,Sentetik Musteri A,8888888888,Test VD
+191,Indirilecek KDV,,
+191.01,Indirilecek KDV %20,,
+320,Saticilar,,
+320.01,Yurt Ici Saticilar,,
+320.01.001,Sentetik Tedarikci A,9999999999,Test VD
+391,Hesaplanan KDV,,
+391.01,Hesaplanan KDV %20,,
+600,Yurt Ici Satislar,,
+600.01,Genel Satis Geliri,,
+770,Genel Yonetim Giderleri,,
+770.01,Ofis Giderleri,,
+770.02,Kargo ve Lojistik Giderleri,,
+

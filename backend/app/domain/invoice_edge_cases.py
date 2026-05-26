@@ -9,7 +9,20 @@ KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("exemption", ("istisna", "muafiyet")),
     ("return_invoice", ("iade", "iade faturasi", "iade faturası")),
     ("zero_amount", ("0,00", "0.00")),
-    ("special_tax", ("oiv", "öiv", "ozel iletisim vergisi", "özel iletişim vergisi", "otv", "ötv")),
+    (
+        "special_tax",
+        (
+            "oiv",
+            "öiv",
+            "ozel iletisim vergisi",
+            "özel iletişim vergisi",
+            "iletisim vergisi",
+            "iletişim vergisi",
+            "telsiz kullanma",
+            "otv",
+            "ötv",
+        ),
+    ),
     ("e_archive", ("e-arsiv", "e-arşiv")),
     ("e_invoice", ("e-fatura", "efatura")),
 )
@@ -121,4 +134,3 @@ def summarize_invoice_edge_cases(file_name: str, text: str, *, extracted_char_co
         risk_flags=tuple(dict.fromkeys(risk_flags)),
         suggested_expected_behavior=expected,
     )
-

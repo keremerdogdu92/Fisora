@@ -19,6 +19,11 @@ from app.domain.chart_accounts import (
 )
 from app.domain.exporters import export_universal_journal_csv
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
+from app.domain.invoice_operations import (
+    ReviewTaskDraft,
+    run_invoice_operations,
+    vat_rate_decimal,
+)
 from app.domain.journal_entries import (
     build_bank_payment_entry,
     build_mixed_vat_purchase_entry,
@@ -26,6 +31,7 @@ from app.domain.journal_entries import (
     build_sales_entry,
     money,
 )
+from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
 
 
 class Phase0DomainTests(unittest.TestCase):
@@ -133,6 +139,79 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("withholding_manual_review", summary.risk_flags)
         self.assertIn("mixed_vat_manual_review", summary.risk_flags)
         self.assertEqual(summary.suggested_expected_behavior, "review_queue")
+
+    def test_pdf_invoice_helpers_parse_amounts_and_vat_rates(self) -> None:
+        text = "Mal Hizmet Toplam Tutarı 1.234,56 TL Hesaplanan KDV(%20) 246,91 TL KDV %8"
+
+        self.assertEqual(str(parse_amount("1.234,56")), "1234.56")
+        self.assertEqual(extract_vat_rates(text), ("8", "20"))
+
+    def test_pdf_invoice_route_returns_notes_tuple_for_journal_candidate(self) -> None:
+        route, notes = build_route(
+            (),
+            {
+                "invoice_no": "ABC2026000000001",
+                "issue_date": "01.05.2026",
+                "payable_total": "1200.00",
+            },
+        )
+
+        self.assertEqual(route, "journal_candidate")
+        self.assertEqual(notes, ())
+
+    def test_invoice_operation_run_splits_journals_and_review_tasks(self) -> None:
+        journal_invoice = ParsedInvoice(
+            file_name="normal.pdf",
+            provider_hint="Aposkal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+        )
+        review_invoice = ParsedInvoice(
+            file_name="mixed.pdf",
+            provider_hint="Aposkal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="DEF2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("10", "20"),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=("mixed_vat_manual_review",),
+            suggested_route="review_queue",
+            parse_notes=(),
+        )
+
+        run = run_invoice_operations([journal_invoice, review_invoice])
+
+        self.assertEqual(len(run.journal_entries), 1)
+        self.assertEqual(len(run.review_tasks), 1)
+        self.assertTrue(run.journal_entries[0].is_balanced)
+        self.assertIsInstance(run.review_tasks[0], ReviewTaskDraft)
+        self.assertEqual(vat_rate_decimal(journal_invoice), Decimal("0.20"))
 
 
 if __name__ == "__main__":

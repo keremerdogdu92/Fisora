@@ -24,6 +24,7 @@ from app.domain.invoice_operations import (
     run_invoice_operations,
     vat_rate_decimal,
 )
+from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.journal_entries import (
     build_bank_payment_entry,
     build_mixed_vat_purchase_entry,
@@ -214,6 +215,83 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(run.journal_entries[0].is_balanced)
         self.assertIsInstance(run.review_tasks[0], ReviewTaskDraft)
         self.assertEqual(vat_rate_decimal(journal_invoice), Decimal("0.20"))
+
+    def test_matching_simulation_creates_review_draft_for_risky_positive_invoice(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="mixed.pdf",
+            provider_hint="Aposkal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="DEF2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("10", "20"),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=("mixed_vat_manual_review",),
+            suggested_route="review_queue",
+            parse_notes=(),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+
+        result = simulate_invoice(invoice, selection)
+
+        self.assertEqual(result.simulated_status, "review_required")
+        self.assertEqual(result.draft_quality, "gross_balanced_needs_vat_split")
+        self.assertTrue(result.is_balanced)
+        self.assertEqual(len(result.draft_lines), 2)
+
+    def test_matching_simulation_keeps_zero_amount_invoice_in_review(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="zero.pdf",
+            provider_hint="Aposkal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="",
+            invoice_type="ISTISNA",
+            invoice_no="IST2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("0",),
+            goods_services_total="0.00",
+            vat_total="0.00",
+            special_tax_total="",
+            tax_inclusive_total="0.00",
+            payable_total="0.00",
+            risk_flags=("exemption_manual_review",),
+            suggested_route="review_queue",
+            parse_notes=(),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+
+        result = simulate_invoice(invoice, selection)
+
+        self.assertEqual(result.simulated_status, "review_required")
+        self.assertEqual(result.draft_quality, "no_positive_amount")
+        self.assertEqual(result.draft_lines, ())
 
 
 if __name__ == "__main__":

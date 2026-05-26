@@ -1,0 +1,57 @@
+export const fallbackReviewData = {
+  generatedFrom: "demo fallback",
+  summary: {
+    chartRunCount: 3,
+    invoiceRowCount: 33,
+    autoReadyCount: 12,
+    reviewRequiredCount: 21,
+    cannotDraftCount: 0,
+    allDraftsBalanced: true,
+  },
+  chartRuns: [
+    {
+      chartFileName: "VIDHATA HESAP PLANI.xlsx",
+      accountCount: 593,
+      detailAccountCount: 255,
+      customerCandidateCount: 20,
+      supplierCandidateCount: 37,
+      hasPurchaseVat191: true,
+      hasSalesVat391: true,
+      autoReadyCount: 4,
+      reviewRequiredCount: 7,
+      cannotDraftCount: 0,
+      selectedAccounts: {
+        expense_account: "770.01",
+        purchase_vat_account: "191.01",
+        supplier_account: "320.01",
+        bank_account: "102.01",
+      },
+    },
+  ],
+  invoiceRows: [
+    {
+      chartFileName: "VIDHATA HESAP PLANI.xlsx",
+      fileName: "ornek-fatura.pdf",
+      providerHint: "Kolay Soft",
+      invoiceType: "SATIS",
+      issueDate: "01.04.2026",
+      payableTotal: "999.90",
+      vatRates: ["20"],
+      status: "review_required",
+      draftQuality: "partial_review_required",
+      isBalanced: true,
+      riskFlags: ["special_tax_manual_review"],
+      parseNotes: [],
+      reviewReasonCodes: ["special_tax_manual_review"],
+      selectedExpenseAccount: "770.01",
+      selectedVatAccount: "191.01",
+      selectedSupplierAccount: "320.01",
+      draftLines: [
+        { account_code: "770.01", description: "Gider", debit: "833.25", credit: "0.00" },
+        { account_code: "191.01", description: "Indirilecek KDV", debit: "166.65", credit: "0.00" },
+        { account_code: "320.01", description: "Satici cari", debit: "0.00", credit: "999.90" },
+      ],
+    },
+  ],
+};
+

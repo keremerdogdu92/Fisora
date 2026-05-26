@@ -15,6 +15,7 @@ exports/*
 !exports/.gitkeep
 private_samples/*
 !private_samples/.gitkeep
+frontend/public/local-review-data.json
 
 # Secrets and local config
 .env

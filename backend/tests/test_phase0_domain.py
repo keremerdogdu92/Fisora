@@ -70,6 +70,8 @@ class Phase0DomainTests(unittest.TestCase):
 
     def test_account_code_normalization(self) -> None:
         self.assertEqual(normalize_account_code(" 120.01,001 "), "120.01.001")
+        self.assertEqual(normalize_account_code("100 01 001"), "100.01.001")
+        self.assertEqual(normalize_account_code("120-01-001"), "120.01.001")
 
     def test_purchase_sales_bank_entries_are_balanced(self) -> None:
         entries = [

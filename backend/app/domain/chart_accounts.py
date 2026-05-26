@@ -25,6 +25,7 @@ NAME_KEYS = (
 )
 TAX_ID_KEYS = ("tax_id", "vkn", "tckn", "vergi_no", "vergi no")
 TAX_OFFICE_KEYS = ("tax_office", "vergi_dairesi", "vergi dairesi")
+DETAIL_KEYS = ("is_detail_account", "detay e/h", "detay", "detay hesap")
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class ChartAccount:
     raw_account_code: str
     normalized_account_code: str
     account_name: str
-    is_detail_account: bool = False
+    is_detail_account: bool | None = None
     tax_id: str | None = None
     tax_office: str | None = None
 
@@ -50,8 +51,9 @@ class ChartAccount:
 
 
 def normalize_account_code(value: str) -> str:
-    compact = value.strip().replace(",", ".").replace(" ", "")
-    compact = re.sub(r"[^0-9A-Za-z.\-]", "", compact)
+    compact = value.strip().replace(",", ".")
+    compact = re.sub(r"[\s\-]+", ".", compact)
+    compact = re.sub(r"[^0-9A-Za-z.]", "", compact)
     compact = re.sub(r"\.+", ".", compact).strip(".")
     return compact
 
@@ -78,17 +80,27 @@ def _is_child(parent: str, child: str) -> bool:
     return parent.isdigit() and child.isdigit() and len(child) > len(parent)
 
 
+def parse_detail_flag(value: str) -> bool | None:
+    normalized = _normalized_header(value)
+    if normalized in {"evet", "e", "yes", "true", "1"}:
+        return True
+    if normalized in {"hayir", "h", "no", "false", "0"}:
+        return False
+    return None
+
+
 def mark_detail_accounts(accounts: list[ChartAccount]) -> list[ChartAccount]:
     codes = [account.normalized_account_code for account in accounts]
     result: list[ChartAccount] = []
     for account in accounts:
         has_child = any(_is_child(account.normalized_account_code, code) for code in codes)
+        explicit_detail = account.is_detail_account
         result.append(
             ChartAccount(
                 raw_account_code=account.raw_account_code,
                 normalized_account_code=account.normalized_account_code,
                 account_name=account.account_name,
-                is_detail_account=not has_child,
+                is_detail_account=explicit_detail if explicit_detail is not None else not has_child,
                 tax_id=account.tax_id,
                 tax_office=account.tax_office,
             )
@@ -110,6 +122,7 @@ def parse_chart_accounts_csv(path: Path) -> list[ChartAccount]:
                     raw_account_code=raw_code,
                     normalized_account_code=normalize_account_code(raw_code),
                     account_name=name,
+                    is_detail_account=parse_detail_flag(_first_value(row, DETAIL_KEYS)),
                     tax_id=_first_value(row, TAX_ID_KEYS) or None,
                     tax_office=_first_value(row, TAX_OFFICE_KEYS) or None,
                 )
@@ -142,6 +155,7 @@ def parse_chart_accounts_xlsx(path: Path) -> list[ChartAccount]:
                 raw_account_code=raw_code,
                 normalized_account_code=normalize_account_code(raw_code),
                 account_name=name,
+                is_detail_account=parse_detail_flag(_first_value(row, DETAIL_KEYS)),
                 tax_id=_first_value(row, TAX_ID_KEYS) or None,
                 tax_office=_first_value(row, TAX_OFFICE_KEYS) or None,
             )
@@ -169,4 +183,3 @@ def validate_vat_accounts(accounts: Iterable[ChartAccount]) -> dict[str, bool]:
         "has_purchase_vat_191": any(code.startswith("191") for code in codes),
         "has_sales_vat_391": any(code.startswith("391") for code in codes),
     }
-

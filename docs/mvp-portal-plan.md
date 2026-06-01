@@ -1,0 +1,121 @@
+# MVP Portal Plani
+
+## Amac
+
+Fisora MVP, mustavirin mevcut tanitim sitesinden erisilecek uyelikli bir belge
+yukleme ve review portali olarak baslar. Portal kendi basina "kesin kayit atan
+AI" degildir; mukellef belgelerini toplar, fis taslagi uretir, riskleri gosterir
+ve mustavir kontrollu Zirve export paketi hazirlar.
+
+## Roller
+
+- Ofis yoneticisi: mustavir/ofis ayarlarini, kullanicilari ve mukellefleri
+  yonetir.
+- Mustavir: fis taslaklarini onaylar, duzeltir, reddeder ve otomasyon
+  politikalarini belirler.
+- Mukellef kullanicisi: sadece kendisine atanmis mukellef adina belge yukler ve
+  belge durumunu izler.
+- Sistem/worker: belgeyi parse eder, siniflandirir, fis taslagi ve risk sonucu
+  uretir.
+
+## Uyelik Karari
+
+Serbest uyelik olmayacak. Kullanici hesabi mustavir/ofis tarafindan acilir ve
+bastan bir mukellefe baglanir. Mukellef eslesmesi olmayan kullanici fatura veya
+ekstre yukleyemez.
+
+Bir kullanici birden fazla mukellefe yetkili olabilir; belge yukleme ekraninda
+sadece yetkili oldugu mukellefleri gorur. Tek mukellefe yetkili kullanicida
+mukellef secimi otomatik gelir.
+
+## Minimum Mukellef Onboarding
+
+Canli belge isleme icin zorunlu paket:
+
+- Mukellef unvani
+- VKN/TCKN
+- Zirve'deki firma veya ofis takip karsiligi
+- Faaliyet/NACE kodu veya faaliyet aciklamasi
+- Isyeri adresleri ve varsa subeler
+- Zirve hesap plani exportu
+
+Opsiyonel hizlandiricilar:
+
+- Cari liste exportu
+- Gecmis yevmiye exportu
+- Muavin veya fis listesi exportu
+- Zirve'nin kabul ettigi ornek import dosyasi
+
+Opsiyonel dosyalar alinmazsa sistem calismayi durdurmaz; daha fazla kaydi review
+kuyruguna dusurur ve ogrenmeyi mustavir onaylarindan baslatir.
+
+## Belge Yukleme Akisi
+
+```text
+kullanici giris yapar
+  -> yetkili mukellef secilir veya otomatik atanir
+  -> fatura, e-fatura XML/PDF, banka ekstresi veya POS ekstresi yuklenir
+  -> belge "isleniyor" durumuna gecer
+  -> worker parse ve siniflandirma yapar
+  -> fis taslagi ve risk sonucu uretilir
+  -> sonuc mustavir review ekranina duser
+```
+
+Yuklenen belge asla bosta kalmaz; her belge bir mukellef, yukleyen kullanici,
+kaynak dosya ve isleme durumu ile saklanir.
+
+## Mustavir Review Akisi
+
+Review ekraninda her kayit icin su bilgiler gosterilir:
+
+- Belge ve yukleyen mukellef
+- Tedarikci/alici bilgisi ve cari eslesme sonucu
+- Fatura kalemleri, marka/model adaylari ve urun kategorileri
+- NACE/faaliyet uygunluk sonucu
+- Onerilen fis satirlari
+- Borc/alacak dengesi
+- Risk bayraklari
+- AI/kural gerekcesi
+- Export'a girip girmeyecegi
+
+Mustavir aksiyonlari:
+
+- Onayla
+- Duzelt ve onayla
+- Export disi birak
+- Is alani disi/reddet
+- Kontrol kuyrugunda tut
+- Bu karari sonraki benzer belgelerde oner
+
+## Export Politikasi
+
+- `export_ready`: dengeli, cari/hessap eslesmesi net, risk bayragi yok veya
+  mustavir politikasiyla izinli.
+- `review_required`: fis taslagi var ama mustavir kontrolu gerekir.
+- `blocked`: eksik mukellef, eksik hesap plani, okunamayan belge veya kritik
+  parse hatasi.
+- `rejected`: mustavir tarafindan is alani disi veya islenmeyecek belge olarak
+  isaretlenmis.
+
+Ilk MVP'de dogrudan Zirve'ye gonderim yoktur. Sistem, gercek Zirve testinde
+calistigi kanitlanmis formatta export paketi uretir.
+
+## Otomasyona Gecis
+
+Ilk canli kullanimda sistem otomatik taslak uretir ama export kontrolludur. Ayni
+mukellef, tedarikci, urun kategorisi, cari ve hesap karari en az 3 kez tutarli
+onaylanirsa otomasyon adayi olur.
+
+Otomasyon adayi olmak tek basina yeterli degildir; mustavir/ofis politikasi bu
+kategoriye izin vermelidir. Supheli, is alani disi, karma KDV, tevkifat, iade,
+istisna veya eksik cari iceren kayitlar otomatik export'a girmez.
+
+## MVP Basari Olcutleri
+
+- Mukellef eslesmesi olmadan belge yuklenemez.
+- Belge yukleyen kisi ve mukellef denetim izinde gorunur.
+- 20-50 fatura ve 1-2 ekstre ile pilot calisir.
+- Fis taslaklari dengelidir.
+- Supheli belgeler export'a girmez.
+- Mustavir duzeltmeleri sonraki benzer belgelerde oneriyi degistirir.
+- Zirve export formati sahada dogrulanir.

@@ -64,6 +64,28 @@ kullanici giris yapar
 Yuklenen belge asla bosta kalmaz; her belge bir mukellef, yukleyen kullanici,
 kaynak dosya ve isleme durumu ile saklanir.
 
+## Portal Ekranlari
+
+Ilk MVP arayuzu iki moda ayrilir:
+
+- Mukellef yukleme modu: mukellef adi sabit gorunur, kullanici fatura,
+  e-fatura XML/PDF, banka ekstresi veya POS ekstresi yukler ve kendi belge
+  kuyrugunu izler.
+- Mustavir review modu: mustavir bir mukellefin belgelerini inceler, fatura
+  gorunumunu ve uretilen muhasebe fisini ayni ekranda gormeden karar vermez.
+
+Mustavir ekraninda ayni anda gorunmesi gereken ana alanlar:
+
+- Sol panel: mukellef karti, belge/review/export kuyrugu ve hesap plani secimi.
+- Orta panel: o an incelenen fatura veya ekstre onizlemesi, tedarikci, tutar,
+  KDV ve kalem/kategori bilgisi.
+- Sag panel: onerilen muhasebe fisi, cari/hesap eslesmeleri, AI/kural
+  gerekcesi, export gate nedeni ve onay/duzeltme aksiyonlari.
+
+Bu ekran ilk etapta mock/local snapshot ile calisabilir; ancak UI davranisi
+production API sozlesmesine hazir tutulur. Sonraki adimda dosya yukleme,
+store/workspace ve review decision endpointleri bu ekrana baglanir.
+
 ## Mustavir Review Akisi
 
 Review ekraninda her kayit icin su bilgiler gosterilir:

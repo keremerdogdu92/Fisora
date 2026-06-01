@@ -1,5 +1,24 @@
 export const fallbackReviewData = {
   generatedFrom: "demo fallback",
+  clientName: "Demo Isitme Merkezi",
+  uploadQueue: [
+    {
+      id: "demo-upload-1",
+      fileName: "rexton-alis-faturasi.pdf",
+      kind: "invoice",
+      uploadedBy: "Demo Isitme Merkezi",
+      status: "export_ready",
+      uploadedAt: "01.06.2026 10:12",
+    },
+    {
+      id: "demo-upload-2",
+      fileName: "mayis-banka-ekstresi.xlsx",
+      kind: "bank",
+      uploadedBy: "Demo Isitme Merkezi",
+      status: "processing",
+      uploadedAt: "01.06.2026 10:18",
+    },
+  ],
   summary: {
     chartRunCount: 1,
     invoiceRowCount: 3,

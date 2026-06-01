@@ -179,3 +179,13 @@ create table learning_rules (
     updated_at timestamptz not null default now()
 );
 
+create index idx_taxpayers_tenant_status on taxpayers(tenant_id, status);
+create index idx_chart_accounts_taxpayer_code on chart_accounts(tenant_id, taxpayer_id, normalized_account_code);
+create index idx_chart_accounts_counterparty_tax on chart_accounts(tenant_id, taxpayer_id, tax_id)
+    where tax_id is not null and is_detail_account = true;
+create index idx_documents_taxpayer_status on documents(tenant_id, taxpayer_id, status);
+create index idx_journal_entries_taxpayer_export on journal_entries(tenant_id, taxpayer_id, export_status);
+create index idx_review_decisions_taxpayer_created on review_decisions(tenant_id, taxpayer_id, created_at desc);
+create index idx_learning_rules_scope on learning_rules(tenant_id, taxpayer_id, scope, automation_candidate);
+create index idx_export_batches_taxpayer_status on export_batches(tenant_id, taxpayer_id, status);
+

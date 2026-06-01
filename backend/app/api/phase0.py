@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import os
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
@@ -14,8 +16,10 @@ from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_e
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.persistence.workflow_store import JsonWorkflowStore
 
 router = APIRouter()
+DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
 
 ReviewAction = Literal[
     "approve",
@@ -149,6 +153,29 @@ class ExportPackagePayload(BaseModel):
     candidates: list[ExportCandidatePayload] = Field(default_factory=list)
 
 
+class ChartAccountsStorePayload(BaseModel):
+    client_id: str
+    accounts: list[ChartAccountPayload] = Field(default_factory=list)
+
+
+class StoredSimulationPayload(SimulationPayload):
+    pass
+
+
+class StoredReviewDecisionPayload(BaseModel):
+    client_id: str
+    decision: ReviewDecisionPayload
+
+
+class StoredExportPackagePayload(BaseModel):
+    client_id: str
+    package: ExportPackagePayload
+
+
+def get_workflow_store() -> JsonWorkflowStore:
+    return JsonWorkflowStore(DEFAULT_STORE_PATH)
+
+
 def _client_profile(payload: ClientProfilePayload) -> ClientProfile:
     return ClientProfile(
         client_id=payload.client_id,
@@ -257,6 +284,25 @@ def onboarding_check(payload: ClientProfilePayload) -> dict[str, object]:
     return {"is_ready": check.is_ready, "missing_fields": list(check.missing_fields)}
 
 
+@router.post("/store/client")
+def store_client(payload: ClientProfilePayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    return get_workflow_store().upsert_client(
+        client_id=payload.client_id,
+        profile=payload.model_dump(),
+        onboarding=onboarding_check(payload),
+    )
+
+
+@router.post("/store/chart-accounts")
+def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    accounts = [asdict(_chart_account(account)) for account in payload.accounts]
+    return get_workflow_store().replace_chart_accounts(client_id=payload.client_id, accounts=accounts)
+
+
 @router.post("/counterparty/match")
 def counterparty_match(payload: CounterpartyMatchPayload) -> dict[str, object]:
     match = match_counterparty(
@@ -301,6 +347,29 @@ def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
     ):
         data[key] = list(data[key])
     return data
+
+
+@router.post("/store/simulation")
+def store_simulation(payload: StoredSimulationPayload) -> dict[str, object]:
+    if payload.client is None or not payload.client.client_id.strip():
+        raise HTTPException(status_code=400, detail="client profile with client_id is required for persistence")
+    result = simulation_invoice(payload)
+    store = get_workflow_store()
+    store.upsert_client(
+        client_id=payload.client.client_id,
+        profile=payload.client.model_dump(),
+        onboarding=onboarding_check(payload.client),
+    )
+    if payload.chart_accounts:
+        store.replace_chart_accounts(
+            client_id=payload.client.client_id,
+            accounts=[asdict(_chart_account(account)) for account in payload.chart_accounts],
+        )
+    return store.save_simulation_result(
+        client_id=payload.client.client_id,
+        document_ref=str(result["file_name"]),
+        result=result,
+    )
 
 
 @router.post("/relevance/assess")
@@ -352,6 +421,18 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
     }
 
 
+@router.post("/store/review-decision")
+def store_review_decision(payload: StoredReviewDecisionPayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    event = review_learning_event(payload.decision)
+    return get_workflow_store().save_review_decision(
+        client_id=payload.client_id,
+        decision=payload.decision.model_dump(),
+        learning_event=event,
+    )
+
+
 @router.post("/export/package")
 def export_package(payload: ExportPackagePayload) -> dict[str, object]:
     candidates = [
@@ -370,3 +451,18 @@ def export_package(payload: ExportPackagePayload) -> dict[str, object]:
         "excluded_document_refs": list(package.excluded_document_refs),
         "entries": [_entry_payload(entry) for entry in package.entries],
     }
+
+
+@router.post("/store/export-package")
+def store_export_package(payload: StoredExportPackagePayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    package = export_package(payload.package)
+    return get_workflow_store().save_export_package(client_id=payload.client_id, package=package)
+
+
+@router.get("/store/workspace/{client_id}")
+def store_workspace(client_id: str) -> dict[str, object]:
+    if not client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    return get_workflow_store().get_workspace(client_id)

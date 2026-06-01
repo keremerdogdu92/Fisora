@@ -31,3 +31,25 @@ python backend/scripts/run_phase0_demo.py
 ```
 
 Demo script'i `exports/` altinda test CSV ciktilari uretir.
+
+## Yerel MVP Store
+
+Phase 0 API, kalici demo snapshot'lari icin varsayilan olarak
+`exports/phase0_store.json` dosyasini kullanir. `exports/` gitignored oldugu
+icin bu dosyaya yazilan musteri/veri denemeleri repoya girmez.
+
+Farkli bir store dosyasi kullanmak icin:
+
+```powershell
+$env:FISORA_STORE_PATH="C:\\tmp\\fisora-phase0-store.json"
+```
+
+Ilk PostgreSQL adapter'i eklenene kadar bu store su endpointlerin davranisini
+yerel olarak dogrulamak icindir:
+
+- `POST /phase0/store/client`
+- `POST /phase0/store/chart-accounts`
+- `POST /phase0/store/simulation`
+- `POST /phase0/store/review-decision`
+- `POST /phase0/store/export-package`
+- `GET /phase0/store/workspace/{client_id}`

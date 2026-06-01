@@ -14,6 +14,7 @@ from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
+from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice
 from app.domain.review_learning import ReviewDecision, build_learning_event
@@ -113,12 +114,23 @@ class AiClassificationPolicyPayload(BaseModel):
     max_provider_calls: int = 1
 
 
+class LearnedPostingRulePayload(BaseModel):
+    scope: str = "client_rule"
+    action: str = "approve_with_changes"
+    category: str
+    corrected_account_code: str = ""
+    corrected_counterparty_code: str = ""
+    reason: str = ""
+    automation_candidate: bool = False
+
+
 class SimulationPayload(BaseModel):
     invoice: InvoicePayload
     account_selection: AccountSelectionPayload = Field(default_factory=AccountSelectionPayload)
     client: ClientProfilePayload | None = None
     chart_accounts: list[ChartAccountPayload] = Field(default_factory=list)
     ai_policy: AiClassificationPolicyPayload | None = None
+    learning_rules: list[LearnedPostingRulePayload] = Field(default_factory=list)
 
 
 class RelevancePayload(BaseModel):
@@ -267,6 +279,18 @@ def _static_first_classifier(payload: AiClassificationPolicyPayload | None) -> S
     return StaticFirstClassifier(policy=_ai_policy(payload))
 
 
+def _learned_rule(payload: LearnedPostingRulePayload) -> LearnedPostingRule:
+    return LearnedPostingRule(
+        scope=payload.scope,
+        action=payload.action,
+        category=payload.category,
+        corrected_account_code=payload.corrected_account_code,
+        corrected_counterparty_code=payload.corrected_counterparty_code,
+        reason=payload.reason,
+        automation_candidate=payload.automation_candidate,
+    )
+
+
 def _journal_entry(payload: ExportCandidatePayload) -> JournalEntry:
     return JournalEntry(
         entry_type=payload.entry_type,
@@ -388,6 +412,7 @@ def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
         counterparty,
         _static_first_classifier(payload.ai_policy),
     )
+    result = apply_learning_rules(result, [_learned_rule(rule) for rule in payload.learning_rules])
     data = asdict(result)
     for key in (
         "vat_rates",

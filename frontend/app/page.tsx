@@ -36,6 +36,9 @@ type InvoiceRow = {
   aiClassificationSkippedReason: string;
   aiClassificationReason: string;
   aiEstimatedInputChars: number;
+  learningRuleApplied: boolean;
+  learningRuleScope: string;
+  learningRuleReason: string;
   exportStatus: string;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
@@ -387,6 +390,10 @@ export default function Home() {
                 />
                 <Info label="AI sinifi" value={formatAiStatus(selectedInvoice)} />
                 <Info label="AI maliyet sinyali" value={`${selectedInvoice.aiEstimatedInputChars ?? 0} karakter`} />
+                <Info
+                  label="Ogrenme"
+                  value={selectedInvoice.learningRuleApplied ? selectedInvoice.learningRuleScope || "Uygulandi" : "Yok"}
+                />
                 <Info label="Export" value={formatExportStatus(selectedInvoice.exportStatus)} />
                 <Info
                   label="Cari eslesme"
@@ -398,6 +405,7 @@ export default function Home() {
               {selectedInvoice.aiClassificationReason ? (
                 <p className="reason">{selectedInvoice.aiClassificationReason}</p>
               ) : null}
+              {selectedInvoice.learningRuleReason ? <p className="reason">{selectedInvoice.learningRuleReason}</p> : null}
               <p className="gate-reason">{exportGateReason(selectedInvoice)}</p>
 
               <div className="decision-actions" aria-label="Musavir kararlari">

@@ -67,6 +67,9 @@ class SimulatedInvoiceResult:
     ai_classification_skipped_reason: str
     ai_classification_reason: str
     ai_estimated_input_chars: int
+    learning_rule_applied: bool
+    learning_rule_scope: str
+    learning_rule_reason: str
     export_status: str
     draft_lines: tuple[dict[str, str], ...]
 
@@ -305,6 +308,9 @@ def simulate_invoice(
         ai_classification_skipped_reason=ai_skipped_reason,
         ai_classification_reason=ai_reason,
         ai_estimated_input_chars=ai_estimated_chars,
+        learning_rule_applied=False,
+        learning_rule_scope="",
+        learning_rule_reason="",
         export_status=export_status,
         draft_lines=_entry_lines(entry),
     )
@@ -388,6 +394,9 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "ai_classification_skipped_reason",
         "ai_classification_reason",
         "ai_estimated_input_chars",
+        "learning_rule_applied",
+        "learning_rule_scope",
+        "learning_rule_reason",
         "export_status",
         "risk_flags",
         "parse_notes",
@@ -455,6 +464,9 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "aiClassificationSkippedReason": result.ai_classification_skipped_reason,
                     "aiClassificationReason": result.ai_classification_reason,
                     "aiEstimatedInputChars": result.ai_estimated_input_chars,
+                    "learningRuleApplied": result.learning_rule_applied,
+                    "learningRuleScope": result.learning_rule_scope,
+                    "learningRuleReason": result.learning_rule_reason,
                     "exportStatus": result.export_status,
                     "selectedExpenseAccount": result.selected_expense_account,
                     "selectedVatAccount": result.selected_vat_account,

@@ -35,6 +35,7 @@ from app.domain.invoice_operations import (
     run_invoice_operations,
     vat_rate_decimal,
 )
+from app.domain.learning_rules import apply_learning_rules, rule_from_learning_event
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.journal_entries import (
     build_bank_payment_entry,
@@ -604,6 +605,65 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual(event.scope, "client_rule")
         self.assertTrue(event.automation_candidate)
+
+    def test_learning_rule_changes_next_similar_document_suggestion(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="kolaysoft-tekrar.pdf",
+            provider_hint="Kolay Soft",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kolay Soft e-fatura hizmeti",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        decision = ReviewDecision(
+            document_ref="kolaysoft-ilk.pdf",
+            action="approve_with_changes",
+            reviewer="mustavir",
+            corrected_account_code="770.05",
+            category="e_fatura_hizmeti",
+            reason="Bu mukellefte e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
+            apply_to_similar=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+        learned = apply_learning_rules(result, [rule_from_learning_event(build_learning_event(decision))])
+
+        self.assertEqual(result.selected_expense_account, "770.01")
+        self.assertEqual(learned.selected_expense_account, "770.05")
+        self.assertEqual(learned.draft_lines[0]["account_code"], "770.05")
+        self.assertTrue(learned.learning_rule_applied)
+        self.assertEqual(learned.learning_rule_scope, "client_rule")
 
     def test_export_package_excludes_risky_or_review_required_entries(self) -> None:
         ready = build_purchase_entry(

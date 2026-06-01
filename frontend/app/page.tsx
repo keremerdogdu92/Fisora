@@ -24,6 +24,14 @@ type InvoiceRow = {
   riskFlags: string[];
   parseNotes: string[];
   reviewReasonCodes: string[];
+  productLineHint: string;
+  productCategory: string;
+  productConfidence: number;
+  businessRelevanceStatus: string;
+  businessRelevanceConfidence: number;
+  businessRelevanceReason: string;
+  businessRelevanceEvidence: string[];
+  exportStatus: string;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedSupplierAccount: string;
@@ -70,12 +78,33 @@ const draftQualityLabels: Record<string, string> = {
   no_positive_amount: "Pozitif tutar yok",
 };
 
+const relevanceLabels: Record<string, string> = {
+  uygun: "Uygun",
+  genel_gider: "Genel gider",
+  supheli: "Şüpheli",
+  is_alani_disi: "İş alanı dışı",
+};
+
+const exportStatusLabels: Record<string, string> = {
+  export_ready: "Export hazır",
+  review_required: "Kontrol gerekli",
+  blocked: "Bloklandı",
+};
+
 function formatStatus(status: string) {
   return statusLabels[status] ?? status;
 }
 
 function formatDraftQuality(value: string) {
   return draftQualityLabels[value] ?? value;
+}
+
+function formatRelevance(value: string) {
+  return relevanceLabels[value] ?? (value || "-");
+}
+
+function formatExportStatus(value: string) {
+  return exportStatusLabels[value] ?? (value || "-");
 }
 
 export default function Home() {
@@ -173,6 +202,8 @@ export default function Home() {
                   <th>Tutar</th>
                   <th>KDV</th>
                   <th>Durum</th>
+                  <th>Uygunluk</th>
+                  <th>Export</th>
                   <th>Risk</th>
                 </tr>
               </thead>
@@ -192,6 +223,8 @@ export default function Home() {
                       <td>
                         <span className={`status ${row.status}`}>{formatStatus(row.status)}</span>
                       </td>
+                      <td>{formatRelevance(row.businessRelevanceStatus)}</td>
+                      <td>{formatExportStatus(row.exportStatus)}</td>
                       <td>{row.reviewReasonCodes.length ? row.reviewReasonCodes.join(", ") : "-"}</td>
                     </tr>
                   );
@@ -210,11 +243,22 @@ export default function Home() {
                 <Info label="Tarih" value={selectedInvoice.issueDate || "-"} />
                 <Info label="Tip" value={selectedInvoice.invoiceType || "-"} />
                 <Info label="Taslak" value={formatDraftQuality(selectedInvoice.draftQuality)} />
+                <Info label="Ürün sinyali" value={selectedInvoice.productLineHint || "-"} />
+                <Info
+                  label="Kategori"
+                  value={`${selectedInvoice.productCategory || "-"} (${selectedInvoice.productConfidence ?? 0})`}
+                />
+                <Info
+                  label="Uygunluk"
+                  value={`${formatRelevance(selectedInvoice.businessRelevanceStatus)} (${selectedInvoice.businessRelevanceConfidence ?? 0})`}
+                />
+                <Info label="Export" value={formatExportStatus(selectedInvoice.exportStatus)} />
                 <Info label="Gider hesabı" value={selectedInvoice.selectedExpenseAccount} />
                 <Info label="KDV hesabı" value={selectedInvoice.selectedVatAccount} />
                 <Info label="Cari hesabı" value={selectedInvoice.selectedSupplierAccount} />
                 <Info label="Denge" value={selectedInvoice.isBalanced ? "Dengeli" : "Eksik"} />
               </div>
+              <p className="reason">{selectedInvoice.businessRelevanceReason || "Uygunluk gerekçesi yok."}</p>
               <div className="draft-lines">
                 {selectedInvoice.draftLines.length ? (
                   <table>

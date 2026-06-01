@@ -10,6 +10,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.domain.matching_simulation import simulate_private_matching, write_review_ui_json, write_simulation_csv  # noqa: E402
+from app.domain.business_relevance import ClientProfile  # noqa: E402
 
 
 def main() -> None:
@@ -26,11 +27,39 @@ def main() -> None:
         default=str(ROOT / "frontend" / "public" / "local-review-data.json"),
         help="Ignored local JSON consumed by the review UI.",
     )
+    parser.add_argument("--client-id", default="", help="Optional client id for business relevance simulation.")
+    parser.add_argument("--client-title", default="", help="Optional client title for business relevance simulation.")
+    parser.add_argument("--tax-id", default="", help="Optional client tax id for onboarding simulation.")
+    parser.add_argument(
+        "--activity-description",
+        default="",
+        help="Optional client activity description, for example 'Isitme cihazi satis merkezi'.",
+    )
+    parser.add_argument("--nace-code", default="", help="Optional NACE/activity code.")
+    parser.add_argument(
+        "--workplace-address",
+        action="append",
+        default=[],
+        help="Optional workplace address. Repeatable.",
+    )
     args = parser.parse_args()
+
+    client_profile = None
+    if args.activity_description or args.nace_code:
+        client_profile = ClientProfile(
+            client_id=args.client_id or "private-client",
+            title=args.client_title or "Private client",
+            tax_id=args.tax_id or "unknown",
+            activity_description=args.activity_description,
+            nace_code=args.nace_code,
+            workplace_addresses=tuple(args.workplace_address or ("unknown",)),
+            has_chart_accounts=True,
+        )
 
     runs = simulate_private_matching(
         Path(args.invoice_dir),
         [Path(chart_file) for chart_file in args.chart_file],
+        client_profile,
     )
     output_dir = Path(args.output_dir)
     csv_path = write_simulation_csv(runs, output_dir / "matching_simulation.csv")

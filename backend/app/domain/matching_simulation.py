@@ -6,6 +6,13 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from app.domain.business_relevance import (
+    BusinessRelevance,
+    ClientProfile,
+    ProductClassification,
+    assess_business_relevance,
+    decide_export_status,
+)
 from app.domain.chart_accounts import ChartAccount, extract_counterparty_candidates, parse_chart_accounts, validate_vat_accounts
 from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, money
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
@@ -42,6 +49,14 @@ class SimulatedInvoiceResult:
     selected_vat_account: str
     selected_supplier_account: str
     review_reason_codes: tuple[str, ...]
+    product_line_hint: str
+    product_category: str
+    product_confidence: int
+    business_relevance_status: str
+    business_relevance_confidence: int
+    business_relevance_reason: str
+    business_relevance_evidence: tuple[str, ...]
+    export_status: str
     draft_lines: tuple[dict[str, str], ...]
 
 
@@ -145,7 +160,31 @@ def _entry_lines(entry: JournalEntry | None) -> tuple[dict[str, str], ...]:
     )
 
 
-def simulate_invoice(invoice: ParsedInvoice, selection: AccountSelection) -> SimulatedInvoiceResult:
+def _product_line_hint(invoice: ParsedInvoice) -> str:
+    return invoice.provider_hint or invoice.invoice_type or invoice.file_name
+
+
+def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
+    classification = ProductClassification(
+        raw_line=raw_line,
+        category="not_assessed",
+        confidence=0,
+        evidence=("client_profile_not_provided",),
+    )
+    return BusinessRelevance(
+        status="genel_gider",
+        confidence=0,
+        reason="Mukellef faaliyet profili verilmedigi icin is alani uygunlugu degerlendirilmedi.",
+        evidence=("client_profile_not_provided",),
+        classification=classification,
+    )
+
+
+def simulate_invoice(
+    invoice: ParsedInvoice,
+    selection: AccountSelection,
+    client_profile: ClientProfile | None = None,
+) -> SimulatedInvoiceResult:
     reasons = tuple(dict.fromkeys((*invoice.risk_flags, *invoice.parse_notes)))
     amount = _decimal_or_none(invoice.payable_total)
     entry: JournalEntry | None = None
@@ -171,6 +210,20 @@ def simulate_invoice(invoice: ParsedInvoice, selection: AccountSelection) -> Sim
         draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
+    raw_line = _product_line_hint(invoice)
+    relevance = (
+        assess_business_relevance(raw_line, client_profile, supplier_hint=invoice.provider_hint)
+        if client_profile
+        else _not_assessed_relevance(raw_line)
+    )
+    export_status = decide_export_status(
+        is_balanced=entry.is_balanced if entry else False,
+        risk_flags=reasons,
+        relevance=relevance,
+    )
+    if client_profile and export_status != "export_ready":
+        status = "review_required"
+
     return SimulatedInvoiceResult(
         chart_file_name=selection.chart_file_name,
         file_name=invoice.file_name,
@@ -191,11 +244,23 @@ def simulate_invoice(invoice: ParsedInvoice, selection: AccountSelection) -> Sim
         selected_vat_account=selection.purchase_vat_account,
         selected_supplier_account=selection.supplier_account,
         review_reason_codes=reasons,
+        product_line_hint=raw_line,
+        product_category=relevance.classification.category,
+        product_confidence=relevance.classification.confidence,
+        business_relevance_status=relevance.status,
+        business_relevance_confidence=relevance.confidence,
+        business_relevance_reason=relevance.reason,
+        business_relevance_evidence=relevance.evidence,
+        export_status=export_status,
         draft_lines=_entry_lines(entry),
     )
 
 
-def simulate_chart_run(chart_path: Path, invoices: list[ParsedInvoice]) -> SimulatedChartRun:
+def simulate_chart_run(
+    chart_path: Path,
+    invoices: list[ParsedInvoice],
+    client_profile: ClientProfile | None = None,
+) -> SimulatedChartRun:
     accounts = parse_chart_accounts(chart_path)
     detail_accounts = [account for account in accounts if account.is_detail_account]
     counterparties = extract_counterparty_candidates(accounts)
@@ -210,13 +275,17 @@ def simulate_chart_run(chart_path: Path, invoices: list[ParsedInvoice]) -> Simul
         has_purchase_vat_191=vat_status["has_purchase_vat_191"],
         has_sales_vat_391=vat_status["has_sales_vat_391"],
         account_selection=selection,
-        invoice_results=tuple(simulate_invoice(invoice, selection) for invoice in invoices),
+        invoice_results=tuple(simulate_invoice(invoice, selection, client_profile) for invoice in invoices),
     )
 
 
-def simulate_private_matching(invoice_dir: Path, chart_paths: list[Path]) -> list[SimulatedChartRun]:
+def simulate_private_matching(
+    invoice_dir: Path,
+    chart_paths: list[Path],
+    client_profile: ClientProfile | None = None,
+) -> list[SimulatedChartRun]:
     invoices = parse_invoice_folder(invoice_dir)
-    return [simulate_chart_run(chart_path, invoices) for chart_path in chart_paths]
+    return [simulate_chart_run(chart_path, invoices, client_profile) for chart_path in chart_paths]
 
 
 def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Path:
@@ -235,6 +304,14 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "selected_expense_account",
         "selected_vat_account",
         "selected_supplier_account",
+        "product_line_hint",
+        "product_category",
+        "product_confidence",
+        "business_relevance_status",
+        "business_relevance_confidence",
+        "business_relevance_reason",
+        "business_relevance_evidence",
+        "export_status",
         "risk_flags",
         "parse_notes",
         "review_reason_codes",
@@ -249,6 +326,7 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
                 row["risk_flags"] = ";".join(result.risk_flags)
                 row["parse_notes"] = ";".join(result.parse_notes)
                 row["review_reason_codes"] = ";".join(result.review_reason_codes)
+                row["business_relevance_evidence"] = ";".join(result.business_relevance_evidence)
                 writer.writerow({column: row[column] for column in columns})
     return output_path
 
@@ -288,6 +366,14 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "riskFlags": list(result.risk_flags),
                     "parseNotes": list(result.parse_notes),
                     "reviewReasonCodes": list(result.review_reason_codes),
+                    "productLineHint": result.product_line_hint,
+                    "productCategory": result.product_category,
+                    "productConfidence": result.product_confidence,
+                    "businessRelevanceStatus": result.business_relevance_status,
+                    "businessRelevanceConfidence": result.business_relevance_confidence,
+                    "businessRelevanceReason": result.business_relevance_reason,
+                    "businessRelevanceEvidence": list(result.business_relevance_evidence),
+                    "exportStatus": result.export_status,
                     "selectedExpenseAccount": result.selected_expense_account,
                     "selectedVatAccount": result.selected_vat_account,
                     "selectedSupplierAccount": result.selected_supplier_account,

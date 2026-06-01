@@ -17,6 +17,12 @@ from app.domain.chart_accounts import (
     parse_chart_accounts,
     validate_vat_accounts,
 )
+from app.domain.business_relevance import (
+    ClientProfile,
+    assess_business_relevance,
+    check_client_onboarding,
+    decide_export_status,
+)
 from app.domain.exporters import export_universal_journal_csv
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_operations import (
@@ -292,6 +298,56 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.draft_quality, "no_positive_amount")
         self.assertEqual(result.draft_lines, ())
+
+    def test_client_onboarding_requires_profile_and_chart_accounts(self) -> None:
+        profile = ClientProfile(
+            client_id="",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=False,
+        )
+
+        check = check_client_onboarding(profile)
+
+        self.assertFalse(check.is_ready)
+        self.assertIn("client_id", check.missing_fields)
+        self.assertIn("chart_accounts", check.missing_fields)
+
+    def test_brand_model_line_flags_personal_care_for_hearing_center(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        relevance = assess_business_relevance("Urban Care sac bakim seti", profile)
+        status = decide_export_status(is_balanced=True, risk_flags=(), relevance=relevance)
+
+        self.assertEqual(relevance.classification.category, "kisisel_bakim_kozmetik")
+        self.assertEqual(relevance.status, "is_alani_disi")
+        self.assertEqual(status, "review_required")
+
+    def test_brand_model_line_allows_hearing_device_for_hearing_center(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        relevance = assess_business_relevance("Rexton RLi 20", profile)
+        status = decide_export_status(is_balanced=True, risk_flags=(), relevance=relevance)
+
+        self.assertEqual(relevance.classification.category, "isitme_cihazi")
+        self.assertEqual(relevance.status, "uygun")
+        self.assertEqual(status, "export_ready")
 
 
 if __name__ == "__main__":

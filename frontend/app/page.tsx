@@ -69,29 +69,74 @@ type ReviewData = {
   invoiceRows: InvoiceRow[];
 };
 
+type ViewMode = "all" | "review" | "export";
+type DecisionAction = "approve" | "approve_with_changes" | "exclude_export" | "out_of_scope" | "wrong_counterparty";
+
+type LocalDecision = {
+  action: DecisionAction;
+  label: string;
+  learningScope: string;
+};
+
 const statusLabels: Record<string, string> = {
-  auto_ready: "Otomatik hazır",
+  auto_ready: "Otomatik hazir",
   review_required: "Kontrol gerekli",
+  cannot_draft: "Taslak yok",
 };
 
 const draftQualityLabels: Record<string, string> = {
-  full_basic_purchase: "Tam temel alış fişi",
-  partial_review_required: "Hazır ama kontrol gerekli",
-  gross_balanced_needs_vat_split: "Brüt dengeli, KDV ayrımı gerekli",
+  full_basic_purchase: "Tam temel alis fisi",
+  partial_review_required: "Hazir ama kontrol gerekli",
+  gross_balanced_needs_vat_split: "Brut dengeli, KDV ayrimi gerekli",
   no_positive_amount: "Pozitif tutar yok",
 };
 
 const relevanceLabels: Record<string, string> = {
   uygun: "Uygun",
   genel_gider: "Genel gider",
-  supheli: "Şüpheli",
-  is_alani_disi: "İş alanı dışı",
+  supheli: "Supheli",
+  is_alani_disi: "Is alani disi",
 };
 
 const exportStatusLabels: Record<string, string> = {
-  export_ready: "Export hazır",
+  export_ready: "Export hazir",
   review_required: "Kontrol gerekli",
-  blocked: "Bloklandı",
+  blocked: "Bloklandi",
+  rejected: "Reddedildi",
+};
+
+const viewLabels: Record<ViewMode, string> = {
+  all: "Belgeler",
+  review: "Review kuyrugu",
+  export: "Export hazir",
+};
+
+const decisions: Record<DecisionAction, LocalDecision> = {
+  approve: {
+    action: "approve",
+    label: "Onayla",
+    learningScope: "Ayni cari ve ayni kategori tekrar ederse guven puani artar.",
+  },
+  approve_with_changes: {
+    action: "approve_with_changes",
+    label: "Duzelt ve onayla",
+    learningScope: "Duzeltilen hesap/cari mukellef ozel kural adayi olur.",
+  },
+  exclude_export: {
+    action: "exclude_export",
+    label: "Export disi birak",
+    learningScope: "Benzer risk bayraklari sonraki belgelerde export disi onerilir.",
+  },
+  out_of_scope: {
+    action: "out_of_scope",
+    label: "Is alani disi",
+    learningScope: "Urun kategorisi bu mukellefte kontrol veya red onerisine tasinir.",
+  },
+  wrong_counterparty: {
+    action: "wrong_counterparty",
+    label: "Cari yanlis",
+    learningScope: "Cari eslestirme guveni dusurulur ve yeni cari secimi istenir.",
+  },
 };
 
 function formatStatus(status: string) {
@@ -110,11 +155,27 @@ function formatExportStatus(value: string) {
   return exportStatusLabels[value] ?? (value || "-");
 }
 
+function rowKey(row: InvoiceRow) {
+  return `${row.chartFileName}:${row.fileName}`;
+}
+
+function exportGateReason(row: InvoiceRow) {
+  if (!row.isBalanced) return "Fis dengeli degil.";
+  if (!row.counterpartyMatchCode || row.counterpartyMatchReason === "not_found") return "Cari eslesmesi net degil.";
+  if (row.reviewReasonCodes.length) return row.reviewReasonCodes.join(", ");
+  if (row.businessRelevanceStatus === "is_alani_disi") return "Kalem faaliyet disi riski tasiyor.";
+  if (row.businessRelevanceStatus === "supheli") return "Kalem faaliyet profiliyle net eslesmedi.";
+  if (row.exportStatus !== "export_ready") return "Musavir politikasi export onayi istiyor.";
+  return "Export paketine alinabilir.";
+}
+
 export default function Home() {
   const [data, setData] = useState<ReviewData>(fallbackReviewData as ReviewData);
   const [source, setSource] = useState("demo fallback");
   const [activeChart, setActiveChart] = useState("");
   const [selectedKey, setSelectedKey] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("review");
+  const [decisionLog, setDecisionLog] = useState<Record<string, LocalDecision>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -141,48 +202,72 @@ export default function Home() {
     };
   }, []);
 
-  const visibleInvoices = useMemo(() => {
+  const chartInvoices = useMemo(() => {
     return data.invoiceRows.filter((row) => !activeChart || row.chartFileName === activeChart);
   }, [activeChart, data.invoiceRows]);
 
+  const visibleInvoices = useMemo(() => {
+    if (viewMode === "review") return chartInvoices.filter((row) => row.exportStatus !== "export_ready");
+    if (viewMode === "export") return chartInvoices.filter((row) => row.exportStatus === "export_ready");
+    return chartInvoices;
+  }, [chartInvoices, viewMode]);
+
   const selectedInvoice = useMemo(() => {
-    return visibleInvoices.find((row) => `${row.chartFileName}:${row.fileName}` === selectedKey) ?? visibleInvoices[0];
+    return visibleInvoices.find((row) => rowKey(row) === selectedKey) ?? visibleInvoices[0];
   }, [selectedKey, visibleInvoices]);
+
   const exportReadyCount = useMemo(() => {
-    return visibleInvoices.filter((row) => row.exportStatus === "export_ready").length;
-  }, [visibleInvoices]);
+    return chartInvoices.filter((row) => row.exportStatus === "export_ready").length;
+  }, [chartInvoices]);
+
   const reviewQueueCount = useMemo(() => {
-    return visibleInvoices.filter((row) => row.exportStatus !== "export_ready").length;
-  }, [visibleInvoices]);
+    return chartInvoices.filter((row) => row.exportStatus !== "export_ready").length;
+  }, [chartInvoices]);
+
+  const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
+
+  function setDecision(action: DecisionAction) {
+    if (!selectedInvoice) return;
+    setDecisionLog((current) => ({
+      ...current,
+      [rowKey(selectedInvoice)]: decisions[action],
+    }));
+  }
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
           <p className="label">Fisora MVP Portal</p>
-          <h1>Mükellef belge ve fiş review console</h1>
+          <h1>Mukellef belge ve fis review console</h1>
         </div>
         <div className="source">{source}</div>
       </header>
 
-      <section className="portal-strip" aria-label="Mükellef portal özeti">
-        <Info label="Mükellef" value="Demo İşitme Merkezi" />
-        <Info label="Yetki" value="Müşavir review" />
-        <Info label="Review kuyruğu" value={String(reviewQueueCount)} />
-        <Info label="Export hazır" value={String(exportReadyCount)} />
+      <section className="portal-strip" aria-label="Mukellef portal ozeti">
+        <Info label="Mukellef" value="Demo Isitme Merkezi" />
+        <Info label="Yetki" value="Musavir review" />
+        <Info label="Review kuyrugu" value={String(reviewQueueCount)} />
+        <Info label="Export hazir" value={String(exportReadyCount)} />
       </section>
 
-      <section className="metrics" aria-label="Özet">
-        <Metric label="Hesap planı denemesi" value={data.summary.chartRunCount} />
-        <Metric label="Fatura koşusu" value={data.summary.invoiceRowCount} />
-        <Metric label="Otomatik hazır" value={data.summary.autoReadyCount} tone="good" />
-        <Metric label="Kontrol gerekli" value={data.summary.reviewRequiredCount} tone="warn" />
+      <section className="metrics" aria-label="Ozet">
+        <Metric label="Hesap plani denemesi" value={data.summary.chartRunCount} />
+        <Metric label="Belge sayisi" value={chartInvoices.length} />
+        <Metric label="Export hazir" value={exportReadyCount} tone="good" />
+        <Metric label="Kontrol gerekli" value={reviewQueueCount} tone="warn" />
         <Metric label="Taslak eksik" value={data.summary.cannotDraftCount} tone="bad" />
       </section>
 
       <section className="layout">
-        <aside className="sidebar" aria-label="Hesap planları">
-          <h2>Hesap Planları</h2>
+        <aside className="sidebar" aria-label="Mukellef ve hesap planlari">
+          <h2>Mukellef Secimi</h2>
+          <div className="client-card">
+            <strong>Demo Isitme Merkezi</strong>
+            <span>VKN/TCKN eslesmis, hesap plani yuklu</span>
+          </div>
+
+          <h2>Hesap Planlari</h2>
           <div className="chart-list">
             {data.chartRuns.map((chart) => (
               <button
@@ -196,7 +281,7 @@ export default function Home() {
               >
                 <strong>{chart.chartFileName}</strong>
                 <span>
-                  {chart.detailAccountCount} detay, {chart.supplierCandidateCount} satıcı
+                  {chart.detailAccountCount} detay, {chart.supplierCandidateCount} satici
                 </span>
               </button>
             ))}
@@ -204,44 +289,67 @@ export default function Home() {
           <ChartDetails chart={data.chartRuns.find((chart) => chart.chartFileName === activeChart)} />
         </aside>
 
-        <section className="table-panel" aria-label="Fatura testleri">
+        <section className="table-panel" aria-label="Belge listesi">
           <div className="panel-head">
-            <h2>Fatura Parser Testleri</h2>
-            <span>{visibleInvoices.length} kayıt</span>
+            <div>
+              <h2>{viewLabels[viewMode]}</h2>
+              <span>{visibleInvoices.length} kayit</span>
+            </div>
+            <div className="tabbar" role="tablist" aria-label="Belge filtreleri">
+              {(Object.keys(viewLabels) as ViewMode[]).map((mode) => (
+                <button
+                  aria-selected={viewMode === mode}
+                  className={viewMode === mode ? "tab active" : "tab"}
+                  key={mode}
+                  onClick={() => {
+                    setViewMode(mode);
+                    setSelectedKey("");
+                  }}
+                  role="tab"
+                  type="button"
+                >
+                  {viewLabels[mode]}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Fatura</th>
-                  <th>Sağlayıcı</th>
+                  <th>Saglayici</th>
                   <th>Tutar</th>
-                  <th>KDV</th>
-                  <th>Durum</th>
                   <th>Uygunluk</th>
+                  <th>Cari</th>
                   <th>Export</th>
-                  <th>Risk</th>
+                  <th>Kontrol nedeni</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleInvoices.map((row) => {
-                  const key = `${row.chartFileName}:${row.fileName}`;
+                  const key = rowKey(row);
                   return (
                     <tr
-                      className={selectedInvoice && selectedInvoice.fileName === row.fileName ? "selected" : ""}
+                      className={selectedInvoice && rowKey(selectedInvoice) === key ? "selected" : ""}
                       key={key}
                       onClick={() => setSelectedKey(key)}
                     >
-                      <td>{row.fileName}</td>
+                      <td>
+                        <strong>{row.fileName}</strong>
+                        <span className="subtle">{row.issueDate || "-"}</span>
+                      </td>
                       <td>{row.providerHint || "Bilinmiyor"}</td>
                       <td>{row.payableTotal || "-"}</td>
-                      <td>{row.vatRates.length ? row.vatRates.join(", ") : "-"}</td>
-                      <td>
-                        <span className={`status ${row.status}`}>{formatStatus(row.status)}</span>
-                      </td>
                       <td>{formatRelevance(row.businessRelevanceStatus)}</td>
-                      <td>{formatExportStatus(row.exportStatus)}</td>
-                      <td>{row.reviewReasonCodes.length ? row.reviewReasonCodes.join(", ") : "-"}</td>
+                      <td>
+                        {row.counterpartyMatchCode || "-"}
+                        <span className="subtle">{row.counterpartyMatchReason}</span>
+                      </td>
+                      <td>
+                        <span className={`status ${row.exportStatus}`}>{formatExportStatus(row.exportStatus)}</span>
+                      </td>
+                      <td>{exportGateReason(row)}</td>
                     </tr>
                   );
                 })}
@@ -250,16 +358,15 @@ export default function Home() {
           </div>
         </section>
 
-        <section className="detail-panel" aria-label="Fiş taslağı">
-          <h2>Fiş Taslağı</h2>
+        <section className="detail-panel" aria-label="Karar ve fis taslagi">
+          <h2>Karar Paneli</h2>
           {selectedInvoice ? (
             <>
               <div className="detail-grid">
                 <Info label="Fatura" value={selectedInvoice.fileName} />
-                <Info label="Tarih" value={selectedInvoice.issueDate || "-"} />
-                <Info label="Tip" value={selectedInvoice.invoiceType || "-"} />
+                <Info label="Durum" value={formatStatus(selectedInvoice.status)} />
                 <Info label="Taslak" value={formatDraftQuality(selectedInvoice.draftQuality)} />
-                <Info label="Ürün sinyali" value={selectedInvoice.productLineHint || "-"} />
+                <Info label="Urun sinyali" value={selectedInvoice.productLineHint || "-"} />
                 <Info
                   label="Kategori"
                   value={`${selectedInvoice.productCategory || "-"} (${selectedInvoice.productConfidence ?? 0})`}
@@ -269,24 +376,44 @@ export default function Home() {
                   value={`${formatRelevance(selectedInvoice.businessRelevanceStatus)} (${selectedInvoice.businessRelevanceConfidence ?? 0})`}
                 />
                 <Info label="Export" value={formatExportStatus(selectedInvoice.exportStatus)} />
-                <Info label="Gider hesabı" value={selectedInvoice.selectedExpenseAccount} />
-                <Info label="KDV hesabı" value={selectedInvoice.selectedVatAccount} />
-                <Info label="Cari hesabı" value={selectedInvoice.selectedSupplierAccount} />
                 <Info
-                  label="Cari eşleşme"
+                  label="Cari eslesme"
                   value={`${selectedInvoice.counterpartyMatchCode || "-"} (${selectedInvoice.counterpartyMatchConfidence ?? 0})`}
                 />
-                <Info label="Denge" value={selectedInvoice.isBalanced ? "Dengeli" : "Eksik"} />
               </div>
-              <p className="reason">{selectedInvoice.businessRelevanceReason || "Uygunluk gerekçesi yok."}</p>
+
+              <p className="reason">{selectedInvoice.businessRelevanceReason || "Uygunluk gerekcesi yok."}</p>
+              <p className="gate-reason">{exportGateReason(selectedInvoice)}</p>
+
+              <div className="decision-actions" aria-label="Musavir kararlari">
+                {(Object.keys(decisions) as DecisionAction[]).map((action) => (
+                  <button key={action} onClick={() => setDecision(action)} type="button">
+                    {decisions[action].label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="decision-result">
+                {activeDecision ? (
+                  <>
+                    <span>Son karar</span>
+                    <strong>{activeDecision.label}</strong>
+                    <p>{activeDecision.learningScope}</p>
+                  </>
+                ) : (
+                  <p>Bu belge icin henuz musavir karari verilmedi.</p>
+                )}
+              </div>
+
+              <h2>Fis Taslagi</h2>
               <div className="draft-lines">
                 {selectedInvoice.draftLines.length ? (
                   <table>
                     <thead>
                       <tr>
                         <th>Hesap</th>
-                        <th>Açıklama</th>
-                        <th>Borç</th>
+                        <th>Aciklama</th>
+                        <th>Borc</th>
                         <th>Alacak</th>
                       </tr>
                     </thead>
@@ -302,12 +429,12 @@ export default function Home() {
                     </tbody>
                   </table>
                 ) : (
-                  <p className="empty">Bu kayıt için pozitif tutarlı fiş taslağı üretilemedi.</p>
+                  <p className="empty">Bu kayit icin pozitif tutarli fis taslagi uretilemedi.</p>
                 )}
               </div>
             </>
           ) : (
-            <p className="empty">Fatura seçimi yok.</p>
+            <p className="empty">Bu filtrede belge yok.</p>
           )}
         </section>
       </section>

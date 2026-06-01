@@ -154,6 +154,24 @@ h2 {
   margin: 14px 0 18px;
 }
 
+.client-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 5px;
+  margin: 14px 0 22px;
+  padding: 12px;
+}
+
+.client-card span,
+.subtle {
+  color: var(--muted);
+  display: block;
+  font-size: 0.76rem;
+  margin-top: 4px;
+}
+
 .chart-button {
   width: 100%;
   border: 1px solid var(--border);
@@ -225,7 +243,38 @@ h2 {
   border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
+  gap: 12px;
   padding: 16px 18px;
+}
+
+.tabbar {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.tab,
+.decision-actions button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.tab {
+  background: transparent;
+  font-size: 0.78rem;
+  padding: 7px 9px;
+  white-space: nowrap;
+}
+
+.tab.active {
+  background: var(--surface);
+  border-color: var(--border);
 }
 
 .table-wrap {
@@ -283,7 +332,18 @@ tbody tr.selected {
   color: var(--warn);
 }
 
+.status.export_ready {
+  background: #e8f6ef;
+  color: var(--good);
+}
+
 .status.cannot_draft {
+  background: #fdecea;
+  color: var(--bad);
+}
+
+.status.blocked,
+.status.rejected {
   background: #fdecea;
   color: var(--bad);
 }
@@ -300,6 +360,60 @@ tbody tr.selected {
 .empty {
   color: var(--muted);
   line-height: 1.5;
+}
+
+.gate-reason {
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: 12px 0 0;
+  padding-left: 10px;
+}
+
+.decision-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 16px 0;
+}
+
+.decision-actions button {
+  background: var(--surface);
+  border-color: var(--border);
+  min-height: 38px;
+  padding: 8px;
+}
+
+.decision-actions button:hover {
+  border-color: var(--accent);
+}
+
+.decision-result {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 18px;
+  min-height: 82px;
+  padding: 12px;
+}
+
+.decision-result span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.76rem;
+}
+
+.decision-result strong {
+  display: block;
+  margin-top: 5px;
+}
+
+.decision-result p {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 7px 0 0;
 }
 
 @media (max-width: 1180px) {
@@ -324,8 +438,19 @@ tbody tr.selected {
   }
 
   .metrics,
+  .portal-strip,
   .layout {
     grid-template-columns: 1fr;
+  }
+
+  .panel-head,
+  .tabbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tab {
+    text-align: left;
   }
 }
 

@@ -54,6 +54,9 @@ export const fallbackReviewData = {
       selectedExpenseAccount: "770.01",
       selectedVatAccount: "191.01",
       selectedSupplierAccount: "320.01",
+      counterpartyMatchCode: "320.01",
+      counterpartyMatchConfidence: 82,
+      counterpartyMatchReason: "title_similarity",
       draftLines: [
         { account_code: "770.01", description: "Gider", debit: "833.25", credit: "0.00" },
         { account_code: "191.01", description: "Indirilecek KDV", debit: "166.65", credit: "0.00" },

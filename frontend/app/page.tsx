@@ -35,6 +35,9 @@ type InvoiceRow = {
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedSupplierAccount: string;
+  counterpartyMatchCode: string;
+  counterpartyMatchConfidence: number;
+  counterpartyMatchReason: string;
   draftLines: DraftLine[];
 };
 
@@ -145,16 +148,29 @@ export default function Home() {
   const selectedInvoice = useMemo(() => {
     return visibleInvoices.find((row) => `${row.chartFileName}:${row.fileName}` === selectedKey) ?? visibleInvoices[0];
   }, [selectedKey, visibleInvoices]);
+  const exportReadyCount = useMemo(() => {
+    return visibleInvoices.filter((row) => row.exportStatus === "export_ready").length;
+  }, [visibleInvoices]);
+  const reviewQueueCount = useMemo(() => {
+    return visibleInvoices.filter((row) => row.exportStatus !== "export_ready").length;
+  }, [visibleInvoices]);
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="label">Fisora Faz 0</p>
-          <h1>Fatura ve hesap planı review console</h1>
+          <p className="label">Fisora MVP Portal</p>
+          <h1>Mükellef belge ve fiş review console</h1>
         </div>
         <div className="source">{source}</div>
       </header>
+
+      <section className="portal-strip" aria-label="Mükellef portal özeti">
+        <Info label="Mükellef" value="Demo İşitme Merkezi" />
+        <Info label="Yetki" value="Müşavir review" />
+        <Info label="Review kuyruğu" value={String(reviewQueueCount)} />
+        <Info label="Export hazır" value={String(exportReadyCount)} />
+      </section>
 
       <section className="metrics" aria-label="Özet">
         <Metric label="Hesap planı denemesi" value={data.summary.chartRunCount} />
@@ -256,6 +272,10 @@ export default function Home() {
                 <Info label="Gider hesabı" value={selectedInvoice.selectedExpenseAccount} />
                 <Info label="KDV hesabı" value={selectedInvoice.selectedVatAccount} />
                 <Info label="Cari hesabı" value={selectedInvoice.selectedSupplierAccount} />
+                <Info
+                  label="Cari eşleşme"
+                  value={`${selectedInvoice.counterpartyMatchCode || "-"} (${selectedInvoice.counterpartyMatchConfidence ?? 0})`}
+                />
                 <Info label="Denge" value={selectedInvoice.isBalanced ? "Dengeli" : "Eksik"} />
               </div>
               <p className="reason">{selectedInvoice.businessRelevanceReason || "Uygunluk gerekçesi yok."}</p>

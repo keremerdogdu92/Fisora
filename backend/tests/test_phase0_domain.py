@@ -23,7 +23,11 @@ from app.domain.business_relevance import (
     check_client_onboarding,
     decide_export_status,
 )
+from app.domain.chart_accounts import ChartAccount
+from app.domain.counterparty_matching import match_counterparty
+from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.exporters import export_universal_journal_csv
+from app.domain.invoice_lines import extract_invoice_lines_from_text
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_operations import (
     ReviewTaskDraft,
@@ -39,6 +43,7 @@ from app.domain.journal_entries import (
     money,
 )
 from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
+from app.domain.review_learning import ReviewDecision, build_learning_event
 
 
 class Phase0DomainTests(unittest.TestCase):
@@ -348,6 +353,77 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(relevance.classification.category, "isitme_cihazi")
         self.assertEqual(relevance.status, "uygun")
         self.assertEqual(status, "export_ready")
+
+    def test_invoice_line_extraction_keeps_brand_model_rows(self) -> None:
+        text = """
+        Fatura No: ABC2026000000001
+        Rexton RLi 20 12.000,00
+        Urban Care sac bakim seti 450,00
+        Odenecek Tutar 12.450,00
+        """
+
+        lines = extract_invoice_lines_from_text(text)
+
+        descriptions = [line.description for line in lines]
+        self.assertIn("Rexton RLi 20", descriptions)
+        self.assertIn("Urban Care sac bakim seti", descriptions)
+
+    def test_counterparty_matching_prefers_tax_id_then_review_for_missing(self) -> None:
+        accounts = [
+            ChartAccount("320.01", "320.01", "Saticilar", is_detail_account=False),
+            ChartAccount("320.01.015", "320.01.015", "Rexton Medikal", is_detail_account=True, tax_id="1234567890"),
+        ]
+
+        exact = match_counterparty(accounts, tax_ids=("1234567890",), name_hint="Bilinmeyen")
+        missing = match_counterparty(accounts, tax_ids=("9999999999",), name_hint="Baska Firma")
+
+        self.assertEqual(exact.account_code, "320.01.015")
+        self.assertEqual(exact.match_reason, "tax_id_exact")
+        self.assertFalse(exact.requires_review)
+        self.assertEqual(missing.match_reason, "not_found")
+        self.assertTrue(missing.requires_review)
+
+    def test_review_decision_creates_learning_event_after_three_consistent_approvals(self) -> None:
+        decision = ReviewDecision(
+            document_ref="AF-0001",
+            action="approve_with_changes",
+            reviewer="mustavir",
+            corrected_account_code="770.04",
+            category="e_fatura_hizmeti",
+            apply_to_similar=True,
+        )
+
+        event = build_learning_event(decision, prior_consistent_approval_count=2)
+
+        self.assertEqual(event.scope, "client_rule")
+        self.assertTrue(event.automation_candidate)
+
+    def test_export_package_excludes_risky_or_review_required_entries(self) -> None:
+        ready = build_purchase_entry(
+            entry_date="2026-05-01",
+            total=money("1200.00"),
+            vat_rate=Decimal("0.20"),
+            expense_account="770.01",
+            document_ref="ready.pdf",
+        )
+        risky = build_purchase_entry(
+            entry_date="2026-05-02",
+            total=money("600.00"),
+            vat_rate=Decimal("0.20"),
+            expense_account="770.01",
+            document_ref="risky.pdf",
+        )
+
+        package = build_export_package(
+            [
+                ExportCandidate("ready.pdf", "export_ready", ready),
+                ExportCandidate("risky.pdf", "review_required", risky, risk_flags=("counterparty_not_found",)),
+            ]
+        )
+
+        self.assertEqual(len(package.entries), 1)
+        self.assertEqual(package.entries[0].description, "Alis faturasi ready.pdf")
+        self.assertEqual(package.excluded_document_refs, ("risky.pdf",))
 
 
 if __name__ == "__main__":

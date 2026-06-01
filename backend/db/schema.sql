@@ -17,6 +17,9 @@ create table taxpayers (
     legal_name text,
     tax_number text,
     tax_office text,
+    activity_description text,
+    nace_code text,
+    workplace_addresses jsonb not null default '[]',
     status text not null default 'active',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
@@ -51,6 +54,51 @@ create table chart_accounts (
     unique (tenant_id, taxpayer_id, normalized_account_code)
 );
 
+create table documents (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    uploaded_by_user_id uuid,
+    source_filename text not null,
+    document_type text not null,
+    status text not null default 'uploaded',
+    parse_notes jsonb not null default '[]',
+    risk_flags jsonb not null default '[]',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table invoice_lines (
+    id uuid primary key,
+    document_id uuid not null references documents(id),
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    line_no integer not null,
+    raw_text text not null,
+    product_category text,
+    product_confidence numeric(5, 2),
+    relevance_status text,
+    relevance_confidence numeric(5, 2),
+    relevance_reason text,
+    created_at timestamptz not null default now()
+);
+
+create table counterparties (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    chart_account_id uuid references chart_accounts(id),
+    normalized_account_code text not null,
+    display_name text not null,
+    tax_id text,
+    counterparty_type text not null,
+    confidence_score numeric(5, 2),
+    match_reason text,
+    is_active boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
 create table journal_entries (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
@@ -63,6 +111,7 @@ create table journal_entries (
     total_credit numeric(18, 2) not null default 0,
     confidence_score numeric(5, 2),
     risk_flags jsonb not null default '[]',
+    export_status text not null default 'review_required',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     check (total_debit = total_credit)
@@ -95,5 +144,38 @@ create table export_batches (
     generated_at timestamptz,
     downloaded_at timestamptz,
     created_at timestamptz not null default now()
+);
+
+create table review_decisions (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    document_id uuid references documents(id),
+    journal_entry_id uuid references journal_entries(id),
+    reviewer_user_id uuid,
+    action text not null,
+    corrected_account_code text,
+    corrected_counterparty_code text,
+    category text,
+    reason text,
+    apply_to_similar boolean not null default false,
+    created_at timestamptz not null default now()
+);
+
+create table learning_rules (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid references taxpayers(id),
+    source_review_decision_id uuid references review_decisions(id),
+    scope text not null,
+    action text not null,
+    category text,
+    corrected_account_code text,
+    corrected_counterparty_code text,
+    reason text,
+    automation_candidate boolean not null default false,
+    consistent_approval_count integer not null default 1,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
 );
 

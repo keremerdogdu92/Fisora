@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
+from app.domain.invoice_lines import extract_invoice_lines_from_text, invoice_line_hints
 
 
 DATE_RE = re.compile(r"(?<!\d)([0-3]?\d)\s*[./-]\s*([01]?\d)\s*[./-]\s*(20\d{2})(?!\d)")
@@ -87,6 +88,7 @@ class ParsedInvoice:
     risk_flags: tuple[str, ...]
     suggested_route: str
     parse_notes: tuple[str, ...]
+    line_items: tuple[str, ...] = ()
 
 
 def extract_pdf_text(path: Path) -> tuple[int, str, tuple[str, ...]]:
@@ -285,6 +287,7 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         "payable_total": parsed_totals["payable_total"],
     }
     route, route_notes = build_route(edge_summary.risk_flags, parsed_identity)
+    line_items = invoice_line_hints(extract_invoice_lines_from_text(text))
     return ParsedInvoice(
         file_name=path.name,
         provider_hint=edge_summary.provider_hint,
@@ -306,6 +309,7 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         risk_flags=edge_summary.risk_flags,
         suggested_route=route,
         parse_notes=tuple(dict.fromkeys((*extraction_notes, *route_notes))),
+        line_items=line_items,
     )
 
 
@@ -326,6 +330,7 @@ def write_invoice_analysis_csv(invoices: list[ParsedInvoice], output_path: Path)
                 row["vat_rates"] = ";".join(invoice.vat_rates)
                 row["risk_flags"] = ";".join(invoice.risk_flags)
                 row["parse_notes"] = ";".join(invoice.parse_notes)
+                row["line_items"] = ";".join(invoice.line_items)
                 writer.writerow(row)
     return output_path
 

@@ -14,6 +14,7 @@ from app.domain.business_relevance import (
     decide_export_status,
 )
 from app.domain.chart_accounts import ChartAccount, extract_counterparty_candidates, parse_chart_accounts, validate_vat_accounts
+from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
 from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, money
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
 
@@ -48,6 +49,9 @@ class SimulatedInvoiceResult:
     selected_expense_account: str
     selected_vat_account: str
     selected_supplier_account: str
+    counterparty_match_code: str
+    counterparty_match_confidence: int
+    counterparty_match_reason: str
     review_reason_codes: tuple[str, ...]
     product_line_hint: str
     product_category: str
@@ -132,7 +136,7 @@ def _single_vat_rate(invoice: ParsedInvoice) -> Decimal:
     return Decimal(invoice.vat_rates[0]) / Decimal("100")
 
 
-def _gross_review_entry(invoice: ParsedInvoice, selection: AccountSelection) -> JournalEntry:
+def _gross_review_entry(invoice: ParsedInvoice, selection: AccountSelection, supplier_account: str) -> JournalEntry:
     total = money(invoice.payable_total)
     return JournalEntry(
         entry_type="review_purchase",
@@ -140,7 +144,7 @@ def _gross_review_entry(invoice: ParsedInvoice, selection: AccountSelection) -> 
         description=f"Kontrol gerekli fatura {invoice.file_name}",
         lines=(
             JournalLine(selection.expense_account, "Kontrol bekleyen gider taslagi", debit=total, document_ref=invoice.file_name),
-            JournalLine(selection.supplier_account, "Kontrol bekleyen satici cari", credit=total, document_ref=invoice.file_name),
+            JournalLine(supplier_account, "Kontrol bekleyen satici cari", credit=total, document_ref=invoice.file_name),
         ),
         risk_flags=invoice.risk_flags,
     )
@@ -161,7 +165,7 @@ def _entry_lines(entry: JournalEntry | None) -> tuple[dict[str, str], ...]:
 
 
 def _product_line_hint(invoice: ParsedInvoice) -> str:
-    return invoice.provider_hint or invoice.invoice_type or invoice.file_name
+    return invoice.line_items[0] if invoice.line_items else invoice.provider_hint or invoice.invoice_type or invoice.file_name
 
 
 def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
@@ -184,11 +188,13 @@ def simulate_invoice(
     invoice: ParsedInvoice,
     selection: AccountSelection,
     client_profile: ClientProfile | None = None,
+    counterparty_match: CounterpartyMatch | None = None,
 ) -> SimulatedInvoiceResult:
     reasons = tuple(dict.fromkeys((*invoice.risk_flags, *invoice.parse_notes)))
     amount = _decimal_or_none(invoice.payable_total)
     entry: JournalEntry | None = None
     draft_quality = "none"
+    supplier_account = counterparty_match.account_code if counterparty_match and counterparty_match.account_code else selection.supplier_account
 
     if amount is None or amount <= 0:
         status = "review_required"
@@ -200,13 +206,13 @@ def simulate_invoice(
             vat_rate=_single_vat_rate(invoice),
             expense_account=selection.expense_account,
             vat_account=selection.purchase_vat_account,
-            supplier_account=selection.supplier_account,
+            supplier_account=supplier_account,
             document_ref=invoice.file_name,
         )
         draft_quality = "full_basic_purchase" if not reasons else "partial_review_required"
         status = "auto_ready" if not reasons else "review_required"
     else:
-        entry = _gross_review_entry(invoice, selection)
+        entry = _gross_review_entry(invoice, selection, supplier_account)
         draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
@@ -216,9 +222,14 @@ def simulate_invoice(
         if client_profile
         else _not_assessed_relevance(raw_line)
     )
+    counterparty_reasons: tuple[str, ...] = ()
+    if counterparty_match and counterparty_match.requires_review:
+        counterparty_reasons = (f"counterparty_{counterparty_match.match_reason}",)
+    all_reasons = tuple(dict.fromkeys((*reasons, *counterparty_reasons)))
+
     export_status = decide_export_status(
         is_balanced=entry.is_balanced if entry else False,
-        risk_flags=reasons,
+        risk_flags=all_reasons,
         relevance=relevance,
     )
     if client_profile and export_status != "export_ready":
@@ -242,8 +253,11 @@ def simulate_invoice(
         is_balanced=entry.is_balanced if entry else False,
         selected_expense_account=selection.expense_account,
         selected_vat_account=selection.purchase_vat_account,
-        selected_supplier_account=selection.supplier_account,
-        review_reason_codes=reasons,
+        selected_supplier_account=supplier_account,
+        counterparty_match_code=counterparty_match.account_code if counterparty_match else "",
+        counterparty_match_confidence=counterparty_match.confidence if counterparty_match else 0,
+        counterparty_match_reason=counterparty_match.match_reason if counterparty_match else "not_assessed",
+        review_reason_codes=all_reasons,
         product_line_hint=raw_line,
         product_category=relevance.classification.category,
         product_confidence=relevance.classification.confidence,
@@ -266,6 +280,10 @@ def simulate_chart_run(
     counterparties = extract_counterparty_candidates(accounts)
     vat_status = validate_vat_accounts(accounts)
     selection = select_accounts(chart_path.name, accounts)
+    counterparty_matches = {
+        invoice.file_name: match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
+        for invoice in invoices
+    }
     return SimulatedChartRun(
         chart_file_name=chart_path.name,
         account_count=len(accounts),
@@ -275,7 +293,10 @@ def simulate_chart_run(
         has_purchase_vat_191=vat_status["has_purchase_vat_191"],
         has_sales_vat_391=vat_status["has_sales_vat_391"],
         account_selection=selection,
-        invoice_results=tuple(simulate_invoice(invoice, selection, client_profile) for invoice in invoices),
+        invoice_results=tuple(
+            simulate_invoice(invoice, selection, client_profile, counterparty_matches[invoice.file_name])
+            for invoice in invoices
+        ),
     )
 
 
@@ -304,6 +325,9 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "selected_expense_account",
         "selected_vat_account",
         "selected_supplier_account",
+        "counterparty_match_code",
+        "counterparty_match_confidence",
+        "counterparty_match_reason",
         "product_line_hint",
         "product_category",
         "product_confidence",
@@ -377,6 +401,9 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "selectedExpenseAccount": result.selected_expense_account,
                     "selectedVatAccount": result.selected_vat_account,
                     "selectedSupplierAccount": result.selected_supplier_account,
+                    "counterpartyMatchCode": result.counterparty_match_code,
+                    "counterpartyMatchConfidence": result.counterparty_match_confidence,
+                    "counterpartyMatchReason": result.counterparty_match_reason,
                     "draftLines": list(result.draft_lines),
                 }
             )

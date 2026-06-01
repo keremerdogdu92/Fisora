@@ -5,7 +5,7 @@ from typing import Literal
 
 
 RelevanceStatus = Literal["uygun", "genel_gider", "supheli", "is_alani_disi"]
-ExportStatus = Literal["export_ready", "review_required", "blocked"]
+ExportStatus = Literal["export_ready", "review_required", "blocked", "rejected"]
 
 
 GENERAL_EXPENSE_CATEGORIES = {

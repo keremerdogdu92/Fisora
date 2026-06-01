@@ -42,7 +42,9 @@ python backend/scripts/run_synthetic_pilot.py
 ```
 
 Varsayilan cikti `exports/synthetic_pilot_store.json` dosyasidir ve repoya
-girmez.
+girmez. Export-ready kayitlar icin ayni klasorde
+`exports/synthetic_pilot_store_export.csv` uretilir; review'a dusen belgeler
+bu CSV'ye girmez.
 
 ## Yerel MVP Store
 

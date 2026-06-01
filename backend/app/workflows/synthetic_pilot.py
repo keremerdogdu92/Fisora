@@ -9,6 +9,7 @@ from app.domain.business_relevance import ClientProfile, check_client_onboarding
 from app.domain.chart_accounts import ChartAccount
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.export_packages import ExportCandidate, build_export_package
+from app.domain.exporters import export_universal_journal_csv
 from app.domain.journal_entries import JournalEntry, JournalLine, money
 from app.domain.matching_simulation import (
     SimulatedInvoiceResult,
@@ -67,7 +68,10 @@ def synthetic_invoices() -> list[ParsedInvoice]:
     ]
 
 
-def run_synthetic_pilot(store_path: Path | str = "exports/synthetic_pilot_store.json") -> dict[str, Any]:
+def run_synthetic_pilot(
+    store_path: Path | str = "exports/synthetic_pilot_store.json",
+    export_csv_path: Path | str | None = None,
+) -> dict[str, Any]:
     profile = synthetic_client_profile()
     accounts = synthetic_chart_accounts()
     invoices = synthetic_invoices()
@@ -106,11 +110,15 @@ def run_synthetic_pilot(store_path: Path | str = "exports/synthetic_pilot_store.
         )
 
     package = build_export_package([_export_candidate_from_result(result) for result in results if result.draft_lines])
+    csv_path = Path(export_csv_path) if export_csv_path else _default_export_csv_path(store.path)
+    if package.entries:
+        export_universal_journal_csv(list(package.entries), csv_path)
     package_record = store.save_export_package(
         client_id=profile.client_id,
         package={
             "export_type": package.export_type,
             "entry_count": len(package.entries),
+            "csv_output_path": str(csv_path),
             "excluded_document_refs": list(package.excluded_document_refs),
             "entries": [_entry_summary(entry) for entry in package.entries],
         },
@@ -128,6 +136,7 @@ def run_synthetic_pilot(store_path: Path | str = "exports/synthetic_pilot_store.
         ],
         "export_package_id": package_record["id"],
         "export_package_entry_count": len(package.entries),
+        "csv_output_path": str(csv_path),
         "excluded_document_refs": list(package.excluded_document_refs),
     }
 
@@ -226,3 +235,6 @@ def _entry_summary(entry: JournalEntry) -> dict[str, Any]:
         "line_count": len(entry.lines),
     }
 
+
+def _default_export_csv_path(store_path: Path) -> Path:
+    return store_path.with_name(f"{store_path.stem}_export.csv")

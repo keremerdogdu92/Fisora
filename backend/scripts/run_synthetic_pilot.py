@@ -19,12 +19,19 @@ def main() -> None:
         default="exports/synthetic_pilot_store.json",
         help="Ignored local JSON store path.",
     )
+    parser.add_argument(
+        "--export-csv-path",
+        default="",
+        help="Optional ignored CSV export path. Defaults next to the store file.",
+    )
     args = parser.parse_args()
 
-    summary = run_synthetic_pilot(Path(args.store_path))
+    summary = run_synthetic_pilot(
+        Path(args.store_path),
+        Path(args.export_csv_path) if args.export_csv_path else None,
+    )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

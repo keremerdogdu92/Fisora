@@ -7,7 +7,9 @@ from typing import Literal
 ReviewAction = Literal[
     "approve",
     "approve_with_changes",
+    "exclude_export",
     "exclude_from_export",
+    "out_of_scope",
     "business_out_of_scope",
     "wrong_counterparty",
     "wrong_account",

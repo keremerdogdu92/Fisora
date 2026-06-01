@@ -266,6 +266,91 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.is_balanced)
         self.assertEqual(len(result.draft_lines), 2)
 
+    def test_matching_simulation_requires_client_profile_for_export(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="rexton.pdf",
+            provider_hint="Rexton Medikal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="10000.00",
+            vat_total="2000.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton RLi 20",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+
+        result = simulate_invoice(invoice, selection)
+
+        self.assertEqual(result.simulated_status, "review_required")
+        self.assertEqual(result.export_status, "review_required")
+        self.assertIn("onboarding_missing_client_profile", result.review_reason_codes)
+
+    def test_matching_simulation_marks_incomplete_client_profile_for_review(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="rexton.pdf",
+            provider_hint="Rexton Medikal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="10000.00",
+            vat_total="2000.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton RLi 20",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=False,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.export_status, "review_required")
+        self.assertIn("onboarding_missing_chart_accounts", result.review_reason_codes)
+
     def test_matching_simulation_keeps_zero_amount_invoice_in_review(self) -> None:
         invoice = ParsedInvoice(
             file_name="zero.pdf",

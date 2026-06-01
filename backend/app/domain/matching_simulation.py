@@ -11,6 +11,7 @@ from app.domain.business_relevance import (
     ClientProfile,
     ProductClassification,
     assess_business_relevance,
+    check_client_onboarding,
     decide_export_status,
 )
 from app.domain.chart_accounts import ChartAccount, extract_counterparty_candidates, parse_chart_accounts, validate_vat_accounts
@@ -176,7 +177,7 @@ def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
         evidence=("client_profile_not_provided",),
     )
     return BusinessRelevance(
-        status="genel_gider",
+        status="supheli",
         confidence=0,
         reason="Mukellef faaliyet profili verilmedigi icin is alani uygunlugu degerlendirilmedi.",
         evidence=("client_profile_not_provided",),
@@ -225,14 +226,21 @@ def simulate_invoice(
     counterparty_reasons: tuple[str, ...] = ()
     if counterparty_match and counterparty_match.requires_review:
         counterparty_reasons = (f"counterparty_{counterparty_match.match_reason}",)
-    all_reasons = tuple(dict.fromkeys((*reasons, *counterparty_reasons)))
+    onboarding_reasons: tuple[str, ...] = ()
+    if client_profile:
+        onboarding = check_client_onboarding(client_profile)
+        if not onboarding.is_ready:
+            onboarding_reasons = tuple(f"onboarding_missing_{field}" for field in onboarding.missing_fields)
+    else:
+        onboarding_reasons = ("onboarding_missing_client_profile",)
+    all_reasons = tuple(dict.fromkeys((*reasons, *counterparty_reasons, *onboarding_reasons)))
 
     export_status = decide_export_status(
         is_balanced=entry.is_balanced if entry else False,
         risk_flags=all_reasons,
         relevance=relevance,
     )
-    if client_profile and export_status != "export_ready":
+    if export_status != "export_ready":
         status = "review_required"
 
     return SimulatedInvoiceResult(

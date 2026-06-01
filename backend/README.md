@@ -8,6 +8,9 @@ Faz 0 backend'i iki katmandan olusur:
 
 ## Kurulum
 
+Python 3.11-3.13 kullanin. Bu repo icin pinlenen `pydantic-core`
+surumu Python 3.14 ile wheel bulamazsa Rust/PyO3 derlemesinde takilabilir.
+
 ```powershell
 python -m venv .venv
 .\\.venv\\Scripts\\Activate.ps1

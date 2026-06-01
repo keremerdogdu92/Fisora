@@ -32,6 +32,18 @@ python backend/scripts/run_phase0_demo.py
 
 Demo script'i `exports/` altinda test CSV ciktilari uretir.
 
+Sentetik pilot kosusu, ozel veri kullanmadan onboarding -> hesap plani ->
+fatura simulation -> review decision -> export package -> workspace store
+akisini tek komutta dener:
+
+```powershell
+$env:PYTHONPATH="backend"
+python backend/scripts/run_synthetic_pilot.py
+```
+
+Varsayilan cikti `exports/synthetic_pilot_store.json` dosyasidir ve repoya
+girmez.
+
 ## Yerel MVP Store
 
 Phase 0 API, kalici demo snapshot'lari icin varsayilan olarak

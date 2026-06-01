@@ -156,8 +156,9 @@ def assess_business_relevance(
     profile: ClientProfile,
     *,
     supplier_hint: str = "",
+    classification: ProductClassification | None = None,
 ) -> BusinessRelevance:
-    classification = classify_product_line(raw_line, supplier_hint)
+    classification = classification or classify_product_line(raw_line, supplier_hint)
     category = classification.category
     evidence = list(classification.evidence)
 

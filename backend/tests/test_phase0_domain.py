@@ -17,6 +17,7 @@ from app.domain.chart_accounts import (
     parse_chart_accounts,
     validate_vat_accounts,
 )
+from app.domain.ai_classification import AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
 from app.domain.business_relevance import (
     ClientProfile,
     assess_business_relevance,
@@ -44,6 +45,18 @@ from app.domain.journal_entries import (
 )
 from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
 from app.domain.review_learning import ReviewDecision, build_learning_event
+
+
+class FakeProductProvider:
+    provider_name = "fake_llm"
+
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.requests: list[AiClassificationRequest] = []
+
+    def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
+        self.requests.append(request)
+        return self.response
 
 
 class Phase0DomainTests(unittest.TestCase):
@@ -439,6 +452,56 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(relevance.status, "uygun")
         self.assertEqual(status, "export_ready")
 
+    def test_static_first_classifier_skips_ai_for_high_confidence_static_match(self) -> None:
+        provider = FakeProductProvider(
+            {"category": "bilinmeyen", "confidence": 40, "reason": "fallback", "evidence": []}
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=70),
+        )
+
+        result = classifier.classify("Rexton RLi 20", supplier_hint="Rexton Medikal")
+
+        self.assertFalse(result.ai_used)
+        self.assertEqual(result.classification.category, "isitme_cihazi")
+        self.assertEqual(result.skipped_reason, "static_high_confidence")
+        self.assertEqual(provider.requests, [])
+
+    def test_static_first_classifier_calls_provider_for_unknown_line_with_schema(self) -> None:
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 84,
+                "reason": "Model odyoloji cihaz ailesine benziyor.",
+                "evidence": ["ai:model_family"],
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, max_input_chars=24),
+        )
+
+        result = classifier.classify("ZX Sonic Pro 9 receiver unit", supplier_hint="Medikal Tedarik")
+
+        self.assertTrue(result.ai_used)
+        self.assertEqual(result.provider, "fake_llm")
+        self.assertEqual(result.classification.category, "isitme_cihazi")
+        self.assertIn("ai_schema_validated", result.classification.evidence)
+        self.assertEqual(provider.requests[0].to_schema_payload()["raw_line"], "ZX Sonic Pro 9 receiver")
+
+    def test_static_first_classifier_rejects_invalid_provider_schema(self) -> None:
+        classifier = StaticFirstClassifier(
+            provider=FakeProductProvider({"category": "serbest", "confidence": 110, "reason": ""}),
+            policy=AiClassificationPolicy(enabled=True),
+        )
+
+        result = classifier.classify("Bilinmeyen marka kalem")
+
+        self.assertTrue(result.ai_used)
+        self.assertEqual(result.classification.category, "bilinmeyen")
+        self.assertIn("ai_invalid_schema", result.classification.evidence)
+
     def test_invoice_line_extraction_keeps_brand_model_rows(self) -> None:
         text = """
         Fatura No: ABC2026000000001
@@ -452,6 +515,65 @@ class Phase0DomainTests(unittest.TestCase):
         descriptions = [line.description for line in lines]
         self.assertIn("Rexton RLi 20", descriptions)
         self.assertIn("Urban Care sac bakim seti", descriptions)
+
+    def test_matching_simulation_records_ai_classification_metadata(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="unknown-device.pdf",
+            provider_hint="Medikal Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="10000.00",
+            vat_total="2000.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("ZX Sonic Pro 9 receiver unit",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        classifier = StaticFirstClassifier(
+            provider=FakeProductProvider(
+                {
+                    "category": "isitme_cihazi",
+                    "confidence": 84,
+                    "reason": "Model odyoloji cihaz ailesine benziyor.",
+                    "evidence": ["ai:model_family"],
+                }
+            ),
+            policy=AiClassificationPolicy(enabled=True),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier)
+
+        self.assertTrue(result.ai_classification_used)
+        self.assertEqual(result.ai_classification_provider, "fake_llm")
+        self.assertEqual(result.product_category, "isitme_cihazi")
+        self.assertEqual(result.business_relevance_status, "uygun")
 
     def test_counterparty_matching_prefers_tax_id_then_review_for_missing(self) -> None:
         accounts = [

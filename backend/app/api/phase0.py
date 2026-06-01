@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
+from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.export_packages import ExportCandidate, build_export_package
@@ -105,17 +106,31 @@ class CounterpartyMatchPayload(BaseModel):
     account_prefixes: list[str] = Field(default_factory=lambda: ["120", "320"])
 
 
+class AiClassificationPolicyPayload(BaseModel):
+    enabled: bool = False
+    static_confidence_threshold: int = 70
+    max_input_chars: int = 320
+    max_provider_calls: int = 1
+
+
 class SimulationPayload(BaseModel):
     invoice: InvoicePayload
     account_selection: AccountSelectionPayload = Field(default_factory=AccountSelectionPayload)
     client: ClientProfilePayload | None = None
     chart_accounts: list[ChartAccountPayload] = Field(default_factory=list)
+    ai_policy: AiClassificationPolicyPayload | None = None
 
 
 class RelevancePayload(BaseModel):
     raw_line: str
     supplier_hint: str = ""
     client: ClientProfilePayload
+
+
+class ProductClassificationPayload(BaseModel):
+    raw_line: str
+    supplier_hint: str = ""
+    ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
 
 
 class ReviewDecisionPayload(BaseModel):
@@ -237,6 +252,21 @@ def _parsed_invoice(payload: InvoicePayload) -> ParsedInvoice:
     )
 
 
+def _ai_policy(payload: AiClassificationPolicyPayload | None) -> AiClassificationPolicy:
+    if payload is None:
+        return AiClassificationPolicy()
+    return AiClassificationPolicy(
+        enabled=payload.enabled,
+        static_confidence_threshold=payload.static_confidence_threshold,
+        max_input_chars=payload.max_input_chars,
+        max_provider_calls=payload.max_provider_calls,
+    )
+
+
+def _static_first_classifier(payload: AiClassificationPolicyPayload | None) -> StaticFirstClassifier:
+    return StaticFirstClassifier(policy=_ai_policy(payload))
+
+
 def _journal_entry(payload: ExportCandidatePayload) -> JournalEntry:
     return JournalEntry(
         entry_type=payload.entry_type,
@@ -320,6 +350,27 @@ def counterparty_match(payload: CounterpartyMatchPayload) -> dict[str, object]:
     }
 
 
+@router.post("/classification/product")
+def product_classification(payload: ProductClassificationPayload) -> dict[str, object]:
+    result = _static_first_classifier(payload.ai_policy).classify(
+        payload.raw_line,
+        supplier_hint=payload.supplier_hint,
+    )
+    return {
+        "classification": {
+            "raw_line": result.classification.raw_line,
+            "category": result.classification.category,
+            "confidence": result.classification.confidence,
+            "evidence": list(result.classification.evidence),
+        },
+        "ai_used": result.ai_used,
+        "provider": result.provider,
+        "skipped_reason": result.skipped_reason,
+        "provider_reason": result.provider_reason,
+        "estimated_input_chars": result.estimated_input_chars,
+    }
+
+
 @router.post("/simulation/invoice")
 def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
     client = _client_profile(payload.client) if payload.client else None
@@ -335,6 +386,7 @@ def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
         _account_selection(payload.account_selection),
         client,
         counterparty,
+        _static_first_classifier(payload.ai_policy),
     )
     data = asdict(result)
     for key in (

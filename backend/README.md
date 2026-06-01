@@ -53,3 +53,22 @@ yerel olarak dogrulamak icindir:
 - `POST /phase0/store/review-decision`
 - `POST /phase0/store/export-package`
 - `GET /phase0/store/workspace/{client_id}`
+
+## AI Adapter Davranisi
+
+Urun/kalem siniflandirma akisi maliyet kontrollu calisir:
+
+1. Statik kural kutuphanesi once calisir.
+2. Statik eslesme yeterince guvenliyse AI cagrilmaz.
+3. AI kapaliysa veya provider bagli degilse sistem statik sonuc ile devam eder.
+4. Provider baglandiginda sonuc kategori/guven/gerekce iceren JSON schema ile
+   dogrulanir.
+
+Ilk yerel endpoint:
+
+- `POST /phase0/classification/product`
+
+Simulation endpointleri `aiClassificationUsed`, `aiClassificationProvider`,
+`aiClassificationSkippedReason`, `aiClassificationReason` ve
+`aiEstimatedInputChars` alanlarini dondurur. Bu alanlar muhasebe kararini tek
+basina vermez; sadece siniflandirma izini ve maliyet sinyalini tasir.

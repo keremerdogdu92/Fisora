@@ -16,6 +16,7 @@ from app.domain.business_relevance import (
 )
 from app.domain.chart_accounts import ChartAccount, extract_counterparty_candidates, parse_chart_accounts, validate_vat_accounts
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
+from app.domain.ai_classification import ProductClassifier
 from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, money
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
 
@@ -61,6 +62,11 @@ class SimulatedInvoiceResult:
     business_relevance_confidence: int
     business_relevance_reason: str
     business_relevance_evidence: tuple[str, ...]
+    ai_classification_used: bool
+    ai_classification_provider: str
+    ai_classification_skipped_reason: str
+    ai_classification_reason: str
+    ai_estimated_input_chars: int
     export_status: str
     draft_lines: tuple[dict[str, str], ...]
 
@@ -190,6 +196,7 @@ def simulate_invoice(
     selection: AccountSelection,
     client_profile: ClientProfile | None = None,
     counterparty_match: CounterpartyMatch | None = None,
+    product_classifier: ProductClassifier | None = None,
 ) -> SimulatedInvoiceResult:
     reasons = tuple(dict.fromkeys((*invoice.risk_flags, *invoice.parse_notes)))
     amount = _decimal_or_none(invoice.payable_total)
@@ -218,11 +225,31 @@ def simulate_invoice(
         status = "review_required"
 
     raw_line = _product_line_hint(invoice)
+    ai_used = False
+    ai_provider = ""
+    ai_skipped_reason = "client_profile_not_provided"
+    ai_reason = ""
+    ai_estimated_chars = 0
     relevance = (
         assess_business_relevance(raw_line, client_profile, supplier_hint=invoice.provider_hint)
         if client_profile
         else _not_assessed_relevance(raw_line)
     )
+    if client_profile and product_classifier:
+        classification_result = product_classifier.classify(raw_line, supplier_hint=invoice.provider_hint)
+        relevance = assess_business_relevance(
+            raw_line,
+            client_profile,
+            supplier_hint=invoice.provider_hint,
+            classification=classification_result.classification,
+        )
+        ai_used = classification_result.ai_used
+        ai_provider = classification_result.provider
+        ai_skipped_reason = classification_result.skipped_reason
+        ai_reason = classification_result.provider_reason
+        ai_estimated_chars = classification_result.estimated_input_chars
+    elif client_profile:
+        ai_skipped_reason = "classifier_not_configured"
     counterparty_reasons: tuple[str, ...] = ()
     if counterparty_match and counterparty_match.requires_review:
         counterparty_reasons = (f"counterparty_{counterparty_match.match_reason}",)
@@ -273,6 +300,11 @@ def simulate_invoice(
         business_relevance_confidence=relevance.confidence,
         business_relevance_reason=relevance.reason,
         business_relevance_evidence=relevance.evidence,
+        ai_classification_used=ai_used,
+        ai_classification_provider=ai_provider,
+        ai_classification_skipped_reason=ai_skipped_reason,
+        ai_classification_reason=ai_reason,
+        ai_estimated_input_chars=ai_estimated_chars,
         export_status=export_status,
         draft_lines=_entry_lines(entry),
     )
@@ -282,6 +314,7 @@ def simulate_chart_run(
     chart_path: Path,
     invoices: list[ParsedInvoice],
     client_profile: ClientProfile | None = None,
+    product_classifier: ProductClassifier | None = None,
 ) -> SimulatedChartRun:
     accounts = parse_chart_accounts(chart_path)
     detail_accounts = [account for account in accounts if account.is_detail_account]
@@ -302,7 +335,13 @@ def simulate_chart_run(
         has_sales_vat_391=vat_status["has_sales_vat_391"],
         account_selection=selection,
         invoice_results=tuple(
-            simulate_invoice(invoice, selection, client_profile, counterparty_matches[invoice.file_name])
+            simulate_invoice(
+                invoice,
+                selection,
+                client_profile,
+                counterparty_matches[invoice.file_name],
+                product_classifier,
+            )
             for invoice in invoices
         ),
     )
@@ -312,9 +351,10 @@ def simulate_private_matching(
     invoice_dir: Path,
     chart_paths: list[Path],
     client_profile: ClientProfile | None = None,
+    product_classifier: ProductClassifier | None = None,
 ) -> list[SimulatedChartRun]:
     invoices = parse_invoice_folder(invoice_dir)
-    return [simulate_chart_run(chart_path, invoices, client_profile) for chart_path in chart_paths]
+    return [simulate_chart_run(chart_path, invoices, client_profile, product_classifier) for chart_path in chart_paths]
 
 
 def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Path:
@@ -343,6 +383,11 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "business_relevance_confidence",
         "business_relevance_reason",
         "business_relevance_evidence",
+        "ai_classification_used",
+        "ai_classification_provider",
+        "ai_classification_skipped_reason",
+        "ai_classification_reason",
+        "ai_estimated_input_chars",
         "export_status",
         "risk_flags",
         "parse_notes",
@@ -405,6 +450,11 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "businessRelevanceConfidence": result.business_relevance_confidence,
                     "businessRelevanceReason": result.business_relevance_reason,
                     "businessRelevanceEvidence": list(result.business_relevance_evidence),
+                    "aiClassificationUsed": result.ai_classification_used,
+                    "aiClassificationProvider": result.ai_classification_provider,
+                    "aiClassificationSkippedReason": result.ai_classification_skipped_reason,
+                    "aiClassificationReason": result.ai_classification_reason,
+                    "aiEstimatedInputChars": result.ai_estimated_input_chars,
                     "exportStatus": result.export_status,
                     "selectedExpenseAccount": result.selected_expense_account,
                     "selectedVatAccount": result.selected_vat_account,

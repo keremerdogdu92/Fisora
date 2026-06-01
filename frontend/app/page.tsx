@@ -31,6 +31,11 @@ type InvoiceRow = {
   businessRelevanceConfidence: number;
   businessRelevanceReason: string;
   businessRelevanceEvidence: string[];
+  aiClassificationUsed: boolean;
+  aiClassificationProvider: string;
+  aiClassificationSkippedReason: string;
+  aiClassificationReason: string;
+  aiEstimatedInputChars: number;
   exportStatus: string;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
@@ -167,6 +172,11 @@ function exportGateReason(row: InvoiceRow) {
   if (row.businessRelevanceStatus === "supheli") return "Kalem faaliyet profiliyle net eslesmedi.";
   if (row.exportStatus !== "export_ready") return "Musavir politikasi export onayi istiyor.";
   return "Export paketine alinabilir.";
+}
+
+function formatAiStatus(row: InvoiceRow) {
+  if (row.aiClassificationUsed) return `AI: ${row.aiClassificationProvider || "provider"} kullanildi`;
+  return `AI yok: ${row.aiClassificationSkippedReason || "statik akış"}`;
 }
 
 export default function Home() {
@@ -375,6 +385,8 @@ export default function Home() {
                   label="Uygunluk"
                   value={`${formatRelevance(selectedInvoice.businessRelevanceStatus)} (${selectedInvoice.businessRelevanceConfidence ?? 0})`}
                 />
+                <Info label="AI sinifi" value={formatAiStatus(selectedInvoice)} />
+                <Info label="AI maliyet sinyali" value={`${selectedInvoice.aiEstimatedInputChars ?? 0} karakter`} />
                 <Info label="Export" value={formatExportStatus(selectedInvoice.exportStatus)} />
                 <Info
                   label="Cari eslesme"
@@ -383,6 +395,9 @@ export default function Home() {
               </div>
 
               <p className="reason">{selectedInvoice.businessRelevanceReason || "Uygunluk gerekcesi yok."}</p>
+              {selectedInvoice.aiClassificationReason ? (
+                <p className="reason">{selectedInvoice.aiClassificationReason}</p>
+              ) : null}
               <p className="gate-reason">{exportGateReason(selectedInvoice)}</p>
 
               <div className="decision-actions" aria-label="Musavir kararlari">

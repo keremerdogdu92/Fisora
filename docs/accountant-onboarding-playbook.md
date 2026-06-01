@@ -104,7 +104,7 @@ sunulur:
 
 Her karar denetim izi ve ogrenme olayi olarak saklanir.
 
-## Mukkellef Onboarding Kontrol Listesi
+## Mukellef Onboarding Kontrol Listesi
 
 - Mukellef karti olusturuldu.
 - Kullanici/mukellef yetkisi tanimlandi.
@@ -117,7 +117,7 @@ Her karar denetim izi ve ogrenme olayi olarak saklanir.
 - Banka ekstresi yuklendi.
 - Ilk review kararlarindan ogrenme olayi olustu.
 
-## Müşaviri Yormama Ilkeleri
+## Mustaviri Yormama Ilkeleri
 
 - Tek tek "bu gider olur mu?" sorusu sorulmaz.
 - Sistem once onerir, mustavir sadece duzeltir veya onaylar.

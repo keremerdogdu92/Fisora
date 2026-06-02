@@ -90,6 +90,17 @@ Bu store su endpointlerin davranisini dogrular:
 - `POST /phase0/store/export-package/from-workspace`
 - `GET /phase0/store/workspace/{client_id}`
 
+Gercek auth gelene kadar API mock header ile yetkiyi test eder:
+
+```text
+X-Fisora-User-Id: mali-musavir
+```
+
+Header yoksa demo geriye donuk calisir. Header varsa `store/workspace`,
+`store/clients`, review, export ve upload akislari atanmis portal kullanicisi ve
+rolune gore filtrelenir. `client_user` belge yukler; `accountant` veya `admin`
+review/export aksiyonu alabilir.
+
 `POST /phase0/store/document-upload` ilk MVP sozlesmesidir. Multipart upload
 destegi de eklendi. `document-upload` geriye donuk base64 kontratini korur;
 `document-upload-multipart` buyuk dosyalar icin tercih edilecek yoldur. Icerik
@@ -171,3 +182,11 @@ sonuclarindan yalnizca dengeli ve risksiz entry'leri export paketine alir.
 Review gerekli veya risk bayrakli kayitlar `excluded_document_refs` icinde kalir.
 Ayni endpoint `exports/generated/{client_id}/` altinda indirilebilir CSV dosyasi
 da uretir; indirme yolu `download_url` alaninda doner.
+
+Export dosyasi adapter katmanindan uretilir. Su an desteklenen adapter'lar:
+
+- `zirve_universal_csv`: ilk aday CSV format.
+- `json_manifest`: denetim ve demo icin JSON entry paketi.
+
+Gercek Zirve saha testinden sonra `zirve_verified_format` bu adapter katmanina
+eklenecek.

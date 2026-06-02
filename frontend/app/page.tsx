@@ -323,6 +323,15 @@ const decisions: Record<DecisionAction, LocalDecision> = {
 };
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_FISORA_API_BASE_URL ?? "http://localhost:8000";
+const ACCOUNTANT_USER_ID = "mali-musavir";
+
+function mockAuthHeaders(userId: string) {
+  return { "X-Fisora-User-Id": userId };
+}
+
+function jsonHeaders(userId: string) {
+  return { "Content-Type": "application/json", ...mockAuthHeaders(userId) };
+}
 
 function formatStatus(status: string) {
   return statusLabels[status] ?? status;
@@ -734,6 +743,7 @@ export default function Home() {
   async function refreshWorkspaceFromApi(targetClientId = clientId) {
     const response = await fetch(`${API_BASE_URL}/phase0/store/workspace/${encodeURIComponent(targetClientId)}`, {
       cache: "no-store",
+      headers: mockAuthHeaders(ACCOUNTANT_USER_ID),
     });
     if (!response.ok) throw new Error("workspace refresh failed");
     const snapshot = (await response.json()) as WorkspaceSnapshot;
@@ -750,6 +760,7 @@ export default function Home() {
   async function refreshClientListFromApi() {
     const response = await fetch(`${API_BASE_URL}/phase0/store/clients`, {
       cache: "no-store",
+      headers: mockAuthHeaders(ACCOUNTANT_USER_ID),
     });
     if (!response.ok) throw new Error("client list refresh failed");
     const payload = (await response.json()) as ClientListResponse;
@@ -785,7 +796,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/phase0/store/review-decision`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders(ACCOUNTANT_USER_ID),
         body: JSON.stringify({
           client_id: clientId,
           decision: {
@@ -819,7 +830,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/phase0/store/export-package/from-workspace`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders(ACCOUNTANT_USER_ID),
         body: JSON.stringify({
           client_id: clientId,
           export_type: "zirve_universal_csv",
@@ -855,7 +866,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/phase0/store/client-onboarding-package`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders(ACCOUNTANT_USER_ID),
         body: JSON.stringify({
           client: {
             client_id: clientId,
@@ -921,6 +932,7 @@ export default function Home() {
           formData.append("file", file);
           const response = await fetch(`${API_BASE_URL}/phase0/store/document-upload-multipart`, {
             method: "POST",
+            headers: mockAuthHeaders(portalUserId),
             body: formData,
           });
           if (!response.ok) throw new Error("upload failed");

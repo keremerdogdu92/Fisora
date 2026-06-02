@@ -27,6 +27,7 @@ from app.domain.business_relevance import (
 )
 from app.domain.chart_accounts import ChartAccount
 from app.domain.counterparty_matching import match_counterparty
+from app.domain.export_adapters import get_export_adapter, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.exporters import export_universal_journal_csv
 from app.domain.invoice_lines import extract_invoice_lines_from_text
@@ -693,6 +694,32 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(len(package.entries), 1)
         self.assertEqual(package.entries[0].description, "Alis faturasi ready.pdf")
         self.assertEqual(package.excluded_document_refs, ("risky.pdf",))
+
+    def test_export_adapter_writes_json_manifest_and_rejects_unknown_type(self) -> None:
+        entry = build_purchase_entry(
+            entry_date="2026-05-01",
+            total=money("1200.00"),
+            vat_rate=Decimal("0.20"),
+            expense_account="770.01",
+            document_ref="ready.pdf",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "manifest.json"
+            adapter = get_export_adapter("json_manifest")
+
+            written = write_export_file(
+                adapter=adapter,
+                entries=(entry,),
+                output_path=output_path,
+                client_id="client-1",
+            )
+            text = written.read_text(encoding="utf-8")
+
+        self.assertTrue(written.name.endswith(".json"))
+        self.assertIn('"export_type": "json_manifest"', text)
+        self.assertIn('"document_ref": "ready.pdf"', text)
+        with self.assertRaises(ValueError):
+            get_export_adapter("zirve_verified_format")
 
     def test_workspace_export_package_includes_only_ready_balanced_entries(self) -> None:
         workspace = {

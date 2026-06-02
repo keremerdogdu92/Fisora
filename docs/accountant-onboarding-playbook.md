@@ -132,3 +132,6 @@ Her karar denetim izi ve ogrenme olayi olarak saklanir.
   edebilir.
 - Duzeltmeler sonraki benzer belgelerde oneriyi degistirir.
 - En az bir Zirve export formati gercek testte dogrulanir.
+
+Yarinki kisa demo ve gorusme akisi icin ayrica
+`docs/accountant-demo-meeting-pack.md` kullanilir.

@@ -227,6 +227,85 @@ class DocumentUploadApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_mock_auth_filters_clients_and_blocks_unassigned_workspace(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            client = TestClient(app)
+            for client_id in ("client-1", "client-2"):
+                client.post(
+                    "/phase0/store/client",
+                    json={"client_id": client_id, "title": f"Demo {client_id}", "has_chart_accounts": True},
+                )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1", "client-2"],
+                },
+            )
+
+            client_user_clients = client.get(
+                "/phase0/store/clients",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+            )
+            accountant_clients = client.get(
+                "/phase0/store/clients",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            )
+            denied_workspace = client.get(
+                "/phase0/store/workspace/client-2",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+            )
+
+        self.assertEqual(client_user_clients.status_code, 200)
+        self.assertEqual([item["client_id"] for item in client_user_clients.json()["clients"]], ["client-1"])
+        self.assertEqual(accountant_clients.status_code, 200)
+        self.assertEqual(len(accountant_clients.json()["clients"]), 2)
+        self.assertEqual(denied_workspace.status_code, 403)
+
+    def test_mock_auth_blocks_client_user_export_package(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_EXPORT_PATH = Path(temp_dir) / "exports"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            response = client.post(
+                "/phase0/store/export-package/from-workspace",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+                json={"client_id": "client-1", "export_type": "zirve_universal_csv"},
+            )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["reason"], "role_not_allowed")
+
     def test_store_export_package_from_workspace_writes_downloadable_csv(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

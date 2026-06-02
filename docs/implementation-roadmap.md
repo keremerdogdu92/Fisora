@@ -46,6 +46,9 @@ Tamamlanan ana dilimler:
 - Versioned migration runner: `backend/db/migrations` altindaki SQL dosyalari checksum ile `schema_migrations` tablosuna islenir.
 - Portal cok-mukellef secimi: musavir ekraninda API'deki mukellef listesi secilebilir ve secime gore workspace yenilenir.
 - Banka/POS cari eslestirme genislemesi: IBAN ve otomasyon adayi gecmis mustavir kararlari cari eslestirmede kullanilir.
+- Mock auth/yetki guard: `X-Fisora-User-Id` header'i ile mukellef, mustavir ve admin rolleri test edilebilir.
+- Export adapter ayrimi: universal CSV ve JSON manifest adapter'lari ayrildi; dogrulanmis Zirve formati daha sonra eklenecek.
+- Mustavir demo gorusmesi paketi: yarinki gorusme icin demo akisi, istenecek dosyalar ve karar sorulari hazirlandi.
 
 ## Siradaki 5 Adim
 
@@ -94,7 +97,7 @@ flowchart TD
 
 ## Kapanmamis Ana Basliklar
 
-- Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
+- Auth ve yetki: Mock header guard var; gercek login/session provider secilmeli.
 - PostgreSQL saha testi: adapter yazildi, Docker daemon izni acilinca gercek Postgres kosusu yapilacak.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
 - Banka/POS akisi: satir parse, dengeli fis taslagi, VKN/unvan, IBAN ve gecmis karar cari eslestirmesi var.

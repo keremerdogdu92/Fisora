@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -17,8 +17,8 @@ from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClas
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.document_uploads import decode_base64_content, store_document_content
+from app.domain.export_adapters import get_export_adapter, journal_entry_payload, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
-from app.domain.exporters import export_universal_journal_csv
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
 from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
@@ -272,10 +272,44 @@ def get_workflow_store():
     return build_workflow_store(json_path=DEFAULT_STORE_PATH)
 
 
-def _safe_export_file_name(client_id: str, export_type: str) -> str:
+def _client_id_from_record(record: dict[str, object]) -> str:
+    profile = record.get("profile") if isinstance(record.get("profile"), dict) else {}
+    return str(record.get("client_id") or profile.get("client_id") or "").strip()
+
+
+def _require_mock_client_access(
+    *,
+    client_id: str,
+    user_id: str | None,
+    allowed_roles: tuple[str, ...] = (),
+) -> dict[str, object]:
+    if not user_id:
+        return {"allowed": True, "reason": "mock_auth_disabled", "role": "anonymous", "client_id": client_id}
+    access = get_workflow_store().verify_portal_access(client_id=client_id, user_id=user_id)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail=access)
+    role = str(access.get("role") or "")
+    if allowed_roles and role not in allowed_roles and role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                **access,
+                "reason": "role_not_allowed",
+                "allowed_roles": list(allowed_roles),
+            },
+        )
+    return access
+
+
+def _mock_user_header(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _safe_export_file_name(client_id: str, export_type: str, extension: str = ".csv") -> str:
     safe_client = re.sub(r"[^A-Za-z0-9_.-]+", "-", client_id.strip()).strip(".-") or "client"
     safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "-", export_type.strip()).strip(".-") or "export"
-    return f"{safe_client}-{safe_type}.csv"
+    safe_extension = extension if extension.startswith(".") else f".{extension}"
+    return f"{safe_client}-{safe_type}{safe_extension}"
 
 
 def _manifest_file_name(output_filename: str) -> str:
@@ -321,6 +355,7 @@ def _save_uploaded_document_with_job(
     file_name: str,
     uploaded_by: str,
     uploaded_by_user_id: str = "",
+    request_user_id: str = "",
     content: bytes | None,
     size_bytes: int = 0,
     sha256: str = "",
@@ -329,7 +364,17 @@ def _save_uploaded_document_with_job(
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for document upload")
     store = get_workflow_store()
-    effective_user_id = uploaded_by_user_id.strip() or uploaded_by.strip()
+    effective_user_id = uploaded_by_user_id.strip() or uploaded_by.strip() or request_user_id.strip()
+    if request_user_id.strip() and effective_user_id and request_user_id.strip() != effective_user_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "allowed": False,
+                "reason": "mock_user_header_mismatch",
+                "user_id": request_user_id.strip(),
+                "payload_user_id": effective_user_id,
+            },
+        )
     if not effective_user_id:
         raise HTTPException(status_code=403, detail="portal user is required for document upload")
     access = store.verify_portal_access(client_id=client_id, user_id=effective_user_id)
@@ -474,25 +519,7 @@ def _journal_entry(payload: ExportCandidatePayload) -> JournalEntry:
 
 
 def _entry_payload(entry: JournalEntry) -> dict[str, object]:
-    return {
-        "entry_type": entry.entry_type,
-        "entry_date": entry.entry_date,
-        "description": entry.description,
-        "total_debit": f"{entry.total_debit:.2f}",
-        "total_credit": f"{entry.total_credit:.2f}",
-        "is_balanced": entry.is_balanced,
-        "risk_flags": list(entry.risk_flags),
-        "lines": [
-            {
-                "account_code": line.account_code,
-                "description": line.description,
-                "debit": f"{line.debit:.2f}",
-                "credit": f"{line.credit:.2f}",
-                "document_ref": line.document_ref,
-            }
-            for line in entry.lines
-        ],
-    }
+    return journal_entry_payload(entry)
 
 
 @router.post("/onboarding/check")
@@ -513,8 +540,23 @@ def store_client(payload: ClientProfilePayload) -> dict[str, object]:
 
 
 @router.get("/store/clients")
-def store_clients() -> dict[str, object]:
-    return {"clients": get_workflow_store().list_clients()}
+def store_clients(x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id")) -> dict[str, object]:
+    store = get_workflow_store()
+    clients = store.list_clients()
+    user_id = _mock_user_header(x_fisora_user_id)
+    if user_id:
+        clients = [
+            client
+            for client in clients
+            if store.verify_portal_access(client_id=_client_id_from_record(client), user_id=user_id).get("allowed")
+        ]
+    return {
+        "clients": clients,
+        "auth": {
+            "mode": "mock_header" if user_id else "disabled",
+            "user_id": user_id,
+        },
+    }
 
 
 @router.post("/store/chart-accounts")
@@ -582,7 +624,10 @@ def store_portal_access_check(payload: PortalAccessPayload) -> dict[str, object]
 
 
 @router.post("/store/document-upload")
-def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
+def store_document_upload(
+    payload: DocumentUploadPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+) -> dict[str, object]:
     content = None
     if payload.content_base64:
         try:
@@ -595,6 +640,7 @@ def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
         uploaded_by_user_id=payload.uploaded_by_user_id,
+        request_user_id=_mock_user_header(x_fisora_user_id),
         content=content,
         size_bytes=payload.size_bytes,
         sha256=payload.sha256,
@@ -610,6 +656,7 @@ async def store_document_upload_multipart(
     uploaded_by_user_id: str = Form(""),
     retention_policy_days: int = Form(90),
     file: UploadFile = File(...),
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
 ) -> dict[str, object]:
     content = await file.read()
     return _save_uploaded_document_with_job(
@@ -618,6 +665,7 @@ async def store_document_upload_multipart(
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
         uploaded_by_user_id=uploaded_by_user_id,
+        request_user_id=_mock_user_header(x_fisora_user_id),
         content=content,
         size_bytes=len(content),
         retention_policy_days=retention_policy_days,
@@ -635,9 +683,13 @@ def store_processing_run(payload: ProcessingRunPayload) -> dict[str, object]:
 
 
 @router.get("/store/processing-jobs/{client_id}")
-def store_processing_jobs(client_id: str) -> dict[str, object]:
+def store_processing_jobs(
+    client_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
+    _require_mock_client_access(client_id=client_id, user_id=_mock_user_header(x_fisora_user_id))
     return {"jobs": get_workflow_store().list_processing_jobs(client_id=client_id)}
 
 
@@ -812,9 +864,17 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
 
 
 @router.post("/store/review-decision")
-def store_review_decision(payload: StoredReviewDecisionPayload) -> dict[str, object]:
+def store_review_decision(
+    payload: StoredReviewDecisionPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    _require_mock_client_access(
+        client_id=payload.client_id,
+        user_id=_mock_user_header(x_fisora_user_id),
+        allowed_roles=("accountant", "admin"),
+    )
     event = review_learning_event(payload.decision)
     return get_workflow_store().save_review_decision(
         client_id=payload.client_id,
@@ -852,17 +912,40 @@ def store_export_package(payload: StoredExportPackagePayload) -> dict[str, objec
 
 
 @router.post("/store/export-package/from-workspace")
-def store_export_package_from_workspace(payload: WorkspaceExportPackagePayload) -> dict[str, object]:
+def store_export_package_from_workspace(
+    payload: WorkspaceExportPackagePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    _require_mock_client_access(
+        client_id=payload.client_id,
+        user_id=_mock_user_header(x_fisora_user_id),
+        allowed_roles=("accountant", "admin"),
+    )
     store = get_workflow_store()
     workspace = store.get_workspace(payload.client_id)
-    build = build_workspace_export_package(workspace, export_type=payload.export_type)
-    output_filename = _safe_export_file_name(payload.client_id, payload.export_type)
+    try:
+        adapter = get_export_adapter(payload.export_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    build = build_workspace_export_package(workspace, export_type=adapter.export_type)
+    output_filename = _safe_export_file_name(payload.client_id, adapter.export_type, adapter.file_extension)
     output_path = DEFAULT_EXPORT_PATH / payload.client_id / output_filename
-    export_universal_journal_csv(list(build.package.entries), output_path)
+    write_export_file(
+        adapter=adapter,
+        entries=build.package.entries,
+        output_path=output_path,
+        client_id=payload.client_id,
+    )
     package_payload = {
         "export_type": build.package.export_type,
+        "adapter": {
+            "display_name": adapter.display_name,
+            "file_extension": adapter.file_extension,
+            "mime_type": adapter.mime_type,
+            "verified_in_zirve": adapter.verified_in_zirve,
+        },
         "candidate_count": build.candidate_count,
         "entry_count": len(build.package.entries),
         "excluded_document_refs": list(build.package.excluded_document_refs),
@@ -882,22 +965,28 @@ def store_export_package_from_workspace(payload: WorkspaceExportPackagePayload) 
 
 
 @router.get("/store/export-package/download/{client_id}/{file_name}")
-def download_export_package(client_id: str, file_name: str) -> FileResponse:
+def download_export_package(
+    client_id: str,
+    file_name: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+) -> FileResponse:
+    _require_mock_client_access(client_id=client_id, user_id=_mock_user_header(x_fisora_user_id))
     safe_name = Path(file_name).name
     path = DEFAULT_EXPORT_PATH / client_id / safe_name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="export file not found")
     if path.suffix.lower() == ".csv":
         get_workflow_store().mark_export_package_downloaded(client_id=client_id, output_filename=safe_name)
-    return FileResponse(
-        path,
-        filename=safe_name,
-        media_type="application/json; charset=utf-8" if path.suffix.lower() == ".json" else "text/csv; charset=utf-8",
-    )
+    media_type = "application/json; charset=utf-8" if path.suffix.lower() == ".json" else "text/csv; charset=utf-8"
+    return FileResponse(path, filename=safe_name, media_type=media_type)
 
 
 @router.get("/store/workspace/{client_id}")
-def store_workspace(client_id: str) -> dict[str, object]:
+def store_workspace(
+    client_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
+    _require_mock_client_access(client_id=client_id, user_id=_mock_user_header(x_fisora_user_id))
     return get_workflow_store().get_workspace(client_id)

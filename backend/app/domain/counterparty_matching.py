@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.chart_accounts import ChartAccount
+from app.domain.chart_accounts import ChartAccount, normalize_iban
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,7 @@ def match_counterparty(
     accounts: list[ChartAccount],
     *,
     tax_ids: tuple[str, ...] = (),
+    ibans: tuple[str, ...] = (),
     name_hint: str = "",
     account_prefixes: tuple[str, ...] = ("120", "320"),
 ) -> CounterpartyMatch:
@@ -47,6 +48,17 @@ def match_counterparty(
         for account in accounts
         if account.is_detail_account and account.normalized_account_code.startswith(account_prefixes)
     ]
+
+    iban_set = {normalize_iban(iban) for iban in ibans if normalize_iban(iban)}
+    for account in candidates:
+        if account.iban and normalize_iban(account.iban) in iban_set:
+            return CounterpartyMatch(
+                account_code=account.normalized_account_code,
+                account_name=account.account_name,
+                confidence=97,
+                match_reason="iban_exact",
+                requires_review=False,
+            )
 
     tax_id_set = {tax_id for tax_id in tax_ids if tax_id}
     for account in candidates:

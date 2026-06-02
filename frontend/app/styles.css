@@ -118,6 +118,41 @@ h2 {
   border-color: var(--border);
 }
 
+.client-selector {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
+.client-selector label {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: min(420px, 100%);
+}
+
+.client-selector span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.client-selector select {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  min-height: 36px;
+  padding: 7px 10px;
+  width: min(320px, 100%);
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -756,6 +791,12 @@ tbody tr.selected {
   .modebar {
     display: grid;
     width: 100%;
+  }
+
+  .client-selector,
+  .client-selector label {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .metrics,

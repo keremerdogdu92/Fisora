@@ -123,10 +123,12 @@ Saklama:
 4. `postgres`, `redis`, `backend`, `worker`, `frontend`, `nginx` compose servisleri hazirlanir.
 5. Belge storage ve backup klasorleri olusturulur.
 6. Demo/pilot env ile deploy edilir.
-7. PostgreSQL store smoke testi calistirilir:
+7. Versioned migration runner calistirilir:
+   `python backend/scripts/apply_migrations.py`
+8. PostgreSQL store smoke testi calistirilir:
    `python backend/scripts/run_postgres_smoke.py`
-8. Mükellef upload -> worker -> review -> export akisi test edilir.
-9. Gercek Zirve export saha testi yapilir.
+9. Mukellef upload -> worker -> review -> export akisi test edilir.
+10. Gercek Zirve export saha testi yapilir.
 
 ## Yerel Docker Kontrol Notu
 
@@ -145,6 +147,7 @@ Container smoke test icin hedef komut:
 
 ```powershell
 docker compose --env-file deploy/production.env.example -f docker-compose.production.yml up -d postgres redis
+python backend/scripts/apply_migrations.py
 python backend/scripts/run_postgres_smoke.py
 docker compose --env-file deploy/production.env.example -f docker-compose.production.yml down
 ```
@@ -160,5 +163,6 @@ docker compose --env-file deploy/production.env.example -f docker-compose.produc
 
 Ilk compose iskeleti JSON store ile calisabilir. PostgreSQL adapter ilk surumu
 eklendi; production smoke testte `FISORA_STORE_BACKEND=postgres` ve `DATABASE_URL`
-ile calistirilacak. Worker upload sonrasi processing job'lari isler ve retention
+ile calistirilacak. Schema `backend/scripts/apply_migrations.py` ile versiyonlu
+uygulanir. Worker upload sonrasi processing job'lari isler ve retention
 job'unu ayni servis icinde periyodik calistirir.

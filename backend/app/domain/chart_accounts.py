@@ -25,6 +25,7 @@ NAME_KEYS = (
 )
 TAX_ID_KEYS = ("tax_id", "vkn", "tckn", "vergi_no", "vergi no")
 TAX_OFFICE_KEYS = ("tax_office", "vergi_dairesi", "vergi dairesi")
+IBAN_KEYS = ("iban", "banka_iban", "banka iban", "counterparty_iban", "karsi_iban")
 DETAIL_KEYS = ("is_detail_account", "detay e/h", "detay", "detay hesap")
 
 
@@ -36,6 +37,7 @@ class ChartAccount:
     is_detail_account: bool | None = None
     tax_id: str | None = None
     tax_office: str | None = None
+    iban: str | None = None
 
     @property
     def is_counterparty_candidate(self) -> bool:
@@ -56,6 +58,10 @@ def normalize_account_code(value: str) -> str:
     compact = re.sub(r"[^0-9A-Za-z.]", "", compact)
     compact = re.sub(r"\.+", ".", compact).strip(".")
     return compact
+
+
+def normalize_iban(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z]", "", value).upper()
 
 
 def _normalized_header(value: str) -> str:
@@ -103,6 +109,7 @@ def mark_detail_accounts(accounts: list[ChartAccount]) -> list[ChartAccount]:
                 is_detail_account=explicit_detail if explicit_detail is not None else not has_child,
                 tax_id=account.tax_id,
                 tax_office=account.tax_office,
+                iban=account.iban,
             )
         )
     return result
@@ -125,6 +132,7 @@ def parse_chart_accounts_csv(path: Path) -> list[ChartAccount]:
                     is_detail_account=parse_detail_flag(_first_value(row, DETAIL_KEYS)),
                     tax_id=_first_value(row, TAX_ID_KEYS) or None,
                     tax_office=_first_value(row, TAX_OFFICE_KEYS) or None,
+                    iban=normalize_iban(_first_value(row, IBAN_KEYS)) or None,
                 )
             )
     return mark_detail_accounts(accounts)
@@ -158,6 +166,7 @@ def parse_chart_accounts_xlsx(path: Path) -> list[ChartAccount]:
                 is_detail_account=parse_detail_flag(_first_value(row, DETAIL_KEYS)),
                 tax_id=_first_value(row, TAX_ID_KEYS) or None,
                 tax_office=_first_value(row, TAX_OFFICE_KEYS) or None,
+                iban=normalize_iban(_first_value(row, IBAN_KEYS)) or None,
             )
         )
     return mark_detail_accounts(accounts)

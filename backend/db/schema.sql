@@ -1,6 +1,6 @@
--- Phase 0 relational model draft. This is not a production migration.
+-- Phase 0 relational model reference. Versioned migrations expand this schema.
 
-create table tenants (
+create table if not exists tenants (
     id uuid primary key,
     name text not null,
     tax_number text,
@@ -11,7 +11,7 @@ create table tenants (
     updated_at timestamptz not null default now()
 );
 
-create table taxpayers (
+create table if not exists taxpayers (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     display_name text not null,
@@ -26,7 +26,7 @@ create table taxpayers (
     updated_at timestamptz not null default now()
 );
 
-create table portal_users (
+create table if not exists portal_users (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     external_user_key text not null,
@@ -38,7 +38,7 @@ create table portal_users (
     unique (tenant_id, external_user_key)
 );
 
-create table portal_user_client_access (
+create table if not exists portal_user_client_access (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     user_id uuid not null references portal_users(id),
@@ -48,7 +48,7 @@ create table portal_user_client_access (
     unique (tenant_id, user_id, taxpayer_id)
 );
 
-create table chart_account_imports (
+create table if not exists chart_account_imports (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -60,7 +60,7 @@ create table chart_account_imports (
     created_at timestamptz not null default now()
 );
 
-create table chart_accounts (
+create table if not exists chart_accounts (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -71,13 +71,14 @@ create table chart_accounts (
     is_detail_account boolean not null default false,
     tax_id text,
     tax_office text,
+    iban text,
     is_active boolean not null default true,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     unique (tenant_id, taxpayer_id, normalized_account_code)
 );
 
-create table documents (
+create table if not exists documents (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -100,7 +101,7 @@ create table documents (
     updated_at timestamptz not null default now()
 );
 
-create table workflow_records (
+create table if not exists workflow_records (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     client_id text not null,
@@ -112,7 +113,7 @@ create table workflow_records (
     unique (tenant_id, client_id, record_type, record_key)
 );
 
-create table invoice_lines (
+create table if not exists invoice_lines (
     id uuid primary key,
     document_id uuid not null references documents(id),
     tenant_id uuid not null references tenants(id),
@@ -127,7 +128,7 @@ create table invoice_lines (
     created_at timestamptz not null default now()
 );
 
-create table counterparties (
+create table if not exists counterparties (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -135,6 +136,7 @@ create table counterparties (
     normalized_account_code text not null,
     display_name text not null,
     tax_id text,
+    iban text,
     counterparty_type text not null,
     confidence_score numeric(5, 2),
     match_reason text,
@@ -143,7 +145,7 @@ create table counterparties (
     updated_at timestamptz not null default now()
 );
 
-create table journal_entries (
+create table if not exists journal_entries (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -161,7 +163,7 @@ create table journal_entries (
     check (total_debit = total_credit)
 );
 
-create table journal_entry_lines (
+create table if not exists journal_entry_lines (
     id uuid primary key,
     journal_entry_id uuid not null references journal_entries(id),
     tenant_id uuid not null references tenants(id),
@@ -178,7 +180,7 @@ create table journal_entry_lines (
     check (not (debit_amount > 0 and credit_amount > 0))
 );
 
-create table export_batches (
+create table if not exists export_batches (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -190,7 +192,7 @@ create table export_batches (
     created_at timestamptz not null default now()
 );
 
-create table review_decisions (
+create table if not exists review_decisions (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
@@ -206,7 +208,7 @@ create table review_decisions (
     created_at timestamptz not null default now()
 );
 
-create table learning_rules (
+create table if not exists learning_rules (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid references taxpayers(id),
@@ -223,19 +225,21 @@ create table learning_rules (
     updated_at timestamptz not null default now()
 );
 
-create index idx_taxpayers_tenant_status on taxpayers(tenant_id, status);
-create index idx_portal_users_tenant_key on portal_users(tenant_id, external_user_key);
-create index idx_portal_user_client_access_taxpayer on portal_user_client_access(tenant_id, taxpayer_id);
-create index idx_chart_accounts_taxpayer_code on chart_accounts(tenant_id, taxpayer_id, normalized_account_code);
-create index idx_chart_accounts_counterparty_tax on chart_accounts(tenant_id, taxpayer_id, tax_id)
+create index if not exists idx_taxpayers_tenant_status on taxpayers(tenant_id, status);
+create index if not exists idx_portal_users_tenant_key on portal_users(tenant_id, external_user_key);
+create index if not exists idx_portal_user_client_access_taxpayer on portal_user_client_access(tenant_id, taxpayer_id);
+create index if not exists idx_chart_accounts_taxpayer_code on chart_accounts(tenant_id, taxpayer_id, normalized_account_code);
+create index if not exists idx_chart_accounts_counterparty_tax on chart_accounts(tenant_id, taxpayer_id, tax_id)
     where tax_id is not null and is_detail_account = true;
-create index idx_documents_taxpayer_status on documents(tenant_id, taxpayer_id, status);
-create index idx_documents_retention on documents(tenant_id, storage_status, expires_at)
+create index if not exists idx_chart_accounts_counterparty_iban on chart_accounts(tenant_id, taxpayer_id, iban)
+    where iban is not null and is_detail_account = true;
+create index if not exists idx_documents_taxpayer_status on documents(tenant_id, taxpayer_id, status);
+create index if not exists idx_documents_retention on documents(tenant_id, storage_status, expires_at)
     where storage_status in ('stored', 'expiring');
-create index idx_workflow_records_lookup on workflow_records(tenant_id, client_id, record_type, created_at);
-create index idx_workflow_records_type_key on workflow_records(tenant_id, record_type, record_key);
-create index idx_journal_entries_taxpayer_export on journal_entries(tenant_id, taxpayer_id, export_status);
-create index idx_review_decisions_taxpayer_created on review_decisions(tenant_id, taxpayer_id, created_at desc);
-create index idx_learning_rules_scope on learning_rules(tenant_id, taxpayer_id, scope, automation_candidate);
-create index idx_export_batches_taxpayer_status on export_batches(tenant_id, taxpayer_id, status);
+create index if not exists idx_workflow_records_lookup on workflow_records(tenant_id, client_id, record_type, created_at);
+create index if not exists idx_workflow_records_type_key on workflow_records(tenant_id, record_type, record_key);
+create index if not exists idx_journal_entries_taxpayer_export on journal_entries(tenant_id, taxpayer_id, export_status);
+create index if not exists idx_review_decisions_taxpayer_created on review_decisions(tenant_id, taxpayer_id, created_at desc);
+create index if not exists idx_learning_rules_scope on learning_rules(tenant_id, taxpayer_id, scope, automation_candidate);
+create index if not exists idx_export_batches_taxpayer_status on export_batches(tenant_id, taxpayer_id, status);
 

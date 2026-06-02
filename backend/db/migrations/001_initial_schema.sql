@@ -1,0 +1,2 @@
+-- Fisora migration runner expands this include before executing the migration.
+-- fisora:include ../schema.sql

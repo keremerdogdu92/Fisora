@@ -62,6 +62,19 @@ Varsayilan adapter JSON store'dur. Production icin `FISORA_STORE_BACKEND=postgre
 ve `DATABASE_URL` veya `FISORA_DATABASE_URL` verilirse ilk PostgreSQL adapter'i
 ayni workspace kontratini `workflow_records` tablosunda saklar.
 
+Schema artik versiyonlu migration runner ile uygulanir:
+
+```powershell
+$env:DATABASE_URL="postgresql://fisora:change-me@localhost:5432/fisora"
+python backend/scripts/apply_migrations.py
+```
+
+Baglanti kurmadan migration planini gormek icin:
+
+```powershell
+python backend/scripts/apply_migrations.py --dry-run
+```
+
 Bu store su endpointlerin davranisini dogrular:
 
 - `POST /phase0/store/client`
@@ -98,6 +111,8 @@ Upload sonrasi sistem bir processing job olusturur. Worker su anda:
   statik islem tipi cikarir.
 - Banka/POS satirlarindan dengeli statement fis taslaklari uretir; riskli POS
   ve belirsiz satirlar review'da kalir.
+- Banka/POS cari eslestirmesinde IBAN, VKN/TCKN, unvan ve otomasyon adayi
+  mustavir learning event'leri sirayla degerlendirilir.
 - Hesap plani ve mukellef profili varsa fatura sonucunu simulation motoruna
   gonderir; eksik veya supheli durumlari `review_required` olarak saklar.
 
@@ -122,8 +137,9 @@ docker compose --env-file deploy/production.env.example -f docker-compose.produc
 ```
 
 Ilk compose iskeleti JSON store ile de calisabilir. Production varsayimi
-`FISORA_STORE_BACKEND=postgres` olacak; bunun icin `backend/db/schema.sql`
-uygulanmali ve `DATABASE_URL` tanimlanmalidir.
+`FISORA_STORE_BACKEND=postgres` olacak; bunun icin
+`backend/scripts/apply_migrations.py` calistirilmali ve `DATABASE_URL`
+tanimlanmalidir.
 
 ## AI Adapter Davranisi
 

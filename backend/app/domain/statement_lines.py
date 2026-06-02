@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 from typing import Iterable
 
-from app.domain.chart_accounts import ChartAccount
+from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 
 
@@ -155,6 +155,7 @@ def _line_from_row(line_no: int, row: dict[str, object], mapping: dict[str, str]
 def enrich_statement_lines_with_counterparties(
     lines: tuple[StatementLine, ...],
     accounts: list[ChartAccount],
+    learning_events: Iterable[dict[str, object]] = (),
 ) -> tuple[StatementLine, ...]:
     if not accounts:
         return tuple(
@@ -163,14 +164,27 @@ def enrich_statement_lines_with_counterparties(
             else line
             for line in lines
         )
-    return tuple(_enrich_statement_line_with_counterparty(line, accounts) for line in lines)
+    events = tuple(learning_events)
+    return tuple(_enrich_statement_line_with_counterparty(line, accounts, events) for line in lines)
 
 
-def _enrich_statement_line_with_counterparty(line: StatementLine, accounts: list[ChartAccount]) -> StatementLine:
+def _enrich_statement_line_with_counterparty(
+    line: StatementLine,
+    accounts: list[ChartAccount],
+    learning_events: tuple[dict[str, object], ...],
+) -> StatementLine:
     if line.transaction_type in {"tax_payment", "sgk_payment"}:
         return line
     name_hint = line.counterparty_name or line.description
-    match = match_counterparty(accounts, tax_ids=tuple(tax_id for tax_id in (line.tax_id,) if tax_id), name_hint=name_hint)
+    match = match_counterparty(
+        accounts,
+        tax_ids=tuple(tax_id for tax_id in (line.tax_id,) if tax_id),
+        ibans=tuple(iban for iban in (line.iban,) if iban),
+        name_hint=name_hint,
+    )
+    learned = _learning_counterparty_match(line, accounts, learning_events)
+    if learned is not None and (not match.account_code or match.requires_review):
+        return learned
     if not match.account_code:
         return _add_counterparty_missing_flag(line) if line.transaction_type == "unknown" else line
 
@@ -191,6 +205,53 @@ def _enrich_statement_line_with_counterparty(line: StatementLine, accounts: list
         counterparty_match_confidence=match.confidence,
         counterparty_match_reason=match.match_reason,
     )
+
+
+def _learning_counterparty_match(
+    line: StatementLine,
+    accounts: list[ChartAccount],
+    learning_events: tuple[dict[str, object], ...],
+) -> StatementLine | None:
+    normalized_text = _normalize(f"{line.description} {line.counterparty_name}")
+    if not normalized_text:
+        return None
+    accounts_by_code = {account.normalized_account_code: account for account in accounts if account.is_detail_account}
+    for event in reversed(learning_events):
+        account_code = normalize_account_code(str(event.get("corrected_counterparty_code") or ""))
+        account = accounts_by_code.get(account_code)
+        if account is None:
+            continue
+        hints = (
+            str(event.get("category") or ""),
+            str(event.get("reason") or ""),
+            str(event.get("document_ref") or ""),
+        )
+        if not any(_learning_hint_matches(normalized_text, hint) for hint in hints):
+            continue
+        automation_candidate = bool(event.get("automation_candidate"))
+        flags = tuple(flag for flag in line.risk_flags if flag != "statement_review_required")
+        if not automation_candidate:
+            flags = tuple(dict.fromkeys((*flags, "learning_rule_review_required")))
+        transaction_type = line.transaction_type
+        if transaction_type == "unknown":
+            transaction_type = "counterparty_collection" if line.direction == "in" else "counterparty_payment"
+        return replace(
+            line,
+            suggested_account_code=line.suggested_account_code or account.normalized_account_code,
+            transaction_type=transaction_type,
+            confidence=max(line.confidence, 90 if automation_candidate else 76),
+            risk_flags=flags,
+            counterparty_match_code=account.normalized_account_code,
+            counterparty_match_name=account.account_name,
+            counterparty_match_confidence=90 if automation_candidate else 76,
+            counterparty_match_reason="learning_event",
+        )
+    return None
+
+
+def _learning_hint_matches(normalized_text: str, hint: str) -> bool:
+    normalized_hint = _normalize(hint)
+    return len(normalized_hint) >= 4 and normalized_hint in normalized_text
 
 
 def _add_counterparty_missing_flag(line: StatementLine) -> StatementLine:

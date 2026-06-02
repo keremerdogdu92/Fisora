@@ -114,6 +114,12 @@ type PortalUserItem = {
   role: string;
 };
 
+type ClientOption = {
+  clientId: string;
+  clientName: string;
+  onboardingReady: boolean;
+};
+
 type ReviewData = {
   generatedFrom: string;
   clientId?: string;
@@ -192,6 +198,17 @@ type WorkspacePortalUser = {
   allowed_client_ids?: string[];
 };
 
+type WorkspaceClientRecord = {
+  client_id?: string;
+  profile?: {
+    client_id?: string;
+    title?: string;
+  };
+  onboarding?: {
+    is_ready?: boolean;
+  };
+};
+
 type WorkspaceSnapshot = {
   client?: {
     client_id?: string;
@@ -208,6 +225,10 @@ type WorkspaceSnapshot = {
   processing_jobs?: WorkspaceProcessingJob[];
   export_packages?: WorkspaceExportPackage[];
   portal_users?: WorkspacePortalUser[];
+};
+
+type ClientListResponse = {
+  clients?: WorkspaceClientRecord[];
 };
 
 type PortalMode = "client" | "accountant";
@@ -380,6 +401,35 @@ function uploadStatusFromJob(documentStatus: string | undefined, job?: Workspace
   return uploadStatusFromApi(documentStatus);
 }
 
+function clientOptionsFromApi(records: WorkspaceClientRecord[]): ClientOption[] {
+  return records.flatMap((record) => {
+    const clientId = record.client_id ?? record.profile?.client_id ?? "";
+    if (!clientId) return [];
+    return [
+      {
+        clientId,
+        clientName: record.profile?.title ?? clientId,
+        onboardingReady: Boolean(record.onboarding?.is_ready),
+      },
+    ];
+  });
+}
+
+function mergedClientOptions(options: ClientOption[], currentClientId: string, currentClientName: string): ClientOption[] {
+  const byClientId = new Map<string, ClientOption>();
+  if (currentClientId) {
+    byClientId.set(currentClientId, {
+      clientId: currentClientId,
+      clientName: currentClientName || currentClientId,
+      onboardingReady: true,
+    });
+  }
+  for (const option of options) {
+    byClientId.set(option.clientId, option);
+  }
+  return Array.from(byClientId.values());
+}
+
 function textValue(source: Record<string, unknown>, camelKey: string, snakeKey: string, fallback = "") {
   const value = source[camelKey] ?? source[snakeKey];
   return value == null ? fallback : String(value);
@@ -468,7 +518,8 @@ function blankInvoiceRow(document: WorkspaceDocument): InvoiceRow {
 }
 
 function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewData): ReviewData {
-  const invoiceRows = snapshot.documents?.length ? snapshot.documents.map(blankInvoiceRow) : (fallback?.invoiceRows ?? []);
+  const hasWorkspaceClient = Boolean(snapshot.client);
+  const invoiceRows = snapshot.documents?.length ? snapshot.documents.map(blankInvoiceRow) : hasWorkspaceClient ? [] : (fallback?.invoiceRows ?? []);
   const exportReadyCount = invoiceRows.filter((row) => row.exportStatus === "export_ready").length;
   const reviewRequiredCount = invoiceRows.length - exportReadyCount;
   const clientId = snapshot.client?.client_id ?? snapshot.client?.profile?.client_id ?? fallback?.clientId ?? "pilot-mukellef";
@@ -478,10 +529,10 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
     clientId,
     clientName,
     uploadQueue: uploadedDocumentsToQueue(snapshot.uploaded_documents ?? [], snapshot.processing_jobs ?? [], clientName),
-    exportPackages: exportPackagesFromWorkspace(snapshot.export_packages ?? [], fallback?.exportPackages ?? []),
-    portalUsers: portalUsersFromWorkspace(snapshot.portal_users ?? [], fallback?.portalUsers ?? []),
+    exportPackages: exportPackagesFromWorkspace(snapshot.export_packages ?? [], hasWorkspaceClient ? [] : (fallback?.exportPackages ?? [])),
+    portalUsers: portalUsersFromWorkspace(snapshot.portal_users ?? [], hasWorkspaceClient ? [] : (fallback?.portalUsers ?? [])),
     summary: {
-      chartRunCount: snapshot.chart_accounts ? 1 : (fallback?.summary.chartRunCount ?? 0),
+      chartRunCount: snapshot.chart_accounts ? 1 : hasWorkspaceClient ? 0 : (fallback?.summary.chartRunCount ?? 0),
       invoiceRowCount: invoiceRows.length,
       autoReadyCount: exportReadyCount,
       reviewRequiredCount,
@@ -504,7 +555,7 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
             selectedAccounts: {},
           },
         ]
-      : (fallback?.chartRuns ?? []),
+      : hasWorkspaceClient ? [] : (fallback?.chartRuns ?? []),
     invoiceRows,
   };
 }
@@ -587,6 +638,8 @@ export default function Home() {
   const [exportPackageDownloadUrl, setExportPackageDownloadUrl] = useState("");
   const [exportManifestDownloadUrl, setExportManifestDownloadUrl] = useState("");
   const [onboardingStatus, setOnboardingStatus] = useState("");
+  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
+  const [clientListStatus, setClientListStatus] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -626,12 +679,21 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (data.uploadQueue?.length) {
-      setUploadItems(data.uploadQueue);
-    }
+    refreshClientListFromApi().catch(() => {
+      setClientListStatus("client listesi icin API bekleniyor");
+    });
+  }, []);
+
+  useEffect(() => {
+    setUploadItems(data.uploadQueue ?? []);
   }, [data.uploadQueue]);
 
   const clientName = data.clientName ?? "Demo Isitme Merkezi";
+  const clientId = data.clientId ?? "demo-isitme-merkezi";
+  const availableClientOptions = useMemo(
+    () => mergedClientOptions(clientOptions, clientId, clientName),
+    [clientId, clientName, clientOptions],
+  );
   const chartInvoices = useMemo(() => {
     return data.invoiceRows.filter((row) => !activeChart || row.chartFileName === activeChart);
   }, [activeChart, data.invoiceRows]);
@@ -655,7 +717,6 @@ export default function Home() {
   }, [chartInvoices]);
 
   const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
-  const clientId = data.clientId ?? "demo-isitme-merkezi";
   const assignedClientUser = data.portalUsers?.find((user) => user.role === "client_user") ?? data.portalUsers?.[0];
   const portalUserId = assignedClientUser?.userId || "demo-mukellef-user";
   const portalUserLabel = assignedClientUser?.displayName || "Demo mukellef kullanicisi";
@@ -684,6 +745,33 @@ export default function Home() {
       setUploadItems(payload.uploadQueue);
     }
     return payload;
+  }
+
+  async function refreshClientListFromApi() {
+    const response = await fetch(`${API_BASE_URL}/phase0/store/clients`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("client list refresh failed");
+    const payload = (await response.json()) as ClientListResponse;
+    setClientOptions(clientOptionsFromApi(payload.clients ?? []));
+    setClientListStatus("api client listesi");
+  }
+
+  async function selectClient(targetClientId: string) {
+    if (!targetClientId || targetClientId === clientId) return;
+    setSource("api workspace yukleniyor");
+    setSelectedKey("");
+    setDecisionLog({});
+    setDecisionStatus("");
+    setOnboardingStatus("");
+    setExportPackageStatus("");
+    setExportPackageDownloadUrl("");
+    setExportManifestDownloadUrl("");
+    try {
+      await refreshWorkspaceFromApi(targetClientId);
+    } catch {
+      setSource("mukellef workspace yuklenemedi");
+    }
   }
 
   async function setDecision(action: DecisionAction) {
@@ -802,6 +890,7 @@ export default function Home() {
       });
       if (!response.ok) throw new Error("onboarding package failed");
       await refreshWorkspaceFromApi(clientId);
+      await refreshClientListFromApi();
       setOnboardingStatus("MVP paketi hazir.");
     } catch {
       setOnboardingStatus("MVP paketi hazirlanamadi.");
@@ -912,6 +1001,13 @@ export default function Home() {
         </button>
       </section>
 
+      <ClientSelector
+        activeClientId={clientId}
+        clientListStatus={clientListStatus}
+        clients={availableClientOptions}
+        onClientChange={selectClient}
+      />
+
       <section className="portal-strip" aria-label="Mukellef portal ozeti">
         <Info label="Mukellef" value={clientName} />
         <Info label="Yetki" value={portalMode === "client" ? "Mukellef kullanicisi" : "Musavir review"} />
@@ -960,6 +1056,34 @@ export default function Home() {
         />
       )}
     </main>
+  );
+}
+
+function ClientSelector({
+  activeClientId,
+  clientListStatus,
+  clients,
+  onClientChange,
+}: {
+  activeClientId: string;
+  clientListStatus: string;
+  clients: ClientOption[];
+  onClientChange: (clientId: string) => Promise<void>;
+}) {
+  return (
+    <section className="client-selector" aria-label="Mukellef secimi">
+      <label>
+        <span>Mukellef secimi</span>
+        <select onChange={(event) => void onClientChange(event.target.value)} value={activeClientId}>
+          {clients.map((client) => (
+            <option key={client.clientId} value={client.clientId}>
+              {client.clientName} ({client.clientId})
+            </option>
+          ))}
+        </select>
+      </label>
+      <span>{clientListStatus || `${clients.length} mukellef gorunur`}</span>
+    </section>
   );
 }
 

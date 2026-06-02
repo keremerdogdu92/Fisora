@@ -43,11 +43,14 @@ Tamamlanan ana dilimler:
 - Client onboarding paketi: mukellef karti, hesap plani ve portal kullanicilari tek API cagrisiyla hazirlanabilir.
 - Mukkellef listesi API'si: musavir ekraninin cok-mukellef secimine hazir client listesi saglanir.
 - Export manifest dosyasi: CSV ile birlikte audit/icerik manifest JSON'u uretilir ve indirilebilir.
+- Versioned migration runner: `backend/db/migrations` altindaki SQL dosyalari checksum ile `schema_migrations` tablosuna islenir.
+- Portal cok-mukellef secimi: musavir ekraninda API'deki mukellef listesi secilebilir ve secime gore workspace yenilenir.
+- Banka/POS cari eslestirme genislemesi: IBAN ve otomasyon adayi gecmis mustavir kararlari cari eslestirmede kullanilir.
 
 ## Siradaki 5 Adim
 
 1. Docker daemon ve PostgreSQL saha smoke testi
-   - `backend/db/schema.sql` gercek Postgres'e uygulanir.
+   - `backend/scripts/apply_migrations.py` gercek Postgres'e uygulanir.
    - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
    - Compose config ve container start senaryosu sunucuda dogrulanir.
 
@@ -94,7 +97,7 @@ flowchart TD
 - Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
 - PostgreSQL saha testi: adapter yazildi, Docker daemon izni acilinca gercek Postgres kosusu yapilacak.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
-- Banka/POS akisi: satir parse, dengeli fis taslagi ve VKN/unvan cari eslestirme var; IBAN/gecmis karar eslestirmesi genisleyecek.
+- Banka/POS akisi: satir parse, dengeli fis taslagi, VKN/unvan, IBAN ve gecmis karar cari eslestirmesi var.
 - Mustavir calisma masasi: karar ve duzeltme API baglantisi var; duzeltme artik kalici taslak ve learning izine uygulanir.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.

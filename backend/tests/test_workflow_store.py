@@ -482,6 +482,130 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "tax_id_exact")
         self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.015")
 
+    def test_processing_worker_matches_bank_statement_counterparty_by_iban(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            statement_path = Path(temp_dir) / "bank.csv"
+            statement_path.write_text(
+                "transaction_date,description,amount,direction,iban\n"
+                "2026-05-03,Tedarikci odeme,1200.00,out,TR12 0000 0000 0000 0000 0000 01\n",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                    {
+                        "raw_account_code": "320.01.777",
+                        "normalized_account_code": "320.01.777",
+                        "account_name": "IBAN Tedarikci",
+                        "is_detail_account": True,
+                        "iban": "TR120000000000000000000001",
+                    },
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "bank-doc",
+                    "document_ref": "bank-doc",
+                    "document_type": "bank_statement",
+                    "original_file_name": "bank.csv",
+                    "storage_path": str(statement_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="bank_statement",
+                parser_kind=parser_kind_for_document_type("bank_statement"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.777")
+        self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "iban_exact")
+        self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.777")
+
+    def test_processing_worker_matches_bank_statement_counterparty_by_learning_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            statement_path = Path(temp_dir) / "bank.csv"
+            statement_path.write_text(
+                "transaction_date,description,amount,direction\n"
+                "2026-05-03,Kolay Soft hizmet odemesi,900.00,out\n",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                    {
+                        "raw_account_code": "320.01.888",
+                        "normalized_account_code": "320.01.888",
+                        "account_name": "Kolay Soft",
+                        "is_detail_account": True,
+                    },
+                ],
+            )
+            store.save_review_decision(
+                client_id="client-1",
+                decision={"document_ref": "old-kolay-soft.pdf", "action": "approve_with_changes"},
+                learning_event={
+                    "document_ref": "old-kolay-soft.pdf",
+                    "scope": "client_rule",
+                    "action": "approve_with_changes",
+                    "category": "kolay_soft",
+                    "corrected_account_code": "770.01",
+                    "corrected_counterparty_code": "320.01.888",
+                    "reason": "Kolay Soft e-fatura hizmeti",
+                    "automation_candidate": True,
+                },
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "bank-doc",
+                    "document_ref": "bank-doc",
+                    "document_type": "bank_statement",
+                    "original_file_name": "bank.csv",
+                    "storage_path": str(statement_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="bank_statement",
+                parser_kind=parser_kind_for_document_type("bank_statement"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(result["export_status"], "export_ready")
+        self.assertTrue(result["learning_rule_applied"])
+        self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.888")
+        self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "learning_event")
+        self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.888")
+
     def test_store_factory_selects_json_and_requires_postgres_dsn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = build_workflow_store(store_backend="json", json_path=Path(temp_dir) / "store.json")

@@ -38,6 +38,7 @@ def _chart_account(payload: dict[str, Any]) -> ChartAccount:
         is_detail_account=bool(payload.get("is_detail_account", True)),
         tax_id=str(payload.get("tax_id") or "") or None,
         tax_office=str(payload.get("tax_office") or "") or None,
+        iban=str(payload.get("iban") or "") or None,
     )
 
 
@@ -137,7 +138,11 @@ def build_statement_processing_result(
     path: Path,
     workspace: dict[str, Any],
 ) -> dict[str, Any]:
-    lines = enrich_statement_lines_with_counterparties(parse_statement_file(path), _chart_accounts(workspace))
+    lines = enrich_statement_lines_with_counterparties(
+        parse_statement_file(path),
+        _chart_accounts(workspace),
+        workspace.get("learning_events") or (),
+    )
     selection = _account_selection(workspace)
     entries = build_statement_entries(
         lines=lines,
@@ -177,16 +182,18 @@ def build_statement_processing_result(
         "ai_classification_skipped_reason": "static_statement_rules",
         "ai_classification_reason": "",
         "ai_estimated_input_chars": sum(len(line.description) for line in lines),
-        "learning_rule_applied": False,
+        "learning_rule_applied": any(line.counterparty_match_reason == "learning_event" for line in lines),
         "learning_rule_scope": "",
-        "learning_rule_reason": "",
+        "learning_rule_reason": "Banka satiri onceki musavir kararina gore cariyle eslesti."
+        if any(line.counterparty_match_reason == "learning_event" for line in lines)
+        else "",
         "export_status": "export_ready" if is_balanced and not risk_flags else "review_required",
         "selected_expense_account": "",
         "selected_vat_account": "",
         "selected_supplier_account": lines[0].suggested_account_code if lines else "",
         "counterparty_match_code": lines[0].suggested_account_code if lines else "",
         "counterparty_match_confidence": lines[0].confidence if lines else 0,
-        "counterparty_match_reason": "statement_static_rule" if lines else "not_found",
+        "counterparty_match_reason": lines[0].counterparty_match_reason if lines else "not_found",
         "draft_lines": [
             {
                 "account_code": line.account_code,

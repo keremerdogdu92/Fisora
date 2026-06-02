@@ -75,6 +75,7 @@ class ChartAccountPayload(BaseModel):
     is_detail_account: bool | None = None
     tax_id: str | None = None
     tax_office: str | None = None
+    iban: str | None = None
 
 
 class AccountSelectionPayload(BaseModel):
@@ -113,6 +114,7 @@ class InvoicePayload(BaseModel):
 class CounterpartyMatchPayload(BaseModel):
     accounts: list[ChartAccountPayload] = Field(default_factory=list)
     tax_ids: list[str] = Field(default_factory=list)
+    ibans: list[str] = Field(default_factory=list)
     name_hint: str = ""
     account_prefixes: list[str] = Field(default_factory=lambda: ["120", "320"])
 
@@ -384,6 +386,7 @@ def _chart_account(payload: ChartAccountPayload) -> ChartAccount:
         is_detail_account=payload.is_detail_account,
         tax_id=payload.tax_id,
         tax_office=payload.tax_office,
+        iban=payload.iban,
     )
 
 
@@ -643,6 +646,7 @@ def counterparty_match(payload: CounterpartyMatchPayload) -> dict[str, object]:
     match = match_counterparty(
         [_chart_account(account) for account in payload.accounts],
         tax_ids=tuple(payload.tax_ids),
+        ibans=tuple(payload.ibans),
         name_hint=payload.name_hint,
         account_prefixes=tuple(payload.account_prefixes),
     )

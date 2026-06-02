@@ -194,6 +194,129 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(workspace["documents"][0]["export_status"], "review_required")
         self.assertEqual(workspace["documents"][0]["review_reason_codes"], ["parser_output_required"])
 
+    def test_processing_worker_parses_xml_invoice_and_runs_simulation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "rexton.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ProfileID>TEMELFATURA</cbc:ProfileID>
+  <cbc:ID>ABC202600000001</cbc:ID>
+  <cbc:UUID>123e4567-e89b-12d3-a456-426614174000</cbc:UUID>
+  <cbc:IssueDate>2026-05-03</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>SATIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyLegalEntity><cbc:RegistrationName>Rexton Medikal</cbc:RegistrationName></cac:PartyLegalEntity>
+      <cac:PartyTaxScheme><cbc:CompanyID>1234567890</cbc:CompanyID></cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:InvoiceLine>
+    <cbc:InvoicedQuantity>1</cbc:InvoicedQuantity>
+    <cac:Item><cbc:Name>Rexton RLi 20</cbc:Name></cac:Item>
+  </cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount>
+    <cbc:TaxInclusiveAmount>1200.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount>1200.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>
+""",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Isitme Merkezi",
+                    "tax_id": "1111111111",
+                    "activity_description": "isitme cihazi satis ve servis",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                    {"raw_account_code": "191.01", "normalized_account_code": "191.01", "account_name": "Indirilecek KDV", "is_detail_account": True},
+                    {"raw_account_code": "320.01.015", "normalized_account_code": "320.01.015", "account_name": "Rexton Medikal", "is_detail_account": True, "tax_id": "1234567890"},
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "xml-doc",
+                    "document_ref": "xml-doc",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "rexton.xml",
+                    "storage_path": str(xml_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="einvoice_xml",
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(result["file_name"], "rexton.xml")
+        self.assertEqual(result["payable_total"], "1200.00")
+        self.assertEqual(result["product_category"], "isitme_cihazi")
+        self.assertEqual(result["selected_supplier_account"], "320.01.015")
+        self.assertEqual(result["export_status"], "export_ready")
+        self.assertTrue(result["draft_lines"])
+
+    def test_processing_worker_parses_bank_statement_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            statement_path = Path(temp_dir) / "bank.csv"
+            statement_path.write_text(
+                "transaction_date,description,amount,direction,balance_after\n"
+                "2026-05-03,GIB ODEME,500.00,out,9500.00\n"
+                "2026-05-04,SGK PRIM,700.00,out,8800.00\n"
+                "2026-05-05,POS BLOKE,1200.00,in,10000.00\n",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "bank-doc",
+                    "document_ref": "bank-doc",
+                    "document_type": "bank_statement",
+                    "original_file_name": "bank.csv",
+                    "storage_path": str(statement_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="bank_statement",
+                parser_kind=parser_kind_for_document_type("bank_statement"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(result["export_status"], "review_required")
+        self.assertEqual(result["statement_lines"][0]["transaction_type"], "tax_payment")
+        self.assertEqual(result["statement_lines"][1]["suggested_account_code"], "361")
+        self.assertEqual(result["statement_lines"][2]["transaction_type"], "pos_blocked")
+
     def test_store_factory_selects_json_and_requires_postgres_dsn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = build_workflow_store(store_backend="json", json_path=Path(temp_dir) / "store.json")

@@ -49,6 +49,8 @@ prototip icin opsiyonel tutulabilir.
   olusturur; worker sonucu workspace'e yazar.
 - Parser katmani: OCR kullanmadan once text PDF, XML, Excel ve CSV parser
   calisir. OCR sadece text cikmayan belgelerde fallback olur.
+- Worker parser baglantisi: text PDF ve e-fatura XML fatura sonucunu simulation
+  motoruna, CSV/XLSX banka-POS ekstrelerini statement line sonucuna donusturur.
 - Product classification: fatura kalemlerindeki marka/model satirlarini urun
   kategorilerine cevirir.
 - Business relevance: urun/hizmet kategorisini mukellef faaliyet profili, NACE,

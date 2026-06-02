@@ -11,6 +11,7 @@ type DraftLine = {
 };
 
 type InvoiceRow = {
+  documentRef?: string;
   chartFileName: string;
   fileName: string;
   providerHint: string;
@@ -261,7 +262,7 @@ function formatExportStatus(value: string) {
 }
 
 function rowKey(row: InvoiceRow) {
-  return `${row.chartFileName}:${row.fileName}`;
+  return `${row.chartFileName}:${row.documentRef || row.fileName}`;
 }
 
 function exportGateReason(row: InvoiceRow) {
@@ -357,6 +358,7 @@ function blankInvoiceRow(document: WorkspaceDocument): InvoiceRow {
   const result = document.result ?? {};
   return {
     chartFileName: textValue(result, "chartFileName", "chart_file_name", "workspace-store"),
+    documentRef: document.document_ref,
     fileName: textValue(result, "fileName", "file_name", document.document_ref),
     providerHint: textValue(result, "providerHint", "provider_hint"),
     invoiceType: textValue(result, "invoiceType", "invoice_type"),
@@ -470,6 +472,7 @@ export default function Home() {
   const [uploadKind, setUploadKind] = useState<UploadKind>("invoice");
   const [uploadItems, setUploadItems] = useState<UploadItem[]>((fallbackReviewData.uploadQueue ?? []) as UploadItem[]);
   const [decisionLog, setDecisionLog] = useState<Record<string, LocalDecision>>({});
+  const [decisionStatus, setDecisionStatus] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -556,12 +559,41 @@ export default function Home() {
     return payload;
   }
 
-  function setDecision(action: DecisionAction) {
+  async function setDecision(action: DecisionAction) {
     if (!selectedInvoice) return;
+    const decision = decisions[action];
     setDecisionLog((current) => ({
       ...current,
-      [rowKey(selectedInvoice)]: decisions[action],
+      [rowKey(selectedInvoice)]: decision,
     }));
+    setDecisionStatus("Karar API'ye yaziliyor...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/phase0/store/review-decision`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          decision: {
+            document_ref: selectedInvoice.documentRef || selectedInvoice.fileName,
+            action,
+            reviewer: "mali-musavir",
+            category: selectedInvoice.productCategory || "",
+            reason: exportGateReason(selectedInvoice),
+            apply_to_similar: action === "approve" || action === "approve_with_changes",
+            prior_consistent_approval_count: action === "approve" ? 2 : 0,
+          },
+        }),
+      });
+      if (!response.ok) throw new Error("review decision save failed");
+      const saved = (await response.json()) as {
+        learning_event?: {
+          automation_candidate?: boolean;
+        };
+      };
+      setDecisionStatus(saved.learning_event?.automation_candidate ? "Karar kaydedildi, otomasyon adayi." : "Karar kaydedildi.");
+    } catch {
+      setDecisionStatus("API yazilamadi; karar bu ekranda lokal tutuldu.");
+    }
   }
 
   async function onFilesSelected(files: FileList | null) {
@@ -695,6 +727,7 @@ export default function Home() {
           exportReadyCount={exportReadyCount}
           reviewQueueCount={reviewQueueCount}
           selectedInvoice={selectedInvoice}
+          decisionStatus={decisionStatus}
           setActiveChart={setActiveChart}
           setDecision={setDecision}
           setSelectedKey={setSelectedKey}
@@ -791,6 +824,7 @@ function AccountantReviewView({
   activeDecision,
   chartRuns,
   clientName,
+  decisionStatus,
   exportReadyCount,
   reviewQueueCount,
   selectedInvoice,
@@ -806,6 +840,7 @@ function AccountantReviewView({
   activeDecision?: LocalDecision;
   chartRuns: ChartRun[];
   clientName: string;
+  decisionStatus: string;
   exportReadyCount: number;
   reviewQueueCount: number;
   selectedInvoice?: InvoiceRow;
@@ -887,7 +922,12 @@ function AccountantReviewView({
         </aside>
 
         <InvoicePreview clientName={clientName} invoice={selectedInvoice} />
-        <JournalReviewPanel activeDecision={activeDecision} invoice={selectedInvoice} setDecision={setDecision} />
+        <JournalReviewPanel
+          activeDecision={activeDecision}
+          decisionStatus={decisionStatus}
+          invoice={selectedInvoice}
+          setDecision={setDecision}
+        />
       </section>
     </>
   );
@@ -937,10 +977,12 @@ function InvoicePreview({ clientName, invoice }: { clientName: string; invoice?:
 
 function JournalReviewPanel({
   activeDecision,
+  decisionStatus,
   invoice,
   setDecision,
 }: {
   activeDecision?: LocalDecision;
+  decisionStatus: string;
   invoice?: InvoiceRow;
   setDecision: (action: DecisionAction) => void;
 }) {
@@ -1006,9 +1048,10 @@ function JournalReviewPanel({
                 <span>Son karar</span>
                 <strong>{activeDecision.label}</strong>
                 <p>{activeDecision.learningScope}</p>
+                {decisionStatus ? <p>{decisionStatus}</p> : null}
               </>
             ) : (
-              <p>Bu belge icin henuz musavir karari verilmedi.</p>
+              <p>{decisionStatus || "Bu belge icin henuz musavir karari verilmedi."}</p>
             )}
           </div>
         </>

@@ -24,30 +24,32 @@ Tamamlanan ana dilimler:
 - PostgreSQL adapter ilk surumu: JSON workspace kontrati production database'de `workflow_records` ile saklanabilir.
 - Worker queue ilk surumu: upload sonrasi processing job olusur, parser tipi secilir, worker workspace'e guvenli review sonucu yazar.
 - Portal job durumu: yuklenen belgelerde parser ve job status gorunur.
+- Worker parser baglantisi: text PDF ve e-fatura XML sonucunu simulation motoruna baglar.
+- Banka/POS parser ilk surumu: CSV/XLSX ekstre satirlarini GIB, SGK, POS ve belirsiz kategoriye ayirir.
+- Portal karar API baglantisi: musavir karar butonlari `store/review-decision` ile kalici learning event uretir.
 
 ## Siradaki 5 Adim
 
-1. Gercek parser ciktilarini worker'a baglama
-   - Text PDF, e-fatura XML, CSV/XLSX ekstreden alan cikarma worker job sonucuna baglanir.
-   - Placeholder review sonucu yerine gercek line item ve tutar bilgisi yazilir.
-
-2. PostgreSQL saha smoke testi
+1. PostgreSQL saha smoke testi
    - `backend/db/schema.sql` gercek Postgres'e uygulanir.
    - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
    - Compose config ve container start senaryosu sunucuda dogrulanir.
 
-3. Portal kararlarini API'ye yazma
-   - Musavir review butonlari `store/review-decision` endpointine baglanir.
-   - Duzeltme alanlari hesap/cari kodu ve gerekceyle birlikte kalici olur.
-   - Karar sonrasi learning event gorunur.
-
-4. Gercek upload iyilestirmesi ve dosya saklama
+2. Gercek upload iyilestirmesi ve dosya saklama
    - Base64 MVP sozlesmesi buyuk dosyalar icin multipart veya direct-upload modeline tasinir.
    - Ham belge ile turetilmis parse/AI/export ciktisi ayrimi korunur.
 
-5. Banka/POS parse ve matching
-   - Ekstre satirlari banka aciklamasi, tutar, tarih ve cari adayiyla review/export gate'e baglanir.
-   - Ilk hedef: GIB, SGK, POS bloke, banka tahsilat/odeme taslaklari.
+3. Banka/POS fis taslagi uretimi
+   - Parse edilen statement satirlari 102/108/320/360/361 taslak fislerine donusur.
+   - POS bloke ve belirsiz satirlar review gate'te kalir.
+
+4. Review duzeltme formlari
+   - Musavir sadece karar degil, hesap/cari/tutar duzeltmesini de UI'dan girebilir.
+   - Duzeltme sonraki benzer belgeye learning rule olarak uygulanir.
+
+5. AI API batch benchmark
+   - Statik kuralla cozulmeyen kalemlerde OpenAI/Gemini/Manus adaylari test edilir.
+   - Belge basina maliyet ve dogruluk karsilastirilir.
 
 Sonraki saha kilidi: Zirve export formati gercek programda denenmeden "tamam" sayilmaz.
 
@@ -75,8 +77,8 @@ flowchart TD
 - Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
 - PostgreSQL saha testi: adapter yazildi, gercek Postgres kosusu henuz yapilmadi.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
-- Banka/POS akisi: UI yukleme alani var; parse ve matching katmani genisleyecek.
-- Mustavir calisma masasi: gorunum var; karar yazma API baglantisi genisleyecek.
+- Banka/POS akisi: satir parse var; dengeli fis taslagi uretimi genisleyecek.
+- Mustavir calisma masasi: karar API baglantisi var; duzeltme formlari genisleyecek.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.
 - Maliyet limiti: Belge basina AI cagrisi, token/karakter limiti ve aylik cap.

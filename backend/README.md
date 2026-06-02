@@ -87,9 +87,14 @@ Ham belge retention politikasi 90 gundur. Upload kaydi
 alanlarini tasir. `POST /phase0/store/document-retention/run` suresi dolan ham
 dosyalari siler ve metadata kaydini `storage_status=deleted` olarak korur.
 
-Upload sonrasi sistem bir processing job olusturur. Ilk worker surumu belge
-tipine gore parser secer, gercek parse henuz tamamlanmadiginda belgeyi guvenli
-sekilde `review_required` simulation sonucu olarak workspace'e yazar.
+Upload sonrasi sistem bir processing job olusturur. Worker su anda:
+
+- Text PDF faturalari mevcut `pypdf` parser'i ile okur.
+- E-fatura XML dosyalarindan temel kimlik, tutar, KDV ve kalem ipuclari cikarir.
+- CSV/XLSX banka veya POS ekstrelerinden satir bazli tarih, aciklama, tutar ve
+  statik islem tipi cikarir.
+- Hesap plani ve mukellef profili varsa fatura sonucunu simulation motoruna
+  gonderir; eksik veya supheli durumlari `review_required` olarak saklar.
 
 ## Production Compose Iskeleti
 

@@ -102,6 +102,7 @@ type ExportPackageItem = {
   excludedCount: number;
   outputFilename: string;
   downloadUrl: string;
+  manifestDownloadUrl: string;
   downloadedAt: string;
   downloadCount: number;
   createdAt: string;
@@ -176,6 +177,7 @@ type WorkspaceExportPackage = {
     excluded_document_refs?: string[];
     output_filename?: string;
     download_url?: string;
+    manifest_download_url?: string;
     downloaded_at?: string;
     download_count?: number;
   };
@@ -531,6 +533,7 @@ function exportPackagesFromWorkspace(
         excludedCount: packagePayload.excluded_document_refs?.length ?? 0,
         outputFilename: packagePayload.output_filename ?? "",
         downloadUrl: packagePayload.download_url ?? "",
+        manifestDownloadUrl: packagePayload.manifest_download_url ?? "",
         downloadedAt: packagePayload.downloaded_at ?? "",
         downloadCount: packagePayload.download_count ?? 0,
         createdAt: record.created_at ?? record.updated_at ?? "",
@@ -582,6 +585,8 @@ export default function Home() {
   });
   const [exportPackageStatus, setExportPackageStatus] = useState("");
   const [exportPackageDownloadUrl, setExportPackageDownloadUrl] = useState("");
+  const [exportManifestDownloadUrl, setExportManifestDownloadUrl] = useState("");
+  const [onboardingStatus, setOnboardingStatus] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -657,6 +662,8 @@ export default function Home() {
   const latestExportPackage = data.exportPackages?.[0];
   const activeExportDownloadUrl =
     exportPackageDownloadUrl || (latestExportPackage?.downloadUrl ? `${API_BASE_URL}${latestExportPackage.downloadUrl}` : "");
+  const activeManifestDownloadUrl =
+    exportManifestDownloadUrl || (latestExportPackage?.manifestDownloadUrl ? `${API_BASE_URL}${latestExportPackage.manifestDownloadUrl}` : "");
 
   useEffect(() => {
     setCorrectionDraft({ correctedAccountCode: "", correctedCounterpartyCode: "", reason: "" });
@@ -736,6 +743,7 @@ export default function Home() {
           entry_count?: number;
           excluded_document_refs?: string[];
           download_url?: string;
+          manifest_download_url?: string;
           output_filename?: string;
         };
       };
@@ -743,11 +751,60 @@ export default function Home() {
       const excludedCount = saved.package?.excluded_document_refs?.length ?? 0;
       setExportPackageStatus(`${entryCount} fis export paketine alindi, ${excludedCount} kayit disarida kaldi.`);
       const downloadUrl = saved.package?.download_url ?? "";
+      const manifestUrl = saved.package?.manifest_download_url ?? "";
       setExportPackageDownloadUrl(downloadUrl ? `${API_BASE_URL}${downloadUrl}` : "");
+      setExportManifestDownloadUrl(manifestUrl ? `${API_BASE_URL}${manifestUrl}` : "");
       await refreshWorkspaceFromApi(clientId);
     } catch {
       setExportPackageStatus("Export paketi olusturulamadi.");
       setExportPackageDownloadUrl("");
+      setExportManifestDownloadUrl("");
+    }
+  }
+
+  async function prepareOnboardingPackage() {
+    setOnboardingStatus("MVP paketi hazirlaniyor...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/phase0/store/client-onboarding-package`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client: {
+            client_id: clientId,
+            title: clientName,
+            tax_id: "1111111111",
+            activity_description: "isitme cihazi satis ve servis",
+            nace_code: "",
+            workplace_addresses: ["Demo isyeri adresi"],
+            has_chart_accounts: true,
+          },
+          chart_accounts: [
+            { raw_account_code: "102.01", normalized_account_code: "102.01", account_name: "Banka", is_detail_account: true },
+            { raw_account_code: "191.01", normalized_account_code: "191.01", account_name: "Indirilecek KDV", is_detail_account: true },
+            { raw_account_code: "770.01", normalized_account_code: "770.01", account_name: "Genel gider", is_detail_account: true },
+            { raw_account_code: "320.01.015", normalized_account_code: "320.01.015", account_name: "Rexton Medikal", is_detail_account: true, tax_id: "1234567890" },
+          ],
+          portal_users: [
+            {
+              user_id: portalUserId,
+              display_name: portalUserLabel,
+              role: "client_user",
+              allowed_client_ids: [clientId],
+            },
+            {
+              user_id: "mali-musavir",
+              display_name: "Mali musavir",
+              role: "accountant",
+              allowed_client_ids: [clientId],
+            },
+          ],
+        }),
+      });
+      if (!response.ok) throw new Error("onboarding package failed");
+      await refreshWorkspaceFromApi(clientId);
+      setOnboardingStatus("MVP paketi hazir.");
+    } catch {
+      setOnboardingStatus("MVP paketi hazirlanamadi.");
     }
   }
 
@@ -867,6 +924,8 @@ export default function Home() {
         <ClientUploadView
           clientName={clientName}
           clientId={clientId}
+          onboardingStatus={onboardingStatus}
+          onPrepareOnboarding={prepareOnboardingPackage}
           portalUserLabel={portalUserLabel}
           portalUserId={portalUserId}
           uploadKind={uploadKind}
@@ -883,6 +942,7 @@ export default function Home() {
           correctionDraft={correctionDraft}
           createExportPackage={createExportPackage}
           exportPackageDownloadUrl={activeExportDownloadUrl}
+          exportManifestDownloadUrl={activeManifestDownloadUrl}
           exportPackageStatus={exportPackageStatus}
           exportReadyCount={exportReadyCount}
           latestExportPackage={latestExportPackage}
@@ -906,6 +966,8 @@ export default function Home() {
 function ClientUploadView({
   clientName,
   clientId,
+  onboardingStatus,
+  onPrepareOnboarding,
   portalUserLabel,
   portalUserId,
   uploadKind,
@@ -915,6 +977,8 @@ function ClientUploadView({
 }: {
   clientName: string;
   clientId: string;
+  onboardingStatus: string;
+  onPrepareOnboarding: () => Promise<void>;
   portalUserLabel: string;
   portalUserId: string;
   uploadKind: UploadKind;
@@ -932,6 +996,10 @@ function ClientUploadView({
             <span>{portalUserLabel} - {portalUserId}</span>
           </div>
         </div>
+        <button className="export-button secondary" onClick={onPrepareOnboarding} type="button">
+          MVP paketi hazirla
+        </button>
+        {onboardingStatus ? <p className="status-note">{onboardingStatus}</p> : null}
         <div className="upload-kind-grid">
           {(Object.keys(uploadKindLabels) as UploadKind[]).map((kind) => (
             <button
@@ -994,6 +1062,7 @@ function AccountantReviewView({
   correctionDraft,
   createExportPackage,
   exportPackageDownloadUrl,
+  exportManifestDownloadUrl,
   decisionStatus,
   exportPackageStatus,
   exportReadyCount,
@@ -1016,6 +1085,7 @@ function AccountantReviewView({
   correctionDraft: CorrectionDraft;
   createExportPackage: () => Promise<void>;
   exportPackageDownloadUrl: string;
+  exportManifestDownloadUrl: string;
   decisionStatus: string;
   exportPackageStatus: string;
   exportReadyCount: number;
@@ -1053,6 +1123,11 @@ function AccountantReviewView({
             {exportPackageDownloadUrl ? (
               <a className="download-link" href={exportPackageDownloadUrl}>
                 CSV indir
+              </a>
+            ) : null}
+            {exportManifestDownloadUrl ? (
+              <a className="download-link" href={exportManifestDownloadUrl}>
+                Manifest indir
               </a>
             ) : null}
             {latestExportPackage ? (

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 import os
 from pathlib import Path
 import re
@@ -208,6 +209,19 @@ class ChartAccountsStorePayload(BaseModel):
     accounts: list[ChartAccountPayload] = Field(default_factory=list)
 
 
+class PortalUserPayload(BaseModel):
+    user_id: str
+    display_name: str = ""
+    role: Literal["client_user", "accountant", "admin"] = "client_user"
+    allowed_client_ids: list[str] = Field(default_factory=list)
+
+
+class ClientOnboardingPackagePayload(BaseModel):
+    client: ClientProfilePayload
+    chart_accounts: list[ChartAccountPayload] = Field(default_factory=list)
+    portal_users: list[PortalUserPayload] = Field(default_factory=list)
+
+
 class DocumentUploadPayload(BaseModel):
     client_id: str
     document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = "invoice"
@@ -218,13 +232,6 @@ class DocumentUploadPayload(BaseModel):
     size_bytes: int = 0
     sha256: str = ""
     retention_policy_days: int = 90
-
-
-class PortalUserPayload(BaseModel):
-    user_id: str
-    display_name: str = ""
-    role: Literal["client_user", "accountant", "admin"] = "client_user"
-    allowed_client_ids: list[str] = Field(default_factory=list)
 
 
 class PortalAccessPayload(BaseModel):
@@ -267,6 +274,42 @@ def _safe_export_file_name(client_id: str, export_type: str) -> str:
     safe_client = re.sub(r"[^A-Za-z0-9_.-]+", "-", client_id.strip()).strip(".-") or "client"
     safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "-", export_type.strip()).strip(".-") or "export"
     return f"{safe_client}-{safe_type}.csv"
+
+
+def _manifest_file_name(output_filename: str) -> str:
+    path = Path(output_filename)
+    return f"{path.stem}.manifest.json"
+
+
+def _write_export_manifest(
+    *,
+    client_id: str,
+    output_path: Path,
+    package_payload: dict[str, object],
+) -> dict[str, str]:
+    manifest_filename = _manifest_file_name(str(package_payload.get("output_filename") or output_path.name))
+    manifest_path = output_path.with_name(manifest_filename)
+    manifest_payload = {
+        "client_id": client_id,
+        "export_type": package_payload.get("export_type"),
+        "output_filename": package_payload.get("output_filename"),
+        "entry_count": package_payload.get("entry_count"),
+        "candidate_count": package_payload.get("candidate_count"),
+        "excluded_document_refs": package_payload.get("excluded_document_refs"),
+        "generated_entries": [
+            {
+                "entry_type": entry.get("entry_type"),
+                "entry_date": entry.get("entry_date"),
+                "description": entry.get("description"),
+                "line_count": len(entry.get("lines") or []),
+            }
+            for entry in package_payload.get("entries") or []
+            if isinstance(entry, dict)
+        ],
+    }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"manifest_filename": manifest_filename, "manifest_path": str(manifest_path)}
 
 
 def _save_uploaded_document_with_job(
@@ -466,12 +509,51 @@ def store_client(payload: ClientProfilePayload) -> dict[str, object]:
     )
 
 
+@router.get("/store/clients")
+def store_clients() -> dict[str, object]:
+    return {"clients": get_workflow_store().list_clients()}
+
+
 @router.post("/store/chart-accounts")
 def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     accounts = [asdict(_chart_account(account)) for account in payload.accounts]
     return get_workflow_store().replace_chart_accounts(client_id=payload.client_id, accounts=accounts)
+
+
+@router.post("/store/client-onboarding-package")
+def store_client_onboarding_package(payload: ClientOnboardingPackagePayload) -> dict[str, object]:
+    if not payload.client.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for onboarding package")
+    store = get_workflow_store()
+    client = store.upsert_client(
+        client_id=payload.client.client_id,
+        profile=payload.client.model_dump(),
+        onboarding=onboarding_check(payload.client),
+    )
+    chart_accounts = None
+    if payload.chart_accounts:
+        chart_accounts = store.replace_chart_accounts(
+            client_id=payload.client.client_id,
+            accounts=[asdict(_chart_account(account)) for account in payload.chart_accounts],
+        )
+    portal_users = []
+    for user in payload.portal_users:
+        portal_users.append(
+            store.upsert_portal_user(
+                user_id=user.user_id,
+                display_name=user.display_name,
+                role=user.role,
+                allowed_client_ids=user.allowed_client_ids or [payload.client.client_id],
+            )
+        )
+    return {
+        "client": client,
+        "chart_accounts": chart_accounts,
+        "portal_users": portal_users,
+        "workspace": store.get_workspace(payload.client.client_id),
+    }
 
 
 @router.post("/store/portal-user")
@@ -785,6 +867,13 @@ def store_export_package_from_workspace(payload: WorkspaceExportPackagePayload) 
         "download_url": f"/phase0/store/export-package/download/{payload.client_id}/{output_filename}",
         "entries": [_entry_payload(entry) for entry in build.package.entries],
     }
+    manifest = _write_export_manifest(client_id=payload.client_id, output_path=output_path, package_payload=package_payload)
+    package_payload.update(
+        {
+            **manifest,
+            "manifest_download_url": f"/phase0/store/export-package/download/{payload.client_id}/{manifest['manifest_filename']}",
+        }
+    )
     return store.save_export_package(client_id=payload.client_id, package=package_payload)
 
 
@@ -794,11 +883,12 @@ def download_export_package(client_id: str, file_name: str) -> FileResponse:
     path = DEFAULT_EXPORT_PATH / client_id / safe_name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="export file not found")
-    get_workflow_store().mark_export_package_downloaded(client_id=client_id, output_filename=safe_name)
+    if path.suffix.lower() == ".csv":
+        get_workflow_store().mark_export_package_downloaded(client_id=client_id, output_filename=safe_name)
     return FileResponse(
         path,
         filename=safe_name,
-        media_type="text/csv; charset=utf-8",
+        media_type="application/json; charset=utf-8" if path.suffix.lower() == ".json" else "text/csv; charset=utf-8",
     )
 
 

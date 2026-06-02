@@ -2,6 +2,13 @@ export const fallbackReviewData = {
   generatedFrom: "demo fallback",
   clientId: "demo-isitme-merkezi",
   clientName: "Demo Isitme Merkezi",
+  portalUsers: [
+    {
+      userId: "demo-mukellef-user",
+      displayName: "Demo mukellef kullanicisi",
+      role: "client_user",
+    },
+  ],
   uploadQueue: [
     {
       id: "demo-upload-1",

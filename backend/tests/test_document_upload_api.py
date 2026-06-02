@@ -138,6 +138,61 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["processing_job"]["parser_kind"], "bank_statement")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "bank.csv")
 
+    def test_client_onboarding_package_creates_upload_ready_workspace(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+
+            package = client.post(
+                "/phase0/store/client-onboarding-package",
+                json={
+                    "client": {
+                        "client_id": "client-1",
+                        "title": "Demo Mukellef",
+                        "tax_id": "1111111111",
+                        "activity_description": "isitme cihazi satis",
+                        "workplace_addresses": ["Istanbul"],
+                        "has_chart_accounts": True,
+                    },
+                    "chart_accounts": [
+                        {
+                            "raw_account_code": "320.01.015",
+                            "normalized_account_code": "320.01.015",
+                            "account_name": "Rexton Medikal",
+                            "is_detail_account": True,
+                            "tax_id": "1234567890",
+                        }
+                    ],
+                    "portal_users": [
+                        {
+                            "user_id": "mukellef-user",
+                            "display_name": "Mukellef Kullanici",
+                            "role": "client_user",
+                            "allowed_client_ids": ["client-1"],
+                        }
+                    ],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by_user_id": "mukellef-user",
+                    "content_base64": "ZmF0dXJh",
+                },
+            )
+            clients = client.get("/phase0/store/clients")
+
+        self.assertEqual(package.status_code, 200)
+        self.assertEqual(upload.status_code, 200)
+        self.assertEqual(clients.json()["clients"][0]["client_id"], "client-1")
+        self.assertEqual(package.json()["workspace"]["portal_users"][0]["user_id"], "mukellef-user")
+
     def test_store_document_upload_rejects_unassigned_portal_user(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -201,11 +256,15 @@ class DocumentUploadApiTests(unittest.TestCase):
             )
             payload = response.json()
             download = client.get(payload["package"]["download_url"])
+            manifest = client.get(payload["package"]["manifest_download_url"])
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["package"]["entry_count"], 1)
+        self.assertTrue(payload["package"]["manifest_filename"].endswith(".manifest.json"))
         self.assertEqual(download.status_code, 200)
         self.assertIn("770.01", download.text)
+        self.assertEqual(manifest.status_code, 200)
+        self.assertIn("ready.pdf", manifest.text)
 
 
 if __name__ == "__main__":

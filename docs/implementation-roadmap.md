@@ -40,6 +40,9 @@ Tamamlanan ana dilimler:
 - Docker compose config kontrolu: production compose dosyasi parse edildi; daemon/container smoke testi Docker Desktop izinleri duzelince kosulacak.
 - Portal yetki iskeleti: upload icin mukellef onboarding kaydi ve atanmis portal kullanicisi zorunlu hale geldi.
 - Banka/POS cari eslestirme: ekstre satirlari VKN/TCKN/unvan uzerinden 120/320 hesap plani adaylarina baglanabilir.
+- Client onboarding paketi: mukellef karti, hesap plani ve portal kullanicilari tek API cagrisiyla hazirlanabilir.
+- Mukkellef listesi API'si: musavir ekraninin cok-mukellef secimine hazir client listesi saglanir.
+- Export manifest dosyasi: CSV ile birlikte audit/icerik manifest JSON'u uretilir ve indirilebilir.
 
 ## Siradaki 5 Adim
 
@@ -50,7 +53,7 @@ Tamamlanan ana dilimler:
 
 2. Export dosya adapter'i genisletme
    - Zirve saha testinde calisan kolon/format sabitlenir.
-   - CSV dosyasi mustavir tarafindan indirildikten sonra audit izi saha raporuna baglanir.
+   - Manifestteki kolon/entry metadatasi gercek Zirve saha raporuna baglanir.
 
 3. Portal auth ve yetki genisletmesi
    - Gercek login/session provider secilir.

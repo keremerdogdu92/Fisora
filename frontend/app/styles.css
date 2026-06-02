@@ -409,6 +409,20 @@ h2 {
   width: 100%;
 }
 
+.export-button.secondary {
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  margin: 0 0 12px;
+}
+
+.status-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  margin: -4px 0 12px;
+}
+
 .download-link {
   color: var(--accent);
   display: inline-block;

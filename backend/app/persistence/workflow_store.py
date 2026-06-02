@@ -64,6 +64,10 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def list_clients(self) -> list[dict[str, Any]]:
+        data = self._read()
+        return [deepcopy(client) for client in data["clients"].values()]
+
     def replace_chart_accounts(self, *, client_id: str, accounts: list[dict[str, Any]]) -> dict[str, Any]:
         data = self._read()
         record = {

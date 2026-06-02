@@ -71,6 +71,9 @@ class PostgresWorkflowStore:
             record["created_at"] = existing.get("created_at", timestamp)
         return self._upsert_record(client_id, "client", client_id, record)
 
+    def list_clients(self) -> list[dict[str, Any]]:
+        return [deepcopy(row["payload"]) for row in self._list_records("client")]
+
     def replace_chart_accounts(self, *, client_id: str, accounts: list[dict[str, Any]]) -> dict[str, Any]:
         timestamp = utc_now()
         record = {

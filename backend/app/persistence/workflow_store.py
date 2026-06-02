@@ -8,6 +8,11 @@ from typing import Any
 from uuid import uuid4
 
 from app.domain.document_uploads import retention_decision
+from app.domain.portal_access import (
+    PORTAL_USERS_CLIENT_ID,
+    build_portal_user_record,
+    decide_portal_access,
+)
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
@@ -28,6 +33,7 @@ def empty_store() -> dict[str, Any]:
         "review_decisions": [],
         "learning_events": [],
         "export_packages": [],
+        "portal_users": {},
     }
 
 
@@ -69,6 +75,48 @@ class JsonWorkflowStore:
         data["chart_accounts"][client_id] = record
         self._write(data)
         return deepcopy(record)
+
+    def upsert_portal_user(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        role: str,
+        allowed_client_ids: list[str],
+    ) -> dict[str, Any]:
+        if not user_id.strip():
+            raise ValueError("user_id is required")
+        data = self._read()
+        existing = data["portal_users"].get(user_id, {})
+        record = {
+            **existing,
+            **build_portal_user_record(
+                user_id=user_id,
+                display_name=display_name,
+                role=role,
+                allowed_client_ids=allowed_client_ids,
+            ),
+            "updated_at": utc_now(),
+        }
+        record.setdefault("created_at", record["updated_at"])
+        data["portal_users"][user_id] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def verify_portal_access(self, *, client_id: str, user_id: str) -> dict[str, Any]:
+        data = self._read()
+        decision = decide_portal_access(
+            portal_user=data["portal_users"].get(user_id),
+            client_exists=client_id in data["clients"],
+            client_id=client_id,
+        )
+        return {
+            "allowed": decision.allowed,
+            "reason": decision.reason,
+            "role": decision.role,
+            "client_id": client_id,
+            "user_id": user_id,
+        }
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -307,6 +355,11 @@ class JsonWorkflowStore:
                 deepcopy(package)
                 for package in data["export_packages"]
                 if package.get("client_id") == client_id
+            ],
+            "portal_users": [
+                deepcopy(user)
+                for user in data["portal_users"].values()
+                if client_id in set(user.get("allowed_client_ids") or []) or "*" in set(user.get("allowed_client_ids") or [])
             ],
         }
 

@@ -213,10 +213,23 @@ class DocumentUploadPayload(BaseModel):
     document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = "invoice"
     file_name: str
     uploaded_by: str = ""
+    uploaded_by_user_id: str = ""
     content_base64: str = ""
     size_bytes: int = 0
     sha256: str = ""
     retention_policy_days: int = 90
+
+
+class PortalUserPayload(BaseModel):
+    user_id: str
+    display_name: str = ""
+    role: Literal["client_user", "accountant", "admin"] = "client_user"
+    allowed_client_ids: list[str] = Field(default_factory=list)
+
+
+class PortalAccessPayload(BaseModel):
+    client_id: str
+    user_id: str
 
 
 class DocumentRetentionRunPayload(BaseModel):
@@ -262,6 +275,7 @@ def _save_uploaded_document_with_job(
     document_type: str,
     file_name: str,
     uploaded_by: str,
+    uploaded_by_user_id: str = "",
     content: bytes | None,
     size_bytes: int = 0,
     sha256: str = "",
@@ -269,6 +283,13 @@ def _save_uploaded_document_with_job(
 ) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for document upload")
+    store = get_workflow_store()
+    effective_user_id = uploaded_by_user_id.strip() or uploaded_by.strip()
+    if not effective_user_id:
+        raise HTTPException(status_code=403, detail="portal user is required for document upload")
+    access = store.verify_portal_access(client_id=client_id, user_id=effective_user_id)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail=access)
     try:
         document = store_document_content(
             base_dir=DEFAULT_DOCUMENT_STORAGE_PATH,
@@ -283,10 +304,12 @@ def _save_uploaded_document_with_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    store = get_workflow_store()
+    document_payload = asdict(document)
+    document_payload["uploaded_by_user_id"] = effective_user_id
+    document_payload["portal_access_reason"] = access.get("reason", "")
     saved = store.save_uploaded_document(
         client_id=client_id,
-        document=asdict(document),
+        document=document_payload,
     )
     job = store.create_processing_job(
         client_id=client_id,
@@ -451,6 +474,28 @@ def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object
     return get_workflow_store().replace_chart_accounts(client_id=payload.client_id, accounts=accounts)
 
 
+@router.post("/store/portal-user")
+def store_portal_user(payload: PortalUserPayload) -> dict[str, object]:
+    if not payload.user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id is required for portal user")
+    try:
+        return get_workflow_store().upsert_portal_user(
+            user_id=payload.user_id,
+            display_name=payload.display_name,
+            role=payload.role,
+            allowed_client_ids=payload.allowed_client_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/store/portal-access/check")
+def store_portal_access_check(payload: PortalAccessPayload) -> dict[str, object]:
+    if not payload.client_id.strip() or not payload.user_id.strip():
+        raise HTTPException(status_code=400, detail="client_id and user_id are required")
+    return get_workflow_store().verify_portal_access(client_id=payload.client_id, user_id=payload.user_id)
+
+
 @router.post("/store/document-upload")
 def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
     content = None
@@ -464,6 +509,7 @@ def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
         document_type=payload.document_type,
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
+        uploaded_by_user_id=payload.uploaded_by_user_id,
         content=content,
         size_bytes=payload.size_bytes,
         sha256=payload.sha256,
@@ -476,6 +522,7 @@ async def store_document_upload_multipart(
     client_id: str = Form(...),
     document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = Form("invoice"),
     uploaded_by: str = Form(""),
+    uploaded_by_user_id: str = Form(""),
     retention_policy_days: int = Form(90),
     file: UploadFile = File(...),
 ) -> dict[str, object]:
@@ -485,6 +532,7 @@ async def store_document_upload_multipart(
         document_type=document_type,
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
+        uploaded_by_user_id=uploaded_by_user_id,
         content=content,
         size_bytes=len(content),
         retention_policy_days=retention_policy_days,

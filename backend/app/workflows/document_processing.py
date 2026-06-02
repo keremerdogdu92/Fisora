@@ -12,7 +12,7 @@ from app.domain.counterparty_matching import match_counterparty
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
 from app.domain.statement_journal_entries import build_statement_entries, journal_entry_payload
-from app.domain.statement_lines import parse_statement_file
+from app.domain.statement_lines import enrich_statement_lines_with_counterparties, parse_statement_file
 from app.domain.xml_invoices import parse_xml_invoice
 
 
@@ -137,7 +137,7 @@ def build_statement_processing_result(
     path: Path,
     workspace: dict[str, Any],
 ) -> dict[str, Any]:
-    lines = parse_statement_file(path)
+    lines = enrich_statement_lines_with_counterparties(parse_statement_file(path), _chart_accounts(workspace))
     selection = _account_selection(workspace)
     entries = build_statement_entries(
         lines=lines,

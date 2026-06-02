@@ -107,12 +107,19 @@ type ExportPackageItem = {
   createdAt: string;
 };
 
+type PortalUserItem = {
+  userId: string;
+  displayName: string;
+  role: string;
+};
+
 type ReviewData = {
   generatedFrom: string;
   clientId?: string;
   clientName?: string;
   uploadQueue?: UploadItem[];
   exportPackages?: ExportPackageItem[];
+  portalUsers?: PortalUserItem[];
   summary: {
     chartRunCount: number;
     invoiceRowCount: number;
@@ -176,6 +183,13 @@ type WorkspaceExportPackage = {
   updated_at?: string;
 };
 
+type WorkspacePortalUser = {
+  user_id?: string;
+  display_name?: string;
+  role?: string;
+  allowed_client_ids?: string[];
+};
+
 type WorkspaceSnapshot = {
   client?: {
     client_id?: string;
@@ -191,6 +205,7 @@ type WorkspaceSnapshot = {
   documents?: WorkspaceDocument[];
   processing_jobs?: WorkspaceProcessingJob[];
   export_packages?: WorkspaceExportPackage[];
+  portal_users?: WorkspacePortalUser[];
 };
 
 type PortalMode = "client" | "accountant";
@@ -462,6 +477,7 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
     clientName,
     uploadQueue: uploadedDocumentsToQueue(snapshot.uploaded_documents ?? [], snapshot.processing_jobs ?? [], clientName),
     exportPackages: exportPackagesFromWorkspace(snapshot.export_packages ?? [], fallback?.exportPackages ?? []),
+    portalUsers: portalUsersFromWorkspace(snapshot.portal_users ?? [], fallback?.portalUsers ?? []),
     summary: {
       chartRunCount: snapshot.chart_accounts ? 1 : (fallback?.summary.chartRunCount ?? 0),
       invoiceRowCount: invoiceRows.length,
@@ -489,6 +505,15 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
       : (fallback?.chartRuns ?? []),
     invoiceRows,
   };
+}
+
+function portalUsersFromWorkspace(users: WorkspacePortalUser[], fallback: PortalUserItem[]): PortalUserItem[] {
+  if (!users.length) return fallback;
+  return users.map((user) => ({
+    userId: user.user_id ?? "",
+    displayName: user.display_name ?? user.user_id ?? "Portal kullanicisi",
+    role: user.role ?? "client_user",
+  }));
 }
 
 function exportPackagesFromWorkspace(
@@ -626,6 +651,9 @@ export default function Home() {
 
   const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
   const clientId = data.clientId ?? "demo-isitme-merkezi";
+  const assignedClientUser = data.portalUsers?.find((user) => user.role === "client_user") ?? data.portalUsers?.[0];
+  const portalUserId = assignedClientUser?.userId || "demo-mukellef-user";
+  const portalUserLabel = assignedClientUser?.displayName || "Demo mukellef kullanicisi";
   const latestExportPackage = data.exportPackages?.[0];
   const activeExportDownloadUrl =
     exportPackageDownloadUrl || (latestExportPackage?.downloadUrl ? `${API_BASE_URL}${latestExportPackage.downloadUrl}` : "");
@@ -741,7 +769,8 @@ export default function Home() {
           const formData = new FormData();
           formData.append("client_id", clientId);
           formData.append("document_type", apiDocumentType(item.kind));
-          formData.append("uploaded_by", clientName);
+          formData.append("uploaded_by", portalUserLabel);
+          formData.append("uploaded_by_user_id", portalUserId);
           formData.append("retention_policy_days", "90");
           formData.append("file", file);
           const response = await fetch(`${API_BASE_URL}/phase0/store/document-upload-multipart`, {
@@ -829,6 +858,7 @@ export default function Home() {
       <section className="portal-strip" aria-label="Mukellef portal ozeti">
         <Info label="Mukellef" value={clientName} />
         <Info label="Yetki" value={portalMode === "client" ? "Mukellef kullanicisi" : "Musavir review"} />
+        <Info label="Kullanici" value={portalMode === "client" ? portalUserLabel : "mali-musavir"} />
         <Info label="Review kuyrugu" value={String(reviewQueueCount)} />
         <Info label="Export hazir" value={String(exportReadyCount)} />
       </section>
@@ -837,6 +867,8 @@ export default function Home() {
         <ClientUploadView
           clientName={clientName}
           clientId={clientId}
+          portalUserLabel={portalUserLabel}
+          portalUserId={portalUserId}
           uploadKind={uploadKind}
           uploadItems={uploadItems}
           onFilesSelected={onFilesSelected}
@@ -874,6 +906,8 @@ export default function Home() {
 function ClientUploadView({
   clientName,
   clientId,
+  portalUserLabel,
+  portalUserId,
   uploadKind,
   uploadItems,
   onFilesSelected,
@@ -881,6 +915,8 @@ function ClientUploadView({
 }: {
   clientName: string;
   clientId: string;
+  portalUserLabel: string;
+  portalUserId: string;
   uploadKind: UploadKind;
   uploadItems: UploadItem[];
   onFilesSelected: (files: FileList | null) => Promise<void>;
@@ -893,6 +929,7 @@ function ClientUploadView({
           <div>
             <h2>Belge yukleme</h2>
             <span>{clientName} - {clientId}</span>
+            <span>{portalUserLabel} - {portalUserId}</span>
           </div>
         </div>
         <div className="upload-kind-grid">

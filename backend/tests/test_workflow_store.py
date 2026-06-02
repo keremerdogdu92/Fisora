@@ -112,6 +112,31 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(workspace["client"]["client_id"], "client-1")
         self.assertEqual([document["document_ref"] for document in workspace["documents"]], ["one.pdf"])
 
+    def test_json_store_tracks_portal_user_client_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            user = store.upsert_portal_user(
+                user_id="mukellef-user",
+                display_name="Mukellef Kullanici",
+                role="client_user",
+                allowed_client_ids=["client-1"],
+            )
+            allowed = store.verify_portal_access(client_id="client-1", user_id="mukellef-user")
+            denied = store.verify_portal_access(client_id="client-2", user_id="mukellef-user")
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(user["role"], "client_user")
+        self.assertTrue(allowed["allowed"])
+        self.assertEqual(allowed["reason"], "assigned_client_access")
+        self.assertFalse(denied["allowed"])
+        self.assertEqual(denied["reason"], "client_not_onboarded")
+        self.assertEqual(workspace["portal_users"][0]["user_id"], "mukellef-user")
+
     def test_json_store_applies_document_retention_without_losing_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             storage_path = Path(temp_dir) / "expired.pdf"
@@ -406,6 +431,56 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["statement_lines"][0]["transaction_type"], "tax_payment")
         self.assertEqual(result["statement_lines"][1]["suggested_account_code"], "361")
         self.assertEqual(result["statement_lines"][2]["transaction_type"], "pos_blocked")
+
+    def test_processing_worker_matches_bank_statement_counterparty_by_tax_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            statement_path = Path(temp_dir) / "bank.csv"
+            statement_path.write_text(
+                "transaction_date,description,amount,direction,tax_id,counterparty_name\n"
+                "2026-05-03,Rexton Medikal odeme,1200.00,out,1234567890,Rexton Medikal\n",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                    {"raw_account_code": "320.01.015", "normalized_account_code": "320.01.015", "account_name": "Rexton Medikal", "is_detail_account": True, "tax_id": "1234567890"},
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "bank-doc",
+                    "document_ref": "bank-doc",
+                    "document_type": "bank_statement",
+                    "original_file_name": "bank.csv",
+                    "storage_path": str(statement_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="bank_statement",
+                parser_kind=parser_kind_for_document_type("bank_statement"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["statement_lines"][0]["transaction_type"], "counterparty_payment")
+        self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.015")
+        self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "tax_id_exact")
+        self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.015")
 
     def test_store_factory_selects_json_and_requires_postgres_dsn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

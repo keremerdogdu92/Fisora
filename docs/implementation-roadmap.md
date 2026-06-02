@@ -38,6 +38,8 @@ Tamamlanan ana dilimler:
 - Review duzeltmesini kalici taslaga uygulama: mustavir onayi workspace refresh sonrasi korunur.
 - Export indirme izi: CSV indirildiginde `downloaded_at` ve `download_count` saklanir.
 - Docker compose config kontrolu: production compose dosyasi parse edildi; daemon/container smoke testi Docker Desktop izinleri duzelince kosulacak.
+- Portal yetki iskeleti: upload icin mukellef onboarding kaydi ve atanmis portal kullanicisi zorunlu hale geldi.
+- Banka/POS cari eslestirme: ekstre satirlari VKN/TCKN/unvan uzerinden 120/320 hesap plani adaylarina baglanabilir.
 
 ## Siradaki 5 Adim
 
@@ -50,10 +52,10 @@ Tamamlanan ana dilimler:
    - Zirve saha testinde calisan kolon/format sabitlenir.
    - CSV dosyasi mustavir tarafindan indirildikten sonra audit izi saha raporuna baglanir.
 
-3. Portal auth ve yetki iskeleti
-   - Serbest uyelik yok.
-   - Kullanici sadece atanmis mukellefe belge yukler.
+3. Portal auth ve yetki genisletmesi
+   - Gercek login/session provider secilir.
    - Musavir birden cok mukellef gorur.
+   - Kullanici listesi ve davet akisi eklenir.
 
 4. Direct object storage hazirligi
    - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.
@@ -89,7 +91,7 @@ flowchart TD
 - Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
 - PostgreSQL saha testi: adapter yazildi, Docker daemon izni acilinca gercek Postgres kosusu yapilacak.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
-- Banka/POS akisi: satir parse ve dengeli fis taslagi var; export gate ve cari eslestirme genisleyecek.
+- Banka/POS akisi: satir parse, dengeli fis taslagi ve VKN/unvan cari eslestirme var; IBAN/gecmis karar eslestirmesi genisleyecek.
 - Mustavir calisma masasi: karar ve duzeltme API baglantisi var; duzeltme artik kalici taslak ve learning izine uygulanir.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.

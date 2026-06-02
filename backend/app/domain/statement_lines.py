@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 from typing import Iterable
+
+from app.domain.chart_accounts import ChartAccount
+from app.domain.counterparty_matching import match_counterparty
 
 
 @dataclass(frozen=True)
@@ -16,10 +19,17 @@ class StatementLine:
     amount: str
     direction: str
     balance_after: str = ""
+    counterparty_name: str = ""
+    tax_id: str = ""
+    iban: str = ""
     suggested_account_code: str = ""
     transaction_type: str = "unknown"
     confidence: int = 35
     risk_flags: tuple[str, ...] = ("statement_review_required",)
+    counterparty_match_code: str = ""
+    counterparty_match_name: str = ""
+    counterparty_match_confidence: int = 0
+    counterparty_match_reason: str = "not_assessed"
 
 
 HEADER_ALIASES = {
@@ -28,6 +38,9 @@ HEADER_ALIASES = {
     "amount": {"amount", "tutar", "islem_tutari", "işlem_tutarı"},
     "direction": {"direction", "yon", "yön", "borc_alacak", "borç_alacak"},
     "balance_after": {"balance_after", "bakiye", "son_bakiye"},
+    "counterparty_name": {"counterparty_name", "cari_unvan", "unvan", "firma", "alici_satici", "karsi_hesap"},
+    "tax_id": {"tax_id", "vkn", "tckn", "vergi_no", "vergi_numarasi"},
+    "iban": {"iban", "karsi_iban", "counterparty_iban"},
     "suggested_account_code": {"suggested_account_code", "hesap_kodu", "account_code"},
 }
 
@@ -129,10 +142,62 @@ def _line_from_row(line_no: int, row: dict[str, object], mapping: dict[str, str]
         amount=_format_decimal(abs(amount) if amount is not None else None),
         direction=direction,
         balance_after=value("balance_after"),
+        counterparty_name=value("counterparty_name"),
+        tax_id=value("tax_id"),
+        iban=value("iban"),
         suggested_account_code=account_code,
         transaction_type=transaction_type,
         confidence=confidence,
         risk_flags=risk_flags,
+    )
+
+
+def enrich_statement_lines_with_counterparties(
+    lines: tuple[StatementLine, ...],
+    accounts: list[ChartAccount],
+) -> tuple[StatementLine, ...]:
+    if not accounts:
+        return tuple(
+            _add_counterparty_missing_flag(line)
+            if line.transaction_type == "unknown" and not line.suggested_account_code
+            else line
+            for line in lines
+        )
+    return tuple(_enrich_statement_line_with_counterparty(line, accounts) for line in lines)
+
+
+def _enrich_statement_line_with_counterparty(line: StatementLine, accounts: list[ChartAccount]) -> StatementLine:
+    if line.transaction_type in {"tax_payment", "sgk_payment"}:
+        return line
+    name_hint = line.counterparty_name or line.description
+    match = match_counterparty(accounts, tax_ids=tuple(tax_id for tax_id in (line.tax_id,) if tax_id), name_hint=name_hint)
+    if not match.account_code:
+        return _add_counterparty_missing_flag(line) if line.transaction_type == "unknown" else line
+
+    flags = tuple(flag for flag in line.risk_flags if flag != "statement_review_required")
+    if match.requires_review:
+        flags = tuple(dict.fromkeys((*flags, "counterparty_match_review_required")))
+    transaction_type = line.transaction_type
+    if transaction_type == "unknown":
+        transaction_type = "counterparty_collection" if line.direction == "in" else "counterparty_payment"
+    return replace(
+        line,
+        suggested_account_code=line.suggested_account_code or match.account_code,
+        transaction_type=transaction_type,
+        confidence=max(line.confidence, match.confidence),
+        risk_flags=flags,
+        counterparty_match_code=match.account_code,
+        counterparty_match_name=match.account_name,
+        counterparty_match_confidence=match.confidence,
+        counterparty_match_reason=match.match_reason,
+    )
+
+
+def _add_counterparty_missing_flag(line: StatementLine) -> StatementLine:
+    return replace(
+        line,
+        risk_flags=tuple(dict.fromkeys((*line.risk_flags, "counterparty_not_found"))),
+        counterparty_match_reason="not_found",
     )
 
 

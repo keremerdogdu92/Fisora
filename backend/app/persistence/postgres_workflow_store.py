@@ -8,6 +8,11 @@ from typing import Any, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.domain.document_uploads import retention_decision
+from app.domain.portal_access import (
+    PORTAL_USERS_CLIENT_ID,
+    build_portal_user_record,
+    decide_portal_access,
+)
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
@@ -80,6 +85,45 @@ class PostgresWorkflowStore:
         else:
             record["created_at"] = timestamp
         return self._upsert_record(client_id, "chart_accounts", client_id, record)
+
+    def upsert_portal_user(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        role: str,
+        allowed_client_ids: list[str],
+    ) -> dict[str, Any]:
+        if not user_id.strip():
+            raise ValueError("user_id is required")
+        timestamp = utc_now()
+        existing = self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id)
+        record = {
+            **(existing or {}),
+            **build_portal_user_record(
+                user_id=user_id,
+                display_name=display_name,
+                role=role,
+                allowed_client_ids=allowed_client_ids,
+            ),
+            "updated_at": timestamp,
+        }
+        record.setdefault("created_at", timestamp)
+        return self._upsert_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id, record)
+
+    def verify_portal_access(self, *, client_id: str, user_id: str) -> dict[str, Any]:
+        decision = decide_portal_access(
+            portal_user=self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id),
+            client_exists=self._get_record(client_id, "client", client_id) is not None,
+            client_id=client_id,
+        )
+        return {
+            "allowed": decision.allowed,
+            "reason": decision.reason,
+            "role": decision.role,
+            "client_id": client_id,
+            "user_id": user_id,
+        }
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
@@ -282,6 +326,11 @@ class PostgresWorkflowStore:
             "review_decisions": self._payloads(client_id, "review_decision"),
             "learning_events": self._payloads(client_id, "learning_event"),
             "export_packages": self._payloads(client_id, "export_package"),
+            "portal_users": [
+                user
+                for user in self._payloads(PORTAL_USERS_CLIENT_ID, "portal_user")
+                if client_id in set(user.get("allowed_client_ids") or []) or "*" in set(user.get("allowed_client_ids") or [])
+            ],
         }
 
     def _payloads(self, client_id: str, record_type: str) -> list[dict[str, Any]]:

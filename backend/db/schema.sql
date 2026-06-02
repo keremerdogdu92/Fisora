@@ -26,6 +26,28 @@ create table taxpayers (
     updated_at timestamptz not null default now()
 );
 
+create table portal_users (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    external_user_key text not null,
+    display_name text not null,
+    role text not null,
+    status text not null default 'active',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (tenant_id, external_user_key)
+);
+
+create table portal_user_client_access (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    user_id uuid not null references portal_users(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    access_role text not null default 'client_user',
+    created_at timestamptz not null default now(),
+    unique (tenant_id, user_id, taxpayer_id)
+);
+
 create table chart_account_imports (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
@@ -202,6 +224,8 @@ create table learning_rules (
 );
 
 create index idx_taxpayers_tenant_status on taxpayers(tenant_id, status);
+create index idx_portal_users_tenant_key on portal_users(tenant_id, external_user_key);
+create index idx_portal_user_client_access_taxpayer on portal_user_client_access(tenant_id, taxpayer_id);
 create index idx_chart_accounts_taxpayer_code on chart_accounts(tenant_id, taxpayer_id, normalized_account_code);
 create index idx_chart_accounts_counterparty_tax on chart_accounts(tenant_id, taxpayer_id, tax_id)
     where tax_id is not null and is_detail_account = true;

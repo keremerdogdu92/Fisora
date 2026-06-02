@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
@@ -225,6 +225,47 @@ def get_workflow_store():
     return build_workflow_store(json_path=DEFAULT_STORE_PATH)
 
 
+def _save_uploaded_document_with_job(
+    *,
+    client_id: str,
+    document_type: str,
+    file_name: str,
+    uploaded_by: str,
+    content: bytes | None,
+    size_bytes: int = 0,
+    sha256: str = "",
+    retention_policy_days: int = 90,
+) -> dict[str, object]:
+    if not client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for document upload")
+    try:
+        document = store_document_content(
+            base_dir=DEFAULT_DOCUMENT_STORAGE_PATH,
+            client_id=client_id,
+            file_name=file_name,
+            document_type=document_type,
+            uploaded_by=uploaded_by,
+            content=content,
+            declared_size_bytes=size_bytes,
+            declared_sha256=sha256,
+            retention_days=retention_policy_days,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    store = get_workflow_store()
+    saved = store.save_uploaded_document(
+        client_id=client_id,
+        document=asdict(document),
+    )
+    job = store.create_processing_job(
+        client_id=client_id,
+        document_ref=str(saved["document_ref"]),
+        document_type=document_type,
+        parser_kind=parser_kind_for_document_type(document_type),
+    )
+    return {**saved, "processing_job": job}
+
+
 def _client_profile(payload: ClientProfilePayload) -> ClientProfile:
     return ClientProfile(
         client_id=payload.client_id,
@@ -381,40 +422,42 @@ def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object
 
 @router.post("/store/document-upload")
 def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
-    if not payload.client_id.strip():
-        raise HTTPException(status_code=400, detail="client_id is required for document upload")
     content = None
     if payload.content_base64:
         try:
             content = decode_base64_content(payload.content_base64)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    try:
-        document = store_document_content(
-            base_dir=DEFAULT_DOCUMENT_STORAGE_PATH,
-            client_id=payload.client_id,
-            file_name=payload.file_name,
-            document_type=payload.document_type,
-            uploaded_by=payload.uploaded_by,
-            content=content,
-            declared_size_bytes=payload.size_bytes,
-            declared_sha256=payload.sha256,
-            retention_days=payload.retention_policy_days,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    store = get_workflow_store()
-    saved = store.save_uploaded_document(
+    return _save_uploaded_document_with_job(
         client_id=payload.client_id,
-        document=asdict(document),
-    )
-    job = store.create_processing_job(
-        client_id=payload.client_id,
-        document_ref=str(saved["document_ref"]),
         document_type=payload.document_type,
-        parser_kind=parser_kind_for_document_type(payload.document_type),
+        file_name=payload.file_name,
+        uploaded_by=payload.uploaded_by,
+        content=content,
+        size_bytes=payload.size_bytes,
+        sha256=payload.sha256,
+        retention_policy_days=payload.retention_policy_days,
     )
-    return {**saved, "processing_job": job}
+
+
+@router.post("/store/document-upload-multipart")
+async def store_document_upload_multipart(
+    client_id: str = Form(...),
+    document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = Form("invoice"),
+    uploaded_by: str = Form(""),
+    retention_policy_days: int = Form(90),
+    file: UploadFile = File(...),
+) -> dict[str, object]:
+    content = await file.read()
+    return _save_uploaded_document_with_job(
+        client_id=client_id,
+        document_type=document_type,
+        file_name=file.filename or "document.bin",
+        uploaded_by=uploaded_by,
+        content=content,
+        size_bytes=len(content),
+        retention_policy_days=retention_policy_days,
+    )
 
 
 @router.post("/store/document-retention/run")

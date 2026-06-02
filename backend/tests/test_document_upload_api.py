@@ -71,6 +71,31 @@ class DocumentUploadApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_store_document_upload_multipart_writes_content(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+
+            response = client.post(
+                "/phase0/store/document-upload-multipart",
+                data={
+                    "client_id": "client-1",
+                    "document_type": "bank_statement",
+                    "uploaded_by": "mukellef-user",
+                },
+                files={"file": ("bank.csv", b"transaction_date,description,amount\n2026-06-01,GIB,10.00\n", "text/csv")},
+            )
+            payload = response.json()
+            workspace = client.get("/phase0/store/workspace/client-1").json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["status"], "stored")
+        self.assertEqual(payload["processing_job"]["parser_kind"], "bank_statement")
+        self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "bank.csv")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -123,8 +123,10 @@ Saklama:
 4. `postgres`, `redis`, `backend`, `worker`, `frontend`, `nginx` compose servisleri hazirlanir.
 5. Belge storage ve backup klasorleri olusturulur.
 6. Demo/pilot env ile deploy edilir.
-7. Mükellef upload -> worker -> review -> export akisi test edilir.
-8. Gercek Zirve export saha testi yapilir.
+7. PostgreSQL store smoke testi calistirilir:
+   `python backend/scripts/run_postgres_smoke.py`
+8. Mükellef upload -> worker -> review -> export akisi test edilir.
+9. Gercek Zirve export saha testi yapilir.
 
 ## Repo Icindeki Ilk Iskelet
 

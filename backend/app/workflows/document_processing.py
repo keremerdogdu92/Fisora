@@ -11,6 +11,7 @@ from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
+from app.domain.statement_journal_entries import build_statement_entries, journal_entry_payload
 from app.domain.statement_lines import parse_statement_file
 from app.domain.xml_invoices import parse_xml_invoice
 
@@ -130,12 +131,25 @@ def _statement_total(lines: tuple[Any, ...]) -> str:
     return f"{total:.2f}"
 
 
-def build_statement_processing_result(document: dict[str, Any], job: dict[str, Any], path: Path) -> dict[str, Any]:
+def build_statement_processing_result(
+    document: dict[str, Any],
+    job: dict[str, Any],
+    path: Path,
+    workspace: dict[str, Any],
+) -> dict[str, Any]:
     lines = parse_statement_file(path)
+    selection = _account_selection(workspace)
+    entries = build_statement_entries(
+        lines=lines,
+        bank_account=selection.bank_account,
+        document_ref=str(document.get("document_ref") or document.get("document_id") or document.get("original_file_name") or ""),
+    )
     risk_flags = tuple(dict.fromkeys(flag for line in lines for flag in line.risk_flags))
     if not lines:
         risk_flags = ("statement_parser_required",)
-    review_reason_codes = risk_flags or ("statement_review_required",)
+    review_reason_codes = risk_flags
+    is_balanced = bool(entries) and all(entry.is_balanced for entry in entries)
+    draft_lines = entries[0].lines if entries else ()
     return {
         "chart_file_name": "workspace-store",
         "file_name": str(document.get("original_file_name") or path.name),
@@ -146,8 +160,8 @@ def build_statement_processing_result(document: dict[str, Any], job: dict[str, A
         "vat_rates": [],
         "simulated_status": "review_required",
         "status": "review_required",
-        "draft_quality": "statement_lines_parsed" if lines else "statement_parse_pending",
-        "is_balanced": False,
+        "draft_quality": "statement_entries_ready" if entries else "statement_parse_pending",
+        "is_balanced": is_balanced,
         "risk_flags": list(risk_flags),
         "parse_notes": [f"{len(lines)} statement satiri parse edildi."] if lines else ["statement satiri bulunamadi."],
         "review_reason_codes": list(review_reason_codes),
@@ -166,15 +180,24 @@ def build_statement_processing_result(document: dict[str, Any], job: dict[str, A
         "learning_rule_applied": False,
         "learning_rule_scope": "",
         "learning_rule_reason": "",
-        "export_status": "review_required",
+        "export_status": "export_ready" if is_balanced and not risk_flags else "review_required",
         "selected_expense_account": "",
         "selected_vat_account": "",
         "selected_supplier_account": lines[0].suggested_account_code if lines else "",
         "counterparty_match_code": lines[0].suggested_account_code if lines else "",
         "counterparty_match_confidence": lines[0].confidence if lines else 0,
         "counterparty_match_reason": "statement_static_rule" if lines else "not_found",
-        "draft_lines": [],
+        "draft_lines": [
+            {
+                "account_code": line.account_code,
+                "description": line.description,
+                "debit": f"{line.debit:.2f}",
+                "credit": f"{line.credit:.2f}",
+            }
+            for line in draft_lines
+        ],
         "statement_lines": [asdict(line) for line in lines],
+        "statement_entries": [journal_entry_payload(entry) for entry in entries],
     }
 
 
@@ -232,7 +255,7 @@ def build_processing_result(document: dict[str, Any], job: dict[str, Any], works
     if path is None:
         return build_initial_processing_result(document, job)
     if document_type in {"bank_statement", "pos_statement"}:
-        return build_statement_processing_result(document, job, path)
+        return build_statement_processing_result(document, job, path, workspace)
     invoice = _parse_invoice_document(path, document_type)
     return _serializable_simulation(invoice, workspace)
 

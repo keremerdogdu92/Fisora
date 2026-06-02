@@ -27,25 +27,28 @@ Tamamlanan ana dilimler:
 - Worker parser baglantisi: text PDF ve e-fatura XML sonucunu simulation motoruna baglar.
 - Banka/POS parser ilk surumu: CSV/XLSX ekstre satirlarini GIB, SGK, POS ve belirsiz kategoriye ayirir.
 - Portal karar API baglantisi: musavir karar butonlari `store/review-decision` ile kalici learning event uretir.
+- PostgreSQL smoke test script'i: schema uygulanmis gercek database'de store ve worker akisini dener.
+- Multipart upload ilk surumu: portal dosyalari base64 yerine `FormData` ile API'ye gonderir.
+- Banka/POS statement fis taslagi: parse edilen satirlardan dengeli banka fis entry payload'i uretir.
 
 ## Siradaki 5 Adim
 
-1. PostgreSQL saha smoke testi
+1. PostgreSQL saha smoke testi calistirma
    - `backend/db/schema.sql` gercek Postgres'e uygulanir.
    - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
    - Compose config ve container start senaryosu sunucuda dogrulanir.
 
-2. Gercek upload iyilestirmesi ve dosya saklama
-   - Base64 MVP sozlesmesi buyuk dosyalar icin multipart veya direct-upload modeline tasinir.
-   - Ham belge ile turetilmis parse/AI/export ciktisi ayrimi korunur.
-
-3. Banka/POS fis taslagi uretimi
-   - Parse edilen statement satirlari 102/108/320/360/361 taslak fislerine donusur.
-   - POS bloke ve belirsiz satirlar review gate'te kalir.
-
-4. Review duzeltme formlari
+2. Review duzeltme formlari
    - Musavir sadece karar degil, hesap/cari/tutar duzeltmesini de UI'dan girebilir.
    - Duzeltme sonraki benzer belgeye learning rule olarak uygulanir.
+
+3. Export package'i workspace sonucundan otomatik uretme
+   - Review veya export_ready kayitlar secilerek package endpointine tasinir.
+   - Riskli statement/fatura satirlari export paketine girmez.
+
+4. Direct object storage hazirligi
+   - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.
+   - 90 gun retention politikasiyla uyumlu download URL akisi planlanir.
 
 5. AI API batch benchmark
    - Statik kuralla cozulmeyen kalemlerde OpenAI/Gemini/Manus adaylari test edilir.
@@ -77,7 +80,7 @@ flowchart TD
 - Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
 - PostgreSQL saha testi: adapter yazildi, gercek Postgres kosusu henuz yapilmadi.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
-- Banka/POS akisi: satir parse var; dengeli fis taslagi uretimi genisleyecek.
+- Banka/POS akisi: satir parse ve dengeli fis taslagi var; export gate ve cari eslestirme genisleyecek.
 - Mustavir calisma masasi: karar API baglantisi var; duzeltme formlari genisleyecek.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.

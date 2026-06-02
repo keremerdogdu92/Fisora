@@ -313,6 +313,12 @@ class WorkflowStoreTests(unittest.TestCase):
 
         self.assertEqual(summary["completed_count"], 1)
         self.assertEqual(result["export_status"], "review_required")
+        self.assertTrue(result["is_balanced"])
+        self.assertEqual(result["draft_quality"], "statement_entries_ready")
+        self.assertEqual(len(result["statement_entries"]), 3)
+        self.assertEqual(result["statement_entries"][0]["total_debit"], "500.00")
+        self.assertEqual(result["statement_entries"][0]["total_credit"], "500.00")
+        self.assertTrue(result["draft_lines"])
         self.assertEqual(result["statement_lines"][0]["transaction_type"], "tax_payment")
         self.assertEqual(result["statement_lines"][1]["suggested_account_code"], "361")
         self.assertEqual(result["statement_lines"][2]["transaction_type"], "pos_blocked")

@@ -321,16 +321,6 @@ function uploadStatusFromJob(documentStatus: string | undefined, job?: Workspace
   return uploadStatusFromApi(documentStatus);
 }
 
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
-
 function textValue(source: Record<string, unknown>, camelKey: string, snakeKey: string, fallback = "") {
   const value = source[camelKey] ?? source[snakeKey];
   return value == null ? fallback : String(value);
@@ -611,18 +601,15 @@ export default function Home() {
       nextItems.map(async (item, index) => {
         const file = files[index];
         try {
-          const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
-          const response = await fetch(`${API_BASE_URL}/phase0/store/document-upload`, {
+          const formData = new FormData();
+          formData.append("client_id", clientId);
+          formData.append("document_type", apiDocumentType(item.kind));
+          formData.append("uploaded_by", clientName);
+          formData.append("retention_policy_days", "90");
+          formData.append("file", file);
+          const response = await fetch(`${API_BASE_URL}/phase0/store/document-upload-multipart`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              client_id: clientId,
-              document_type: apiDocumentType(item.kind),
-              file_name: file.name,
-              uploaded_by: clientName,
-              content_base64: contentBase64,
-              size_bytes: file.size,
-            }),
+            body: formData,
           });
           if (!response.ok) throw new Error("upload failed");
           const stored = (await response.json()) as {

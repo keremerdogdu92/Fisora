@@ -45,12 +45,17 @@ prototip icin opsiyonel tutulabilir.
   Zirve hesap plani ve opsiyonel yevmiye/muavin exportu alir.
 - Belge yukleme: fatura, e-fatura XML/PDF, banka ekstresi ve POS ekstresi
   mukellef yetkisine gore yuklenir.
+- Upload protokolu: base64 geriye donuk MVP kontrati korunur; production portal
+  dosyalari multipart/form-data ile gonderir.
 - Processing queue: upload sonrasi belge icin parser secimi ve job durumu
   olusturur; worker sonucu workspace'e yazar.
 - Parser katmani: OCR kullanmadan once text PDF, XML, Excel ve CSV parser
   calisir. OCR sadece text cikmayan belgelerde fallback olur.
 - Worker parser baglantisi: text PDF ve e-fatura XML fatura sonucunu simulation
   motoruna, CSV/XLSX banka-POS ekstrelerini statement line sonucuna donusturur.
+- Statement fis taslagi: GIB, SGK, POS ve banka satirlarindan 102/108/360/361
+  gibi hesaplarla dengeli taslak entry payload'i uretilir; riskli satirlar
+  review gate'te kalir.
 - Product classification: fatura kalemlerindeki marka/model satirlarini urun
   kategorilerine cevirir.
 - Business relevance: urun/hizmet kategorisini mukellef faaliyet profili, NACE,

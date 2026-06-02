@@ -67,6 +67,7 @@ Bu store su endpointlerin davranisini dogrular:
 - `POST /phase0/store/client`
 - `POST /phase0/store/chart-accounts`
 - `POST /phase0/store/document-upload`
+- `POST /phase0/store/document-upload-multipart`
 - `POST /phase0/store/document-retention/run`
 - `POST /phase0/store/processing/run`
 - `GET /phase0/store/processing-jobs/{client_id}`
@@ -76,11 +77,12 @@ Bu store su endpointlerin davranisini dogrular:
 - `GET /phase0/store/workspace/{client_id}`
 
 `POST /phase0/store/document-upload` ilk MVP sozlesmesidir. Multipart upload
-yerine simdilik opsiyonel `content_base64` kabul eder; icerik gonderilirse
-dosya `exports/documents/{client_id}/{document_id}/` altina yazilir, icerik
-gonderilmezse sadece kuyruk/metaveri kaydi olusur. Production'da bu davranis
-ayni kalir, sadece storage adapter local disk yerine sunucu volume'u veya
-S3-compatible object storage kullanir.
+destegi de eklendi. `document-upload` geriye donuk base64 kontratini korur;
+`document-upload-multipart` buyuk dosyalar icin tercih edilecek yoldur. Icerik
+gonderilirse dosya `exports/documents/{client_id}/{document_id}/` altina yazilir,
+icerik gonderilmezse sadece kuyruk/metaveri kaydi olusur. Production'da storage
+adapter local disk yerine sunucu volume'u veya S3-compatible object storage
+kullanabilir.
 
 Ham belge retention politikasi 90 gundur. Upload kaydi
 `download_available_until`, `expires_at`, `storage_status` ve `deleted_at`
@@ -93,8 +95,20 @@ Upload sonrasi sistem bir processing job olusturur. Worker su anda:
 - E-fatura XML dosyalarindan temel kimlik, tutar, KDV ve kalem ipuclari cikarir.
 - CSV/XLSX banka veya POS ekstrelerinden satir bazli tarih, aciklama, tutar ve
   statik islem tipi cikarir.
+- Banka/POS satirlarindan dengeli statement fis taslaklari uretir; riskli POS
+  ve belirsiz satirlar review'da kalir.
 - Hesap plani ve mukellef profili varsa fatura sonucunu simulation motoruna
   gonderir; eksik veya supheli durumlari `review_required` olarak saklar.
+
+PostgreSQL adapter smoke testi icin:
+
+```powershell
+$env:DATABASE_URL="postgresql://fisora:change-me@localhost:5432/fisora"
+python backend/scripts/run_postgres_smoke.py
+```
+
+Bu komut schema uygulanmis gercek Postgres'te client, chart account, upload,
+processing job ve workspace okuma akisini dener.
 
 ## Production Compose Iskeleti
 

@@ -78,6 +78,18 @@ create table documents (
     updated_at timestamptz not null default now()
 );
 
+create table workflow_records (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    client_id text not null,
+    record_type text not null,
+    record_key text not null,
+    payload jsonb not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (tenant_id, client_id, record_type, record_key)
+);
+
 create table invoice_lines (
     id uuid primary key,
     document_id uuid not null references documents(id),
@@ -196,6 +208,8 @@ create index idx_chart_accounts_counterparty_tax on chart_accounts(tenant_id, ta
 create index idx_documents_taxpayer_status on documents(tenant_id, taxpayer_id, status);
 create index idx_documents_retention on documents(tenant_id, storage_status, expires_at)
     where storage_status in ('stored', 'expiring');
+create index idx_workflow_records_lookup on workflow_records(tenant_id, client_id, record_type, created_at);
+create index idx_workflow_records_type_key on workflow_records(tenant_id, record_type, record_key);
 create index idx_journal_entries_taxpayer_export on journal_entries(tenant_id, taxpayer_id, export_status);
 create index idx_review_decisions_taxpayer_created on review_decisions(tenant_id, taxpayer_id, created_at desc);
 create index idx_learning_rules_scope on learning_rules(tenant_id, taxpayer_id, scope, automation_candidate);

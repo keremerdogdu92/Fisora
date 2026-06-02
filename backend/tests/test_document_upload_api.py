@@ -46,7 +46,9 @@ class DocumentUploadApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["status"], "stored")
         self.assertEqual(payload["size_bytes"], 6)
+        self.assertEqual(payload["processing_job"]["status"], "queued")
         self.assertEqual(len(workspace["uploaded_documents"]), 1)
+        self.assertEqual(len(workspace["processing_jobs"]), 1)
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "fatura.pdf")
 
     def test_store_document_upload_rejects_invalid_base64(self) -> None:

@@ -21,22 +21,25 @@ Tamamlanan ana dilimler:
 - Server deployment plani: Nginx, Docker Compose, frontend, backend, worker, PostgreSQL, Redis, document volume.
 - Retention politikasi: ham PDF/XML/ekstre 90 gun saklanir, metadata ve muhasebe izi korunur.
 - Production compose iskeleti: backend, frontend, nginx, worker, postgres, redis ve backup servisleri.
+- PostgreSQL adapter ilk surumu: JSON workspace kontrati production database'de `workflow_records` ile saklanabilir.
+- Worker queue ilk surumu: upload sonrasi processing job olusur, parser tipi secilir, worker workspace'e guvenli review sonucu yazar.
+- Portal job durumu: yuklenen belgelerde parser ve job status gorunur.
 
 ## Siradaki 5 Adim
 
-1. PostgreSQL adapter ilk surum
-   - JSON store davranisi Postgres'e tasinir.
-   - Client, belge metadata, simulation, review, learning ve export package kalici olur.
-   - Ham belge database'e yazilmaz.
+1. Gercek parser ciktilarini worker'a baglama
+   - Text PDF, e-fatura XML, CSV/XLSX ekstreden alan cikarma worker job sonucuna baglanir.
+   - Placeholder review sonucu yerine gercek line item ve tutar bilgisi yazilir.
 
-2. Worker queue ilk surum
-   - Upload sonrasi job olusturulur.
-   - Text PDF/XML/CSV/XLSX parser secilir.
-   - Simulation sonucu workspace'e yazilir.
+2. PostgreSQL saha smoke testi
+   - `backend/db/schema.sql` gercek Postgres'e uygulanir.
+   - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
+   - Compose config ve container start senaryosu sunucuda dogrulanir.
 
-3. Portal UI dilimini production workspace API'ye baglama
-   - Mukellef yukleme, belge listesi, fatura onizleme ve fis taslagi ekranlari production store/API verisine tasinir.
-   - Silinmis ham belge durumunda metadata ve fis gorunumu korunur.
+3. Portal kararlarini API'ye yazma
+   - Musavir review butonlari `store/review-decision` endpointine baglanir.
+   - Duzeltme alanlari hesap/cari kodu ve gerekceyle birlikte kalici olur.
+   - Karar sonrasi learning event gorunur.
 
 4. Gercek upload iyilestirmesi ve dosya saklama
    - Base64 MVP sozlesmesi buyuk dosyalar icin multipart veya direct-upload modeline tasinir.
@@ -70,10 +73,10 @@ flowchart TD
 ## Kapanmamis Ana Basliklar
 
 - Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
-- PostgreSQL adapter: Yerel JSON store yerine production repository.
+- PostgreSQL saha testi: adapter yazildi, gercek Postgres kosusu henuz yapilmadi.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
 - Banka/POS akisi: UI yukleme alani var; parse ve matching katmani genisleyecek.
-- Mustavir calisma masasi: fatura gorunumu, fis taslagi ve karar paneli API'ye baglanacak.
+- Mustavir calisma masasi: gorunum var; karar yazma API baglantisi genisleyecek.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.
 - Maliyet limiti: Belge basina AI cagrisi, token/karakter limiti ve aylik cap.

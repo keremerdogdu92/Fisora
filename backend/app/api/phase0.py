@@ -19,7 +19,8 @@ from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice
 from app.domain.review_learning import ReviewDecision, build_learning_event
-from app.persistence.workflow_store import JsonWorkflowStore
+from app.persistence.store_factory import build_workflow_store
+from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
 router = APIRouter()
 DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
@@ -202,6 +203,10 @@ class DocumentRetentionRunPayload(BaseModel):
     delete_files: bool = True
 
 
+class ProcessingRunPayload(BaseModel):
+    max_jobs: int = 10
+
+
 class StoredSimulationPayload(SimulationPayload):
     pass
 
@@ -216,8 +221,8 @@ class StoredExportPackagePayload(BaseModel):
     package: ExportPackagePayload
 
 
-def get_workflow_store() -> JsonWorkflowStore:
-    return JsonWorkflowStore(DEFAULT_STORE_PATH)
+def get_workflow_store():
+    return build_workflow_store(json_path=DEFAULT_STORE_PATH)
 
 
 def _client_profile(payload: ClientProfilePayload) -> ClientProfile:
@@ -398,15 +403,35 @@ def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return get_workflow_store().save_uploaded_document(
+    store = get_workflow_store()
+    saved = store.save_uploaded_document(
         client_id=payload.client_id,
         document=asdict(document),
     )
+    job = store.create_processing_job(
+        client_id=payload.client_id,
+        document_ref=str(saved["document_ref"]),
+        document_type=payload.document_type,
+        parser_kind=parser_kind_for_document_type(payload.document_type),
+    )
+    return {**saved, "processing_job": job}
 
 
 @router.post("/store/document-retention/run")
 def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
     return get_workflow_store().apply_document_retention(delete_files=payload.delete_files)
+
+
+@router.post("/store/processing/run")
+def store_processing_run(payload: ProcessingRunPayload) -> dict[str, object]:
+    return process_queued_documents(get_workflow_store(), max_jobs=payload.max_jobs)
+
+
+@router.get("/store/processing-jobs/{client_id}")
+def store_processing_jobs(client_id: str) -> dict[str, object]:
+    if not client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    return {"jobs": get_workflow_store().list_processing_jobs(client_id=client_id)}
 
 
 @router.post("/counterparty/match")

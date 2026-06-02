@@ -58,13 +58,18 @@ Farkli bir store dosyasi kullanmak icin:
 $env:FISORA_STORE_PATH="C:\\tmp\\fisora-phase0-store.json"
 ```
 
-Ilk PostgreSQL adapter'i eklenene kadar bu store su endpointlerin davranisini
-yerel olarak dogrulamak icindir:
+Varsayilan adapter JSON store'dur. Production icin `FISORA_STORE_BACKEND=postgres`
+ve `DATABASE_URL` veya `FISORA_DATABASE_URL` verilirse ilk PostgreSQL adapter'i
+ayni workspace kontratini `workflow_records` tablosunda saklar.
+
+Bu store su endpointlerin davranisini dogrular:
 
 - `POST /phase0/store/client`
 - `POST /phase0/store/chart-accounts`
 - `POST /phase0/store/document-upload`
 - `POST /phase0/store/document-retention/run`
+- `POST /phase0/store/processing/run`
+- `GET /phase0/store/processing-jobs/{client_id}`
 - `POST /phase0/store/simulation`
 - `POST /phase0/store/review-decision`
 - `POST /phase0/store/export-package`
@@ -82,6 +87,10 @@ Ham belge retention politikasi 90 gundur. Upload kaydi
 alanlarini tasir. `POST /phase0/store/document-retention/run` suresi dolan ham
 dosyalari siler ve metadata kaydini `storage_status=deleted` olarak korur.
 
+Upload sonrasi sistem bir processing job olusturur. Ilk worker surumu belge
+tipine gore parser secer, gercek parse henuz tamamlanmadiginda belgeyi guvenli
+sekilde `review_required` simulation sonucu olarak workspace'e yazar.
+
 ## Production Compose Iskeleti
 
 Ilk production iskeleti kok dizindeki `docker-compose.production.yml` dosyasidir.
@@ -92,8 +101,9 @@ eder.
 docker compose --env-file deploy/production.env.example -f docker-compose.production.yml config
 ```
 
-Ilk compose iskeleti JSON store ile de calisabilir. PostgreSQL adapter
-eklendikten sonra `FISORA_STORE_BACKEND=postgres` production varsayimi olacak.
+Ilk compose iskeleti JSON store ile de calisabilir. Production varsayimi
+`FISORA_STORE_BACKEND=postgres` olacak; bunun icin `backend/db/schema.sql`
+uygulanmali ve `DATABASE_URL` tanimlanmalidir.
 
 ## AI Adapter Davranisi
 

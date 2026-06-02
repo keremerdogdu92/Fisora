@@ -12,6 +12,8 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.persistence.workflow_store import JsonWorkflowStore
+from app.persistence.store_factory import build_workflow_store
+from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
 
 class WorkflowStoreTests(unittest.TestCase):
@@ -136,6 +138,69 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertFalse(storage_path.exists())
         self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "deleted")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "expired.pdf")
+
+    def test_json_store_tracks_processing_jobs_in_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_type": "invoice",
+                    "original_file_name": "fatura.pdf",
+                    "status": "stored",
+                },
+            )
+
+            job = store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="invoice",
+                parser_kind=parser_kind_for_document_type("invoice"),
+            )
+            claimed = store.claim_next_processing_job()
+            store.update_processing_job(job_id=job["id"], status="completed")
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(claimed["status"], "processing")
+        self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
+
+    def test_processing_worker_creates_review_required_simulation_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_ref": "doc-1",
+                    "document_type": "invoice",
+                    "original_file_name": "fatura.pdf",
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="invoice",
+                parser_kind=parser_kind_for_document_type("invoice"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
+        self.assertEqual(workspace["documents"][0]["export_status"], "review_required")
+        self.assertEqual(workspace["documents"][0]["review_reason_codes"], ["parser_output_required"])
+
+    def test_store_factory_selects_json_and_requires_postgres_dsn(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = build_workflow_store(store_backend="json", json_path=Path(temp_dir) / "store.json")
+
+        self.assertIsInstance(store, JsonWorkflowStore)
+        with self.assertRaises(ValueError):
+            build_workflow_store(store_backend="postgres", postgres_dsn="")
 
 
 if __name__ == "__main__":

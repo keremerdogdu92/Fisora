@@ -20,6 +20,7 @@ def empty_store() -> dict[str, Any]:
         "chart_accounts": {},
         "uploaded_documents": {},
         "documents": {},
+        "processing_jobs": [],
         "review_decisions": [],
         "learning_events": [],
         "export_packages": [],
@@ -139,6 +140,70 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def create_processing_job(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        document_type: str,
+        parser_kind: str,
+    ) -> dict[str, Any]:
+        data = self._read()
+        created_at = utc_now()
+        record = {
+            "id": str(uuid4()),
+            "client_id": client_id,
+            "document_ref": document_ref,
+            "document_type": document_type,
+            "parser_kind": parser_kind,
+            "status": "queued",
+            "attempt_count": 0,
+            "error_message": "",
+            "created_at": created_at,
+            "updated_at": created_at,
+        }
+        data["processing_jobs"].append(record)
+        self._write(data)
+        return deepcopy(record)
+
+    def list_processing_jobs(self, *, client_id: str | None = None) -> list[dict[str, Any]]:
+        data = self._read()
+        return [
+            deepcopy(job)
+            for job in data["processing_jobs"]
+            if client_id is None or job.get("client_id") == client_id
+        ]
+
+    def claim_next_processing_job(self) -> dict[str, Any] | None:
+        data = self._read()
+        for job in data["processing_jobs"]:
+            if job.get("status") != "queued":
+                continue
+            job["status"] = "processing"
+            job["attempt_count"] = int(job.get("attempt_count") or 0) + 1
+            job["updated_at"] = utc_now()
+            self._write(data)
+            return deepcopy(job)
+        return None
+
+    def update_processing_job(
+        self,
+        *,
+        job_id: str,
+        status: str,
+        error_message: str = "",
+    ) -> dict[str, Any] | None:
+        data = self._read()
+        for job in data["processing_jobs"]:
+            if job.get("id") != job_id:
+                continue
+            job["status"] = status
+            job["error_message"] = error_message
+            job["updated_at"] = utc_now()
+            self._write(data)
+            return deepcopy(job)
+        return None
+
     def save_review_decision(
         self,
         *,
@@ -193,6 +258,11 @@ class JsonWorkflowStore:
                 deepcopy(document)
                 for key, document in data["documents"].items()
                 if key.startswith(document_prefix)
+            ],
+            "processing_jobs": [
+                deepcopy(job)
+                for job in data["processing_jobs"]
+                if job.get("client_id") == client_id
             ],
             "review_decisions": [
                 deepcopy(decision)

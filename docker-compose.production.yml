@@ -7,6 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     volumes:
       - fisora_postgres:/var/lib/postgresql/data
+      - ./backend/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fisora} -d ${POSTGRES_DB:-fisora}"]
       interval: 10s
@@ -30,7 +31,7 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       FISORA_ENV: production
-      FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-json}
+      FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
       FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
       FISORA_EXPORT_PATH: /opt/fisora/data/exports
@@ -59,10 +60,11 @@ services:
     command: ["python", "-m", "app.worker"]
     environment:
       FISORA_ENV: production
-      FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-json}
+      FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
       FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
       FISORA_WORKER_RETENTION_INTERVAL_SECONDS: ${FISORA_WORKER_RETENTION_INTERVAL_SECONDS:-86400}
+      FISORA_WORKER_PROCESSING_INTERVAL_SECONDS: ${FISORA_WORKER_PROCESSING_INTERVAL_SECONDS:-30}
       DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}
       REDIS_URL: redis://redis:6379/0
     volumes:

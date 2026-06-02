@@ -77,6 +77,9 @@ type UploadStatus =
 type UploadItem = {
   id: string;
   remoteDocumentId?: string;
+  processingJobId?: string;
+  parserKind?: string;
+  processingStatus?: string;
   fileName: string;
   kind: UploadKind;
   uploadedBy: string;
@@ -126,6 +129,18 @@ type WorkspaceUploadedDocument = {
   updated_at?: string;
 };
 
+type WorkspaceProcessingJob = {
+  id?: string;
+  client_id?: string;
+  document_ref?: string;
+  document_type?: string;
+  parser_kind?: string;
+  status?: string;
+  error_message?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 type WorkspaceSnapshot = {
   client?: {
     client_id?: string;
@@ -139,6 +154,7 @@ type WorkspaceSnapshot = {
   };
   uploaded_documents?: WorkspaceUploadedDocument[];
   documents?: WorkspaceDocument[];
+  processing_jobs?: WorkspaceProcessingJob[];
 };
 
 type PortalMode = "client" | "accountant";
@@ -294,6 +310,16 @@ function uploadStatusFromApi(status?: string): UploadStatus {
   return "queued";
 }
 
+function uploadStatusFromJob(documentStatus: string | undefined, job?: WorkspaceProcessingJob): UploadStatus {
+  if (documentStatus === "deleted") return "deleted";
+  if (documentStatus === "expiring") return "expiring";
+  if (job?.status === "queued") return "queued";
+  if (job?.status === "processing") return "processing";
+  if (job?.status === "failed") return "upload_failed";
+  if (job?.status === "completed") return uploadStatusFromApi(documentStatus || "review_required");
+  return uploadStatusFromApi(documentStatus);
+}
+
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -379,7 +405,7 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
     generatedFrom: "local workspace snapshot",
     clientId,
     clientName,
-    uploadQueue: uploadedDocumentsToQueue(snapshot.uploaded_documents ?? [], clientName),
+    uploadQueue: uploadedDocumentsToQueue(snapshot.uploaded_documents ?? [], snapshot.processing_jobs ?? [], clientName),
     summary: {
       chartRunCount: snapshot.chart_accounts ? 1 : (fallback?.summary.chartRunCount ?? 0),
       invoiceRowCount: invoiceRows.length,
@@ -409,14 +435,25 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
   };
 }
 
-function uploadedDocumentsToQueue(documents: WorkspaceUploadedDocument[], fallbackUploadedBy: string): UploadItem[] {
+function uploadedDocumentsToQueue(
+  documents: WorkspaceUploadedDocument[],
+  jobs: WorkspaceProcessingJob[],
+  fallbackUploadedBy: string,
+): UploadItem[] {
+  const jobsByDocumentRef = new Map(jobs.map((job) => [String(job.document_ref ?? ""), job]));
   return documents.map((document) => ({
     id: document.document_id ?? document.document_ref ?? `${document.original_file_name ?? "document"}-${document.created_at ?? ""}`,
     remoteDocumentId: document.document_id ?? document.document_ref,
+    processingJobId: jobsByDocumentRef.get(String(document.document_ref ?? document.document_id ?? ""))?.id,
+    parserKind: jobsByDocumentRef.get(String(document.document_ref ?? document.document_id ?? ""))?.parser_kind,
+    processingStatus: jobsByDocumentRef.get(String(document.document_ref ?? document.document_id ?? ""))?.status,
     fileName: document.original_file_name ?? document.document_ref ?? "document",
     kind: uploadKindFromApi(document.document_type),
     uploadedBy: document.uploaded_by || fallbackUploadedBy,
-    status: uploadStatusFromApi(document.storage_status ?? document.status),
+    status: uploadStatusFromJob(
+      document.storage_status ?? document.status,
+      jobsByDocumentRef.get(String(document.document_ref ?? document.document_id ?? "")),
+    ),
     uploadedAt: document.created_at ?? document.updated_at ?? "",
     downloadAvailableUntil: document.download_available_until ?? document.expires_at ?? "",
     deletedAt: document.deleted_at ?? "",
@@ -560,6 +597,11 @@ export default function Home() {
             document_id?: string;
             status?: UploadStatus;
             download_available_until?: string;
+            processing_job?: {
+              id?: string;
+              status?: string;
+              parser_kind?: string;
+            };
           };
           setUploadItems((current) =>
             current.map((currentItem) =>
@@ -567,7 +609,10 @@ export default function Home() {
                 ? {
                     ...currentItem,
                     remoteDocumentId: stored.document_id,
-                    status: stored.status === "stored" ? "stored" : "queued",
+                    processingJobId: stored.processing_job?.id,
+                    parserKind: stored.processing_job?.parser_kind,
+                    processingStatus: stored.processing_job?.status,
+                    status: stored.processing_job?.status === "queued" ? "queued" : stored.status === "stored" ? "stored" : "queued",
                     downloadAvailableUntil: stored.download_available_until,
                   }
                 : currentItem,
@@ -725,6 +770,7 @@ function ClientUploadView({
                 <strong>{item.fileName}</strong>
                 <span>{uploadKindLabels[item.kind]} - {item.uploadedAt}</span>
                 {item.remoteDocumentId ? <span>Belge ID: {item.remoteDocumentId}</span> : null}
+                {item.parserKind ? <span>Parser: {item.parserKind} / {item.processingStatus || "queued"}</span> : null}
                 {item.deletedAt ? (
                   <span>Ham belge silindi: {formatDateText(item.deletedAt)}</span>
                 ) : item.downloadAvailableUntil ? (

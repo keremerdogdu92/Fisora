@@ -95,6 +95,7 @@ REDIS_URL=redis://redis:6379/0
 FISORA_AI_PROVIDER=disabled
 FISORA_AI_MONTHLY_CAP_USD=100
 FISORA_WORKER_RETENTION_INTERVAL_SECONDS=86400
+FISORA_WORKER_PROCESSING_INTERVAL_SECONDS=30
 ```
 
 AI provider canliya alindiginda `FISORA_AI_PROVIDER` `openai`, `gemini` veya
@@ -134,5 +135,7 @@ Saklama:
 - `deploy/backup/backup.sh`
 - `deploy/production.env.example`
 
-Ilk compose iskeleti JSON store ile calisabilir. PostgreSQL adapter eklendiginde
-`FISORA_STORE_BACKEND=postgres` production varsayimi olur.
+Ilk compose iskeleti JSON store ile calisabilir. PostgreSQL adapter ilk surumu
+eklendi; production smoke testte `FISORA_STORE_BACKEND=postgres` ve `DATABASE_URL`
+ile calistirilacak. Worker upload sonrasi processing job'lari isler ve retention
+job'unu ayni servis icinde periyodik calistirir.

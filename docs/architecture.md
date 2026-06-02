@@ -45,6 +45,8 @@ prototip icin opsiyonel tutulabilir.
   Zirve hesap plani ve opsiyonel yevmiye/muavin exportu alir.
 - Belge yukleme: fatura, e-fatura XML/PDF, banka ekstresi ve POS ekstresi
   mukellef yetkisine gore yuklenir.
+- Processing queue: upload sonrasi belge icin parser secimi ve job durumu
+  olusturur; worker sonucu workspace'e yazar.
 - Parser katmani: OCR kullanmadan once text PDF, XML, Excel ve CSV parser
   calisir. OCR sadece text cikmayan belgelerde fallback olur.
 - Product classification: fatura kalemlerindeki marka/model satirlarini urun
@@ -86,11 +88,18 @@ PostgreSQL tablolari ilk etapta davranis seviyesinde su varliklari tasimalidir:
 - `learning_rules`: tekrar eden kararlar, otomasyon adaylari ve kapsam seviyesi.
 - `export_packages`: Zirve'ye aktarilacak onayli kayit paketleri.
 
+Ilk PostgreSQL adapter'i, JSON store ile ayni MVP workspace kontratini
+`workflow_records` tablosunda tutar. Bu tablo client, chart account snapshot,
+uploaded document, processing job, simulation result, review decision, learning
+event ve export package payload'larini kaybetmeden production database'e tasir.
+Normalized tablolar pilot veriler netlestikce ana yazma modeli haline getirilecek.
+
 ## Worker Akisi
 
 ```text
 belge yuklendi
   -> mukellef yetkisi ve karti dogrula
+  -> processing job olustur
   -> text/XML/Excel/CSV parse et
   -> fatura/ekstre alanlarini cikar
   -> gerekiyorsa AI ile marka-model ve urun kategorisi siniflandir

@@ -64,7 +64,15 @@ type ChartRun = {
 };
 
 type UploadKind = "invoice" | "xml" | "bank" | "pos";
-type UploadStatus = "queued" | "processing" | "stored" | "upload_failed" | "review_required" | "export_ready";
+type UploadStatus =
+  | "queued"
+  | "processing"
+  | "stored"
+  | "expiring"
+  | "deleted"
+  | "upload_failed"
+  | "review_required"
+  | "export_ready";
 
 type UploadItem = {
   id: string;
@@ -74,6 +82,8 @@ type UploadItem = {
   uploadedBy: string;
   status: UploadStatus;
   uploadedAt: string;
+  downloadAvailableUntil?: string;
+  deletedAt?: string;
 };
 
 type ReviewData = {
@@ -108,6 +118,10 @@ type WorkspaceUploadedDocument = {
   original_file_name?: string;
   uploaded_by?: string;
   status?: string;
+  storage_status?: string;
+  download_available_until?: string;
+  expires_at?: string;
+  deleted_at?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -145,6 +159,8 @@ const statusLabels: Record<string, string> = {
   processing: "Isleniyor",
   queued: "Kuyrukta",
   stored: "Yuklendi",
+  expiring: "Silinmeye yaklasiyor",
+  deleted: "Ham belge silindi",
   upload_failed: "Yukleme hatasi",
 };
 
@@ -247,6 +263,13 @@ function formatAiStatus(row: InvoiceRow) {
   return `AI yok: ${row.aiClassificationSkippedReason || "statik akis"}`;
 }
 
+function formatDateText(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("tr-TR");
+}
+
 function apiDocumentType(kind: UploadKind) {
   if (kind === "xml") return "einvoice_xml";
   if (kind === "bank") return "bank_statement";
@@ -262,6 +285,8 @@ function uploadKindFromApi(documentType?: string): UploadKind {
 }
 
 function uploadStatusFromApi(status?: string): UploadStatus {
+  if (status === "deleted") return "deleted" as UploadStatus;
+  if (status === "expiring") return "expiring" as UploadStatus;
   if (status === "stored") return "stored";
   if (status === "processing") return "processing";
   if (status === "export_ready") return "export_ready";
@@ -391,8 +416,10 @@ function uploadedDocumentsToQueue(documents: WorkspaceUploadedDocument[], fallba
     fileName: document.original_file_name ?? document.document_ref ?? "document",
     kind: uploadKindFromApi(document.document_type),
     uploadedBy: document.uploaded_by || fallbackUploadedBy,
-    status: uploadStatusFromApi(document.status),
+    status: uploadStatusFromApi(document.storage_status ?? document.status),
     uploadedAt: document.created_at ?? document.updated_at ?? "",
+    downloadAvailableUntil: document.download_available_until ?? document.expires_at ?? "",
+    deletedAt: document.deleted_at ?? "",
   }));
 }
 
@@ -529,7 +556,11 @@ export default function Home() {
             }),
           });
           if (!response.ok) throw new Error("upload failed");
-          const stored = (await response.json()) as { document_id?: string; status?: UploadStatus };
+          const stored = (await response.json()) as {
+            document_id?: string;
+            status?: UploadStatus;
+            download_available_until?: string;
+          };
           setUploadItems((current) =>
             current.map((currentItem) =>
               currentItem.id === item.id
@@ -537,6 +568,7 @@ export default function Home() {
                     ...currentItem,
                     remoteDocumentId: stored.document_id,
                     status: stored.status === "stored" ? "stored" : "queued",
+                    downloadAvailableUntil: stored.download_available_until,
                   }
                 : currentItem,
             ),
@@ -693,6 +725,11 @@ function ClientUploadView({
                 <strong>{item.fileName}</strong>
                 <span>{uploadKindLabels[item.kind]} - {item.uploadedAt}</span>
                 {item.remoteDocumentId ? <span>Belge ID: {item.remoteDocumentId}</span> : null}
+                {item.deletedAt ? (
+                  <span>Ham belge silindi: {formatDateText(item.deletedAt)}</span>
+                ) : item.downloadAvailableUntil ? (
+                  <span>Son indirme: {formatDateText(item.downloadAvailableUntil)}</span>
+                ) : null}
               </div>
               <span className={`status ${item.status}`}>{formatStatus(item.status)}</span>
             </div>

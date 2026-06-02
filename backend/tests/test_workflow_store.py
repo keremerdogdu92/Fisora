@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sys
 import tempfile
@@ -107,6 +108,34 @@ class WorkflowStoreTests(unittest.TestCase):
 
         self.assertEqual(workspace["client"]["client_id"], "client-1")
         self.assertEqual([document["document_ref"] for document in workspace["documents"]], ["one.pdf"])
+
+    def test_json_store_applies_document_retention_without_losing_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage_path = Path(temp_dir) / "expired.pdf"
+            storage_path.write_bytes(b"expired")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            expired_at = datetime.now(UTC) - timedelta(days=1)
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "expired-doc",
+                    "document_type": "invoice",
+                    "original_file_name": "expired.pdf",
+                    "storage_path": str(storage_path),
+                    "status": "stored",
+                    "storage_status": "stored",
+                    "expires_at": expired_at.isoformat(timespec="seconds"),
+                    "deleted_at": "",
+                },
+            )
+
+            summary = store.apply_document_retention()
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(summary["deleted_count"], 1)
+        self.assertFalse(storage_path.exists())
+        self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "deleted")
+        self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "expired.pdf")
 
 
 if __name__ == "__main__":

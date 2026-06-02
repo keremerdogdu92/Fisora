@@ -556,6 +556,11 @@ tbody tr.selected {
   color: var(--warn);
 }
 
+.status.expiring {
+  background: #fff3dd;
+  color: var(--warn);
+}
+
 .status.export_ready {
   background: #e8f6ef;
   color: var(--good);
@@ -573,7 +578,9 @@ tbody tr.selected {
 }
 
 .status.blocked,
-.status.rejected {
+.status.rejected,
+.status.deleted,
+.status.upload_failed {
   background: #fdecea;
   color: var(--bad);
 }

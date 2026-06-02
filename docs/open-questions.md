@@ -42,7 +42,8 @@ netlestirilecek.
 
 ## Operasyon ve Veri
 
-21. Belge saklama sorumlulugu operasyonel ve yasal olarak kimde olacak?
+21. Ham belge saklama politikasi 90 gun olarak belirlendi; metadata/audit
+    saklama suresi mustavir/ofis politikasina gore netlestirilecek.
 22. Maliyet kontrolu icin hangi durumlarda AI cagrisi atlanacak?
 23. OCR fallback hangi belge tipleri ve hangi guven esiklerinde calisacak?
 24. Iptal ve duzeltme istekleri mustavir operasyonunda nasil karsilanmali?
@@ -53,8 +54,8 @@ netlestirilecek.
 
 26. Ilk production kendi kiralik sunucuda mi, yoksa cloud app/object storage
     kombinasyonunda mi baslayacak?
-27. Ham belge storage volume'u sifreli olacak mi, dis backup hangi lokasyonda
-    tutulacak?
+27. Ham belge storage volume'u sifreli olacak mi, dis backup hangi Turkiye
+    lokasyonunda tutulacak?
 28. Dis AI API sadece kategori/gerekce icin mi kullanilacak, yoksa banka
     aciklamasi siniflandirma da kapsama girecek mi?
 29. API sonucunun dusuk guven esigi kac olacak ve hangi durumlarda mustavir

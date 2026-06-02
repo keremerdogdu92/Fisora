@@ -4,24 +4,30 @@
 
 Ilk production kurulumu GPU'suz tek kiralik sunucuda baslayacak. Sunucu AI modeli
 calistirmayacak; AI ihtiyaci sadece dis API/batch cagriyla karsilanacak.
+Varsayilan baslangic saglayici Radore Cloud Server Infinity kabul edilir.
 
 ## Onerilen Minimum Sunucu
 
 Pilot ve ilk canli deneme icin:
 
-- 8-12 vCPU
-- 16-32 GB RAM
-- 512 GB-1 TB NVMe
+- Turkiye lokasyon
+- 8 vCPU
+- 24 GB RAM
+- En az 250 GB disk, tercihen buyutulebilir disk
 - Ubuntu LTS
 - Ayrilmis belge storage klasoru veya volume
 - Harici backup hedefi
 
-Daha guvenli ilk secenek:
+Varsayilan ilk paket:
 
-- 32 GB RAM
-- 1 TB NVMe
-- Snapshot/backup destegi
-- Avrupa lokasyonu
+- Radore Infinity: 8 vCPU, 24 GB RAM, 250 GB disk.
+
+Buyume hedefi:
+
+- 16 vCPU / 32 GB RAM veya daha yuksek paket.
+- Disk/storage ayrica buyutulebilmeli.
+- Paket buyutmede veri tasima gerekip gerekmedigi satin alma oncesi yazili
+  netlestirilmeli.
 
 ## Kurulacak Bilesenler
 
@@ -63,6 +69,18 @@ Ham belgeler `/opt/fisora/data/documents` altinda tutulur. Veritabaninda sadece
 belge metaverisi, storage path, boyut, hash, yukleyen kullanici ve isleme durumu
 saklanir.
 
+## Belge Saklama Politikasi
+
+Ham PDF/XML/ekstre dosyalari 90 gun indirilebilir kalir.
+
+- 0-90 gun: belge indirilebilir ve review ekraninda goruntulenebilir.
+- 75. gunden sonra: `storage_status=expiring`.
+- 90. gun sonunda: ham dosya silinir, `storage_status=deleted`.
+- Metadata, fis taslagi, mustavir karari, learning kaydi ve export izi kalir.
+
+Backup manifestleri 14 gun saklanir. Ham dosya backup kopyasi uzun sureli
+saklanmayacak; 90 gunluk urun politikasiyla uyumlu tutulacak.
+
 ## Ortam Degiskenleri
 
 Ilk production env:
@@ -76,6 +94,7 @@ DATABASE_URL=postgresql://...
 REDIS_URL=redis://redis:6379/0
 FISORA_AI_PROVIDER=disabled
 FISORA_AI_MONTHLY_CAP_USD=100
+FISORA_WORKER_RETENTION_INTERVAL_SECONDS=86400
 ```
 
 AI provider canliya alindiginda `FISORA_AI_PROVIDER` `openai`, `gemini` veya
@@ -88,13 +107,12 @@ Her gece:
 - PostgreSQL dump.
 - Belge metadata manifest.
 - Export paketleri.
-- Son 24 saatte yuklenen belgelerin harici backup kopyasi.
 
 Saklama:
 
 - Gunluk: 14 gun.
-- Haftalik: 8 hafta.
-- Aylik: mustavir/ofis politikasina gore.
+- Ham belge dosyasi: urun politikasina gore 90 gunu asmayacak.
+- Metadata/audit/export izleri: database retention politikasina gore kalir.
 
 ## Ilk Deploy Sirasi
 
@@ -106,3 +124,15 @@ Saklama:
 6. Demo/pilot env ile deploy edilir.
 7. Mükellef upload -> worker -> review -> export akisi test edilir.
 8. Gercek Zirve export saha testi yapilir.
+
+## Repo Icindeki Ilk Iskelet
+
+- `docker-compose.production.yml`
+- `backend/Dockerfile`
+- `frontend/Dockerfile`
+- `deploy/nginx/default.conf`
+- `deploy/backup/backup.sh`
+- `deploy/production.env.example`
+
+Ilk compose iskeleti JSON store ile calisabilir. PostgreSQL adapter eklendiginde
+`FISORA_STORE_BACKEND=postgres` production varsayimi olur.

@@ -19,29 +19,32 @@ Tamamlanan ana dilimler:
 - Belge upload/storage ilk sozlesmesi: metaveri, local storage path, sha256 ve kuyruk durumu.
 - Kendi sunucu yonu: GPU'suz baslangic, AI sadece dis API/batch ve maliyet cap'iyle.
 - Server deployment plani: Nginx, Docker Compose, frontend, backend, worker, PostgreSQL, Redis, document volume.
+- Retention politikasi: ham PDF/XML/ekstre 90 gun saklanir, metadata ve muhasebe izi korunur.
+- Production compose iskeleti: backend, frontend, nginx, worker, postgres, redis ve backup servisleri.
 
 ## Siradaki 5 Adim
 
-1. Frontend yukleme ekranini upload API'ye baglama
-   - Mukellef dosya sectiginde `store/document-upload` endpointine metaveri ve ilk etapta base64 icerik gonderilir.
-   - Durum: backend sozlesmesi, ilk frontend baglantisi ve upload sonrasi workspace refresh baslatildi.
+1. PostgreSQL adapter ilk surum
+   - JSON store davranisi Postgres'e tasinir.
+   - Client, belge metadata, simulation, review, learning ve export package kalici olur.
+   - Ham belge database'e yazilmaz.
 
-2. Portal UI dilimini workspace API'ye baglama
-   - Mukellef yukleme, belge listesi, fatura onizleme ve fis taslagi ekranlari mock veriden store/API verisine tasinir.
-   - Durum: UI iskeleti baslatildi; workspace okuma baglantisi eksik.
+2. Worker queue ilk surum
+   - Upload sonrasi job olusturulur.
+   - Text PDF/XML/CSV/XLSX parser secilir.
+   - Simulation sonucu workspace'e yazilir.
 
-3. Gercek upload iyilestirmesi ve dosya saklama
+3. Portal UI dilimini production workspace API'ye baglama
+   - Mukellef yukleme, belge listesi, fatura onizleme ve fis taslagi ekranlari production store/API verisine tasinir.
+   - Silinmis ham belge durumunda metadata ve fis gorunumu korunur.
+
+4. Gercek upload iyilestirmesi ve dosya saklama
    - Base64 MVP sozlesmesi buyuk dosyalar icin multipart veya direct-upload modeline tasinir.
    - Ham belge ile turetilmis parse/AI/export ciktisi ayrimi korunur.
 
-4. Banka/POS parse ve matching
+5. Banka/POS parse ve matching
    - Ekstre satirlari banka aciklamasi, tutar, tarih ve cari adayiyla review/export gate'e baglanir.
    - Ilk hedef: GIB, SGK, POS bloke, banka tahsilat/odeme taslaklari.
-
-5. Online AI batch benchmark
-   - `FISORA_AI_PROVIDER=disabled|openai|gemini|manus` secimi.
-   - Ilk entegrasyonda sadece siniflandirma/gerekce uretimi; muhasebe karari yok.
-   - Iki pilot mukellefle 20-50 fatura ve 1-2 ekstre uzerinden maliyet/dogruluk olculur.
 
 Sonraki saha kilidi: Zirve export formati gercek programda denenmeden "tamam" sayilmaz.
 

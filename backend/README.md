@@ -64,6 +64,7 @@ yerel olarak dogrulamak icindir:
 - `POST /phase0/store/client`
 - `POST /phase0/store/chart-accounts`
 - `POST /phase0/store/document-upload`
+- `POST /phase0/store/document-retention/run`
 - `POST /phase0/store/simulation`
 - `POST /phase0/store/review-decision`
 - `POST /phase0/store/export-package`
@@ -75,6 +76,24 @@ dosya `exports/documents/{client_id}/{document_id}/` altina yazilir, icerik
 gonderilmezse sadece kuyruk/metaveri kaydi olusur. Production'da bu davranis
 ayni kalir, sadece storage adapter local disk yerine sunucu volume'u veya
 S3-compatible object storage kullanir.
+
+Ham belge retention politikasi 90 gundur. Upload kaydi
+`download_available_until`, `expires_at`, `storage_status` ve `deleted_at`
+alanlarini tasir. `POST /phase0/store/document-retention/run` suresi dolan ham
+dosyalari siler ve metadata kaydini `storage_status=deleted` olarak korur.
+
+## Production Compose Iskeleti
+
+Ilk production iskeleti kok dizindeki `docker-compose.production.yml` dosyasidir.
+Backend, worker, PostgreSQL, Redis, frontend, Nginx ve backup servislerini tarif
+eder.
+
+```powershell
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml config
+```
+
+Ilk compose iskeleti JSON store ile de calisabilir. PostgreSQL adapter
+eklendikten sonra `FISORA_STORE_BACKEND=postgres` production varsayimi olacak.
 
 ## AI Adapter Davranisi
 

@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.domain.document_uploads import retention_decision
+
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -77,6 +79,39 @@ class JsonWorkflowStore:
         data["uploaded_documents"][document_key] = record
         self._write(data)
         return deepcopy(record)
+
+    def apply_document_retention(self, *, delete_files: bool = True) -> dict[str, Any]:
+        data = self._read()
+        now = utc_now()
+        checked_count = 0
+        expiring_count = 0
+        deleted_count = 0
+        deleted_refs: list[str] = []
+        for key, document in data["uploaded_documents"].items():
+            checked_count += 1
+            decision = retention_decision(document)
+            if decision.storage_status == "expiring":
+                document["storage_status"] = "expiring"
+                expiring_count += 1
+            if not decision.should_delete:
+                continue
+            storage_path = Path(str(document.get("storage_path") or ""))
+            if delete_files and storage_path.exists() and storage_path.is_file():
+                storage_path.unlink()
+            document["status"] = "deleted"
+            document["storage_status"] = "deleted"
+            document["deleted_at"] = now
+            document["updated_at"] = now
+            deleted_refs.append(key)
+            deleted_count += 1
+        if expiring_count or deleted_count:
+            self._write(data)
+        return {
+            "checked_count": checked_count,
+            "expiring_count": expiring_count,
+            "deleted_count": deleted_count,
+            "deleted_document_refs": deleted_refs,
+        }
 
     def save_simulation_result(
         self,

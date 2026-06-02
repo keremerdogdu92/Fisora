@@ -6,6 +6,7 @@ create table tenants (
     tax_number text,
     status text not null default 'active',
     retention_policy_months integer,
+    document_retention_days integer not null default 90,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -66,6 +67,11 @@ create table documents (
     sha256 text,
     document_type text not null,
     status text not null default 'uploaded',
+    storage_status text not null default 'stored',
+    retention_policy_days integer not null default 90,
+    download_available_until timestamptz,
+    expires_at timestamptz,
+    deleted_at timestamptz,
     parse_notes jsonb not null default '[]',
     risk_flags jsonb not null default '[]',
     created_at timestamptz not null default now(),
@@ -188,6 +194,8 @@ create index idx_chart_accounts_taxpayer_code on chart_accounts(tenant_id, taxpa
 create index idx_chart_accounts_counterparty_tax on chart_accounts(tenant_id, taxpayer_id, tax_id)
     where tax_id is not null and is_detail_account = true;
 create index idx_documents_taxpayer_status on documents(tenant_id, taxpayer_id, status);
+create index idx_documents_retention on documents(tenant_id, storage_status, expires_at)
+    where storage_status in ('stored', 'expiring');
 create index idx_journal_entries_taxpayer_export on journal_entries(tenant_id, taxpayer_id, export_status);
 create index idx_review_decisions_taxpayer_created on review_decisions(tenant_id, taxpayer_id, created_at desc);
 create index idx_learning_rules_scope on learning_rules(tenant_id, taxpayer_id, scope, automation_candidate);

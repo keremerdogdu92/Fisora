@@ -1,0 +1,14 @@
+.git
+.next
+node_modules
+frontend/.next
+frontend/node_modules
+backend/tests/__pycache__
+backend/app/**/__pycache__
+exports
+private_samples
+samples
+.env
+.env.*
+*.pyc
+*.log

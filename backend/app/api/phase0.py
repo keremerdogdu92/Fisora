@@ -195,6 +195,11 @@ class DocumentUploadPayload(BaseModel):
     content_base64: str = ""
     size_bytes: int = 0
     sha256: str = ""
+    retention_policy_days: int = 90
+
+
+class DocumentRetentionRunPayload(BaseModel):
+    delete_files: bool = True
 
 
 class StoredSimulationPayload(SimulationPayload):
@@ -389,6 +394,7 @@ def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
             content=content,
             declared_size_bytes=payload.size_bytes,
             declared_sha256=payload.sha256,
+            retention_days=payload.retention_policy_days,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -396,6 +402,11 @@ def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
         client_id=payload.client_id,
         document=asdict(document),
     )
+
+
+@router.post("/store/document-retention/run")
+def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
+    return get_workflow_store().apply_document_retention(delete_files=payload.delete_files)
 
 
 @router.post("/counterparty/match")

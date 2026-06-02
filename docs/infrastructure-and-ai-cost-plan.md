@@ -10,7 +10,7 @@ oldugunda devreye girer.
 
 ## Onerilen Ilk Kurulum
 
-Baslangic icin GPU'suz dedicated veya guclu VPS yeterlidir:
+Baslangic icin GPU'suz cloud server yeterlidir:
 
 - Nginx
 - Docker Compose
@@ -21,6 +21,15 @@ Baslangic icin GPU'suz dedicated veya guclu VPS yeterlidir:
 - Python worker
 - Local encrypted document volume
 - Harici/gece backup
+
+Varsayilan ilk sunucu:
+
+- Turkiye lokasyon
+- Radore Cloud Server Infinity varsayimi
+- 8 vCPU
+- 24 GB RAM
+- 250 GB disk
+- GPU yok
 
 Bu kurulum fatura yukleme, hesap plani, cari eslestirme, fis taslagi, review ve
 export paketi icin yeterlidir. AI modeli calistirmak icin GPU, Ollama, vLLM veya
@@ -74,14 +83,28 @@ avantajli gorunmuyor.
 
 ## Normal Sunucu Kisa Liste
 
-Baslangic icin iki pratik secenek:
+Baslangic icin pratik secenek:
 
-- Ekonomik root/VPS: 8-12 dedicated vCPU, 16-32 GB RAM, 512 GB-1 TB NVMe.
-- Daha kontrollu dedicated: 64 GB RAM, 2 x NVMe, ayrilmis belge volume'u.
+- 8 vCPU / 24 GB RAM / 250 GB disk: ilk pilot ve dusuk hacimli canli kullanim.
+- 16 vCPU / 32 GB RAM: daha fazla worker ve daha rahat PostgreSQL payi.
+- Ek disk/storage: belge hacmi arttiginda ilk buyutulecek kaynak.
 
-Ilk pilotta 2-5 mukellef ve dusuk belge hacmi icin ekonomik root/VPS yeterli
-olur. Gercek belge hacmi ve storage ihtiyaci belirginlesince dedicated sunucuya
-gecmek daha saglikli olur.
+Ilk pilotta 2-5 mukellef ve text PDF/XML/CSV agirlikli akis icin 8 vCPU / 24 GB
+RAM yeterli olur. Ham belgeler 90 gun sonra silinecegi icin uzun vadeli disk
+yuku metadata ve export izinden cok daha dusuk kalir.
+
+## 90 Gun Ham Belge Saklama
+
+Ham PDF/XML/ekstre dosyalari 90 gun indirilebilir kalir. 75. gunden sonra
+uyari, 90. gun sonunda silme uygulanir. Metadata, fis taslagi, mustavir karari,
+learning event ve export izi korunur.
+
+Bu karar:
+
+- Storage maliyetini dusurur.
+- Server tasimasini kolaylastirir.
+- 250 GB diskle baslamayi daha gercekci yapar.
+- Backup politikasini ham belge yerine metadata/dump agirlikli hale getirir.
 
 ## Sonraki Teknik Adim
 

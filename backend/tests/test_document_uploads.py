@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sys
 import tempfile
@@ -10,7 +11,13 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.domain.document_uploads import decode_base64_content, sanitize_file_name, store_document_content
+from app.domain.document_uploads import (
+    decode_base64_content,
+    document_storage_status,
+    retention_decision,
+    sanitize_file_name,
+    store_document_content,
+)
 
 
 class DocumentUploadTests(unittest.TestCase):
@@ -31,6 +38,11 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertEqual(document.status, "stored")
         self.assertEqual(document.client_id, "client 1")
         self.assertEqual(document.stored_file_name, "Rexton-Alis-Faturasi.pdf")
+        self.assertEqual(document.retention_policy_days, 90)
+        self.assertEqual(document.storage_status, "stored")
+        self.assertTrue(document.download_available_until)
+        self.assertTrue(document.expires_at)
+        self.assertEqual(document.deleted_at, "")
         self.assertEqual(document.size_bytes, len(b"invoice-bytes"))
         self.assertEqual(stored_bytes, b"invoice-bytes")
         self.assertIn("client-1", document.storage_path)
@@ -48,6 +60,7 @@ class DocumentUploadTests(unittest.TestCase):
             )
 
         self.assertEqual(document.status, "queued")
+        self.assertEqual(document.storage_status, "queued")
         self.assertEqual(document.size_bytes, 123)
         self.assertEqual(document.sha256, "declared")
 
@@ -69,6 +82,27 @@ class DocumentUploadTests(unittest.TestCase):
 
     def test_file_name_sanitizer_removes_path_segments(self) -> None:
         self.assertEqual(sanitize_file_name("..\\secret\\fatura 01.pdf"), "fatura-01.pdf")
+
+    def test_retention_status_marks_expiring_and_expired_documents(self) -> None:
+        now = datetime(2026, 6, 1, tzinfo=UTC)
+        expires_at = now + timedelta(days=10)
+        self.assertEqual(document_storage_status(expires_at=expires_at, now=now), "expiring")
+        self.assertEqual(document_storage_status(expires_at=now - timedelta(seconds=1), now=now), "expired")
+
+    def test_retention_decision_keeps_metadata_and_marks_expired_for_deletion(self) -> None:
+        now = datetime(2026, 6, 1, tzinfo=UTC)
+        decision = retention_decision(
+            {
+                "document_id": "doc-1",
+                "expires_at": (now - timedelta(days=1)).isoformat(timespec="seconds"),
+                "storage_status": "stored",
+            },
+            now=now,
+        )
+
+        self.assertEqual(decision.document_id, "doc-1")
+        self.assertEqual(decision.storage_status, "expired")
+        self.assertTrue(decision.should_delete)
 
 
 if __name__ == "__main__":

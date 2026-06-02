@@ -15,6 +15,25 @@ Docker Compose
 Nginx
 ```
 
+Kiralik kendi sunucu modelinde ilk production kurulumu tek makinede baslayabilir:
+
+```text
+Nginx
+Docker Compose
+Next.js frontend
+FastAPI backend
+PostgreSQL
+Redis
+worker
+local encrypted document volume
+nightly external backup
+```
+
+Bu modelde ham belgeler veritabanina yazilmaz. Veritabaninda belge metaverisi,
+storage path, dosya boyutu, hash, yukleyen kullanici ve isleme durumu tutulur.
+Dosyalar sunucudaki ayrilmis volume'da veya S3-compatible object storage'da
+saklanir.
+
 Supabase production ana mimari olarak kullanilmayacak. Sadece demo veya hizli
 prototip icin opsiyonel tutulabilir.
 
@@ -102,3 +121,26 @@ belge yuklendi
 - Queue
 - AI classification adapter
 - Zirve export adapter
+
+## Offline AI Yon
+
+Offline model kullanimi karar verici muhasebe motoru degil, yardimci
+siniflandirma katmani olarak ele alinacak.
+
+Offline modele uygun isler:
+
+- Marka/model satirindan urun kategorisi adayi cikarma.
+- Belirsiz fatura kalemine kisa uygunluk gerekcesi yazma.
+- Tedarikci/aciklama metnini normalize etme.
+- Banka aciklamasini genel kategoriye ayirma.
+
+Offline modele uygun olmayan isler:
+
+- Nihai hesap kodu karari.
+- Mevzuat yorumu veya gider yazilir/yazilmaz kesin karari.
+- KDV, tevkifat, istisna ve iade gibi riskli kararlar.
+- Zirve export formatinin kesinligi.
+
+Ilk politika: statik kural eslesirse AI cagrilmaz. Belirsiz kalemde once kucuk
+offline model denenebilir; guven dusukse online provider veya mustavir review
+devreye girer.

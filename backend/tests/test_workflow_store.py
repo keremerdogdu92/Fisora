@@ -34,6 +34,16 @@ class WorkflowStoreTests(unittest.TestCase):
                     }
                 ],
             )
+            uploaded_document = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_type": "invoice",
+                    "original_file_name": "rexton.pdf",
+                    "storage_path": "exports/documents/client-1/doc-1/rexton.pdf",
+                    "status": "stored",
+                },
+            )
             document = store.save_simulation_result(
                 client_id="client-1",
                 document_ref="rexton.pdf",
@@ -58,10 +68,12 @@ class WorkflowStoreTests(unittest.TestCase):
 
         self.assertEqual(client["client_id"], "client-1")
         self.assertEqual(chart_accounts["account_count"], 1)
+        self.assertEqual(uploaded_document["document_ref"], "doc-1")
         self.assertEqual(document["export_status"], "export_ready")
         self.assertEqual(decision["decision"]["action"], "approve")
         self.assertEqual(package["package"]["entry_count"], 1)
         self.assertEqual(reloaded["client"]["profile"]["title"], "Demo Isitme Merkezi")
+        self.assertEqual(len(reloaded["uploaded_documents"]), 1)
         self.assertEqual(len(reloaded["documents"]), 1)
         self.assertEqual(len(reloaded["review_decisions"]), 1)
         self.assertEqual(len(reloaded["learning_events"]), 1)
@@ -99,4 +111,3 @@ class WorkflowStoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -64,10 +64,11 @@ type ChartRun = {
 };
 
 type UploadKind = "invoice" | "xml" | "bank" | "pos";
-type UploadStatus = "queued" | "processing" | "review_required" | "export_ready";
+type UploadStatus = "queued" | "processing" | "stored" | "upload_failed" | "review_required" | "export_ready";
 
 type UploadItem = {
   id: string;
+  remoteDocumentId?: string;
   fileName: string;
   kind: UploadKind;
   uploadedBy: string;
@@ -77,6 +78,7 @@ type UploadItem = {
 
 type ReviewData = {
   generatedFrom: string;
+  clientId?: string;
   clientName?: string;
   uploadQueue?: UploadItem[];
   summary: {
@@ -101,7 +103,9 @@ type WorkspaceDocument = {
 
 type WorkspaceSnapshot = {
   client?: {
+    client_id?: string;
     profile?: {
+      client_id?: string;
       title?: string;
     };
   };
@@ -128,6 +132,8 @@ const statusLabels: Record<string, string> = {
   cannot_draft: "Taslak yok",
   processing: "Isleniyor",
   queued: "Kuyrukta",
+  stored: "Yuklendi",
+  upload_failed: "Yukleme hatasi",
 };
 
 const uploadKindLabels: Record<UploadKind, string> = {
@@ -192,6 +198,8 @@ const decisions: Record<DecisionAction, LocalDecision> = {
   },
 };
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_FISORA_API_BASE_URL ?? "http://localhost:8000";
+
 function formatStatus(status: string) {
   return statusLabels[status] ?? status;
 }
@@ -225,6 +233,23 @@ function exportGateReason(row: InvoiceRow) {
 function formatAiStatus(row: InvoiceRow) {
   if (row.aiClassificationUsed) return `AI: ${row.aiClassificationProvider || "provider"} kullanildi`;
   return `AI yok: ${row.aiClassificationSkippedReason || "statik akis"}`;
+}
+
+function apiDocumentType(kind: UploadKind) {
+  if (kind === "xml") return "einvoice_xml";
+  if (kind === "bank") return "bank_statement";
+  if (kind === "pos") return "pos_statement";
+  return "invoice";
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }
 
 function textValue(source: Record<string, unknown>, camelKey: string, snakeKey: string, fallback = "") {
@@ -298,6 +323,7 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot): ReviewData {
   const reviewRequiredCount = invoiceRows.length - exportReadyCount;
   return {
     generatedFrom: "local workspace snapshot",
+    clientId: snapshot.client?.client_id ?? snapshot.client?.profile?.client_id ?? "pilot-mukellef",
     clientName: snapshot.client?.profile?.title ?? "Pilot Mukellef",
     summary: {
       chartRunCount: snapshot.chart_accounts ? 1 : 0,
@@ -404,6 +430,7 @@ export default function Home() {
   }, [chartInvoices]);
 
   const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
+  const clientId = data.clientId ?? "demo-isitme-merkezi";
 
   function setDecision(action: DecisionAction) {
     if (!selectedInvoice) return;
@@ -413,17 +440,56 @@ export default function Home() {
     }));
   }
 
-  function onFilesSelected(files: FileList | null) {
+  async function onFilesSelected(files: FileList | null) {
     if (!files?.length) return;
     const nextItems = Array.from(files).map((file, index) => ({
       id: `${Date.now()}-${index}`,
       fileName: file.name,
       kind: uploadKind,
       uploadedBy: clientName,
-      status: "queued" as UploadStatus,
+      status: "processing" as UploadStatus,
       uploadedAt: new Date().toLocaleString("tr-TR"),
     }));
     setUploadItems((current) => [...nextItems, ...current]);
+    await Promise.all(
+      nextItems.map(async (item, index) => {
+        const file = files[index];
+        try {
+          const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
+          const response = await fetch(`${API_BASE_URL}/phase0/store/document-upload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              client_id: clientId,
+              document_type: apiDocumentType(item.kind),
+              file_name: file.name,
+              uploaded_by: clientName,
+              content_base64: contentBase64,
+              size_bytes: file.size,
+            }),
+          });
+          if (!response.ok) throw new Error("upload failed");
+          const stored = (await response.json()) as { document_id?: string; status?: UploadStatus };
+          setUploadItems((current) =>
+            current.map((currentItem) =>
+              currentItem.id === item.id
+                ? {
+                    ...currentItem,
+                    remoteDocumentId: stored.document_id,
+                    status: stored.status === "stored" ? "stored" : "queued",
+                  }
+                : currentItem,
+            ),
+          );
+        } catch {
+          setUploadItems((current) =>
+            current.map((currentItem) =>
+              currentItem.id === item.id ? { ...currentItem, status: "upload_failed" } : currentItem,
+            ),
+          );
+        }
+      }),
+    );
   }
 
   return (
@@ -468,6 +534,7 @@ export default function Home() {
       {portalMode === "client" ? (
         <ClientUploadView
           clientName={clientName}
+          clientId={clientId}
           uploadKind={uploadKind}
           uploadItems={uploadItems}
           onFilesSelected={onFilesSelected}
@@ -497,15 +564,17 @@ export default function Home() {
 
 function ClientUploadView({
   clientName,
+  clientId,
   uploadKind,
   uploadItems,
   onFilesSelected,
   setUploadKind,
 }: {
   clientName: string;
+  clientId: string;
   uploadKind: UploadKind;
   uploadItems: UploadItem[];
-  onFilesSelected: (files: FileList | null) => void;
+  onFilesSelected: (files: FileList | null) => Promise<void>;
   setUploadKind: (kind: UploadKind) => void;
 }) {
   return (
@@ -514,7 +583,7 @@ function ClientUploadView({
         <div className="panel-head compact">
           <div>
             <h2>Belge yukleme</h2>
-            <span>{clientName}</span>
+            <span>{clientName} - {clientId}</span>
           </div>
         </div>
         <div className="upload-kind-grid">
@@ -554,6 +623,7 @@ function ClientUploadView({
               <div>
                 <strong>{item.fileName}</strong>
                 <span>{uploadKindLabels[item.kind]} - {item.uploadedAt}</span>
+                {item.remoteDocumentId ? <span>Belge ID: {item.remoteDocumentId}</span> : null}
               </div>
               <span className={`status ${item.status}`}>{formatStatus(item.status)}</span>
             </div>

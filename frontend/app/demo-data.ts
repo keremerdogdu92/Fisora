@@ -1,5 +1,6 @@
 export const fallbackReviewData = {
   generatedFrom: "demo fallback",
+  clientId: "demo-isitme-merkezi",
   clientName: "Demo Isitme Merkezi",
   uploadQueue: [
     {

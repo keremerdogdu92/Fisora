@@ -63,10 +63,18 @@ yerel olarak dogrulamak icindir:
 
 - `POST /phase0/store/client`
 - `POST /phase0/store/chart-accounts`
+- `POST /phase0/store/document-upload`
 - `POST /phase0/store/simulation`
 - `POST /phase0/store/review-decision`
 - `POST /phase0/store/export-package`
 - `GET /phase0/store/workspace/{client_id}`
+
+`POST /phase0/store/document-upload` ilk MVP sozlesmesidir. Multipart upload
+yerine simdilik opsiyonel `content_base64` kabul eder; icerik gonderilirse
+dosya `exports/documents/{client_id}/{document_id}/` altina yazilir, icerik
+gonderilmezse sadece kuyruk/metaveri kaydi olusur. Production'da bu davranis
+ayni kalir, sadece storage adapter local disk yerine sunucu volume'u veya
+S3-compatible object storage kullanir.
 
 ## AI Adapter Davranisi
 

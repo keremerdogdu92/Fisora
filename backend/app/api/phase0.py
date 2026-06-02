@@ -12,6 +12,7 @@ from app.domain.business_relevance import ClientProfile, assess_business_relevan
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
+from app.domain.document_uploads import decode_base64_content, store_document_content
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
 from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
@@ -22,6 +23,7 @@ from app.persistence.workflow_store import JsonWorkflowStore
 
 router = APIRouter()
 DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
+DEFAULT_DOCUMENT_STORAGE_PATH = Path(os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "exports/documents"))
 
 ReviewAction = Literal[
     "approve",
@@ -183,6 +185,16 @@ class ExportPackagePayload(BaseModel):
 class ChartAccountsStorePayload(BaseModel):
     client_id: str
     accounts: list[ChartAccountPayload] = Field(default_factory=list)
+
+
+class DocumentUploadPayload(BaseModel):
+    client_id: str
+    document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = "invoice"
+    file_name: str
+    uploaded_by: str = ""
+    content_base64: str = ""
+    size_bytes: int = 0
+    sha256: str = ""
 
 
 class StoredSimulationPayload(SimulationPayload):
@@ -355,6 +367,35 @@ def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     accounts = [asdict(_chart_account(account)) for account in payload.accounts]
     return get_workflow_store().replace_chart_accounts(client_id=payload.client_id, accounts=accounts)
+
+
+@router.post("/store/document-upload")
+def store_document_upload(payload: DocumentUploadPayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for document upload")
+    content = None
+    if payload.content_base64:
+        try:
+            content = decode_base64_content(payload.content_base64)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        document = store_document_content(
+            base_dir=DEFAULT_DOCUMENT_STORAGE_PATH,
+            client_id=payload.client_id,
+            file_name=payload.file_name,
+            document_type=payload.document_type,
+            uploaded_by=payload.uploaded_by,
+            content=content,
+            declared_size_bytes=payload.size_bytes,
+            declared_sha256=payload.sha256,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_workflow_store().save_uploaded_document(
+        client_id=payload.client_id,
+        document=asdict(document),
+    )
 
 
 @router.post("/counterparty/match")

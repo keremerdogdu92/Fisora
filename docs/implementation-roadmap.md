@@ -16,27 +16,29 @@ Tamamlanan ana dilimler:
 - Sentetik pilot: 3 belgeyle uc uca store + review + export CSV kosusu.
 - Learning rule uygulama: mustavir duzeltmesi sonraki benzer belgede oneriyi etkiler.
 - Portal ilk UI dilimi: mukellef yukleme alani ve mustavir review calisma masasi.
+- Belge upload/storage ilk sozlesmesi: metaveri, local storage path, sha256 ve kuyruk durumu.
+- Kendi sunucu/offline AI yonu: GPU'suz baslangic, kucuk offline model sadece yardimci siniflandirma.
 
 ## Siradaki 5 Adim
 
-1. Portal UI dilimini API'ye baglama
+1. Frontend yukleme ekranini upload API'ye baglama
+   - Mukellef dosya sectiginde `store/document-upload` endpointine metaveri ve ilk etapta base64 icerik gonderilir.
+   - Durum: backend sozlesmesi baslatildi; frontend baglantisi eksik.
+
+2. Portal UI dilimini workspace API'ye baglama
    - Mukellef yukleme, belge listesi, fatura onizleme ve fis taslagi ekranlari mock veriden store/API verisine tasinir.
-   - Durum: UI iskeleti baslatildi; gercek upload endpointi ve dosya saklama eksik.
+   - Durum: UI iskeleti baslatildi; workspace okuma baglantisi eksik.
 
-2. Gercek upload ve dosya saklama
-   - PDF/XML/CSV/XLSX dosyasi mukellef, yukleyen kullanici, belge turu ve isleme durumu ile kaydedilir.
-   - Ham belge ile turetilmis parse/AI/export ciktisi ayrilir.
-
-3. Workspace formatina portal uyumu
-   - Portal `local-review-data.json` disinda store/workspace snapshot formatini da okuyabilir.
-   - Amac: pilot runner ciktisini UI'da direkt gostermek.
+3. Gercek upload iyilestirmesi ve dosya saklama
+   - Base64 MVP sozlesmesi buyuk dosyalar icin multipart veya direct-upload modeline tasinir.
+   - Ham belge ile turetilmis parse/AI/export ciktisi ayrimi korunur.
 
 4. Banka/POS parse ve matching
    - Ekstre satirlari banka aciklamasi, tutar, tarih ve cari adayiyla review/export gate'e baglanir.
    - Ilk hedef: GIB, SGK, POS bloke, banka tahsilat/odeme taslaklari.
 
-5. Gercek AI provider adapter ve pilot benchmark
-   - `FISORA_AI_PROVIDER=disabled|openai|gemini|manus` secimi.
+5. Offline/online AI benchmark
+   - `FISORA_AI_PROVIDER=disabled|offline|openai|gemini|manus` secimi.
    - Ilk entegrasyonda sadece siniflandirma/gerekce uretimi; muhasebe karari yok.
    - Iki pilot mukellefle 20-50 fatura ve 1-2 ekstre uzerinden maliyet/dogruluk olculur.
 
@@ -53,7 +55,7 @@ flowchart TD
     E --> F["Risk gate ve mustavir review ekrani"]
     F --> G["Learning rule uygulama"]
     G --> H["Kontrollu export CSV"]
-    H --> I["Portal API ve workspace baglantisi"]
+    H --> I["Belge upload ve local storage"]
     I --> J["Gercek pilot veri kosusu"]
     J --> K["Zirve saha dogrulamasi"]
     K --> L["PostgreSQL adapter ve auth"]

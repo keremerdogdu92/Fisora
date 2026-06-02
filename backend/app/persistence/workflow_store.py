@@ -16,6 +16,7 @@ def empty_store() -> dict[str, Any]:
     return {
         "clients": {},
         "chart_accounts": {},
+        "uploaded_documents": {},
         "documents": {},
         "review_decisions": [],
         "learning_events": [],
@@ -59,6 +60,21 @@ class JsonWorkflowStore:
             "updated_at": utc_now(),
         }
         data["chart_accounts"][client_id] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
+        document_key = self._document_key(client_id, document_ref)
+        record = {
+            **document,
+            "client_id": client_id,
+            "document_ref": document_ref,
+            "updated_at": utc_now(),
+        }
+        record.setdefault("created_at", record["updated_at"])
+        data["uploaded_documents"][document_key] = record
         self._write(data)
         return deepcopy(record)
 
@@ -133,6 +149,11 @@ class JsonWorkflowStore:
         return {
             "client": deepcopy(data["clients"].get(client_id)),
             "chart_accounts": deepcopy(data["chart_accounts"].get(client_id)),
+            "uploaded_documents": [
+                deepcopy(document)
+                for key, document in data["uploaded_documents"].items()
+                if key.startswith(document_prefix)
+            ],
             "documents": [
                 deepcopy(document)
                 for key, document in data["documents"].items()
@@ -175,4 +196,3 @@ class JsonWorkflowStore:
     @staticmethod
     def _document_key(client_id: str, document_ref: str) -> str:
         return f"{client_id}:{document_ref}"
-

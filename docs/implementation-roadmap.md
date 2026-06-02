@@ -17,13 +17,14 @@ Tamamlanan ana dilimler:
 - Learning rule uygulama: mustavir duzeltmesi sonraki benzer belgede oneriyi etkiler.
 - Portal ilk UI dilimi: mukellef yukleme alani ve mustavir review calisma masasi.
 - Belge upload/storage ilk sozlesmesi: metaveri, local storage path, sha256 ve kuyruk durumu.
-- Kendi sunucu/offline AI yonu: GPU'suz baslangic, kucuk offline model sadece yardimci siniflandirma.
+- Kendi sunucu yonu: GPU'suz baslangic, AI sadece dis API/batch ve maliyet cap'iyle.
+- Server deployment plani: Nginx, Docker Compose, frontend, backend, worker, PostgreSQL, Redis, document volume.
 
 ## Siradaki 5 Adim
 
 1. Frontend yukleme ekranini upload API'ye baglama
    - Mukellef dosya sectiginde `store/document-upload` endpointine metaveri ve ilk etapta base64 icerik gonderilir.
-   - Durum: backend sozlesmesi baslatildi; frontend baglantisi eksik.
+   - Durum: backend sozlesmesi, ilk frontend baglantisi ve upload sonrasi workspace refresh baslatildi.
 
 2. Portal UI dilimini workspace API'ye baglama
    - Mukellef yukleme, belge listesi, fatura onizleme ve fis taslagi ekranlari mock veriden store/API verisine tasinir.
@@ -37,8 +38,8 @@ Tamamlanan ana dilimler:
    - Ekstre satirlari banka aciklamasi, tutar, tarih ve cari adayiyla review/export gate'e baglanir.
    - Ilk hedef: GIB, SGK, POS bloke, banka tahsilat/odeme taslaklari.
 
-5. Offline/online AI benchmark
-   - `FISORA_AI_PROVIDER=disabled|offline|openai|gemini|manus` secimi.
+5. Online AI batch benchmark
+   - `FISORA_AI_PROVIDER=disabled|openai|gemini|manus` secimi.
    - Ilk entegrasyonda sadece siniflandirma/gerekce uretimi; muhasebe karari yok.
    - Iki pilot mukellefle 20-50 fatura ve 1-2 ekstre uzerinden maliyet/dogruluk olculur.
 
@@ -71,6 +72,6 @@ flowchart TD
 - Banka/POS akisi: UI yukleme alani var; parse ve matching katmani genisleyecek.
 - Mustavir calisma masasi: fatura gorunumu, fis taslagi ve karar paneli API'ye baglanacak.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
-- AI provider secimi: OpenAI/Gemini/Manus kararini pilot benchmark belirlemeli.
+- AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.
 - Maliyet limiti: Belge basina AI cagrisi, token/karakter limiti ve aylik cap.
 - Denetim izi: Kim yukledi, kim onayladi, ne degisti, hangi kurala donustu.

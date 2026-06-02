@@ -49,14 +49,14 @@ netlestirilecek.
 25. Mustavir onay izi, reddetme gerekcesi ve export paketi denetim icin ne kadar
     saklanmali?
 
-## Sunucu ve Offline AI
+## Sunucu ve AI API
 
 26. Ilk production kendi kiralik sunucuda mi, yoksa cloud app/object storage
     kombinasyonunda mi baslayacak?
 27. Ham belge storage volume'u sifreli olacak mi, dis backup hangi lokasyonda
     tutulacak?
-28. Offline model sadece kategori/gerekce icin mi kullanilacak, yoksa banka
+28. Dis AI API sadece kategori/gerekce icin mi kullanilacak, yoksa banka
     aciklamasi siniflandirma da kapsama girecek mi?
-29. Offline modelin dusuk guven esigi kac olacak ve hangi durumlarda online AI
-    provider'a fallback yapilacak?
+29. API sonucunun dusuk guven esigi kac olacak ve hangi durumlarda mustavir
+    review'a zorunlu donderecek?
 30. Aylik AI maliyet cap'i ofis bazinda mi, mukellef bazinda mi uygulanacak?

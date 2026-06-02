@@ -101,6 +101,17 @@ type WorkspaceDocument = {
   result?: Record<string, unknown>;
 };
 
+type WorkspaceUploadedDocument = {
+  document_id?: string;
+  document_ref?: string;
+  document_type?: string;
+  original_file_name?: string;
+  uploaded_by?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 type WorkspaceSnapshot = {
   client?: {
     client_id?: string;
@@ -112,6 +123,7 @@ type WorkspaceSnapshot = {
   chart_accounts?: {
     account_count?: number;
   };
+  uploaded_documents?: WorkspaceUploadedDocument[];
   documents?: WorkspaceDocument[];
 };
 
@@ -242,6 +254,21 @@ function apiDocumentType(kind: UploadKind) {
   return "invoice";
 }
 
+function uploadKindFromApi(documentType?: string): UploadKind {
+  if (documentType === "einvoice_xml") return "xml";
+  if (documentType === "bank_statement") return "bank";
+  if (documentType === "pos_statement") return "pos";
+  return "invoice";
+}
+
+function uploadStatusFromApi(status?: string): UploadStatus {
+  if (status === "stored") return "stored";
+  if (status === "processing") return "processing";
+  if (status === "export_ready") return "export_ready";
+  if (status === "review_required") return "review_required";
+  return "queued";
+}
+
 function arrayBufferToBase64(buffer: ArrayBuffer) {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -317,39 +344,56 @@ function blankInvoiceRow(document: WorkspaceDocument): InvoiceRow {
   };
 }
 
-function workspaceToReviewData(snapshot: WorkspaceSnapshot): ReviewData {
-  const invoiceRows = (snapshot.documents ?? []).map(blankInvoiceRow);
+function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewData): ReviewData {
+  const invoiceRows = snapshot.documents?.length ? snapshot.documents.map(blankInvoiceRow) : (fallback?.invoiceRows ?? []);
   const exportReadyCount = invoiceRows.filter((row) => row.exportStatus === "export_ready").length;
   const reviewRequiredCount = invoiceRows.length - exportReadyCount;
+  const clientId = snapshot.client?.client_id ?? snapshot.client?.profile?.client_id ?? fallback?.clientId ?? "pilot-mukellef";
+  const clientName = snapshot.client?.profile?.title ?? fallback?.clientName ?? "Pilot Mukellef";
   return {
     generatedFrom: "local workspace snapshot",
-    clientId: snapshot.client?.client_id ?? snapshot.client?.profile?.client_id ?? "pilot-mukellef",
-    clientName: snapshot.client?.profile?.title ?? "Pilot Mukellef",
+    clientId,
+    clientName,
+    uploadQueue: uploadedDocumentsToQueue(snapshot.uploaded_documents ?? [], clientName),
     summary: {
-      chartRunCount: snapshot.chart_accounts ? 1 : 0,
+      chartRunCount: snapshot.chart_accounts ? 1 : (fallback?.summary.chartRunCount ?? 0),
       invoiceRowCount: invoiceRows.length,
       autoReadyCount: exportReadyCount,
       reviewRequiredCount,
       cannotDraftCount: invoiceRows.filter((row) => !row.draftLines.length).length,
       allDraftsBalanced: invoiceRows.every((row) => row.isBalanced || !row.draftLines.length),
     },
-    chartRuns: [
-      {
-        chartFileName: "workspace-store",
-        accountCount: snapshot.chart_accounts?.account_count ?? 0,
-        detailAccountCount: snapshot.chart_accounts?.account_count ?? 0,
-        customerCandidateCount: 0,
-        supplierCandidateCount: 0,
-        hasPurchaseVat191: true,
-        hasSalesVat391: true,
-        autoReadyCount: exportReadyCount,
-        reviewRequiredCount,
-        cannotDraftCount: invoiceRows.filter((row) => !row.draftLines.length).length,
-        selectedAccounts: {},
-      },
-    ],
+    chartRuns: snapshot.chart_accounts
+      ? [
+          {
+            chartFileName: "workspace-store",
+            accountCount: snapshot.chart_accounts.account_count ?? 0,
+            detailAccountCount: snapshot.chart_accounts.account_count ?? 0,
+            customerCandidateCount: 0,
+            supplierCandidateCount: 0,
+            hasPurchaseVat191: true,
+            hasSalesVat391: true,
+            autoReadyCount: exportReadyCount,
+            reviewRequiredCount,
+            cannotDraftCount: invoiceRows.filter((row) => !row.draftLines.length).length,
+            selectedAccounts: {},
+          },
+        ]
+      : (fallback?.chartRuns ?? []),
     invoiceRows,
   };
+}
+
+function uploadedDocumentsToQueue(documents: WorkspaceUploadedDocument[], fallbackUploadedBy: string): UploadItem[] {
+  return documents.map((document) => ({
+    id: document.document_id ?? document.document_ref ?? `${document.original_file_name ?? "document"}-${document.created_at ?? ""}`,
+    remoteDocumentId: document.document_id ?? document.document_ref,
+    fileName: document.original_file_name ?? document.document_ref ?? "document",
+    kind: uploadKindFromApi(document.document_type),
+    uploadedBy: document.uploaded_by || fallbackUploadedBy,
+    status: uploadStatusFromApi(document.status),
+    uploadedAt: document.created_at ?? document.updated_at ?? "",
+  }));
 }
 
 export default function Home() {
@@ -432,6 +476,22 @@ export default function Home() {
   const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
   const clientId = data.clientId ?? "demo-isitme-merkezi";
 
+  async function refreshWorkspaceFromApi(targetClientId = clientId) {
+    const response = await fetch(`${API_BASE_URL}/phase0/store/workspace/${encodeURIComponent(targetClientId)}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("workspace refresh failed");
+    const snapshot = (await response.json()) as WorkspaceSnapshot;
+    const payload = workspaceToReviewData(snapshot, data);
+    setData(payload);
+    setSource("api workspace");
+    setActiveChart(payload.chartRuns[0]?.chartFileName ?? "");
+    if (payload.uploadQueue?.length) {
+      setUploadItems(payload.uploadQueue);
+    }
+    return payload;
+  }
+
   function setDecision(action: DecisionAction) {
     if (!selectedInvoice) return;
     setDecisionLog((current) => ({
@@ -451,7 +511,7 @@ export default function Home() {
       uploadedAt: new Date().toLocaleString("tr-TR"),
     }));
     setUploadItems((current) => [...nextItems, ...current]);
-    await Promise.all(
+    const uploadResults = await Promise.all(
       nextItems.map(async (item, index) => {
         const file = files[index];
         try {
@@ -481,15 +541,24 @@ export default function Home() {
                 : currentItem,
             ),
           );
+          return true;
         } catch {
           setUploadItems((current) =>
             current.map((currentItem) =>
               currentItem.id === item.id ? { ...currentItem, status: "upload_failed" } : currentItem,
             ),
           );
+          return false;
         }
       }),
     );
+    if (uploadResults.some(Boolean)) {
+      try {
+        await refreshWorkspaceFromApi(clientId);
+      } catch {
+        setSource("api upload ok, workspace refresh failed");
+      }
+    }
   }
 
   return (

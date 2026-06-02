@@ -122,25 +122,25 @@ belge yuklendi
 - AI classification adapter
 - Zirve export adapter
 
-## Offline AI Yon
+## AI Provider Yon
 
-Offline model kullanimi karar verici muhasebe motoru degil, yardimci
+Kendi sunucuda AI modeli calistirma baslangic kapsamindan cikarildi. AI,
+karar verici muhasebe motoru degil, dis API/batch uzerinden calisan yardimci
 siniflandirma katmani olarak ele alinacak.
 
-Offline modele uygun isler:
+AI API'ye uygun isler:
 
 - Marka/model satirindan urun kategorisi adayi cikarma.
 - Belirsiz fatura kalemine kisa uygunluk gerekcesi yazma.
 - Tedarikci/aciklama metnini normalize etme.
 - Banka aciklamasini genel kategoriye ayirma.
 
-Offline modele uygun olmayan isler:
+AI API'ye uygun olmayan isler:
 
 - Nihai hesap kodu karari.
 - Mevzuat yorumu veya gider yazilir/yazilmaz kesin karari.
 - KDV, tevkifat, istisna ve iade gibi riskli kararlar.
 - Zirve export formatinin kesinligi.
 
-Ilk politika: statik kural eslesirse AI cagrilmaz. Belirsiz kalemde once kucuk
-offline model denenebilir; guven dusukse online provider veya mustavir review
-devreye girer.
+Ilk politika: statik kural eslesirse AI cagrilmaz. Belirsiz kalemde dusuk
+tokenli API sorgusu denenir; guven dusukse sonuc mustavir review'a duser.

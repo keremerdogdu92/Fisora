@@ -409,6 +409,15 @@ h2 {
   width: 100%;
 }
 
+.download-link {
+  color: var(--accent);
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 800;
+  margin-top: 6px;
+  text-decoration: none;
+}
+
 .chart-button {
   width: 100%;
   border: 1px solid var(--border);

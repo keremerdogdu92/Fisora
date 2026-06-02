@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict
 import os
 from pathlib import Path
+import re
 from typing import Literal
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
@@ -15,6 +17,7 @@ from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.document_uploads import decode_base64_content, store_document_content
 from app.domain.export_packages import ExportCandidate, build_export_package
+from app.domain.exporters import export_universal_journal_csv
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
 from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
@@ -27,6 +30,7 @@ from app.workflows.document_processing import parser_kind_for_document_type, pro
 router = APIRouter()
 DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
 DEFAULT_DOCUMENT_STORAGE_PATH = Path(os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "exports/documents"))
+DEFAULT_EXPORT_PATH = Path(os.environ.get("FISORA_EXPORT_PATH", "exports/generated"))
 
 ReviewAction = Literal[
     "approve",
@@ -244,6 +248,12 @@ class WorkspaceExportPackagePayload(BaseModel):
 
 def get_workflow_store():
     return build_workflow_store(json_path=DEFAULT_STORE_PATH)
+
+
+def _safe_export_file_name(client_id: str, export_type: str) -> str:
+    safe_client = re.sub(r"[^A-Za-z0-9_.-]+", "-", client_id.strip()).strip(".-") or "client"
+    safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "-", export_type.strip()).strip(".-") or "export"
+    return f"{safe_client}-{safe_type}.csv"
 
 
 def _save_uploaded_document_with_job(
@@ -714,14 +724,33 @@ def store_export_package_from_workspace(payload: WorkspaceExportPackagePayload) 
     store = get_workflow_store()
     workspace = store.get_workspace(payload.client_id)
     build = build_workspace_export_package(workspace, export_type=payload.export_type)
+    output_filename = _safe_export_file_name(payload.client_id, payload.export_type)
+    output_path = DEFAULT_EXPORT_PATH / payload.client_id / output_filename
+    export_universal_journal_csv(list(build.package.entries), output_path)
     package_payload = {
         "export_type": build.package.export_type,
         "candidate_count": build.candidate_count,
         "entry_count": len(build.package.entries),
         "excluded_document_refs": list(build.package.excluded_document_refs),
+        "output_filename": output_filename,
+        "output_path": str(output_path),
+        "download_url": f"/phase0/store/export-package/download/{payload.client_id}/{output_filename}",
         "entries": [_entry_payload(entry) for entry in build.package.entries],
     }
     return store.save_export_package(client_id=payload.client_id, package=package_payload)
+
+
+@router.get("/store/export-package/download/{client_id}/{file_name}")
+def download_export_package(client_id: str, file_name: str) -> FileResponse:
+    safe_name = Path(file_name).name
+    path = DEFAULT_EXPORT_PATH / client_id / safe_name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="export file not found")
+    return FileResponse(
+        path,
+        filename=safe_name,
+        media_type="text/csv; charset=utf-8",
+    )
 
 
 @router.get("/store/workspace/{client_id}")

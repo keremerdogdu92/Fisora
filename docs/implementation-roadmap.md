@@ -33,6 +33,8 @@ Tamamlanan ana dilimler:
 - Review duzeltme formlari: mustavir hesap/cari/gerekce duzeltmesini kararla birlikte API'ye yazar.
 - Workspace export package: store'daki guvenli ve dengeli fatura/statement entry'lerinden export paketi uretir.
 - AI batch benchmark altyapisi: statik kural ve replay provider payload'lari uzerinden kategori dogruluk/maliyet sinyali hesaplar.
+- Export CSV dosya uretimi: workspace export package indirilebilir CSV dosyasina yazilir.
+- Review duzeltmesini UI taslagina uygulama: girilen hesap/cari kodlari secili fis satirinda aninda gorunur.
 
 ## Siradaki 5 Adim
 
@@ -42,12 +44,12 @@ Tamamlanan ana dilimler:
    - Compose config ve container start senaryosu sunucuda dogrulanir.
 
 2. Review duzeltmelerini taslaga uygulama
-   - Musavirin girdigi hesap/cari duzeltmesi mevcut fis taslagi uzerinde aninda gorunur.
    - Duzeltme sonraki benzer belgeye learning rule olarak uygulanir.
+   - Kalici duzeltme sonraki workspace refresh sonrasi taslaga otomatik uygulanir.
 
 3. Export dosya adapter'i genisletme
-   - Workspace export package sonucundan gercek CSV dosyasi uretilir.
    - Zirve saha testinde calisan kolon/format sabitlenir.
+   - CSV dosyasi mustavir tarafindan indirildikten sonra downloaded_at izi tutulur.
 
 4. Direct object storage hazirligi
    - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.

@@ -350,6 +350,22 @@ function draftLineValue(source: Record<string, unknown>) {
   return Array.isArray(value) ? (value as DraftLine[]) : [];
 }
 
+function correctedDraftLines(invoice: InvoiceRow, correction: CorrectionDraft) {
+  const accountCode = correction.correctedAccountCode.trim();
+  const counterpartyCode = correction.correctedCounterpartyCode.trim();
+  if (!accountCode && !counterpartyCode) return invoice.draftLines;
+  return invoice.draftLines.map((line) => {
+    if (accountCode && line.account_code === invoice.selectedExpenseAccount) {
+      return { ...line, account_code: accountCode };
+    }
+    const supplierTargets = [invoice.selectedSupplierAccount, invoice.counterpartyMatchCode].filter(Boolean);
+    if (counterpartyCode && supplierTargets.includes(line.account_code)) {
+      return { ...line, account_code: counterpartyCode };
+    }
+    return line;
+  });
+}
+
 function blankInvoiceRow(document: WorkspaceDocument): InvoiceRow {
   const result = document.result ?? {};
   return {
@@ -475,6 +491,7 @@ export default function Home() {
     reason: "",
   });
   const [exportPackageStatus, setExportPackageStatus] = useState("");
+  const [exportPackageDownloadUrl, setExportPackageDownloadUrl] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -621,14 +638,19 @@ export default function Home() {
         package?: {
           entry_count?: number;
           excluded_document_refs?: string[];
+          download_url?: string;
+          output_filename?: string;
         };
       };
       const entryCount = saved.package?.entry_count ?? 0;
       const excludedCount = saved.package?.excluded_document_refs?.length ?? 0;
       setExportPackageStatus(`${entryCount} fis export paketine alindi, ${excludedCount} kayit disarida kaldi.`);
+      const downloadUrl = saved.package?.download_url ?? "";
+      setExportPackageDownloadUrl(downloadUrl ? `${API_BASE_URL}${downloadUrl}` : "");
       await refreshWorkspaceFromApi(clientId);
     } catch {
       setExportPackageStatus("Export paketi olusturulamadi.");
+      setExportPackageDownloadUrl("");
     }
   }
 
@@ -759,6 +781,7 @@ export default function Home() {
           clientName={clientName}
           correctionDraft={correctionDraft}
           createExportPackage={createExportPackage}
+          exportPackageDownloadUrl={exportPackageDownloadUrl}
           exportPackageStatus={exportPackageStatus}
           exportReadyCount={exportReadyCount}
           reviewQueueCount={reviewQueueCount}
@@ -863,6 +886,7 @@ function AccountantReviewView({
   clientName,
   correctionDraft,
   createExportPackage,
+  exportPackageDownloadUrl,
   decisionStatus,
   exportPackageStatus,
   exportReadyCount,
@@ -883,6 +907,7 @@ function AccountantReviewView({
   clientName: string;
   correctionDraft: CorrectionDraft;
   createExportPackage: () => Promise<void>;
+  exportPackageDownloadUrl: string;
   decisionStatus: string;
   exportPackageStatus: string;
   exportReadyCount: number;
@@ -916,6 +941,11 @@ function AccountantReviewView({
               Export paketi olustur
             </button>
             {exportPackageStatus ? <span>{exportPackageStatus}</span> : null}
+            {exportPackageDownloadUrl ? (
+              <a className="download-link" href={exportPackageDownloadUrl}>
+                CSV indir
+              </a>
+            ) : null}
           </div>
           <div className="tabbar vertical" role="tablist" aria-label="Belge filtreleri">
             {(Object.keys(viewLabels) as ViewMode[]).map((mode) => (
@@ -1041,6 +1071,7 @@ function JournalReviewPanel({
   setCorrectionDraft: (value: CorrectionDraft) => void;
   setDecision: (action: DecisionAction) => void;
 }) {
+  const visibleDraftLines = invoice ? correctedDraftLines(invoice, correctionDraft) : [];
   return (
     <section className="journal-panel" aria-label="Fis taslagi ve karar">
       <div className="panel-head compact">
@@ -1095,7 +1126,7 @@ function JournalReviewPanel({
           </div>
 
           <div className="draft-lines">
-            {invoice.draftLines.length ? (
+            {visibleDraftLines.length ? (
               <table>
                 <thead>
                   <tr>
@@ -1106,7 +1137,7 @@ function JournalReviewPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {invoice.draftLines.map((line, index) => (
+                  {visibleDraftLines.map((line, index) => (
                     <tr key={`${line.account_code}-${index}`}>
                       <td>{line.account_code}</td>
                       <td>{line.description}</td>

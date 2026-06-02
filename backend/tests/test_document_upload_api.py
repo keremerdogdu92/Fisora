@@ -96,6 +96,41 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["processing_job"]["parser_kind"], "bank_statement")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "bank.csv")
 
+    def test_store_export_package_from_workspace_writes_downloadable_csv(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_EXPORT_PATH = Path(temp_dir) / "exports"
+            client = TestClient(app)
+            store = phase0.get_workflow_store()
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="ready.pdf",
+                result={
+                    "file_name": "ready.pdf",
+                    "export_status": "export_ready",
+                    "review_reason_codes": [],
+                    "risk_flags": [],
+                    "draft_lines": [
+                        {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.01", "description": "Satici", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+
+            response = client.post(
+                "/phase0/store/export-package/from-workspace",
+                json={"client_id": "client-1", "export_type": "zirve_universal_csv"},
+            )
+            payload = response.json()
+            download = client.get(payload["package"]["download_url"])
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["package"]["entry_count"], 1)
+        self.assertEqual(download.status_code, 200)
+        self.assertIn("770.01", download.text)
+
 
 if __name__ == "__main__":
     unittest.main()

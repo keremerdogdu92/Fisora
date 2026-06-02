@@ -153,3 +153,5 @@ dogruluk karsilastirmasi icin kullanilacak.
 `store/export-package/from-workspace`, workspace'teki fatura ve statement
 sonuclarindan yalnizca dengeli ve risksiz entry'leri export paketine alir.
 Review gerekli veya risk bayrakli kayitlar `excluded_document_refs` icinde kalir.
+Ayni endpoint `exports/generated/{client_id}/` altinda indirilebilir CSV dosyasi
+da uretir; indirme yolu `download_url` alaninda doner.

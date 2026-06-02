@@ -71,6 +71,10 @@ prototip icin opsiyonel tutulabilir.
   uretir.
 - Export workspace builder: fatura ve statement sonucundaki dengeli, risksiz
   entry'leri paketler; riskli satirlari `excluded_document_refs` olarak tutar.
+- Export download: paketlenen entry'ler universal journal CSV dosyasina yazilir
+  ve mustavir ekranindan indirilebilir.
+- Correction preview: mustavirin girdigi hesap/cari duzeltmesi karar
+  kaydedilmeden once secili fis taslagi satirinda aninda gorunur.
 - AI benchmark: dis provider baglanmadan once statik kural ve replay payload
   sonuclarini ayni schema ile karsilastirir.
 

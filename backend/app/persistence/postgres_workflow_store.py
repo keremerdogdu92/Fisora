@@ -8,6 +8,10 @@ from typing import Any, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.domain.document_uploads import retention_decision
+from app.domain.workspace_review_updates import (
+    apply_review_decision_to_document,
+    mark_export_package_downloaded,
+)
 
 
 ConnectFactory = Callable[[], Any]
@@ -222,17 +226,30 @@ class PostgresWorkflowStore:
             "created_at": timestamp,
         }
         self._upsert_record(client_id, "review_decision", record["id"], record)
+        learning_event_id = str(uuid4())
         self._upsert_record(
             client_id,
             "learning_event",
-            str(uuid4()),
+            learning_event_id,
             {
-                "id": str(uuid4()),
+                "id": learning_event_id,
                 "client_id": client_id,
                 **learning_event,
                 "created_at": timestamp,
             },
         )
+        document_ref = str(decision.get("document_ref") or learning_event.get("document_ref") or "")
+        document = self._get_record(client_id, "document", document_ref)
+        if document is not None:
+            corrected_document = apply_review_decision_to_document(
+                document,
+                decision=decision,
+                learning_event=learning_event,
+                reviewed_at=timestamp,
+            )
+            self._upsert_record(client_id, "document", document_ref, corrected_document)
+            record["corrected_document"] = corrected_document
+            self._upsert_record(client_id, "review_decision", record["id"], record)
         return deepcopy(record)
 
     def save_export_package(self, *, client_id: str, package: dict[str, Any]) -> dict[str, Any]:
@@ -243,6 +260,17 @@ class PostgresWorkflowStore:
             "created_at": utc_now(),
         }
         return self._upsert_record(client_id, "export_package", record["id"], record)
+
+    def mark_export_package_downloaded(self, *, client_id: str, output_filename: str) -> dict[str, Any] | None:
+        timestamp = utc_now()
+        for row in reversed(self._list_records("export_package", client_id=client_id)):
+            record = row["payload"]
+            package = record.get("package") or {}
+            if package.get("output_filename") != output_filename:
+                continue
+            updated = mark_export_package_downloaded(record, downloaded_at=timestamp)
+            return self._upsert_record(client_id, "export_package", str(row["record_key"]), updated)
+        return None
 
     def get_workspace(self, client_id: str) -> dict[str, Any]:
         return {

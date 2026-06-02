@@ -82,12 +82,15 @@ def export_candidates_from_workspace(workspace: dict[str, Any]) -> list[ExportCa
         entry = _invoice_entry_from_result(result, document_ref=document_ref)
         if entry is None:
             continue
+        review_risks = tuple(str(flag) for flag in result.get("review_reason_codes") or [] if str(flag).strip())
+        if result.get("accountant_export_override") is True:
+            review_risks = ()
         candidates.append(
             ExportCandidate(
                 document_ref=document_ref,
                 export_status=str(document.get("export_status") or result.get("export_status") or "review_required"),
                 journal_entry=entry,
-                risk_flags=tuple(str(flag) for flag in result.get("review_reason_codes") or [] if str(flag).strip()),
+                risk_flags=review_risks,
             )
         )
     return candidates

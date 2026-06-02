@@ -746,6 +746,7 @@ def download_export_package(client_id: str, file_name: str) -> FileResponse:
     path = DEFAULT_EXPORT_PATH / client_id / safe_name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="export file not found")
+    get_workflow_store().mark_export_package_downloaded(client_id=client_id, output_filename=safe_name)
     return FileResponse(
         path,
         filename=safe_name,

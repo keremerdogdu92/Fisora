@@ -47,6 +47,11 @@ type InvoiceRow = {
   counterpartyMatchCode: string;
   counterpartyMatchConfidence: number;
   counterpartyMatchReason: string;
+  accountantDecisionAction?: string;
+  accountantDecisionReason?: string;
+  accountantReviewedAt?: string;
+  accountantReviewedBy?: string;
+  accountantExportOverride?: boolean;
   draftLines: DraftLine[];
 };
 
@@ -90,11 +95,24 @@ type UploadItem = {
   deletedAt?: string;
 };
 
+type ExportPackageItem = {
+  id: string;
+  exportType: string;
+  entryCount: number;
+  excludedCount: number;
+  outputFilename: string;
+  downloadUrl: string;
+  downloadedAt: string;
+  downloadCount: number;
+  createdAt: string;
+};
+
 type ReviewData = {
   generatedFrom: string;
   clientId?: string;
   clientName?: string;
   uploadQueue?: UploadItem[];
+  exportPackages?: ExportPackageItem[];
   summary: {
     chartRunCount: number;
     invoiceRowCount: number;
@@ -142,6 +160,22 @@ type WorkspaceProcessingJob = {
   updated_at?: string;
 };
 
+type WorkspaceExportPackage = {
+  id?: string;
+  client_id?: string;
+  package?: {
+    export_type?: string;
+    entry_count?: number;
+    excluded_document_refs?: string[];
+    output_filename?: string;
+    download_url?: string;
+    downloaded_at?: string;
+    download_count?: number;
+  };
+  created_at?: string;
+  updated_at?: string;
+};
+
 type WorkspaceSnapshot = {
   client?: {
     client_id?: string;
@@ -156,6 +190,7 @@ type WorkspaceSnapshot = {
   uploaded_documents?: WorkspaceUploadedDocument[];
   documents?: WorkspaceDocument[];
   processing_jobs?: WorkspaceProcessingJob[];
+  export_packages?: WorkspaceExportPackage[];
 };
 
 type PortalMode = "client" | "accountant";
@@ -272,6 +307,7 @@ function rowKey(row: InvoiceRow) {
 }
 
 function exportGateReason(row: InvoiceRow) {
+  if (row.accountantExportOverride) return "Musavir onayi ile export paketine alinabilir.";
   if (!row.isBalanced) return "Fis dengeli degil.";
   if (!row.counterpartyMatchCode || row.counterpartyMatchReason === "not_found") return "Cari eslesmesi net degil.";
   if (row.reviewReasonCodes.length) return row.reviewReasonCodes.join(", ");
@@ -405,6 +441,11 @@ function blankInvoiceRow(document: WorkspaceDocument): InvoiceRow {
     counterpartyMatchCode: textValue(result, "counterpartyMatchCode", "counterparty_match_code"),
     counterpartyMatchConfidence: numberValue(result, "counterpartyMatchConfidence", "counterparty_match_confidence"),
     counterpartyMatchReason: textValue(result, "counterpartyMatchReason", "counterparty_match_reason"),
+    accountantDecisionAction: textValue(result, "accountantDecisionAction", "accountant_decision_action"),
+    accountantDecisionReason: textValue(result, "accountantDecisionReason", "accountant_decision_reason"),
+    accountantReviewedAt: textValue(result, "accountantReviewedAt", "accountant_reviewed_at"),
+    accountantReviewedBy: textValue(result, "accountantReviewedBy", "accountant_reviewed_by"),
+    accountantExportOverride: boolValue(result, "accountantExportOverride", "accountant_export_override"),
     draftLines: draftLineValue(result),
   };
 }
@@ -420,6 +461,7 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
     clientId,
     clientName,
     uploadQueue: uploadedDocumentsToQueue(snapshot.uploaded_documents ?? [], snapshot.processing_jobs ?? [], clientName),
+    exportPackages: exportPackagesFromWorkspace(snapshot.export_packages ?? [], fallback?.exportPackages ?? []),
     summary: {
       chartRunCount: snapshot.chart_accounts ? 1 : (fallback?.summary.chartRunCount ?? 0),
       invoiceRowCount: invoiceRows.length,
@@ -447,6 +489,29 @@ function workspaceToReviewData(snapshot: WorkspaceSnapshot, fallback?: ReviewDat
       : (fallback?.chartRuns ?? []),
     invoiceRows,
   };
+}
+
+function exportPackagesFromWorkspace(
+  packages: WorkspaceExportPackage[],
+  fallback: ExportPackageItem[],
+): ExportPackageItem[] {
+  if (!packages.length) return fallback;
+  return packages
+    .map((record) => {
+      const packagePayload = record.package ?? {};
+      return {
+        id: record.id ?? packagePayload.output_filename ?? record.created_at ?? "export-package",
+        exportType: packagePayload.export_type ?? "zirve_universal_csv",
+        entryCount: packagePayload.entry_count ?? 0,
+        excludedCount: packagePayload.excluded_document_refs?.length ?? 0,
+        outputFilename: packagePayload.output_filename ?? "",
+        downloadUrl: packagePayload.download_url ?? "",
+        downloadedAt: packagePayload.downloaded_at ?? "",
+        downloadCount: packagePayload.download_count ?? 0,
+        createdAt: record.created_at ?? record.updated_at ?? "",
+      };
+    })
+    .reverse();
 }
 
 function uploadedDocumentsToQueue(
@@ -561,6 +626,9 @@ export default function Home() {
 
   const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
   const clientId = data.clientId ?? "demo-isitme-merkezi";
+  const latestExportPackage = data.exportPackages?.[0];
+  const activeExportDownloadUrl =
+    exportPackageDownloadUrl || (latestExportPackage?.downloadUrl ? `${API_BASE_URL}${latestExportPackage.downloadUrl}` : "");
 
   useEffect(() => {
     setCorrectionDraft({ correctedAccountCode: "", correctedCounterpartyCode: "", reason: "" });
@@ -616,6 +684,7 @@ export default function Home() {
           automation_candidate?: boolean;
         };
       };
+      await refreshWorkspaceFromApi(clientId);
       setDecisionStatus(saved.learning_event?.automation_candidate ? "Karar kaydedildi, otomasyon adayi." : "Karar kaydedildi.");
     } catch {
       setDecisionStatus("API yazilamadi; karar bu ekranda lokal tutuldu.");
@@ -781,9 +850,10 @@ export default function Home() {
           clientName={clientName}
           correctionDraft={correctionDraft}
           createExportPackage={createExportPackage}
-          exportPackageDownloadUrl={exportPackageDownloadUrl}
+          exportPackageDownloadUrl={activeExportDownloadUrl}
           exportPackageStatus={exportPackageStatus}
           exportReadyCount={exportReadyCount}
+          latestExportPackage={latestExportPackage}
           reviewQueueCount={reviewQueueCount}
           selectedInvoice={selectedInvoice}
           decisionStatus={decisionStatus}
@@ -890,6 +960,7 @@ function AccountantReviewView({
   decisionStatus,
   exportPackageStatus,
   exportReadyCount,
+  latestExportPackage,
   reviewQueueCount,
   selectedInvoice,
   setActiveChart,
@@ -911,6 +982,7 @@ function AccountantReviewView({
   decisionStatus: string;
   exportPackageStatus: string;
   exportReadyCount: number;
+  latestExportPackage?: ExportPackageItem;
   reviewQueueCount: number;
   selectedInvoice?: InvoiceRow;
   setActiveChart: (value: string) => void;
@@ -945,6 +1017,17 @@ function AccountantReviewView({
               <a className="download-link" href={exportPackageDownloadUrl}>
                 CSV indir
               </a>
+            ) : null}
+            {latestExportPackage ? (
+              <span>
+                Son paket: {latestExportPackage.entryCount} fis, {latestExportPackage.excludedCount} disarida
+              </span>
+            ) : null}
+            {latestExportPackage?.downloadedAt ? (
+              <span>
+                Indirildi: {formatDateText(latestExportPackage.downloadedAt)}
+                {latestExportPackage.downloadCount > 1 ? ` (${latestExportPackage.downloadCount} kez)` : ""}
+              </span>
             ) : null}
           </div>
           <div className="tabbar vertical" role="tablist" aria-label="Belge filtreleri">
@@ -1089,9 +1172,14 @@ function JournalReviewPanel({
             <Info label="Cari eslesme" value={`${invoice.counterpartyMatchCode || "-"} (${invoice.counterpartyMatchConfidence || 0})`} />
             <Info label="AI sinifi" value={formatAiStatus(invoice)} />
             <Info label="Ogrenme" value={invoice.learningRuleApplied ? invoice.learningRuleScope || "Uygulandi" : "Yok"} />
+            <Info
+              label="Musavir onayi"
+              value={invoice.accountantDecisionAction ? `${invoice.accountantDecisionAction} / ${formatDateText(invoice.accountantReviewedAt)}` : "Yok"}
+            />
           </div>
 
           {invoice.learningRuleReason ? <p className="reason">{invoice.learningRuleReason}</p> : null}
+          {invoice.accountantDecisionReason ? <p className="reason">{invoice.accountantDecisionReason}</p> : null}
 
           <div className="correction-form" aria-label="Duzeltme alanlari">
             <label>

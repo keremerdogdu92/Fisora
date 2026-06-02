@@ -8,6 +8,10 @@ from typing import Any
 from uuid import uuid4
 
 from app.domain.document_uploads import retention_decision
+from app.domain.workspace_review_updates import (
+    apply_review_decision_to_document,
+    mark_export_package_downloaded,
+)
 
 
 def utc_now() -> str:
@@ -212,12 +216,13 @@ class JsonWorkflowStore:
         learning_event: dict[str, Any],
     ) -> dict[str, Any]:
         data = self._read()
+        timestamp = utc_now()
         record = {
             "id": str(uuid4()),
             "client_id": client_id,
             "decision": decision,
             "learning_event": learning_event,
-            "created_at": utc_now(),
+            "created_at": timestamp,
         }
         data["review_decisions"].append(record)
         data["learning_events"].append(
@@ -228,6 +233,17 @@ class JsonWorkflowStore:
                 "created_at": record["created_at"],
             }
         )
+        document_ref = str(decision.get("document_ref") or learning_event.get("document_ref") or "")
+        document_key = self._document_key(client_id, document_ref)
+        if document_key in data["documents"]:
+            corrected_document = apply_review_decision_to_document(
+                data["documents"][document_key],
+                decision=decision,
+                learning_event=learning_event,
+                reviewed_at=timestamp,
+            )
+            data["documents"][document_key] = corrected_document
+            record["corrected_document"] = deepcopy(corrected_document)
         self._write(data)
         return deepcopy(record)
 
@@ -242,6 +258,19 @@ class JsonWorkflowStore:
         data["export_packages"].append(record)
         self._write(data)
         return deepcopy(record)
+
+    def mark_export_package_downloaded(self, *, client_id: str, output_filename: str) -> dict[str, Any] | None:
+        data = self._read()
+        timestamp = utc_now()
+        for record in reversed(data["export_packages"]):
+            package = record.get("package") or {}
+            if record.get("client_id") != client_id or package.get("output_filename") != output_filename:
+                continue
+            updated = mark_export_package_downloaded(record, downloaded_at=timestamp)
+            record.update(updated)
+            self._write(data)
+            return deepcopy(record)
+        return None
 
     def get_workspace(self, client_id: str) -> dict[str, Any]:
         data = self._read()

@@ -35,21 +35,25 @@ Tamamlanan ana dilimler:
 - AI batch benchmark altyapisi: statik kural ve replay provider payload'lari uzerinden kategori dogruluk/maliyet sinyali hesaplar.
 - Export CSV dosya uretimi: workspace export package indirilebilir CSV dosyasina yazilir.
 - Review duzeltmesini UI taslagina uygulama: girilen hesap/cari kodlari secili fis satirinda aninda gorunur.
+- Review duzeltmesini kalici taslaga uygulama: mustavir onayi workspace refresh sonrasi korunur.
+- Export indirme izi: CSV indirildiginde `downloaded_at` ve `download_count` saklanir.
+- Docker compose config kontrolu: production compose dosyasi parse edildi; daemon/container smoke testi Docker Desktop izinleri duzelince kosulacak.
 
 ## Siradaki 5 Adim
 
-1. PostgreSQL saha smoke testi calistirma
+1. Docker daemon ve PostgreSQL saha smoke testi
    - `backend/db/schema.sql` gercek Postgres'e uygulanir.
    - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
    - Compose config ve container start senaryosu sunucuda dogrulanir.
 
-2. Review duzeltmelerini taslaga uygulama
-   - Duzeltme sonraki benzer belgeye learning rule olarak uygulanir.
-   - Kalici duzeltme sonraki workspace refresh sonrasi taslaga otomatik uygulanir.
-
-3. Export dosya adapter'i genisletme
+2. Export dosya adapter'i genisletme
    - Zirve saha testinde calisan kolon/format sabitlenir.
-   - CSV dosyasi mustavir tarafindan indirildikten sonra downloaded_at izi tutulur.
+   - CSV dosyasi mustavir tarafindan indirildikten sonra audit izi saha raporuna baglanir.
+
+3. Portal auth ve yetki iskeleti
+   - Serbest uyelik yok.
+   - Kullanici sadece atanmis mukellefe belge yukler.
+   - Musavir birden cok mukellef gorur.
 
 4. Direct object storage hazirligi
    - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.
@@ -83,10 +87,10 @@ flowchart TD
 ## Kapanmamis Ana Basliklar
 
 - Auth ve yetki: Serbest uyelik yok; kullanici bastan mukellefe bagli olmali.
-- PostgreSQL saha testi: adapter yazildi, gercek Postgres kosusu henuz yapilmadi.
+- PostgreSQL saha testi: adapter yazildi, Docker daemon izni acilinca gercek Postgres kosusu yapilacak.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
 - Banka/POS akisi: satir parse ve dengeli fis taslagi var; export gate ve cari eslestirme genisleyecek.
-- Mustavir calisma masasi: karar ve duzeltme API baglantisi var; duzeltmenin fis taslagina aninda uygulanmasi genisleyecek.
+- Mustavir calisma masasi: karar ve duzeltme API baglantisi var; duzeltme artik kalici taslak ve learning izine uygulanir.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.
 - Maliyet limiti: Belge basina AI cagrisi, token/karakter limiti ve aylik cap.

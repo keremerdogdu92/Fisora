@@ -128,6 +128,27 @@ Saklama:
 8. Mükellef upload -> worker -> review -> export akisi test edilir.
 9. Gercek Zirve export saha testi yapilir.
 
+## Yerel Docker Kontrol Notu
+
+2026-06-02 yerel kontrolde:
+
+- `docker --version`: Docker CLI kurulu.
+- `docker compose version`: Docker Compose kurulu.
+- `docker compose --env-file deploy/production.env.example -f docker-compose.production.yml config`: compose dosyasi
+  parse edildi.
+- `docker info`: Docker Desktop Service durdugu ve `docker_engine` pipe erisimi reddedildigi icin container
+  baslatma testi yapilamadi.
+- `C:\Users\kerem\.docker` altinda izin hatasi gorundu; Docker Desktop acildiktan veya kullanici izinleri
+  duzeltildikten sonra `docker info` tekrar denenmeli.
+
+Container smoke test icin hedef komut:
+
+```powershell
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml up -d postgres redis
+python backend/scripts/run_postgres_smoke.py
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml down
+```
+
 ## Repo Icindeki Ilk Iskelet
 
 - `docker-compose.production.yml`

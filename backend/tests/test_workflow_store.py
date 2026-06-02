@@ -12,6 +12,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.persistence.workflow_store import JsonWorkflowStore
+from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
@@ -165,6 +166,89 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(job["status"], "queued")
         self.assertEqual(claimed["status"], "processing")
         self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
+
+    def test_json_store_applies_review_correction_to_stored_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="urban-care.pdf",
+                result={
+                    "file_name": "urban-care.pdf",
+                    "simulated_status": "review_required",
+                    "export_status": "review_required",
+                    "review_reason_codes": ["business_out_of_scope"],
+                    "risk_flags": [],
+                    "is_balanced": True,
+                    "selected_expense_account": "770.01",
+                    "selected_supplier_account": "320.01.001",
+                    "counterparty_match_code": "320.01.001",
+                    "product_category": "kisisel_bakim",
+                    "draft_lines": [
+                        {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.01.001", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+
+            decision = store.save_review_decision(
+                client_id="client-1",
+                decision={
+                    "document_ref": "urban-care.pdf",
+                    "action": "approve_with_changes",
+                    "reviewer": "mali-musavir",
+                    "corrected_account_code": "770.04.001",
+                    "corrected_counterparty_code": "320.01.999",
+                    "reason": "Pilot duzeltme",
+                },
+                learning_event={
+                    "document_ref": "urban-care.pdf",
+                    "scope": "client_rule",
+                    "action": "approve_with_changes",
+                    "category": "kisisel_bakim",
+                    "corrected_account_code": "770.04.001",
+                    "corrected_counterparty_code": "320.01.999",
+                    "reason": "Pilot duzeltme",
+                    "automation_candidate": False,
+                },
+            )
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            export_build = build_workspace_export_package(workspace)
+
+        self.assertIn("corrected_document", decision)
+        self.assertEqual(result["selected_expense_account"], "770.04.001")
+        self.assertEqual(result["selected_supplier_account"], "320.01.999")
+        self.assertEqual(result["counterparty_match_code"], "320.01.999")
+        self.assertEqual(result["draft_lines"][0]["account_code"], "770.04.001")
+        self.assertEqual(result["draft_lines"][1]["account_code"], "320.01.999")
+        self.assertTrue(result["learning_rule_applied"])
+        self.assertTrue(result["accountant_export_override"])
+        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(len(export_build.package.entries), 1)
+
+    def test_json_store_marks_export_package_downloaded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_export_package(
+                client_id="client-1",
+                package={
+                    "export_type": "zirve_universal_csv",
+                    "entry_count": 1,
+                    "output_filename": "client-1-zirve.csv",
+                },
+            )
+
+            downloaded = store.mark_export_package_downloaded(
+                client_id="client-1",
+                output_filename="client-1-zirve.csv",
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertIsNotNone(downloaded)
+        self.assertEqual(downloaded["package"]["download_count"], 1)
+        self.assertTrue(downloaded["package"]["downloaded_at"])
+        self.assertEqual(workspace["export_packages"][0]["package"]["download_count"], 1)
 
     def test_processing_worker_creates_review_required_simulation_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

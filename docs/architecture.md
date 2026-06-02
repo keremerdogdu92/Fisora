@@ -69,6 +69,10 @@ prototip icin opsiyonel tutulabilir.
   politikasi veya mukellef ozel kural olarak saklar.
 - Export package: yalnizca export'a uygun kayitlardan Zirve aktarim dosyasi
   uretir.
+- Export workspace builder: fatura ve statement sonucundaki dengeli, risksiz
+  entry'leri paketler; riskli satirlari `excluded_document_refs` olarak tutar.
+- AI benchmark: dis provider baglanmadan once statik kural ve replay payload
+  sonuclarini ayni schema ile karsilastirir.
 
 ## Faz 0 Yon
 
@@ -150,6 +154,8 @@ AI API'ye uygun isler:
 - Belirsiz fatura kalemine kisa uygunluk gerekcesi yazma.
 - Tedarikci/aciklama metnini normalize etme.
 - Banka aciklamasini genel kategoriye ayirma.
+- Pilot batch benchmark icin provider cevabini kategori/guven/gerekce JSON
+  schema'siyla olcmek.
 
 AI API'ye uygun olmayan isler:
 

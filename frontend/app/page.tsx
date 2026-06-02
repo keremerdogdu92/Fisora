@@ -168,6 +168,12 @@ type LocalDecision = {
   learningScope: string;
 };
 
+type CorrectionDraft = {
+  correctedAccountCode: string;
+  correctedCounterpartyCode: string;
+  reason: string;
+};
+
 const statusLabels: Record<string, string> = {
   auto_ready: "Otomatik hazir",
   export_ready: "Export hazir",
@@ -463,6 +469,12 @@ export default function Home() {
   const [uploadItems, setUploadItems] = useState<UploadItem[]>((fallbackReviewData.uploadQueue ?? []) as UploadItem[]);
   const [decisionLog, setDecisionLog] = useState<Record<string, LocalDecision>>({});
   const [decisionStatus, setDecisionStatus] = useState("");
+  const [correctionDraft, setCorrectionDraft] = useState<CorrectionDraft>({
+    correctedAccountCode: "",
+    correctedCounterpartyCode: "",
+    reason: "",
+  });
+  const [exportPackageStatus, setExportPackageStatus] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -533,6 +545,11 @@ export default function Home() {
   const activeDecision = selectedInvoice ? decisionLog[rowKey(selectedInvoice)] : undefined;
   const clientId = data.clientId ?? "demo-isitme-merkezi";
 
+  useEffect(() => {
+    setCorrectionDraft({ correctedAccountCode: "", correctedCounterpartyCode: "", reason: "" });
+    setDecisionStatus("");
+  }, [selectedInvoice ? rowKey(selectedInvoice) : ""]);
+
   async function refreshWorkspaceFromApi(targetClientId = clientId) {
     const response = await fetch(`${API_BASE_URL}/phase0/store/workspace/${encodeURIComponent(targetClientId)}`, {
       cache: "no-store",
@@ -567,8 +584,10 @@ export default function Home() {
             document_ref: selectedInvoice.documentRef || selectedInvoice.fileName,
             action,
             reviewer: "mali-musavir",
+            corrected_account_code: correctionDraft.correctedAccountCode.trim(),
+            corrected_counterparty_code: correctionDraft.correctedCounterpartyCode.trim(),
             category: selectedInvoice.productCategory || "",
-            reason: exportGateReason(selectedInvoice),
+            reason: correctionDraft.reason.trim() || exportGateReason(selectedInvoice),
             apply_to_similar: action === "approve" || action === "approve_with_changes",
             prior_consistent_approval_count: action === "approve" ? 2 : 0,
           },
@@ -583,6 +602,33 @@ export default function Home() {
       setDecisionStatus(saved.learning_event?.automation_candidate ? "Karar kaydedildi, otomasyon adayi." : "Karar kaydedildi.");
     } catch {
       setDecisionStatus("API yazilamadi; karar bu ekranda lokal tutuldu.");
+    }
+  }
+
+  async function createExportPackage() {
+    setExportPackageStatus("Export paketi olusturuluyor...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/phase0/store/export-package/from-workspace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: clientId,
+          export_type: "zirve_universal_csv",
+        }),
+      });
+      if (!response.ok) throw new Error("export package failed");
+      const saved = (await response.json()) as {
+        package?: {
+          entry_count?: number;
+          excluded_document_refs?: string[];
+        };
+      };
+      const entryCount = saved.package?.entry_count ?? 0;
+      const excludedCount = saved.package?.excluded_document_refs?.length ?? 0;
+      setExportPackageStatus(`${entryCount} fis export paketine alindi, ${excludedCount} kayit disarida kaldi.`);
+      await refreshWorkspaceFromApi(clientId);
+    } catch {
+      setExportPackageStatus("Export paketi olusturulamadi.");
     }
   }
 
@@ -711,11 +757,15 @@ export default function Home() {
           activeDecision={activeDecision}
           chartRuns={data.chartRuns}
           clientName={clientName}
+          correctionDraft={correctionDraft}
+          createExportPackage={createExportPackage}
+          exportPackageStatus={exportPackageStatus}
           exportReadyCount={exportReadyCount}
           reviewQueueCount={reviewQueueCount}
           selectedInvoice={selectedInvoice}
           decisionStatus={decisionStatus}
           setActiveChart={setActiveChart}
+          setCorrectionDraft={setCorrectionDraft}
           setDecision={setDecision}
           setSelectedKey={setSelectedKey}
           setViewMode={setViewMode}
@@ -811,11 +861,15 @@ function AccountantReviewView({
   activeDecision,
   chartRuns,
   clientName,
+  correctionDraft,
+  createExportPackage,
   decisionStatus,
+  exportPackageStatus,
   exportReadyCount,
   reviewQueueCount,
   selectedInvoice,
   setActiveChart,
+  setCorrectionDraft,
   setDecision,
   setSelectedKey,
   setViewMode,
@@ -827,11 +881,15 @@ function AccountantReviewView({
   activeDecision?: LocalDecision;
   chartRuns: ChartRun[];
   clientName: string;
+  correctionDraft: CorrectionDraft;
+  createExportPackage: () => Promise<void>;
   decisionStatus: string;
+  exportPackageStatus: string;
   exportReadyCount: number;
   reviewQueueCount: number;
   selectedInvoice?: InvoiceRow;
   setActiveChart: (value: string) => void;
+  setCorrectionDraft: (value: CorrectionDraft) => void;
   setDecision: (action: DecisionAction) => void;
   setSelectedKey: (value: string) => void;
   setViewMode: (value: ViewMode) => void;
@@ -854,6 +912,10 @@ function AccountantReviewView({
           <div className="client-card">
             <strong>{clientName}</strong>
             <span>VKN/TCKN eslesmis, hesap plani yuklu</span>
+            <button className="export-button" onClick={createExportPackage} type="button">
+              Export paketi olustur
+            </button>
+            {exportPackageStatus ? <span>{exportPackageStatus}</span> : null}
           </div>
           <div className="tabbar vertical" role="tablist" aria-label="Belge filtreleri">
             {(Object.keys(viewLabels) as ViewMode[]).map((mode) => (
@@ -911,8 +973,10 @@ function AccountantReviewView({
         <InvoicePreview clientName={clientName} invoice={selectedInvoice} />
         <JournalReviewPanel
           activeDecision={activeDecision}
+          correctionDraft={correctionDraft}
           decisionStatus={decisionStatus}
           invoice={selectedInvoice}
+          setCorrectionDraft={setCorrectionDraft}
           setDecision={setDecision}
         />
       </section>
@@ -964,13 +1028,17 @@ function InvoicePreview({ clientName, invoice }: { clientName: string; invoice?:
 
 function JournalReviewPanel({
   activeDecision,
+  correctionDraft,
   decisionStatus,
   invoice,
+  setCorrectionDraft,
   setDecision,
 }: {
   activeDecision?: LocalDecision;
+  correctionDraft: CorrectionDraft;
   decisionStatus: string;
   invoice?: InvoiceRow;
+  setCorrectionDraft: (value: CorrectionDraft) => void;
   setDecision: (action: DecisionAction) => void;
 }) {
   return (
@@ -993,6 +1061,38 @@ function JournalReviewPanel({
           </div>
 
           {invoice.learningRuleReason ? <p className="reason">{invoice.learningRuleReason}</p> : null}
+
+          <div className="correction-form" aria-label="Duzeltme alanlari">
+            <label>
+              <span>Gider hesabi</span>
+              <input
+                onChange={(event) =>
+                  setCorrectionDraft({ ...correctionDraft, correctedAccountCode: event.target.value })
+                }
+                placeholder={invoice.selectedExpenseAccount || "770.01"}
+                value={correctionDraft.correctedAccountCode}
+              />
+            </label>
+            <label>
+              <span>Cari hesabi</span>
+              <input
+                onChange={(event) =>
+                  setCorrectionDraft({ ...correctionDraft, correctedCounterpartyCode: event.target.value })
+                }
+                placeholder={invoice.selectedSupplierAccount || invoice.counterpartyMatchCode || "320.01"}
+                value={correctionDraft.correctedCounterpartyCode}
+              />
+            </label>
+            <label className="wide">
+              <span>Gerekce</span>
+              <textarea
+                onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
+                placeholder="Musteriye ozel hesap/cari duzeltmesi veya kontrol gerekcesi"
+                rows={3}
+                value={correctionDraft.reason}
+              />
+            </label>
+          </div>
 
           <div className="draft-lines">
             {invoice.draftLines.length ? (

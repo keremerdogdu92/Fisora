@@ -8,6 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
@@ -19,6 +20,7 @@ from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
@@ -148,6 +150,20 @@ class ProductClassificationPayload(BaseModel):
     ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
 
 
+class AiBenchmarkCasePayload(BaseModel):
+    case_id: str
+    raw_line: str
+    supplier_hint: str = ""
+    expected_category: str = ""
+
+
+class AiBatchBenchmarkPayload(BaseModel):
+    cases: list[AiBenchmarkCasePayload] = Field(default_factory=list)
+    ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
+    provider_name: str = "static_rules"
+    provider_payloads: list[dict[str, object]] = Field(default_factory=list)
+
+
 class ReviewDecisionPayload(BaseModel):
     document_ref: str
     action: ReviewAction
@@ -219,6 +235,11 @@ class StoredReviewDecisionPayload(BaseModel):
 class StoredExportPackagePayload(BaseModel):
     client_id: str
     package: ExportPackagePayload
+
+
+class WorkspaceExportPackagePayload(BaseModel):
+    client_id: str
+    export_type: str = "zirve_universal_csv"
 
 
 def get_workflow_store():
@@ -515,6 +536,34 @@ def product_classification(payload: ProductClassificationPayload) -> dict[str, o
     }
 
 
+@router.post("/classification/batch-benchmark")
+def classification_batch_benchmark(payload: AiBatchBenchmarkPayload) -> dict[str, object]:
+    summary = run_ai_batch_benchmark(
+        tuple(
+            AiBenchmarkCase(
+                case_id=case.case_id,
+                raw_line=case.raw_line,
+                supplier_hint=case.supplier_hint,
+                expected_category=case.expected_category,
+            )
+            for case in payload.cases
+        ),
+        policy=_ai_policy(payload.ai_policy),
+        provider_payloads=payload.provider_payloads,
+        provider_name=payload.provider_name,
+    )
+    return {
+        "case_count": summary.case_count,
+        "ai_used_count": summary.ai_used_count,
+        "matched_count": summary.matched_count,
+        "evaluated_count": summary.evaluated_count,
+        "accuracy_percent": summary.accuracy_percent,
+        "estimated_input_chars": summary.estimated_input_chars,
+        "provider": summary.provider,
+        "results": [asdict(result) for result in summary.results],
+    }
+
+
 @router.post("/simulation/invoice")
 def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
     client = _client_profile(payload.client) if payload.client else None
@@ -656,6 +705,23 @@ def store_export_package(payload: StoredExportPackagePayload) -> dict[str, objec
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     package = export_package(payload.package)
     return get_workflow_store().save_export_package(client_id=payload.client_id, package=package)
+
+
+@router.post("/store/export-package/from-workspace")
+def store_export_package_from_workspace(payload: WorkspaceExportPackagePayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required for persistence")
+    store = get_workflow_store()
+    workspace = store.get_workspace(payload.client_id)
+    build = build_workspace_export_package(workspace, export_type=payload.export_type)
+    package_payload = {
+        "export_type": build.package.export_type,
+        "candidate_count": build.candidate_count,
+        "entry_count": len(build.package.entries),
+        "excluded_document_refs": list(build.package.excluded_document_refs),
+        "entries": [_entry_payload(entry) for entry in build.package.entries],
+    }
+    return store.save_export_package(client_id=payload.client_id, package=package_payload)
 
 
 @router.get("/store/workspace/{client_id}")

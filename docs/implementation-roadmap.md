@@ -30,6 +30,9 @@ Tamamlanan ana dilimler:
 - PostgreSQL smoke test script'i: schema uygulanmis gercek database'de store ve worker akisini dener.
 - Multipart upload ilk surumu: portal dosyalari base64 yerine `FormData` ile API'ye gonderir.
 - Banka/POS statement fis taslagi: parse edilen satirlardan dengeli banka fis entry payload'i uretir.
+- Review duzeltme formlari: mustavir hesap/cari/gerekce duzeltmesini kararla birlikte API'ye yazar.
+- Workspace export package: store'daki guvenli ve dengeli fatura/statement entry'lerinden export paketi uretir.
+- AI batch benchmark altyapisi: statik kural ve replay provider payload'lari uzerinden kategori dogruluk/maliyet sinyali hesaplar.
 
 ## Siradaki 5 Adim
 
@@ -38,13 +41,13 @@ Tamamlanan ana dilimler:
    - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
    - Compose config ve container start senaryosu sunucuda dogrulanir.
 
-2. Review duzeltme formlari
-   - Musavir sadece karar degil, hesap/cari/tutar duzeltmesini de UI'dan girebilir.
+2. Review duzeltmelerini taslaga uygulama
+   - Musavirin girdigi hesap/cari duzeltmesi mevcut fis taslagi uzerinde aninda gorunur.
    - Duzeltme sonraki benzer belgeye learning rule olarak uygulanir.
 
-3. Export package'i workspace sonucundan otomatik uretme
-   - Review veya export_ready kayitlar secilerek package endpointine tasinir.
-   - Riskli statement/fatura satirlari export paketine girmez.
+3. Export dosya adapter'i genisletme
+   - Workspace export package sonucundan gercek CSV dosyasi uretilir.
+   - Zirve saha testinde calisan kolon/format sabitlenir.
 
 4. Direct object storage hazirligi
    - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.
@@ -81,7 +84,7 @@ flowchart TD
 - PostgreSQL saha testi: adapter yazildi, gercek Postgres kosusu henuz yapilmadi.
 - Dosya saklama: PDF/XML/ekstre ve turetilmis JSON/CSV ayrimi, retention politikasi.
 - Banka/POS akisi: satir parse ve dengeli fis taslagi var; export gate ve cari eslestirme genisleyecek.
-- Mustavir calisma masasi: karar API baglantisi var; duzeltme formlari genisleyecek.
+- Mustavir calisma masasi: karar ve duzeltme API baglantisi var; duzeltmenin fis taslagina aninda uygulanmasi genisleyecek.
 - Zirve format kesinligi: Gercek import dosyasiyla saha testi sart.
 - AI provider secimi: OpenAI/Gemini/Manus kararini pilot batch benchmark belirlemeli.
 - Maliyet limiti: Belge basina AI cagrisi, token/karakter limiti ve aylik cap.

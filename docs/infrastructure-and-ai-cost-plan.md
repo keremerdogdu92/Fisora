@@ -69,6 +69,14 @@ Ilk hedef aylik AI maliyetini dusuk tutmaktir:
 4. API guveni dusukse sonuc mustavir review'a duser.
 5. Her mukellef/ofis icin aylik AI cagrisi ve karakter/token cap'i tutulur.
 
+Benchmark altyapisi:
+
+- `POST /phase0/classification/batch-benchmark` statik kural ve provider
+  payload'larini ayni kategori/guven/gerekce schema'siyla karsilastirir.
+- Ilk benchmark dis API'ye cikmadan replay payload ile yapilir.
+- OpenAI/Gemini/Manus adaylari baglandiginda ayni case seti uzerinde dogruluk,
+  AI kullanildi mi ve tahmini input karakteri raporlanir.
+
 ## Sunucu Secimi
 
 Ilk canli deneme icin pratik karar:

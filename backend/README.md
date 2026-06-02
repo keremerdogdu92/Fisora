@@ -74,6 +74,7 @@ Bu store su endpointlerin davranisini dogrular:
 - `POST /phase0/store/simulation`
 - `POST /phase0/store/review-decision`
 - `POST /phase0/store/export-package`
+- `POST /phase0/store/export-package/from-workspace`
 - `GET /phase0/store/workspace/{client_id}`
 
 `POST /phase0/store/document-upload` ilk MVP sozlesmesidir. Multipart upload
@@ -137,8 +138,18 @@ Urun/kalem siniflandirma akisi maliyet kontrollu calisir:
 Ilk yerel endpoint:
 
 - `POST /phase0/classification/product`
+- `POST /phase0/classification/batch-benchmark`
 
 Simulation endpointleri `aiClassificationUsed`, `aiClassificationProvider`,
 `aiClassificationSkippedReason`, `aiClassificationReason` ve
 `aiEstimatedInputChars` alanlarini dondurur. Bu alanlar muhasebe kararini tek
 basina vermez; sadece siniflandirma izini ve maliyet sinyalini tasir.
+
+`classification/batch-benchmark` dis API'ye cikmadan statik kurallari veya
+replay provider payload'larini ayni schema ile kiyaslar. Gercek OpenAI, Gemini
+veya Manus kosulari baglandiginda ayni benchmark yapisi belge basina maliyet ve
+dogruluk karsilastirmasi icin kullanilacak.
+
+`store/export-package/from-workspace`, workspace'teki fatura ve statement
+sonuclarindan yalnizca dengeli ve risksiz entry'leri export paketine alir.
+Review gerekli veya risk bayrakli kayitlar `excluded_document_refs` icinde kalir.

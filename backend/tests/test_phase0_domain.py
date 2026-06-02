@@ -17,6 +17,7 @@ from app.domain.chart_accounts import (
     parse_chart_accounts,
     validate_vat_accounts,
 )
+from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
 from app.domain.ai_classification import AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
 from app.domain.business_relevance import (
     ClientProfile,
@@ -46,6 +47,7 @@ from app.domain.journal_entries import (
 )
 from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.domain.workspace_exports import build_workspace_export_package
 
 
 class FakeProductProvider:
@@ -691,6 +693,88 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(len(package.entries), 1)
         self.assertEqual(package.entries[0].description, "Alis faturasi ready.pdf")
         self.assertEqual(package.excluded_document_refs, ("risky.pdf",))
+
+    def test_workspace_export_package_includes_only_ready_balanced_entries(self) -> None:
+        workspace = {
+            "documents": [
+                {
+                    "document_ref": "ready.pdf",
+                    "export_status": "export_ready",
+                    "result": {
+                        "file_name": "ready.pdf",
+                        "issue_date": "2026-05-01",
+                        "draft_entry_type": "purchase",
+                        "review_reason_codes": [],
+                        "risk_flags": [],
+                        "draft_lines": [
+                            {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                            {"account_code": "320.01", "description": "Satici", "debit": "0.00", "credit": "100.00"},
+                        ],
+                    },
+                },
+                {
+                    "document_ref": "statement.csv",
+                    "export_status": "review_required",
+                    "result": {
+                        "statement_entries": [
+                            {
+                                "entry_type": "bank_payment",
+                                "entry_date": "2026-05-02",
+                                "description": "GIB ODEME",
+                                "risk_flags": [],
+                                "lines": [
+                                    {"account_code": "360", "description": "tax_payment", "debit": "50.00", "credit": "0.00"},
+                                    {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "50.00"},
+                                ],
+                            },
+                            {
+                                "entry_type": "bank_collection",
+                                "entry_date": "2026-05-03",
+                                "description": "POS BLOKE",
+                                "risk_flags": ["pos_policy_review_required"],
+                                "lines": [
+                                    {"account_code": "102.01", "description": "Banka girisi", "debit": "80.00", "credit": "0.00"},
+                                    {"account_code": "108", "description": "pos_blocked", "debit": "0.00", "credit": "80.00"},
+                                ],
+                            },
+                        ]
+                    },
+                },
+            ]
+        }
+
+        build = build_workspace_export_package(workspace)
+
+        self.assertEqual(build.candidate_count, 3)
+        self.assertEqual(len(build.package.entries), 2)
+        self.assertEqual(build.package.excluded_document_refs, ("statement.csv#statement-2",))
+
+    def test_ai_batch_benchmark_scores_static_and_replay_provider_results(self) -> None:
+        static_summary = run_ai_batch_benchmark(
+            (
+                AiBenchmarkCase("1", "Rexton RLi 20", "Rexton", "isitme_cihazi"),
+                AiBenchmarkCase("2", "Urban Care sac bakim", "", "kisisel_bakim_kozmetik"),
+            )
+        )
+        provider_summary = run_ai_batch_benchmark(
+            (AiBenchmarkCase("3", "ZX Sonic Pro 9", "Medikal", "isitme_cihazi"),),
+            policy=AiClassificationPolicy(enabled=True),
+            provider_name="replay_openai",
+            provider_payloads=[
+                {
+                    "category": "isitme_cihazi",
+                    "confidence": 82,
+                    "reason": "Model isitme cihazi ailesine benziyor.",
+                    "evidence": ["benchmark"],
+                }
+            ],
+        )
+
+        self.assertEqual(static_summary.accuracy_percent, 100)
+        self.assertEqual(static_summary.ai_used_count, 0)
+        self.assertEqual(provider_summary.provider, "replay_openai")
+        self.assertEqual(provider_summary.ai_used_count, 1)
+        self.assertEqual(provider_summary.accuracy_percent, 100)
 
 
 if __name__ == "__main__":

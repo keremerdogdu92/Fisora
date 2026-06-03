@@ -47,6 +47,10 @@ type InvoiceRow = {
   counterpartyMatchCode: string;
   counterpartyMatchConfidence: number;
   counterpartyMatchReason: string;
+  processingMode: string;
+  draftDecisionSource: string;
+  deterministicChecks: string[];
+  exportGateReason: string;
   accountantDecisionAction?: string;
   accountantDecisionReason?: string;
   accountantReviewedAt?: string;
@@ -288,6 +292,12 @@ const exportStatusLabels: Record<string, string> = {
   rejected: "Reddedildi",
 };
 
+const processingModeLabels: Record<string, string> = {
+  conservative: "Conservative",
+  ai_assisted_draft: "AI destekli taslak",
+  controlled_automation: "Kontrollu otomasyon",
+};
+
 const viewLabels: Record<ViewMode, string> = {
   all: "Belgeler",
   review: "Review kuyrugu",
@@ -349,11 +359,16 @@ function formatExportStatus(value: string) {
   return exportStatusLabels[value] ?? (value || "-");
 }
 
+function formatProcessingMode(value: string) {
+  return processingModeLabels[value] ?? (value || "-");
+}
+
 function rowKey(row: InvoiceRow) {
   return `${row.chartFileName}:${row.documentRef || row.fileName}`;
 }
 
 function exportGateReason(row: InvoiceRow) {
+  if (row.exportGateReason) return row.exportGateReason;
   if (row.accountantExportOverride) return "Musavir onayi ile export paketine alinabilir.";
   if (!row.isBalanced) return "Fis dengeli degil.";
   if (!row.counterpartyMatchCode || row.counterpartyMatchReason === "not_found") return "Cari eslesmesi net degil.";
@@ -367,6 +382,17 @@ function exportGateReason(row: InvoiceRow) {
 function formatAiStatus(row: InvoiceRow) {
   if (row.aiClassificationUsed) return `AI: ${row.aiClassificationProvider || "provider"} kullanildi`;
   return `AI yok: ${row.aiClassificationSkippedReason || "statik akis"}`;
+}
+
+function aiDecisionReason(row: InvoiceRow) {
+  if (row.aiClassificationReason) return row.aiClassificationReason;
+  if (row.businessRelevanceReason) return row.businessRelevanceReason;
+  return "AI veya kural gerekcesi yok.";
+}
+
+function deterministicCheckSummary(row: InvoiceRow) {
+  if (row.deterministicChecks.length) return row.deterministicChecks.join(", ");
+  return row.isBalanced ? "balanced_entry" : "balanced_entry_missing";
 }
 
 function formatDateText(value?: string) {
@@ -517,6 +543,10 @@ function blankInvoiceRow(document: WorkspaceDocument): InvoiceRow {
     counterpartyMatchCode: textValue(result, "counterpartyMatchCode", "counterparty_match_code"),
     counterpartyMatchConfidence: numberValue(result, "counterpartyMatchConfidence", "counterparty_match_confidence"),
     counterpartyMatchReason: textValue(result, "counterpartyMatchReason", "counterparty_match_reason"),
+    processingMode: textValue(result, "processingMode", "processing_mode"),
+    draftDecisionSource: textValue(result, "draftDecisionSource", "draft_decision_source"),
+    deterministicChecks: listValue(result, "deterministicChecks", "deterministic_checks"),
+    exportGateReason: textValue(result, "exportGateReason", "export_gate_reason"),
     accountantDecisionAction: textValue(result, "accountantDecisionAction", "accountant_decision_action"),
     accountantDecisionReason: textValue(result, "accountantDecisionReason", "accountant_decision_reason"),
     accountantReviewedAt: textValue(result, "accountantReviewedAt", "accountant_reviewed_at"),
@@ -1380,8 +1410,23 @@ function InvoicePreview({ clientName, invoice }: { clientName: string; invoice?:
           <span>Kategori</span>
           <strong>{invoice.productCategory || "-"} ({invoice.productConfidence || 0})</strong>
         </div>
-        <p className="reason">{invoice.businessRelevanceReason || "Uygunluk gerekcesi yok."}</p>
-        <p className="gate-reason">{exportGateReason(invoice)}</p>
+        <div className="decision-breakdown" aria-label="Karar ayrimi">
+          <DecisionCard
+            label="AI/kural"
+            status={formatAiStatus(invoice)}
+            detail={aiDecisionReason(invoice)}
+          />
+          <DecisionCard
+            label="Deterministik"
+            status={invoice.isBalanced ? "Fis dengeli" : "Denge kontrolu gerekli"}
+            detail={deterministicCheckSummary(invoice)}
+          />
+          <DecisionCard
+            label="Export gate"
+            status={formatExportStatus(invoice.exportStatus)}
+            detail={exportGateReason(invoice)}
+          />
+        </div>
       </div>
     </section>
   );
@@ -1414,6 +1459,8 @@ function JournalReviewPanel({
       {invoice ? (
         <>
           <div className="detail-grid">
+            <Info label="Calisma modu" value={formatProcessingMode(invoice.processingMode)} />
+            <Info label="Karar kaynagi" value={invoice.draftDecisionSource || "-"} />
             <Info label="Gider hesabi" value={invoice.selectedExpenseAccount || "-"} />
             <Info label="KDV hesabi" value={invoice.selectedVatAccount || "-"} />
             <Info label="Cari hesabi" value={invoice.selectedSupplierAccount || "-"} />
@@ -1428,6 +1475,7 @@ function JournalReviewPanel({
 
           {invoice.learningRuleReason ? <p className="reason">{invoice.learningRuleReason}</p> : null}
           {invoice.accountantDecisionReason ? <p className="reason">{invoice.accountantDecisionReason}</p> : null}
+          <p className="gate-reason">{exportGateReason(invoice)}</p>
 
           <div className="correction-form" aria-label="Duzeltme alanlari">
             <label>
@@ -1521,6 +1569,16 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: "
     <div className={`metric ${tone ?? ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function DecisionCard({ label, status, detail }: { label: string; status: string; detail: string }) {
+  return (
+    <div className="decision-card">
+      <span>{label}</span>
+      <strong>{status || "-"}</strong>
+      <p>{detail || "-"}</p>
     </div>
   );
 }

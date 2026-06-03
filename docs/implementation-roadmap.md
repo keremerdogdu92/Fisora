@@ -52,6 +52,13 @@ Tamamlanan ana dilimler:
 - AI assisted draft karari: gecmis veri olmayan yeni mukellefte AI ilk fis
   taslagini hazirlayabilir, ancak export mustavir onayi veya mustavir/ofis
   politikasi olmadan acilmaz.
+- AI assisted draft payload'i: simulation sonucu artik `processing_mode`,
+  karar kaynagi, deterministic check listesi ve export gate gerekcesi tasir.
+- Review ekran karar ayrimi: AI/kural gerekcesi, deterministic denge ve export
+  gate nedeni ayri kartlarla gosterilir.
+- Sentetik AI benchmark seti: bos benchmark cagrisi Urban Care, Rexton, pil,
+  e-fatura, cloud, elektrik, internet, GIB ve bilinmeyen model case'leriyle
+  calisir.
 
 ## Siradaki Adimlar
 

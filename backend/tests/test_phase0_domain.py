@@ -579,6 +579,63 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.product_category, "isitme_cihazi")
         self.assertEqual(result.business_relevance_status, "uygun")
 
+    def test_ai_assisted_draft_mode_keeps_clean_draft_in_review(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="rexton.pdf",
+            provider_hint="Rexton Medikal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1234567890",),
+            vat_rates=("20",),
+            goods_services_total="10000.00",
+            vat_total="2000.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton RLi 20",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        accounts = [
+            ChartAccount("320.01.015", "320.01.015", "Rexton Medikal", is_detail_account=True, tax_id="1234567890"),
+        ]
+        counterparty = match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
+
+        assisted = simulate_invoice(invoice, selection, profile, counterparty, processing_mode="ai_assisted_draft")
+        controlled = simulate_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
+
+        self.assertEqual(assisted.processing_mode, "ai_assisted_draft")
+        self.assertEqual(assisted.export_status, "review_required")
+        self.assertEqual(assisted.simulated_status, "review_required")
+        self.assertIn("ai_assisted_draft_requires_accountant_approval", assisted.review_reason_codes)
+        self.assertIn("balanced_entry", assisted.deterministic_checks)
+        self.assertIn("mustavir onayi olmadan export kapali", assisted.export_gate_reason)
+        self.assertEqual(controlled.export_status, "export_ready")
+        self.assertEqual(controlled.simulated_status, "auto_ready")
+
     def test_counterparty_matching_prefers_tax_id_then_review_for_missing(self) -> None:
         accounts = [
             ChartAccount("320.01", "320.01", "Saticilar", is_detail_account=False),
@@ -802,6 +859,14 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(provider_summary.provider, "replay_openai")
         self.assertEqual(provider_summary.ai_used_count, 1)
         self.assertEqual(provider_summary.accuracy_percent, 100)
+
+    def test_ai_batch_benchmark_uses_default_demo_cases_when_empty(self) -> None:
+        summary = run_ai_batch_benchmark(())
+
+        self.assertGreaterEqual(summary.case_count, 8)
+        self.assertEqual(summary.ai_used_count, 0)
+        self.assertEqual(summary.accuracy_percent, 100)
+        self.assertIn("Urban Care", " ".join(result.raw_line for result in summary.results))
 
 
 if __name__ == "__main__":

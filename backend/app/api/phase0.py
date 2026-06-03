@@ -21,7 +21,7 @@ from app.domain.export_adapters import get_export_adapter, journal_entry_payload
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
 from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
-from app.domain.matching_simulation import AccountSelection, simulate_invoice
+from app.domain.matching_simulation import AccountSelection, ProcessingMode, simulate_invoice
 from app.domain.pdf_invoices import ParsedInvoice
 from app.domain.review_learning import ReviewDecision, build_learning_event
 from app.domain.workspace_exports import build_workspace_export_package
@@ -142,6 +142,7 @@ class SimulationPayload(BaseModel):
     client: ClientProfilePayload | None = None
     chart_accounts: list[ChartAccountPayload] = Field(default_factory=list)
     ai_policy: AiClassificationPolicyPayload | None = None
+    processing_mode: ProcessingMode = "ai_assisted_draft"
     learning_rules: list[LearnedPostingRulePayload] = Field(default_factory=list)
 
 
@@ -776,6 +777,7 @@ def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
         client,
         counterparty,
         _static_first_classifier(payload.ai_policy),
+        payload.processing_mode,
     )
     result = apply_learning_rules(result, [_learned_rule(rule) for rule in payload.learning_rules])
     data = asdict(result)
@@ -784,6 +786,7 @@ def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
         "risk_flags",
         "parse_notes",
         "review_reason_codes",
+        "deterministic_checks",
         "business_relevance_evidence",
         "draft_lines",
     ):

@@ -45,6 +45,24 @@ class AiBenchmarkSummary:
     results: tuple[AiBenchmarkCaseResult, ...]
 
 
+DEFAULT_AI_BENCHMARK_CASES: tuple[AiBenchmarkCase, ...] = (
+    AiBenchmarkCase("hearing-rexton", "Rexton RLi 20", "Rexton Medikal", "isitme_cihazi"),
+    AiBenchmarkCase("hearing-device-battery", "13 numara pil blister", "Medikal Tedarik", "isitme_cihazi_pili"),
+    AiBenchmarkCase("personal-urban-care", "Urban Care sac bakim seti", "Market Tedarik", "kisisel_bakim_kozmetik"),
+    AiBenchmarkCase("personal-shampoo-brand", "Argan shampoo repair set", "Kozmetik Magaza", "kisisel_bakim_kozmetik"),
+    AiBenchmarkCase("general-efatura", "QNB eFinans e-fatura kontor paketi", "QNB eFinans", "e_fatura_hizmeti"),
+    AiBenchmarkCase("general-cloud", "AWS hosting aylik kullanim", "Amazon Web Services", "bulut_yazilim_hizmeti"),
+    AiBenchmarkCase("general-electric", "Elektrik tuketim bedeli", "Elektrik Dagitim", "elektrik"),
+    AiBenchmarkCase("general-internet", "Fiber internet hizmet bedeli", "Turk Telekom", "internet"),
+    AiBenchmarkCase("statement-tax", "GIB ODEME 2026/05", "Banka ekstresi", "bilinmeyen"),
+    AiBenchmarkCase("unknown-model", "ZX Sonic Pro 9 receiver unit", "Medikal Tedarik", "bilinmeyen"),
+)
+
+
+def default_ai_benchmark_cases() -> tuple[AiBenchmarkCase, ...]:
+    return DEFAULT_AI_BENCHMARK_CASES
+
+
 class ReplayClassificationProvider:
     def __init__(self, payloads: list[dict[str, Any]], *, provider_name: str = "replay_provider") -> None:
         self.provider_name = provider_name
@@ -71,6 +89,8 @@ def run_ai_batch_benchmark(
     provider_payloads: list[dict[str, Any]] | None = None,
     provider_name: str = "static_rules",
 ) -> AiBenchmarkSummary:
+    if not cases:
+        cases = DEFAULT_AI_BENCHMARK_CASES
     provider = ReplayClassificationProvider(provider_payloads or [], provider_name=provider_name) if provider_payloads else None
     classifier = StaticFirstClassifier(provider=provider, policy=policy or AiClassificationPolicy())
     results: list[AiBenchmarkCaseResult] = []

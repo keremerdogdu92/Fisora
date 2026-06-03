@@ -92,6 +92,10 @@ export const fallbackReviewData = {
       counterpartyMatchCode: "320.01.015",
       counterpartyMatchConfidence: 100,
       counterpartyMatchReason: "tax_id_exact",
+      processingMode: "controlled_automation",
+      draftDecisionSource: "deterministic_rules",
+      deterministicChecks: ["amount_positive", "single_vat_rate", "balanced_entry", "counterparty_matched", "client_onboarding_ready"],
+      exportGateReason: "Deterministik kontroller temiz; export paketine alinabilir.",
       draftLines: [
         { account_code: "770.01", description: "Alis gideri", debit: "10000.00", credit: "0.00" },
         { account_code: "191.01", description: "Indirilecek KDV", debit: "2000.00", credit: "0.00" },
@@ -134,6 +138,10 @@ export const fallbackReviewData = {
       counterpartyMatchCode: "320.01.020",
       counterpartyMatchConfidence: 82,
       counterpartyMatchReason: "title_similarity",
+      processingMode: "ai_assisted_draft",
+      draftDecisionSource: "static_rules_ai_assisted_draft",
+      deterministicChecks: ["amount_positive", "single_vat_rate", "balanced_entry", "counterparty_low_confidence", "client_onboarding_ready"],
+      exportGateReason: "AI assisted draft modu: fis taslagi hazir, mustavir onayi olmadan export kapali.",
       draftLines: [
         { account_code: "770.01", description: "Kontrol bekleyen gider", debit: "375.00", credit: "0.00" },
         { account_code: "191.01", description: "Indirilecek KDV", debit: "75.00", credit: "0.00" },
@@ -176,6 +184,10 @@ export const fallbackReviewData = {
       counterpartyMatchCode: "",
       counterpartyMatchConfidence: 0,
       counterpartyMatchReason: "not_found",
+      processingMode: "ai_assisted_draft",
+      draftDecisionSource: "static_rules_ai_assisted_draft",
+      deterministicChecks: ["amount_positive", "single_vat_rate", "balanced_entry", "counterparty_missing", "client_onboarding_ready"],
+      exportGateReason: "Cari eslesmesi net olmadigi icin export kapali.",
       draftLines: [
         { account_code: "770.01", description: "Gider", debit: "833.25", credit: "0.00" },
         { account_code: "191.01", description: "Indirilecek KDV", debit: "166.65", credit: "0.00" },

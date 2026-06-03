@@ -101,6 +101,7 @@ def _serializable_simulation(invoice: ParsedInvoice, workspace: dict[str, Any]) 
         "risk_flags",
         "parse_notes",
         "review_reason_codes",
+        "deterministic_checks",
         "business_relevance_evidence",
         "draft_lines",
     ):
@@ -170,6 +171,16 @@ def build_statement_processing_result(
         "risk_flags": list(risk_flags),
         "parse_notes": [f"{len(lines)} statement satiri parse edildi."] if lines else ["statement satiri bulunamadi."],
         "review_reason_codes": list(review_reason_codes),
+        "processing_mode": "controlled_automation",
+        "draft_decision_source": "static_statement_rules",
+        "deterministic_checks": [
+            "statement_lines_parsed" if lines else "statement_lines_missing",
+            "balanced_entry" if is_balanced else "balanced_entry_missing",
+            "statement_risk_flags_clear" if not risk_flags else "statement_risk_flags_present",
+        ],
+        "export_gate_reason": "Ekstre satirlari dengeli ve risksiz; export paketine alinabilir."
+        if is_balanced and not risk_flags
+        else "Ekstre satirlari musavir kontrolu veya risk temizligi gerektiriyor.",
         "product_line_hint": lines[0].description if lines else "",
         "product_category": lines[0].transaction_type if lines else "",
         "product_confidence": lines[0].confidence if lines else 0,
@@ -230,6 +241,10 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
         "risk_flags": [review_code],
         "parse_notes": [f"{parser_kind} parser secildi; gercek parse ciktisi bekleniyor."],
         "review_reason_codes": [review_code],
+        "processing_mode": "ai_assisted_draft",
+        "draft_decision_source": "parser_placeholder",
+        "deterministic_checks": ["parse_output_missing", "balanced_entry_missing"],
+        "export_gate_reason": "Parse sonucu henuz fis taslagina donusmedigi icin export kapali.",
         "product_line_hint": "",
         "product_category": "",
         "product_confidence": 0,

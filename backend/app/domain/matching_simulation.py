@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Literal
 
 from app.domain.business_relevance import (
     BusinessRelevance,
@@ -19,6 +20,8 @@ from app.domain.counterparty_matching import CounterpartyMatch, match_counterpar
 from app.domain.ai_classification import ProductClassifier
 from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, money
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
+
+ProcessingMode = Literal["conservative", "ai_assisted_draft", "controlled_automation"]
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,10 @@ class SimulatedInvoiceResult:
     counterparty_match_confidence: int
     counterparty_match_reason: str
     review_reason_codes: tuple[str, ...]
+    processing_mode: str
+    draft_decision_source: str
+    deterministic_checks: tuple[str, ...]
+    export_gate_reason: str
     product_line_hint: str
     product_category: str
     product_confidence: int
@@ -174,6 +181,12 @@ def _entry_lines(entry: JournalEntry | None) -> tuple[dict[str, str], ...]:
     )
 
 
+def _normalize_processing_mode(mode: str | None) -> ProcessingMode:
+    if mode in {"conservative", "ai_assisted_draft", "controlled_automation"}:
+        return mode  # type: ignore[return-value]
+    return "controlled_automation"
+
+
 def _product_line_hint(invoice: ParsedInvoice) -> str:
     return invoice.line_items[0] if invoice.line_items else invoice.provider_hint or invoice.invoice_type or invoice.file_name
 
@@ -194,13 +207,75 @@ def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
     )
 
 
+def _deterministic_checks(
+    *,
+    entry: JournalEntry | None,
+    invoice: ParsedInvoice,
+    amount: Decimal | None,
+    counterparty_match: CounterpartyMatch | None,
+    client_profile: ClientProfile | None,
+) -> tuple[str, ...]:
+    checks: list[str] = []
+    checks.append("amount_positive" if amount is not None and amount > 0 else "amount_requires_review")
+    checks.append("single_vat_rate" if len(invoice.vat_rates) <= 1 else "mixed_vat_requires_review")
+    checks.append("balanced_entry" if entry and entry.is_balanced else "balanced_entry_missing")
+    if counterparty_match and counterparty_match.account_code and not counterparty_match.requires_review:
+        checks.append("counterparty_matched")
+    elif counterparty_match and counterparty_match.account_code:
+        checks.append("counterparty_low_confidence")
+    else:
+        checks.append("counterparty_missing")
+    checks.append("client_onboarding_ready" if client_profile and check_client_onboarding(client_profile).is_ready else "client_onboarding_incomplete")
+    return tuple(checks)
+
+
+def _draft_decision_source(*, ai_used: bool, processing_mode: ProcessingMode) -> str:
+    if ai_used:
+        return "ai_assisted_classification"
+    if processing_mode == "ai_assisted_draft":
+        return "static_rules_ai_assisted_draft"
+    if processing_mode == "conservative":
+        return "static_rules_conservative_review"
+    return "deterministic_rules"
+
+
+def _export_gate_reason(
+    *,
+    export_status: str,
+    processing_mode: ProcessingMode,
+    review_reasons: tuple[str, ...],
+    relevance: BusinessRelevance,
+    counterparty_match: CounterpartyMatch | None,
+    entry: JournalEntry | None,
+) -> str:
+    if processing_mode == "conservative":
+        return "Conservative mod: mustavir onayi olmadan export kapali."
+    if processing_mode == "ai_assisted_draft":
+        return "AI assisted draft modu: fis taslagi hazir, mustavir onayi olmadan export kapali."
+    if not entry or not entry.is_balanced:
+        return "Fis dengeli degil veya taslak satirlari eksik."
+    if counterparty_match and counterparty_match.requires_review:
+        return f"Cari eslesmesi kontrol istiyor: {counterparty_match.match_reason}."
+    if review_reasons:
+        return f"Review nedeni: {', '.join(review_reasons)}."
+    if relevance.status == "is_alani_disi":
+        return "Kalem faaliyet disi riski tasiyor."
+    if relevance.status == "supheli":
+        return "Kalem faaliyet profiliyle net eslesmedi."
+    if export_status != "export_ready":
+        return "Mustavir politikasi veya risk kapisi export onayi istiyor."
+    return "Deterministik kontroller temiz; export paketine alinabilir."
+
+
 def simulate_invoice(
     invoice: ParsedInvoice,
     selection: AccountSelection,
     client_profile: ClientProfile | None = None,
     counterparty_match: CounterpartyMatch | None = None,
     product_classifier: ProductClassifier | None = None,
+    processing_mode: ProcessingMode | str = "controlled_automation",
 ) -> SimulatedInvoiceResult:
+    mode = _normalize_processing_mode(processing_mode)
     reasons = tuple(dict.fromkeys((*invoice.risk_flags, *invoice.parse_notes)))
     amount = _decimal_or_none(invoice.payable_total)
     entry: JournalEntry | None = None
@@ -270,8 +345,31 @@ def simulate_invoice(
         risk_flags=all_reasons,
         relevance=relevance,
     )
+    mode_reasons: tuple[str, ...] = ()
+    if mode == "conservative" and export_status == "export_ready":
+        mode_reasons = ("conservative_mode_requires_review",)
+    elif mode == "ai_assisted_draft" and export_status == "export_ready":
+        mode_reasons = ("ai_assisted_draft_requires_accountant_approval",)
+    if mode_reasons:
+        all_reasons = tuple(dict.fromkeys((*all_reasons, *mode_reasons)))
+        export_status = "review_required"
     if export_status != "export_ready":
         status = "review_required"
+    deterministic_checks = _deterministic_checks(
+        entry=entry,
+        invoice=invoice,
+        amount=amount,
+        counterparty_match=counterparty_match,
+        client_profile=client_profile,
+    )
+    export_gate_reason = _export_gate_reason(
+        export_status=export_status,
+        processing_mode=mode,
+        review_reasons=all_reasons,
+        relevance=relevance,
+        counterparty_match=counterparty_match,
+        entry=entry,
+    )
 
     return SimulatedInvoiceResult(
         chart_file_name=selection.chart_file_name,
@@ -296,6 +394,10 @@ def simulate_invoice(
         counterparty_match_confidence=counterparty_match.confidence if counterparty_match else 0,
         counterparty_match_reason=counterparty_match.match_reason if counterparty_match else "not_assessed",
         review_reason_codes=all_reasons,
+        processing_mode=mode,
+        draft_decision_source=_draft_decision_source(ai_used=ai_used, processing_mode=mode),
+        deterministic_checks=deterministic_checks,
+        export_gate_reason=export_gate_reason,
         product_line_hint=raw_line,
         product_category=relevance.classification.category,
         product_confidence=relevance.classification.confidence,
@@ -382,6 +484,10 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "counterparty_match_code",
         "counterparty_match_confidence",
         "counterparty_match_reason",
+        "processing_mode",
+        "draft_decision_source",
+        "deterministic_checks",
+        "export_gate_reason",
         "product_line_hint",
         "product_category",
         "product_confidence",
@@ -412,6 +518,7 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
                 row["risk_flags"] = ";".join(result.risk_flags)
                 row["parse_notes"] = ";".join(result.parse_notes)
                 row["review_reason_codes"] = ";".join(result.review_reason_codes)
+                row["deterministic_checks"] = ";".join(result.deterministic_checks)
                 row["business_relevance_evidence"] = ";".join(result.business_relevance_evidence)
                 writer.writerow({column: row[column] for column in columns})
     return output_path
@@ -474,6 +581,10 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "counterpartyMatchCode": result.counterparty_match_code,
                     "counterpartyMatchConfidence": result.counterparty_match_confidence,
                     "counterpartyMatchReason": result.counterparty_match_reason,
+                    "processingMode": result.processing_mode,
+                    "draftDecisionSource": result.draft_decision_source,
+                    "deterministicChecks": list(result.deterministic_checks),
+                    "exportGateReason": result.export_gate_reason,
                     "draftLines": list(result.draft_lines),
                 }
             )

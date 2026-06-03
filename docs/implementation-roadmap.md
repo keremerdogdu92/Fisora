@@ -49,6 +49,9 @@ Tamamlanan ana dilimler:
 - Mock auth/yetki guard: `X-Fisora-User-Id` header'i ile mukellef, mustavir ve admin rolleri test edilebilir.
 - Export adapter ayrimi: universal CSV ve JSON manifest adapter'lari ayrildi; dogrulanmis Zirve formati daha sonra eklenecek.
 - Mustavir demo gorusmesi paketi: yarinki gorusme icin demo akisi, istenecek dosyalar ve karar sorulari hazirlandi.
+- AI assisted draft karari: gecmis veri olmayan yeni mukellefte AI ilk fis
+  taslagini hazirlayabilir, ancak export mustavir onayi veya mustavir/ofis
+  politikasi olmadan acilmaz.
 
 ## Siradaki 5 Adim
 
@@ -73,6 +76,13 @@ Tamamlanan ana dilimler:
 5. AI API batch benchmark
    - Statik kuralla cozulmeyen kalemlerde OpenAI/Gemini/Manus adaylari test edilir.
    - Belge basina maliyet ve dogruluk karsilastirilir.
+
+6. AI assisted draft pilot entegrasyonu
+   - Soguk baslangic icin AI taslak modu backend payload'inda acik durum olarak
+     tutulur.
+   - Review ekraninda AI gerekcesi, deterministic denge ve export gate nedeni
+     birlikte gosterilir.
+   - Gercek fatura ile test lokal kalir; public demo sentetik veriyle ayrilir.
 
 Sonraki saha kilidi: Zirve export formati gercek programda denenmeden "tamam" sayilmaz.
 

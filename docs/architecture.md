@@ -58,6 +58,8 @@ prototip icin opsiyonel tutulabilir.
   review gate'te kalir.
 - Product classification: fatura kalemlerindeki marka/model satirlarini urun
   kategorilerine cevirir.
+- AI assisted draft adapter: soguk baslangicta mevcut hesap plani ve cari
+  adaylari icinden aciklamali fis taslagi onerir; export karari vermez.
 - Business relevance: urun/hizmet kategorisini mukellef faaliyet profili, NACE,
   isyeri adresi, tedarikci ve gecmis kararlarla karsilastirir.
 - Rule engine: genel kurallar, mustavir/ofis politikalari ve mukellef ozel
@@ -118,6 +120,7 @@ belge yuklendi
   -> text/XML/Excel/CSV parse et
   -> fatura/ekstre alanlarini cikar
   -> gerekiyorsa AI ile marka-model ve urun kategorisi siniflandir
+  -> soguk baslangicta AI assisted draft ile hesap/kategori gerekcesi olustur
   -> business relevance ve risk bayraklarini hesapla
   -> karsi cari ve hesap plani eslestir
   -> dengeli fis taslagi uret
@@ -170,3 +173,8 @@ AI API'ye uygun olmayan isler:
 
 Ilk politika: statik kural eslesirse AI cagrilmaz. Belirsiz kalemde dusuk
 tokenli API sorgusu denenir; guven dusukse sonuc mustavir review'a duser.
+
+Soguk baslangic politikasi: gecmis veri yoksa AI taslak hazirlayabilir, ancak
+onerilen hesap yalnizca mevcut hesap plani icinden secilir ve export kapisi
+mustavir onayi olmadan acilmaz. Bu modun ayrintili hazirlik kriterleri
+`docs/ai-assisted-draft-readiness.md` dosyasinda tutulur.

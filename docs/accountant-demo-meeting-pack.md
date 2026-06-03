@@ -12,11 +12,13 @@ gereken minimum dosyalari netlestirmektir.
 2. Mukellef kullanicisi sadece yetkili oldugu mukellefe belge yukler.
 3. Sistem belgeyi okur, cari ve hesap plani adaylarini mevcut Zirve hesap
    planindan secer.
-4. Fis taslagi dengeli uretilir.
-5. Riskli, faaliyet disi veya cari belirsiz kayit export'a girmez.
-6. Mustavir onaylar veya duzeltir.
-7. Duzeltme sonraki benzer belgelerde ogrenme adayi olur.
-8. Export paketi Zirve testinden gecen format kesinlesene kadar kontrollu kalir.
+4. Gecmis veri yoksa AI destekli taslak modu bos sayfa yerine ilk fis onerisi
+   ve gerekce hazirlar.
+5. Fis taslagi deterministic motorla dengeli uretilir.
+6. Riskli, faaliyet disi veya cari belirsiz kayit export'a girmez.
+7. Mustavir onaylar veya duzeltir.
+8. Duzeltme sonraki benzer belgelerde ogrenme adayi olur.
+9. Export paketi Zirve testinden gecen format kesinlesene kadar kontrollu kalir.
 
 ## Canli Demo Sirasi
 
@@ -25,9 +27,10 @@ gereken minimum dosyalari netlestirmektir.
 3. Export hazir ve review gerekli belgeleri ayri goster.
 4. Rexton gibi alan ici kalemde fis taslagini goster.
 5. Urban Care gibi supheli kalemde export kapisinin kapali kaldigini goster.
-6. Cari/hessap duzeltme alanina ornek kod gir.
-7. "Duzelt ve onayla" kararinin learning event'e donustugunu anlat.
-8. Export paketi olustur ve manifest mantigini anlat.
+6. AI/kural gerekcesinin mustavire nasil yardim ettigini goster.
+7. Cari/hessap duzeltme alanina ornek kod gir.
+8. "Duzelt ve onayla" kararinin learning event'e donustugunu anlat.
+9. Export paketi olustur ve manifest mantigini anlat.
 
 ## Mustavirden Istenen Minimum Dosyalar
 
@@ -68,4 +71,8 @@ Varsa:
 Bu sistem sizin yerinize kesin kayit atmak icin degil,
 size kontrol edilebilir fis taslagi ve guvenli export paketi hazirlamak icin
 tasarlandi. Ilk pilotta tum kritik kararlar sizden onay alacak.
+
+Gecmis veri olmayan yeni mukellefte AI size ilk taslagi hazirlar.
+Siz duzelttikce sistem sizin kararlarinizi ogrenir ve tekrar eden dusuk riskli
+islerde daha az mudahale gerektirir.
 ```

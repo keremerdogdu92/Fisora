@@ -86,6 +86,20 @@ Bu ekran ilk etapta mock/local snapshot ile calisabilir; ancak UI davranisi
 production API sozlesmesine hazir tutulur. Sonraki adimda dosya yukleme,
 store/workspace ve review decision endpointleri bu ekrana baglanir.
 
+## AI Destekli Taslak Davranisi
+
+Yeni mukellefte gecmis karar yoksa portal bos sonuc gostermemelidir. Sistem
+`ai_assisted_draft` modunda AI/kural destekli ilk fis taslagini hazirlar ve
+mustavire su ayrimi net gosterir:
+
+- AI'in tahmini kategori ve hesap onerisi.
+- Deterministik motorun dogruladigi tutar, KDV ve denge.
+- Export'a neden girip girmedigi.
+- Mustavirin hangi alani duzelttigi ve bunun ogrenmeye nasil yansiyacagi.
+
+Bu modda export varsayilan olarak kapali kalir. Kayit ancak mustavir onayi veya
+daha once tanimlanmis mustavir/ofis politikasi varsa export adayi olur.
+
 ## Mustavir Review Akisi
 
 Review ekraninda her kayit icin su bilgiler gosterilir:

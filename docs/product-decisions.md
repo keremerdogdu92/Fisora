@@ -27,6 +27,26 @@ AI nihai "gider yazilir/yazilmaz" veya "kesin kayit at" karari vermez. AI'in
 rolu belge/urun siniflandirmasi, belirsizlik aciklamasi, guven skoru ve gerekce
 uretmekle sinirlidir.
 
+## Soguk Baslangic ve AI Destekli Taslak
+
+Yeni mukellefte gecmis yevmiye, muavin veya yeterli mustavir karari olmayabilir.
+Bu durumda sistem bos form birakmak yerine `ai_assisted_draft` modunda ilk
+muhasebe fisi taslagini hazirlar. AI fatura metni, kalemler, mukellef faaliyeti,
+hesap plani adaylari ve cari adaylarini kullanarak kategori, gerekce, guven
+skoru ve hesap adayi onerir.
+
+Bu mod satis ve demo icin onemlidir; mustavir sifirdan fis yazmak yerine hazir
+taslagi duzeltir. Guvenlik cizgisi ayni kalir: AI'in hazirladigi soguk baslangic
+taslagi mustavir onayi veya mustavir/ofis politikasi olmadan export'a girmez.
+
+Calisma modlari:
+
+- `conservative`: AI kapali veya guven dusuk; tum kayitlar review ister.
+- `ai_assisted_draft`: AI taslak ve gerekce hazirlar; export mustavir onayi
+  olmadan kapali kalir.
+- `controlled_automation`: en az 3 tutarli onay ve mustavir politikasi olan
+  dusuk riskli islemler export adayi olabilir.
+
 ## MVP Urun Kararlari
 
 - Serbest uyelik olmayacak; kullanicilar mustavir/ofis tarafindan acilacak.
@@ -47,6 +67,8 @@ uretmekle sinirlidir.
 - Ilk canli otomasyon politikasi `export kontrollu`: sistem otomatik taslak
   uretir; export'a yalnizca net, dengeli, risk bayraksiz veya mustavir
   politikasinca izinli kayitlar girer.
+- Ilk demo ve yeni mukellef akisi `ai_assisted_draft` modunu kullanabilir; bu
+  modda AI taslak hazirlar ama kesin kayit veya export karari vermez.
 
 ## Faz 0 Hedefi
 

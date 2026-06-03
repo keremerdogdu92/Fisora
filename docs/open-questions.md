@@ -61,3 +61,12 @@ netlestirilecek.
 29. API sonucunun dusuk guven esigi kac olacak ve hangi durumlarda mustavir
     review'a zorunlu donderecek?
 30. Aylik AI maliyet cap'i ofis bazinda mi, mukellef bazinda mi uygulanacak?
+31. Gercek fatura metni dis AI API'ye gonderilecekse mustavir ve veri sahibi
+    onayi hangi metinle alinacak?
+32. AI assisted draft modunda minimum confidence esigi kac olacak?
+33. AI'in hesap onerisi yalnizca mevcut hesap plani adaylariyla mi sinirli
+    kalacak, yoksa "hesap bulunamadi" durumunda aciklama mi uretecek?
+34. Soguk baslangic demo basarisi ile production otomasyon basarisi raporda
+    nasil ayrilacak?
+35. OpenAI/Gemini/Manus benchmarkinda hangi 20-50 marka/model ve genel gider
+    case seti standart kabul edilecek?

@@ -81,6 +81,23 @@ Her belge veya kalem icin su sonuc uretilir:
 AI'in gorevi bu ciktinin siniflandirma ve gerekce kismini desteklemektir. AI
 nihai vergi/hukuk karari vermez.
 
+## AI Destekli Taslak Modu
+
+Gecmis yevmiye veya mustavir karari olmayan yeni mukelleflerde sistem
+`ai_assisted_draft` moduyla calisabilir. Bu modda AI fatura metni, marka/model
+satirlari, mukellef faaliyet bilgisi ve mevcut hesap plani adaylarindan ilk fis
+taslagini hazirlamaya yardim eder.
+
+Bu modun kurallari:
+
+- AI mevcut hesap plani disinda hesap kodu uyduramaz.
+- AI'in hesaba yazma onerisi deterministic fis motoru tarafindan dengelenir.
+- AI confidence dusukse kayit otomatik olarak `review_required` kalir.
+- AI'in hazirladigi soguk baslangic taslagi mustavir onayi olmadan export'a
+  girmez.
+- Mustavir duzeltmesi sonraki benzer belgede kural/ogrenme sinyali olarak
+  kullanilir.
+
 ## Fis ve Export Karari
 
 - `uygun`: fis taslagi normal uretilir, risk yoksa export adayi olabilir.

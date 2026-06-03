@@ -44,6 +44,8 @@ Baslangic karari:
 - Belirsiz kalemlerde dis AI API'ye dusuk hacimli, kontrollu batch istek atilir.
 - Her istek JSON schema ile sinirlanir ve muhasebe karari yerine sadece
   kategori/gerekce uretir.
+- Gecmis veri olmayan yeni mukellefte AI, `ai_assisted_draft` modunda ilk fis
+  taslagini hazirlamaya yardim edebilir; bu sonuc export yetkisi vermez.
 
 AI API'ye uygun isler:
 
@@ -68,6 +70,8 @@ Ilk hedef aylik AI maliyetini dusuk tutmaktir:
 3. Belirsiz marka/modelde dusuk tokenli API sorgusu atilir.
 4. API guveni dusukse sonuc mustavir review'a duser.
 5. Her mukellef/ofis icin aylik AI cagrisi ve karakter/token cap'i tutulur.
+6. Soguk baslangic demo/pilot istekleri ayri izlenir; satis demosu icin yapilan
+   AI cagrilari production otomasyon basarisi gibi raporlanmaz.
 
 Benchmark altyapisi:
 

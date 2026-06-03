@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
+from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.auth_policy import auth_status_payload, build_auth_config, resolve_user_id
@@ -23,8 +25,23 @@ from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
 from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, ProcessingMode, simulate_invoice
+from app.domain.operation_monitoring import (
+    build_operation_event,
+    operation_event_payload,
+    summarize_operation_health,
+)
 from app.domain.pdf_invoices import ParsedInvoice
+from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.domain.session_auth import (
+    action_token_expires_at,
+    create_auth_action_token,
+    create_password_hash,
+    create_session_token,
+    hash_session_token,
+    session_expires_at,
+    verify_password,
+)
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
@@ -156,6 +173,7 @@ class RelevancePayload(BaseModel):
 class ProductClassificationPayload(BaseModel):
     raw_line: str
     supplier_hint: str = ""
+    client_id: str = ""
     ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
 
 
@@ -171,6 +189,28 @@ class AiBatchBenchmarkPayload(BaseModel):
     ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
     provider_name: str = "static_rules"
     provider_payloads: list[dict[str, object]] = Field(default_factory=list)
+
+
+class AiUsageEventPayload(BaseModel):
+    client_id: str
+    provider: str = "static_rules"
+    operation: str = "manual"
+    input_chars: int = 0
+    ai_used: bool = False
+    skipped_reason: str = ""
+
+
+class AiUsageSummaryPayload(BaseModel):
+    client_id: str
+    monthly_cap_usd: str = "100.00"
+
+
+class OperationEventPayload(BaseModel):
+    client_id: str = "__system__"
+    event_type: str
+    status: Literal["info", "ok", "warning", "error"] = "info"
+    message: str = ""
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class ReviewDecisionPayload(BaseModel):
@@ -241,6 +281,45 @@ class DocumentUploadPayload(BaseModel):
 class PortalAccessPayload(BaseModel):
     client_id: str
     user_id: str
+
+
+class AuthPasswordPayload(BaseModel):
+    user_id: str
+    password: str
+
+
+class AuthLoginPayload(BaseModel):
+    user_id: str
+    password: str
+    ttl_hours: int = 12
+
+
+class AuthLogoutPayload(BaseModel):
+    session_token: str = ""
+
+
+class AuthInvitePayload(BaseModel):
+    user_id: str
+    display_name: str = ""
+    role: Literal["client_user", "accountant", "admin"] = "client_user"
+    allowed_client_ids: list[str] = Field(default_factory=list)
+    invited_by: str = ""
+    ttl_hours: int = 48
+
+
+class AuthInviteAcceptPayload(BaseModel):
+    invite_token: str
+    password: str
+
+
+class AuthPasswordResetPayload(BaseModel):
+    user_id: str
+    ttl_hours: int = 24
+
+
+class AuthPasswordResetConfirmPayload(BaseModel):
+    reset_token: str
+    password: str
 
 
 class DocumentRetentionRunPayload(BaseModel):
@@ -324,6 +403,23 @@ def _mock_user_header(value: str | None) -> str:
     return resolve_user_id(value, build_auth_config())
 
 
+def _request_user_id(user_header: str | None, session_header: str | None = None) -> str:
+    user_id = _mock_user_header(user_header)
+    if user_id:
+        return user_id
+    token = (session_header or "").strip()
+    if not token:
+        return ""
+    session = get_workflow_store().resolve_auth_session(token_hash=hash_session_token(token))
+    if not session.get("valid"):
+        raise HTTPException(status_code=401, detail=session)
+    return str(session.get("user_id") or "")
+
+
+def _password_bootstrap_enabled() -> bool:
+    return os.environ.get("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+
+
 def _safe_export_file_name(client_id: str, export_type: str, extension: str = ".csv") -> str:
     safe_client = re.sub(r"[^A-Za-z0-9_.-]+", "-", client_id.strip()).strip(".-") or "client"
     safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "-", export_type.strip()).strip(".-") or "export"
@@ -365,6 +461,27 @@ def _write_export_manifest(
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"manifest_filename": manifest_filename, "manifest_path": str(manifest_path)}
+
+
+def _record_operation_event(
+    *,
+    store,
+    client_id: str,
+    event_type: str,
+    status: str = "info",
+    message: str = "",
+    metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    event = operation_event_payload(
+        build_operation_event(
+            client_id=client_id,
+            event_type=event_type,
+            status=status,
+            message=message,
+            metadata=metadata,
+        )
+    )
+    return store.record_operation_event(client_id=str(event["client_id"]), event=event)
 
 
 def _save_uploaded_document_with_job(
@@ -425,6 +542,21 @@ def _save_uploaded_document_with_job(
         document_ref=str(saved["document_ref"]),
         document_type=document_type,
         parser_kind=parser_kind_for_document_type(document_type),
+    )
+    _record_operation_event(
+        store=store,
+        client_id=client_id,
+        event_type="document_uploaded",
+        status="ok",
+        message="Belge kaydedildi ve processing job kuyruga alindi.",
+        metadata={
+            "document_ref": saved["document_ref"],
+            "document_type": document_type,
+            "file_name": file_name,
+            "processing_job_id": job["id"],
+            "parser_kind": job["parser_kind"],
+            "uploaded_by_user_id": effective_user_id,
+        },
     )
     return {**saved, "processing_job": job}
 
@@ -559,10 +691,13 @@ def store_client(payload: ClientProfilePayload) -> dict[str, object]:
 
 
 @router.get("/store/clients")
-def store_clients(x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id")) -> dict[str, object]:
+def store_clients(
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
     store = get_workflow_store()
     clients = store.list_clients()
-    user_id = _mock_user_header(x_fisora_user_id)
+    user_id = _request_user_id(x_fisora_user_id, x_fisora_session)
     if user_id:
         clients = [
             client
@@ -572,7 +707,7 @@ def store_clients(x_fisora_user_id: str | None = Header(default=None, alias="X-F
     return {
         "clients": clients,
         "auth": {
-            "mode": "mock_header" if user_id else "disabled",
+            "mode": "session_or_header" if user_id else "disabled",
             "user_id": user_id,
         },
     }
@@ -647,10 +782,205 @@ def store_auth_status() -> dict[str, object]:
     return auth_status_payload(build_auth_config())
 
 
+@router.post("/store/auth/password")
+def store_auth_password(payload: AuthPasswordPayload) -> dict[str, object]:
+    if not payload.user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if build_auth_config().mode == "trusted_header" and not _password_bootstrap_enabled():
+        raise HTTPException(status_code=403, detail={"allowed": False, "reason": "password_bootstrap_disabled"})
+    try:
+        password_hash = create_password_hash(payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_workflow_store().set_auth_password(user_id=payload.user_id.strip(), password_hash=password_hash)
+
+
+@router.post("/store/auth/login")
+def store_auth_login(payload: AuthLoginPayload) -> dict[str, object]:
+    store = get_workflow_store()
+    password_hash = store.get_auth_password_hash(user_id=payload.user_id.strip())
+    if not password_hash or not verify_password(payload.password, password_hash):
+        raise HTTPException(status_code=401, detail={"allowed": False, "reason": "invalid_credentials"})
+    session_token = create_session_token()
+    try:
+        expires_at = session_expires_at(ttl_hours=payload.ttl_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session = store.create_auth_session(
+        user_id=payload.user_id.strip(),
+        token_hash=session_token.token_hash,
+        expires_at=expires_at,
+    )
+    return {"session_token": session_token.raw_token, "session": session}
+
+
+@router.post("/store/auth/invite")
+def store_auth_invite(payload: AuthInvitePayload) -> dict[str, object]:
+    if not payload.user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id is required")
+    store = get_workflow_store()
+    try:
+        portal_user = store.upsert_portal_user(
+            user_id=payload.user_id.strip(),
+            display_name=payload.display_name,
+            role=payload.role,
+            allowed_client_ids=payload.allowed_client_ids,
+        )
+        expires_at = action_token_expires_at(ttl_hours=payload.ttl_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    token = create_auth_action_token()
+    token_record = store.create_auth_token(
+        purpose="invite",
+        user_id=payload.user_id.strip(),
+        token_hash=token.token_hash,
+        expires_at=expires_at,
+        payload={
+            "display_name": payload.display_name,
+            "role": payload.role,
+            "allowed_client_ids": payload.allowed_client_ids,
+            "invited_by": payload.invited_by,
+        },
+    )
+    return {"invite_token": token.raw_token, "token": token_record, "portal_user": portal_user}
+
+
+@router.post("/store/auth/invite/accept")
+def store_auth_invite_accept(payload: AuthInviteAcceptPayload) -> dict[str, object]:
+    token_hash = hash_session_token(payload.invite_token.strip())
+    store = get_workflow_store()
+    token = store.resolve_auth_token(purpose="invite", token_hash=token_hash)
+    if not token.get("valid"):
+        raise HTTPException(status_code=400, detail=token)
+    try:
+        password_hash = create_password_hash(payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    credential = store.set_auth_password(user_id=str(token["user_id"]), password_hash=password_hash)
+    used = store.mark_auth_token_used(token_hash=token_hash)
+    return {"credential": credential, "token": used}
+
+
+@router.post("/store/auth/password-reset")
+def store_auth_password_reset(payload: AuthPasswordResetPayload) -> dict[str, object]:
+    if not payload.user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id is required")
+    token = create_auth_action_token()
+    try:
+        expires_at = action_token_expires_at(ttl_hours=payload.ttl_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    token_record = get_workflow_store().create_auth_token(
+        purpose="password_reset",
+        user_id=payload.user_id.strip(),
+        token_hash=token.token_hash,
+        expires_at=expires_at,
+        payload={},
+    )
+    return {"reset_token": token.raw_token, "token": token_record}
+
+
+@router.post("/store/auth/password-reset/confirm")
+def store_auth_password_reset_confirm(payload: AuthPasswordResetConfirmPayload) -> dict[str, object]:
+    token_hash = hash_session_token(payload.reset_token.strip())
+    store = get_workflow_store()
+    token = store.resolve_auth_token(purpose="password_reset", token_hash=token_hash)
+    if not token.get("valid"):
+        raise HTTPException(status_code=400, detail=token)
+    try:
+        password_hash = create_password_hash(payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    credential = store.set_auth_password(user_id=str(token["user_id"]), password_hash=password_hash)
+    used = store.mark_auth_token_used(token_hash=token_hash)
+    return {"credential": credential, "token": used}
+
+
+@router.get("/store/auth/session")
+def store_auth_session(
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
+    token = (x_fisora_session or "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail={"valid": False, "reason": "session_required"})
+    session = get_workflow_store().resolve_auth_session(token_hash=hash_session_token(token))
+    if not session.get("valid"):
+        raise HTTPException(status_code=401, detail=session)
+    return session
+
+
+@router.get("/store/system/readiness")
+def store_system_readiness() -> dict[str, object]:
+    return production_readiness_payload(
+        document_storage_path=DEFAULT_DOCUMENT_STORAGE_PATH,
+        export_path=DEFAULT_EXPORT_PATH,
+    )
+
+
+@router.post("/store/operation-log")
+def store_operation_log(
+    payload: OperationEventPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    if payload.client_id != "__system__":
+        _require_mock_client_access(
+            client_id=payload.client_id,
+            user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+            allowed_roles=("accountant", "admin"),
+        )
+    return _record_operation_event(
+        store=get_workflow_store(),
+        client_id=payload.client_id,
+        event_type=payload.event_type,
+        status=payload.status,
+        message=payload.message,
+        metadata=payload.metadata,
+    )
+
+
+@router.get("/store/operation-health/{client_id}")
+def store_operation_health(
+    client_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
+    if not client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    _require_mock_client_access(
+        client_id=client_id,
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        allowed_roles=("accountant", "admin"),
+    )
+    store = get_workflow_store()
+    events = store.list_operation_events(client_id=client_id)
+    jobs = store.list_processing_jobs(client_id=client_id)
+    return {
+        "client_id": client_id,
+        "summary": summarize_operation_health(events=events, processing_jobs=jobs),
+        "events": events,
+        "processing_jobs": jobs,
+    }
+
+
+@router.post("/store/auth/logout")
+def store_auth_logout(
+    payload: AuthLogoutPayload,
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
+    token = (payload.session_token or x_fisora_session or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="session token is required")
+    return get_workflow_store().revoke_auth_session(token_hash=hash_session_token(token))
+
+
 @router.post("/store/document-upload")
 def store_document_upload(
     payload: DocumentUploadPayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> dict[str, object]:
     content = None
     if payload.content_base64:
@@ -664,7 +994,7 @@ def store_document_upload(
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
         uploaded_by_user_id=payload.uploaded_by_user_id,
-        request_user_id=_mock_user_header(x_fisora_user_id),
+        request_user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
         content=content,
         size_bytes=payload.size_bytes,
         sha256=payload.sha256,
@@ -681,6 +1011,7 @@ async def store_document_upload_multipart(
     retention_policy_days: int = Form(90),
     file: UploadFile = File(...),
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> dict[str, object]:
     content = await file.read()
     return _save_uploaded_document_with_job(
@@ -689,7 +1020,7 @@ async def store_document_upload_multipart(
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
         uploaded_by_user_id=uploaded_by_user_id,
-        request_user_id=_mock_user_header(x_fisora_user_id),
+        request_user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
         content=content,
         size_bytes=len(content),
         retention_policy_days=retention_policy_days,
@@ -698,22 +1029,43 @@ async def store_document_upload_multipart(
 
 @router.post("/store/document-retention/run")
 def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
-    return get_workflow_store().apply_document_retention(delete_files=payload.delete_files)
+    store = get_workflow_store()
+    summary = store.apply_document_retention(delete_files=payload.delete_files)
+    _record_operation_event(
+        store=store,
+        client_id="__system__",
+        event_type="document_retention_run",
+        status="warning" if summary["deleted_count"] else "ok",
+        message="90 gun belge retention job'u calisti.",
+        metadata=summary,
+    )
+    return summary
 
 
 @router.post("/store/processing/run")
 def store_processing_run(payload: ProcessingRunPayload) -> dict[str, object]:
-    return process_queued_documents(get_workflow_store(), max_jobs=payload.max_jobs)
+    store = get_workflow_store()
+    summary = process_queued_documents(store, max_jobs=payload.max_jobs)
+    _record_operation_event(
+        store=store,
+        client_id="__system__",
+        event_type="processing_run",
+        status="error" if summary["failed_count"] else "ok",
+        message="Worker kuyrugu manuel/API tetiklemesiyle calisti.",
+        metadata=summary,
+    )
+    return summary
 
 
 @router.get("/store/processing-jobs/{client_id}")
 def store_processing_jobs(
     client_id: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
-    _require_mock_client_access(client_id=client_id, user_id=_mock_user_header(x_fisora_user_id))
+    _require_mock_client_access(client_id=client_id, user_id=_request_user_id(x_fisora_user_id, x_fisora_session))
     return {"jobs": get_workflow_store().list_processing_jobs(client_id=client_id)}
 
 
@@ -741,6 +1093,19 @@ def product_classification(payload: ProductClassificationPayload) -> dict[str, o
         payload.raw_line,
         supplier_hint=payload.supplier_hint,
     )
+    usage_event = None
+    if payload.client_id.strip():
+        usage_event = ai_usage_payload(
+            build_ai_usage_event(
+                client_id=payload.client_id.strip(),
+                provider=result.provider,
+                operation="product_classification",
+                input_chars=result.estimated_input_chars,
+                ai_used=result.ai_used,
+                skipped_reason=result.skipped_reason,
+            )
+        )
+        get_workflow_store().record_ai_usage(client_id=payload.client_id.strip(), event=usage_event)
     return {
         "classification": {
             "raw_line": result.classification.raw_line,
@@ -753,6 +1118,36 @@ def product_classification(payload: ProductClassificationPayload) -> dict[str, o
         "skipped_reason": result.skipped_reason,
         "provider_reason": result.provider_reason,
         "estimated_input_chars": result.estimated_input_chars,
+        "usage_event": usage_event,
+    }
+
+
+@router.post("/store/ai-usage")
+def store_ai_usage(payload: AiUsageEventPayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    event = ai_usage_payload(
+        build_ai_usage_event(
+            client_id=payload.client_id.strip(),
+            provider=payload.provider,
+            operation=payload.operation,
+            input_chars=payload.input_chars,
+            ai_used=payload.ai_used,
+            skipped_reason=payload.skipped_reason,
+        )
+    )
+    return get_workflow_store().record_ai_usage(client_id=payload.client_id.strip(), event=event)
+
+
+@router.post("/store/ai-usage/summary")
+def store_ai_usage_summary(payload: AiUsageSummaryPayload) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    events = get_workflow_store().list_ai_usage(client_id=payload.client_id.strip())
+    return {
+        "client_id": payload.client_id,
+        "summary": summarize_ai_usage(events, monthly_cap_usd=Decimal(payload.monthly_cap_usd)),
+        "events": events,
     }
 
 
@@ -893,20 +1288,36 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
 def store_review_decision(
     payload: StoredReviewDecisionPayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     _require_mock_client_access(
         client_id=payload.client_id,
-        user_id=_mock_user_header(x_fisora_user_id),
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
         allowed_roles=("accountant", "admin"),
     )
     event = review_learning_event(payload.decision)
-    return get_workflow_store().save_review_decision(
+    store = get_workflow_store()
+    saved = store.save_review_decision(
         client_id=payload.client_id,
         decision=payload.decision.model_dump(),
         learning_event=event,
     )
+    _record_operation_event(
+        store=store,
+        client_id=payload.client_id,
+        event_type="review_decision_saved",
+        status="ok",
+        message="Musavir review karari ve learning event kaydedildi.",
+        metadata={
+            "document_ref": payload.decision.document_ref,
+            "action": payload.decision.action,
+            "reviewer": payload.decision.reviewer,
+            "automation_candidate": event.get("automation_candidate", False),
+        },
+    )
+    return saved
 
 
 @router.post("/export/package")
@@ -934,19 +1345,34 @@ def store_export_package(payload: StoredExportPackagePayload) -> dict[str, objec
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     package = export_package(payload.package)
-    return get_workflow_store().save_export_package(client_id=payload.client_id, package=package)
+    store = get_workflow_store()
+    saved = store.save_export_package(client_id=payload.client_id, package=package)
+    _record_operation_event(
+        store=store,
+        client_id=payload.client_id,
+        event_type="export_package_saved",
+        status="ok",
+        message="Export package payload store'a kaydedildi.",
+        metadata={
+            "export_type": package.get("export_type"),
+            "entry_count": package.get("entry_count"),
+            "excluded_document_refs": package.get("excluded_document_refs", []),
+        },
+    )
+    return saved
 
 
 @router.post("/store/export-package/from-workspace")
 def store_export_package_from_workspace(
     payload: WorkspaceExportPackagePayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     _require_mock_client_access(
         client_id=payload.client_id,
-        user_id=_mock_user_header(x_fisora_user_id),
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
         allowed_roles=("accountant", "admin"),
     )
     store = get_workflow_store()
@@ -989,7 +1415,23 @@ def store_export_package_from_workspace(
             "manifest_download_url": f"/phase0/store/export-package/download/{payload.client_id}/{manifest['manifest_filename']}",
         }
     )
-    return store.save_export_package(client_id=payload.client_id, package=package_payload)
+    saved = store.save_export_package(client_id=payload.client_id, package=package_payload)
+    _record_operation_event(
+        store=store,
+        client_id=payload.client_id,
+        event_type="workspace_export_package_created",
+        status="ok" if package_payload["entry_count"] else "warning",
+        message="Workspace'ten indirilebilir export paketi uretildi.",
+        metadata={
+            "export_type": package_payload["export_type"],
+            "entry_count": package_payload["entry_count"],
+            "candidate_count": package_payload["candidate_count"],
+            "excluded_document_refs": package_payload["excluded_document_refs"],
+            "output_filename": package_payload["output_filename"],
+            "manifest_filename": package_payload["manifest_filename"],
+        },
+    )
+    return saved
 
 
 @router.get("/store/export-package/download/{client_id}/{file_name}")
@@ -997,14 +1439,23 @@ def download_export_package(
     client_id: str,
     file_name: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> FileResponse:
-    _require_mock_client_access(client_id=client_id, user_id=_mock_user_header(x_fisora_user_id))
+    _require_mock_client_access(client_id=client_id, user_id=_request_user_id(x_fisora_user_id, x_fisora_session))
     safe_name = Path(file_name).name
     path = DEFAULT_EXPORT_PATH / client_id / safe_name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="export file not found")
     if path.suffix.lower() == ".csv":
         get_workflow_store().mark_export_package_downloaded(client_id=client_id, output_filename=safe_name)
+        _record_operation_event(
+            store=get_workflow_store(),
+            client_id=client_id,
+            event_type="export_package_downloaded",
+            status="ok",
+            message="Export CSV indirildi.",
+            metadata={"output_filename": safe_name},
+        )
     media_type = "application/json; charset=utf-8" if path.suffix.lower() == ".json" else "text/csv; charset=utf-8"
     return FileResponse(path, filename=safe_name, media_type=media_type)
 
@@ -1013,8 +1464,9 @@ def download_export_package(
 def store_workspace(
     client_id: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
 ) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
-    _require_mock_client_access(client_id=client_id, user_id=_mock_user_header(x_fisora_user_id))
+    _require_mock_client_access(client_id=client_id, user_id=_request_user_id(x_fisora_user_id, x_fisora_session))
     return get_workflow_store().get_workspace(client_id)

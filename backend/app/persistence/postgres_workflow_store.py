@@ -13,6 +13,7 @@ from app.domain.portal_access import (
     build_portal_user_record,
     decide_portal_access,
 )
+from app.domain.session_auth import auth_token_public_payload, credential_public_payload, is_expired, session_public_payload
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
@@ -127,6 +128,124 @@ class PostgresWorkflowStore:
             "client_id": client_id,
             "user_id": user_id,
         }
+
+    def set_auth_password(self, *, user_id: str, password_hash: str) -> dict[str, Any]:
+        timestamp = utc_now()
+        existing = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_credential", user_id) or {}
+        record = {
+            **existing,
+            "user_id": user_id,
+            "password_hash": password_hash,
+            "updated_at": timestamp,
+        }
+        record.setdefault("created_at", timestamp)
+        stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_credential", user_id, record)
+        return credential_public_payload(stored)
+
+    def get_auth_password_hash(self, *, user_id: str) -> str:
+        credential = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_credential", user_id) or {}
+        return str(credential.get("password_hash") or "")
+
+    def create_auth_session(self, *, user_id: str, token_hash: str, expires_at: str) -> dict[str, Any]:
+        timestamp = utc_now()
+        record = {
+            "session_id": str(uuid4()),
+            "user_id": user_id,
+            "token_hash": token_hash,
+            "expires_at": expires_at,
+            "revoked_at": "",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_session", token_hash, record)
+        return session_public_payload(stored)
+
+    def resolve_auth_session(self, *, token_hash: str) -> dict[str, Any]:
+        record = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_session", token_hash)
+        if not record:
+            return {"valid": False, "reason": "session_not_found"}
+        if record.get("revoked_at"):
+            return {"valid": False, "reason": "session_revoked", "user_id": record.get("user_id", "")}
+        if is_expired(str(record.get("expires_at") or "")):
+            return {"valid": False, "reason": "session_expired", "user_id": record.get("user_id", "")}
+        return {"valid": True, "reason": "session_valid", **session_public_payload(record)}
+
+    def revoke_auth_session(self, *, token_hash: str) -> dict[str, Any]:
+        record = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_session", token_hash)
+        if not record:
+            return {"revoked": False, "reason": "session_not_found"}
+        record["revoked_at"] = utc_now()
+        record["updated_at"] = record["revoked_at"]
+        stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_session", token_hash, record)
+        return {"revoked": True, "reason": "session_revoked", **session_public_payload(stored)}
+
+    def create_auth_token(
+        self,
+        *,
+        purpose: str,
+        user_id: str,
+        token_hash: str,
+        expires_at: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        timestamp = utc_now()
+        record = {
+            "token_id": str(uuid4()),
+            "purpose": purpose,
+            "user_id": user_id,
+            "token_hash": token_hash,
+            "expires_at": expires_at,
+            "used_at": "",
+            "payload": payload or {},
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash, record)
+        return auth_token_public_payload(stored)
+
+    def resolve_auth_token(self, *, purpose: str, token_hash: str) -> dict[str, Any]:
+        record = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash)
+        if not record or record.get("purpose") != purpose:
+            return {"valid": False, "reason": "token_not_found"}
+        if record.get("used_at"):
+            return {"valid": False, "reason": "token_used", "user_id": record.get("user_id", "")}
+        if is_expired(str(record.get("expires_at") or "")):
+            return {"valid": False, "reason": "token_expired", "user_id": record.get("user_id", "")}
+        return {"valid": True, "reason": "token_valid", **auth_token_public_payload(record), "payload": deepcopy(record.get("payload") or {})}
+
+    def mark_auth_token_used(self, *, token_hash: str) -> dict[str, Any]:
+        record = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash)
+        if not record:
+            return {"used": False, "reason": "token_not_found"}
+        record["used_at"] = utc_now()
+        record["updated_at"] = record["used_at"]
+        stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash, record)
+        return {"used": True, "reason": "token_used", **auth_token_public_payload(stored)}
+
+    def record_ai_usage(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        event_id = str(event.get("event_id") or uuid4())
+        record = {
+            **event,
+            "event_id": event_id,
+            "client_id": client_id,
+        }
+        return self._upsert_record(client_id, "ai_usage_event", event_id, record)
+
+    def list_ai_usage(self, *, client_id: str) -> list[dict[str, Any]]:
+        return self._payloads(client_id, "ai_usage_event")
+
+    def record_operation_event(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        event_id = str(event.get("event_id") or uuid4())
+        record = {
+            **event,
+            "event_id": event_id,
+            "client_id": client_id,
+        }
+        return self._upsert_record(client_id, "operation_event", event_id, record)
+
+    def list_operation_events(self, *, client_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        events = self._payloads(client_id, "operation_event")
+        return events[-max(limit, 1):]
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
@@ -334,6 +453,7 @@ class PostgresWorkflowStore:
                 for user in self._payloads(PORTAL_USERS_CLIENT_ID, "portal_user")
                 if client_id in set(user.get("allowed_client_ids") or []) or "*" in set(user.get("allowed_client_ids") or [])
             ],
+            "operation_events": self.list_operation_events(client_id=client_id),
         }
 
     def _payloads(self, client_id: str, record_type: str) -> list[dict[str, Any]]:

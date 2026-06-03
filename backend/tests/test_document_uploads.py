@@ -18,6 +18,7 @@ from app.domain.document_uploads import (
     sanitize_file_name,
     store_document_content,
 )
+from app.domain.storage_adapters import storage_readiness
 
 
 class DocumentUploadTests(unittest.TestCase):
@@ -36,6 +37,7 @@ class DocumentUploadTests(unittest.TestCase):
             stored_bytes = stored_path.read_bytes()
 
         self.assertEqual(document.status, "stored")
+        self.assertEqual(document.storage_backend, "local")
         self.assertEqual(document.client_id, "client 1")
         self.assertEqual(document.stored_file_name, "Rexton-Alis-Faturasi.pdf")
         self.assertEqual(document.retention_policy_days, 90)
@@ -46,6 +48,14 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertEqual(document.size_bytes, len(b"invoice-bytes"))
         self.assertEqual(stored_bytes, b"invoice-bytes")
         self.assertIn("client-1", document.storage_path)
+
+    def test_local_storage_readiness_reports_writable_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            readiness = storage_readiness(base_dir=Path(temp_dir))
+
+        self.assertTrue(readiness["ok"])
+        self.assertEqual(readiness["backend"], "local")
+        self.assertTrue(readiness["writable"])
 
     def test_document_without_content_is_queued_metadata_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

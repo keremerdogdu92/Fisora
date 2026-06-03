@@ -235,6 +235,71 @@ type ClientListResponse = {
   clients?: WorkspaceClientRecord[];
 };
 
+type StoredAuthSession = {
+  version: 1;
+  userId: string;
+  token: string;
+};
+
+type SystemReadiness = {
+  ready?: boolean;
+  warnings?: string[];
+  auth?: {
+    auth_mode?: string;
+    production_ready?: boolean;
+  };
+  document_storage?: {
+    ok?: boolean;
+    backend?: string;
+  };
+  export_storage?: {
+    ok?: boolean;
+    backend?: string;
+  };
+  ai_provider?: string;
+  store_backend?: string;
+  export_adapters?: {
+    export_type?: string;
+    display_name?: string;
+    verified_in_zirve?: boolean;
+    validation_status?: string;
+  }[];
+};
+
+type OperationEventItem = {
+  event_id?: string;
+  event_type?: string;
+  status?: string;
+  message?: string;
+  created_at?: string;
+};
+
+type OperationHealth = {
+  client_id?: string;
+  summary?: {
+    health_status?: string;
+    event_count?: number;
+    job_count?: number;
+    failed_job_count?: number;
+    job_status_counts?: Record<string, number>;
+    latest_event?: OperationEventItem | null;
+  };
+  events?: OperationEventItem[];
+};
+
+type AiUsageStatus = {
+  client_id?: string;
+  summary?: {
+    event_count?: number;
+    ai_used_count?: number;
+    ai_skipped_count?: number;
+    estimated_total_cost_usd?: string;
+    monthly_cap_usd?: string;
+    remaining_cap_usd?: string;
+    cap_exceeded?: boolean;
+  };
+};
+
 type PortalMode = "client" | "accountant";
 type ViewMode = "all" | "review" | "export";
 type DecisionAction = "approve" | "approve_with_changes" | "exclude_export" | "out_of_scope" | "wrong_counterparty";
@@ -334,13 +399,41 @@ const decisions: Record<DecisionAction, LocalDecision> = {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_FISORA_API_BASE_URL ?? "http://localhost:8000";
 const ACCOUNTANT_USER_ID = "mali-musavir";
+const SESSION_STORAGE_KEY = "fisora.session.v1";
 
 function mockAuthHeaders(userId: string) {
   return { "X-Fisora-User-Id": userId };
 }
 
-function jsonHeaders(userId: string) {
-  return { "Content-Type": "application/json", ...mockAuthHeaders(userId) };
+function authHeaders(userId: string, session?: StoredAuthSession | null) {
+  if (session?.token) return { "X-Fisora-Session": session.token };
+  return mockAuthHeaders(userId);
+}
+
+function jsonHeaders(userId: string, session?: StoredAuthSession | null) {
+  return { "Content-Type": "application/json", ...authHeaders(userId, session) };
+}
+
+function readStoredSession(): StoredAuthSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredAuthSession>;
+    if (parsed.version !== 1 || !parsed.userId || !parsed.token) return null;
+    return { version: 1, userId: parsed.userId, token: parsed.token };
+  } catch {
+    return null;
+  }
+}
+
+function persistSession(session: StoredAuthSession | null) {
+  if (typeof window === "undefined") return;
+  if (!session) {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
 function formatStatus(status: string) {
@@ -679,6 +772,13 @@ export default function Home() {
   const [onboardingStatus, setOnboardingStatus] = useState("");
   const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
   const [clientListStatus, setClientListStatus] = useState("");
+  const [authSession, setAuthSession] = useState<StoredAuthSession | null>(() => readStoredSession());
+  const [loginUserId, setLoginUserId] = useState(ACCOUNTANT_USER_ID);
+  const [loginPassword, setLoginPassword] = useState("");
+  const [authStatus, setAuthStatus] = useState("");
+  const [readiness, setReadiness] = useState<SystemReadiness | null>(null);
+  const [operationHealth, setOperationHealth] = useState<OperationHealth | null>(null);
+  const [aiUsageStatus, setAiUsageStatus] = useState<AiUsageStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -721,7 +821,10 @@ export default function Home() {
     refreshClientListFromApi().catch(() => {
       setClientListStatus("client listesi icin API bekleniyor");
     });
-  }, []);
+    refreshSystemReadiness().catch(() => {
+      setReadiness(null);
+    });
+  }, [authSession?.token]);
 
   useEffect(() => {
     setUploadItems(data.uploadQueue ?? []);
@@ -766,6 +869,15 @@ export default function Home() {
     exportManifestDownloadUrl || (latestExportPackage?.manifestDownloadUrl ? `${API_BASE_URL}${latestExportPackage.manifestDownloadUrl}` : "");
 
   useEffect(() => {
+    refreshOperationHealth(clientId).catch(() => {
+      setOperationHealth(null);
+    });
+    refreshAiUsage(clientId).catch(() => {
+      setAiUsageStatus(null);
+    });
+  }, [authSession?.token, clientId]);
+
+  useEffect(() => {
     setCorrectionDraft({ correctedAccountCode: "", correctedCounterpartyCode: "", reason: "" });
     setDecisionStatus("");
   }, [selectedInvoice ? rowKey(selectedInvoice) : ""]);
@@ -773,7 +885,7 @@ export default function Home() {
   async function refreshWorkspaceFromApi(targetClientId = clientId) {
     const response = await fetch(`${API_BASE_URL}/phase0/store/workspace/${encodeURIComponent(targetClientId)}`, {
       cache: "no-store",
-      headers: mockAuthHeaders(ACCOUNTANT_USER_ID),
+      headers: authHeaders(ACCOUNTANT_USER_ID, authSession),
     });
     if (!response.ok) throw new Error("workspace refresh failed");
     const snapshot = (await response.json()) as WorkspaceSnapshot;
@@ -784,13 +896,15 @@ export default function Home() {
     if (payload.uploadQueue?.length) {
       setUploadItems(payload.uploadQueue);
     }
+    void refreshOperationHealth(targetClientId);
+    void refreshAiUsage(targetClientId);
     return payload;
   }
 
   async function refreshClientListFromApi() {
     const response = await fetch(`${API_BASE_URL}/phase0/store/clients`, {
       cache: "no-store",
-      headers: mockAuthHeaders(ACCOUNTANT_USER_ID),
+      headers: authHeaders(ACCOUNTANT_USER_ID, authSession),
     });
     if (!response.ok) throw new Error("client list refresh failed");
     const payload = (await response.json()) as ClientListResponse;
@@ -815,6 +929,99 @@ export default function Home() {
     }
   }
 
+  async function refreshSystemReadiness() {
+    const response = await fetch(`${API_BASE_URL}/phase0/store/system/readiness`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("readiness failed");
+    setReadiness((await response.json()) as SystemReadiness);
+  }
+
+  async function refreshOperationHealth(targetClientId = clientId) {
+    const response = await fetch(`${API_BASE_URL}/phase0/store/operation-health/${encodeURIComponent(targetClientId)}`, {
+      cache: "no-store",
+      headers: authHeaders(ACCOUNTANT_USER_ID, authSession),
+    });
+    if (!response.ok) throw new Error("operation health failed");
+    setOperationHealth((await response.json()) as OperationHealth);
+  }
+
+  async function refreshAiUsage(targetClientId = clientId) {
+    const response = await fetch(`${API_BASE_URL}/phase0/store/ai-usage/summary`, {
+      method: "POST",
+      headers: jsonHeaders(ACCOUNTANT_USER_ID, authSession),
+      body: JSON.stringify({
+        client_id: targetClientId,
+        monthly_cap_usd: "100.00",
+      }),
+    });
+    if (!response.ok) throw new Error("ai usage summary failed");
+    setAiUsageStatus((await response.json()) as AiUsageStatus);
+  }
+
+  async function saveDemoPassword() {
+    setAuthStatus("Sifre kaydediliyor...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/phase0/store/auth/password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: loginUserId.trim(),
+          password: loginPassword,
+        }),
+      });
+      if (!response.ok) throw new Error("password save failed");
+      setAuthStatus("Sifre kaydedildi; simdi giris yapilabilir.");
+    } catch {
+      setAuthStatus("Sifre kaydedilemedi. Production modunda bootstrap kapali olabilir.");
+    }
+  }
+
+  async function loginWithPassword() {
+    setAuthStatus("Giris yapiliyor...");
+    try {
+      const response = await fetch(`${API_BASE_URL}/phase0/store/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: loginUserId.trim(),
+          password: loginPassword,
+        }),
+      });
+      if (!response.ok) throw new Error("login failed");
+      const payload = (await response.json()) as { session_token?: string };
+      if (!payload.session_token) throw new Error("session missing");
+      const nextSession: StoredAuthSession = {
+        version: 1,
+        userId: loginUserId.trim(),
+        token: payload.session_token,
+      };
+      persistSession(nextSession);
+      setAuthSession(nextSession);
+      setAuthStatus("Session aktif.");
+      setLoginPassword("");
+    } catch {
+      setAuthStatus("Giris basarisiz.");
+    }
+  }
+
+  async function logoutSession() {
+    const token = authSession?.token;
+    persistSession(null);
+    setAuthSession(null);
+    setAuthStatus("Session kapatildi.");
+    if (!token) return;
+    try {
+      await fetch(`${API_BASE_URL}/phase0/store/auth/logout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Fisora-Session": token },
+        body: JSON.stringify({}),
+      });
+    } catch {
+      setAuthStatus("Session lokal kapatildi; API logout cevap vermedi.");
+    }
+  }
+
   async function setDecision(action: DecisionAction) {
     if (!selectedInvoice) return;
     const decision = decisions[action];
@@ -826,7 +1033,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/phase0/store/review-decision`, {
         method: "POST",
-        headers: jsonHeaders(ACCOUNTANT_USER_ID),
+        headers: jsonHeaders(ACCOUNTANT_USER_ID, authSession),
         body: JSON.stringify({
           client_id: clientId,
           decision: {
@@ -860,7 +1067,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/phase0/store/export-package/from-workspace`, {
         method: "POST",
-        headers: jsonHeaders(ACCOUNTANT_USER_ID),
+        headers: jsonHeaders(ACCOUNTANT_USER_ID, authSession),
         body: JSON.stringify({
           client_id: clientId,
           export_type: "zirve_universal_csv",
@@ -896,7 +1103,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/phase0/store/client-onboarding-package`, {
         method: "POST",
-        headers: jsonHeaders(ACCOUNTANT_USER_ID),
+        headers: jsonHeaders(ACCOUNTANT_USER_ID, authSession),
         body: JSON.stringify({
           client: {
             client_id: clientId,
@@ -962,7 +1169,7 @@ export default function Home() {
           formData.append("file", file);
           const response = await fetch(`${API_BASE_URL}/phase0/store/document-upload-multipart`, {
             method: "POST",
-            headers: mockAuthHeaders(portalUserId),
+            headers: authHeaders(portalUserId, authSession),
             body: formData,
           });
           if (!response.ok) throw new Error("upload failed");
@@ -1023,6 +1230,26 @@ export default function Home() {
           <div className="source">{source}</div>
         </div>
       </header>
+
+      <AuthSessionPanel
+        authSession={authSession}
+        authStatus={authStatus}
+        loginPassword={loginPassword}
+        loginUserId={loginUserId}
+        onLogin={loginWithPassword}
+        onLogout={logoutSession}
+        onSaveDemoPassword={saveDemoPassword}
+        readiness={readiness}
+        setLoginPassword={setLoginPassword}
+        setLoginUserId={setLoginUserId}
+      />
+
+      <AdminReadinessPanel
+        aiUsageStatus={aiUsageStatus}
+        clientId={clientId}
+        operationHealth={operationHealth}
+        readiness={readiness}
+      />
 
       <section className="modebar" aria-label="Portal modu">
         <button
@@ -1126,6 +1353,144 @@ function ClientSelector({
       </label>
       <span>{clientListStatus || `${clients.length} mukellef gorunur`}</span>
     </section>
+  );
+}
+
+function AuthSessionPanel({
+  authSession,
+  authStatus,
+  loginPassword,
+  loginUserId,
+  onLogin,
+  onLogout,
+  onSaveDemoPassword,
+  readiness,
+  setLoginPassword,
+  setLoginUserId,
+}: {
+  authSession: StoredAuthSession | null;
+  authStatus: string;
+  loginPassword: string;
+  loginUserId: string;
+  onLogin: () => Promise<void>;
+  onLogout: () => Promise<void>;
+  onSaveDemoPassword: () => Promise<void>;
+  readiness: SystemReadiness | null;
+  setLoginPassword: (value: string) => void;
+  setLoginUserId: (value: string) => void;
+}) {
+  const readinessText = readiness
+    ? `${readiness.ready ? "Hazir" : "Kontrol gerekli"} / ${readiness.auth?.auth_mode ?? "-"} / ${readiness.document_storage?.backend ?? "-"}`
+    : "Readiness bekleniyor";
+  const warningText = readiness?.warnings?.length ? readiness.warnings.join(", ") : "Kritik uyari yok";
+  return (
+    <section className="auth-panel" aria-label="Session ve sistem durumu">
+      <div className="auth-status">
+        <strong>{authSession ? `Session: ${authSession.userId}` : "Mock header fallback"}</strong>
+        <span>{authStatus || warningText}</span>
+      </div>
+      <div className="auth-form">
+        <input
+          aria-label="Kullanici id"
+          onChange={(event) => setLoginUserId(event.target.value)}
+          placeholder="kullanici id"
+          value={loginUserId}
+        />
+        <input
+          aria-label="Sifre"
+          onChange={(event) => setLoginPassword(event.target.value)}
+          placeholder="sifre"
+          type="password"
+          value={loginPassword}
+        />
+        <button onClick={onLogin} type="button">Giris</button>
+        <button className="secondary" onClick={onSaveDemoPassword} type="button">Sifre ata</button>
+        <button className="secondary" onClick={onLogout} type="button">Cikis</button>
+      </div>
+      <div className="readiness-pill">{readinessText}</div>
+    </section>
+  );
+}
+
+function AdminReadinessPanel({
+  aiUsageStatus,
+  clientId,
+  operationHealth,
+  readiness,
+}: {
+  aiUsageStatus: AiUsageStatus | null;
+  clientId: string;
+  operationHealth: OperationHealth | null;
+  readiness: SystemReadiness | null;
+}) {
+  const workerStatus = operationHealth?.summary?.health_status ?? "bekleniyor";
+  const jobCounts = operationHealth?.summary?.job_status_counts ?? {};
+  const queuedJobs = jobCounts.queued ?? 0;
+  const processingJobs = jobCounts.processing ?? 0;
+  const completedJobs = jobCounts.completed ?? 0;
+  const failedJobs = operationHealth?.summary?.failed_job_count ?? jobCounts.failed ?? 0;
+  const latestEvent = operationHealth?.summary?.latest_event;
+  const aiSummary = aiUsageStatus?.summary;
+  const hasVerifiedZirve = Boolean(readiness?.export_adapters?.some((adapter) => adapter.verified_in_zirve));
+  return (
+    <section className="admin-readiness" aria-label="Admin operasyon durumu">
+      <ReadinessCard
+        label="Auth"
+        status={readiness?.auth?.production_ready ? "Production hazir" : readiness?.auth?.auth_mode ?? "Bekleniyor"}
+        detail={`Mode: ${readiness?.auth?.auth_mode ?? "-"} / Store: ${readiness?.store_backend ?? "-"}`}
+        tone={readiness?.auth?.production_ready ? "good" : "warn"}
+      />
+      <ReadinessCard
+        label="Storage"
+        status={readiness?.document_storage?.ok && readiness?.export_storage?.ok ? "Yazilabilir" : "Kontrol gerekli"}
+        detail={`Belge: ${readiness?.document_storage?.backend ?? "-"} / Export: ${readiness?.export_storage?.backend ?? "-"}`}
+        tone={readiness?.document_storage?.ok && readiness?.export_storage?.ok ? "good" : "bad"}
+      />
+      <ReadinessCard
+        label="Worker"
+        status={workerStatus}
+        detail={`queued ${queuedJobs}, processing ${processingJobs}, completed ${completedJobs}, failed ${failedJobs}`}
+        tone={workerStatus === "ok" ? "good" : workerStatus === "error" ? "bad" : "warn"}
+      />
+      <ReadinessCard
+        label="AI cap"
+        status={aiSummary ? `$${aiSummary.estimated_total_cost_usd ?? "0.000000"}` : "Bekleniyor"}
+        detail={`Kalan: $${aiSummary?.remaining_cap_usd ?? "-"} / Event: ${aiSummary?.event_count ?? 0}`}
+        tone={aiSummary?.cap_exceeded ? "bad" : "good"}
+      />
+      <ReadinessCard
+        label="Zirve"
+        status={hasVerifiedZirve ? "Verified adapter var" : "Saha testi bekliyor"}
+        detail={(readiness?.warnings ?? []).length ? readiness?.warnings?.join(", ") ?? "" : `Aktif mukellef: ${clientId}`}
+        tone={hasVerifiedZirve ? "good" : "warn"}
+      />
+      <ReadinessCard
+        label="Son olay"
+        status={latestEvent?.event_type ?? "Olay yok"}
+        detail={latestEvent ? `${latestEvent.status ?? "-"} / ${formatDateText(latestEvent.created_at)}` : "Operasyon logu henuz bos"}
+        tone={latestEvent?.status === "error" ? "bad" : latestEvent?.status === "warning" ? "warn" : "good"}
+      />
+    </section>
+  );
+}
+
+function ReadinessCard({
+  detail,
+  label,
+  status,
+  tone,
+}: {
+  detail: string;
+  label: string;
+  status: string;
+  tone: "good" | "warn" | "bad";
+}) {
+  return (
+    <div className={`readiness-card ${tone}`}>
+      <span>{label}</span>
+      <strong>{status}</strong>
+      <p>{detail || "-"}</p>
+    </div>
   );
 }
 

@@ -75,35 +75,75 @@ Tamamlanan ana dilimler:
   tasinir.
 - Production deploy checklist: TLS, firewall, env secret, worker/export/backup
   smoke ve 90 gun belge retention kontrolu tek runbook'a baglandi.
+- Session/auth MVP: parola hash'i, session token hash'i, login/session/logout
+  endpointleri ve `X-Fisora-Session` yetki cozumu eklendi.
+- Storage adapter ilk surumu: local belge storage adapter arkasina alindi;
+  ileride S3-compatible storage ayni kontrata baglanabilir.
+- Production readiness endpoint'i: auth modu, storage yazilabilirligi, store
+  backend, AI provider ve export adapter durumu `/store/system/readiness` ile
+  gorulebilir hale geldi.
+- Docker sonrasi mustavirsiz backlog: teknik kalan isler
+  `docs/post-docker-non-accountant-backlog.md` altinda ayrildi.
+- Frontend session paneli: login, logout, demo sifre atama ve readiness ozeti
+  portal ust paneline eklendi; session varsa API istekleri
+  `X-Fisora-Session` ile gider.
+- Kullanici davet/reset iskeleti: invite token, invite accept, password reset
+  token ve reset confirm endpointleri eklendi.
+- AI usage ledger: product classification client bazli usage event yazabilir;
+  provider, input karakteri, skip nedeni ve tahmini maliyet summary olarak
+  izlenebilir.
+- Operasyon loglari: upload, review, export, export download, processing run ve
+  retention olaylari store'a yazilir; client bazli operation health endpoint'i
+  worker/job durumunu ozetler.
+- Admin readiness paneli: auth, storage, worker, AI cap, Zirve adapter ve son
+  operasyon olayi frontend'de gorunur.
+- Private intake manifest araci: mustavirden gelen lokal pilot klasoru hash,
+  belge tipi, mukellef, donem ve gizlilik seviyesiyle `private_samples/`
+  manifestine donusur.
+
+## MVP Ilerleme Degerlendirmesi
+
+2026-06-03 itibariyle muhendislik tahmini:
+
+- Genel MVP prototip: %78-82.
+- Server kiralama ve mustavir gorusmesi oncesi hazirlik: %82-86.
+- Production-ready canli MVP: %60-65.
+
+Bu oranlar gercek Zirve import dogrulamasi, gercek pilot veri kosusu ve
+production sunucu kurulumu tamamlanmadan daha yukari sayilmamalidir.
 
 ## Siradaki Adimlar
 
-1. Zirve saha testi ve verified adapter kilidi
+1. S3-compatible object storage hazirligi
+   - Local storage adapter yanina object storage sozlesmesi eklenir.
+   - 90 gun retention ve download URL stratejisi belirlenir.
+
+2. Docker production hardening scriptleri
+   - Sunucu kurulum, env template, compose deploy ve backup restore komutlari
+     scriptlesir.
+
+3. Real-data local import araclari ikinci dilim
+   - Manifestten store upload/import job'lari uretilir.
+   - Hesap plani, cari, fatura ve ekstre dosyalari local/private store hattina
+     baglanir.
+
+4. Backup ve disk health sinyali
+   - Son backup, backup manifesti ve belge volume boyutu API/readiness paneline
+     eklenir.
+
+6. Zirve saha testi ve verified adapter kilidi
    - `zirve_trial_csv` veya mustavirden gelen ornek format Zirve'de denenir.
    - Calisan kolon/format sabitlenince adapter `verified_in_zirve=true` olacak
      sekilde ayrilir.
 
-2. Gercek login/session implementasyonu
-   - Custom session, Keycloak/Auth0/Clerk veya trusted gateway rotasi secilir.
-   - Header bootstrap yerine dogrulanmis session/token akisi eklenir.
-   - Kullanici davet, sifre sifirlama ve 2FA karari verilir.
-
-3. Direct object storage hazirligi
-   - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.
-   - 90 gun retention politikasiyla uyumlu download URL akisi planlanir.
-
-4. AI API batch benchmark
-   - Statik kuralla cozulmeyen kalemlerde OpenAI/Gemini/Manus adaylari test edilir.
-   - Belge basina maliyet ve dogruluk karsilastirilir.
-
-5. AI assisted draft pilot entegrasyonu
+7. AI assisted draft pilot entegrasyonu
    - Soguk baslangic icin AI taslak modu backend payload'inda acik durum olarak
      tutulur.
    - Review ekraninda AI gerekcesi, deterministic denge ve export gate nedeni
      birlikte gosterilir.
    - Gercek fatura ile test lokal kalir; public demo sentetik veriyle ayrilir.
 
-6. Production hardening saha uygulamasi
+8. Production hardening saha uygulamasi
    - `docs/production-deploy-checklist.md` gercek sunucuda uygulanir.
    - TLS, firewall, backup hedefi, disk monitor ve env secret kontrolleri
      tamamlanir.

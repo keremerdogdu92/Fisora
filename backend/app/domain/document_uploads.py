@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from app.domain.storage_adapters import build_document_storage_adapter
+
 
 ALLOWED_DOCUMENT_TYPES = {"invoice", "einvoice_xml", "bank_statement", "pos_statement"}
 DEFAULT_RETENTION_DAYS = 90
@@ -23,6 +25,7 @@ class StoredDocument:
     original_file_name: str
     stored_file_name: str
     storage_path: str
+    storage_backend: str
     status: str
     storage_status: str
     size_bytes: int
@@ -128,8 +131,8 @@ def store_document_content(
     expires_at = retention_deadline(created_at=created, retention_days=retention_days)
     safe_client = sanitize_identifier(client_id)
     safe_name = sanitize_file_name(file_name)
-    storage_dir = Path(base_dir) / safe_client / document_id
-    storage_path = storage_dir / safe_name
+    storage_path = Path(base_dir) / safe_client / document_id / safe_name
+    storage_backend = "local"
 
     actual_size = declared_size_bytes
     actual_sha256 = declared_sha256
@@ -137,8 +140,14 @@ def store_document_content(
     storage_status = "queued"
 
     if content is not None:
-        storage_dir.mkdir(parents=True, exist_ok=True)
-        storage_path.write_bytes(content)
+        stored = build_document_storage_adapter(base_dir=base_dir).write_bytes(
+            client_key=safe_client,
+            document_id=document_id,
+            file_name=safe_name,
+            content=content,
+        )
+        storage_path = Path(stored.path)
+        storage_backend = stored.backend
         actual_size = len(content)
         actual_sha256 = hashlib.sha256(content).hexdigest()
         status = "stored"
@@ -151,6 +160,7 @@ def store_document_content(
         original_file_name=file_name,
         stored_file_name=safe_name,
         storage_path=str(storage_path),
+        storage_backend=storage_backend,
         status=status,
         storage_status=storage_status,
         size_bytes=actual_size,

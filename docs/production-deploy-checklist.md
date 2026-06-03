@@ -65,6 +65,7 @@ Kabul:
 - `/health` 200.
 - Frontend aciliyor.
 - `/api/phase0/summary` 200.
+- `/api/phase0/store/system/readiness` 200 ve `ready=true`.
 
 ## 6. Worker, Export ve Backup Smoke
 
@@ -96,3 +97,4 @@ docker compose --env-file deploy/production.env -f docker-compose.production.yml
 - Zirve import formati sahada test edilene kadar `verified_in_zirve=false`.
 - Export dosyasi gercek Zirve testinden gecmeden musteriye kesin aktarim
   formati olarak sunulmuyor.
+- `trusted_header` veya session auth akisi gercek kullanici icin test edildi.

@@ -81,6 +81,16 @@ Benchmark altyapisi:
 - OpenAI/Gemini/Manus adaylari baglandiginda ayni case seti uzerinde dogruluk,
   AI kullanildi mi ve tahmini input karakteri raporlanir.
 
+Usage ledger ilk surumu:
+
+- `POST /phase0/store/ai-usage` manuel usage event kaydi yazar.
+- `POST /phase0/store/ai-usage/summary` client bazinda tahmini toplam maliyet,
+  kullanilan/atlanmis cagri sayisi ve aylik cap kalanini dondurur.
+- `POST /phase0/classification/product` `client_id` ile cagrilirsa usage event
+  otomatik kaydedilir.
+- Bu rakamlar provider faturasinin yerine gecmez; erken MVP'de maliyet cap'i ve
+  karar izi icin ic tahmindir.
+
 ## Sunucu Secimi
 
 Ilk canli deneme icin pratik karar:

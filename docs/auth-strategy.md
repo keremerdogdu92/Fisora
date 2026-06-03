@@ -52,6 +52,34 @@ Baslangic icin teknik onerim: demo ve pilotta `mock_header_required`, canliya
 gecerken custom session veya provider kararini netlestirmek. Provider secilirse
 backend `trusted_header` veya token dogrulama katmanina tasinir.
 
+## Eklenen MVP Session Akisi
+
+Backend artik custom session icin ilk MVP endpointlerini tasir:
+
+- `POST /phase0/store/auth/password`: portal kullanicisi icin parola hash'i
+  kaydeder.
+- `POST /phase0/store/auth/login`: dogru parola ile session token uretir.
+- `GET /phase0/store/auth/session`: `X-Fisora-Session` header'ini dogrular.
+- `POST /phase0/store/auth/logout`: session token'i revoke eder.
+- `POST /phase0/store/auth/invite`: portal kullanicisi icin davet token'i
+  uretir.
+- `POST /phase0/store/auth/invite/accept`: davet token'iyle ilk sifreyi
+  belirler.
+- `POST /phase0/store/auth/password-reset`: sifre reset token'i uretir.
+- `POST /phase0/store/auth/password-reset/confirm`: reset token'iyle yeni sifre
+  yazar.
+
+Session token'in kendisi database'e yazilmaz; sadece SHA-256 hash'i saklanir.
+Parolalar PBKDF2-SHA256 ile salt'li hash olarak tutulur.
+
+`trusted_header` modunda parola bootstrap endpoint'i varsayilan olarak kapali
+kalir. Sadece kapali pilot ortaminda `FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED=true`
+ile acilmalidir. Production davet/reset akisi eklenmeden bu endpoint public
+erisime acik birakilmaz.
+
+Bu henuz tam davet/sifre sifirlama sistemi degildir. Bir sonraki adimda
+mail gonderimi, token link UI'i, token rate limit ve 2FA politikasi eklenmelidir.
+
 ## Yetki Kurallari
 
 - Belge upload: sadece atanmis `client_user`, `accountant` veya `admin`.

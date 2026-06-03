@@ -13,6 +13,7 @@ from app.domain.portal_access import (
     build_portal_user_record,
     decide_portal_access,
 )
+from app.domain.session_auth import auth_token_public_payload, credential_public_payload, is_expired, session_public_payload
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
@@ -34,6 +35,11 @@ def empty_store() -> dict[str, Any]:
         "learning_events": [],
         "export_packages": [],
         "portal_users": {},
+        "auth_credentials": {},
+        "auth_sessions": {},
+        "auth_tokens": {},
+        "ai_usage_events": [],
+        "operation_events": [],
     }
 
 
@@ -121,6 +127,147 @@ class JsonWorkflowStore:
             "client_id": client_id,
             "user_id": user_id,
         }
+
+    def set_auth_password(self, *, user_id: str, password_hash: str) -> dict[str, Any]:
+        data = self._read()
+        timestamp = utc_now()
+        existing = data["auth_credentials"].get(user_id, {})
+        record = {
+            **existing,
+            "user_id": user_id,
+            "password_hash": password_hash,
+            "updated_at": timestamp,
+        }
+        record.setdefault("created_at", timestamp)
+        data["auth_credentials"][user_id] = record
+        self._write(data)
+        return credential_public_payload(record)
+
+    def get_auth_password_hash(self, *, user_id: str) -> str:
+        data = self._read()
+        credential = data["auth_credentials"].get(user_id) or {}
+        return str(credential.get("password_hash") or "")
+
+    def create_auth_session(self, *, user_id: str, token_hash: str, expires_at: str) -> dict[str, Any]:
+        data = self._read()
+        timestamp = utc_now()
+        record = {
+            "session_id": str(uuid4()),
+            "user_id": user_id,
+            "token_hash": token_hash,
+            "expires_at": expires_at,
+            "revoked_at": "",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        data["auth_sessions"][token_hash] = record
+        self._write(data)
+        return session_public_payload(record)
+
+    def resolve_auth_session(self, *, token_hash: str) -> dict[str, Any]:
+        data = self._read()
+        record = data["auth_sessions"].get(token_hash)
+        if not record:
+            return {"valid": False, "reason": "session_not_found"}
+        if record.get("revoked_at"):
+            return {"valid": False, "reason": "session_revoked", "user_id": record.get("user_id", "")}
+        if is_expired(str(record.get("expires_at") or "")):
+            return {"valid": False, "reason": "session_expired", "user_id": record.get("user_id", "")}
+        return {"valid": True, "reason": "session_valid", **session_public_payload(record)}
+
+    def revoke_auth_session(self, *, token_hash: str) -> dict[str, Any]:
+        data = self._read()
+        record = data["auth_sessions"].get(token_hash)
+        if not record:
+            return {"revoked": False, "reason": "session_not_found"}
+        record["revoked_at"] = utc_now()
+        record["updated_at"] = record["revoked_at"]
+        self._write(data)
+        return {"revoked": True, "reason": "session_revoked", **session_public_payload(record)}
+
+    def create_auth_token(
+        self,
+        *,
+        purpose: str,
+        user_id: str,
+        token_hash: str,
+        expires_at: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = self._read()
+        timestamp = utc_now()
+        record = {
+            "token_id": str(uuid4()),
+            "purpose": purpose,
+            "user_id": user_id,
+            "token_hash": token_hash,
+            "expires_at": expires_at,
+            "used_at": "",
+            "payload": payload or {},
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        data["auth_tokens"][token_hash] = record
+        self._write(data)
+        return auth_token_public_payload(record)
+
+    def resolve_auth_token(self, *, purpose: str, token_hash: str) -> dict[str, Any]:
+        data = self._read()
+        record = data["auth_tokens"].get(token_hash)
+        if not record or record.get("purpose") != purpose:
+            return {"valid": False, "reason": "token_not_found"}
+        if record.get("used_at"):
+            return {"valid": False, "reason": "token_used", "user_id": record.get("user_id", "")}
+        if is_expired(str(record.get("expires_at") or "")):
+            return {"valid": False, "reason": "token_expired", "user_id": record.get("user_id", "")}
+        return {"valid": True, "reason": "token_valid", **auth_token_public_payload(record), "payload": deepcopy(record.get("payload") or {})}
+
+    def mark_auth_token_used(self, *, token_hash: str) -> dict[str, Any]:
+        data = self._read()
+        record = data["auth_tokens"].get(token_hash)
+        if not record:
+            return {"used": False, "reason": "token_not_found"}
+        record["used_at"] = utc_now()
+        record["updated_at"] = record["used_at"]
+        self._write(data)
+        return {"used": True, "reason": "token_used", **auth_token_public_payload(record)}
+
+    def record_ai_usage(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        record = {
+            **event,
+            "client_id": client_id,
+        }
+        data["ai_usage_events"].append(record)
+        self._write(data)
+        return deepcopy(record)
+
+    def list_ai_usage(self, *, client_id: str) -> list[dict[str, Any]]:
+        data = self._read()
+        return [
+            deepcopy(event)
+            for event in data["ai_usage_events"]
+            if event.get("client_id") == client_id
+        ]
+
+    def record_operation_event(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        record = {
+            **event,
+            "client_id": client_id,
+        }
+        data["operation_events"].append(record)
+        self._write(data)
+        return deepcopy(record)
+
+    def list_operation_events(self, *, client_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        data = self._read()
+        events = [
+            deepcopy(event)
+            for event in data["operation_events"]
+            if event.get("client_id") == client_id
+        ]
+        return events[-max(limit, 1):]
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -365,6 +512,7 @@ class JsonWorkflowStore:
                 for user in data["portal_users"].values()
                 if client_id in set(user.get("allowed_client_ids") or []) or "*" in set(user.get("allowed_client_ids") or [])
             ],
+            "operation_events": self.list_operation_events(client_id=client_id),
         }
 
     def _read(self) -> dict[str, Any]:

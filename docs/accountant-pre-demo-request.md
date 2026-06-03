@@ -156,3 +156,20 @@ zirve_import_ornegi.xlsx
 ```
 
 Bu adlandirma zorunlu degildir; sadece dosyalari karistirmamak icindir.
+
+## 9. Bizim Lokal Intake Adimimiz
+
+Dosyalar geldikten sonra ilk yapilacak is ham dosyayi repoya eklemek degil,
+lokal manifest uretmektir:
+
+```powershell
+python backend/scripts/build_private_intake_manifest.py C:\path\pilot_paket `
+  --client-id pilot-mukellef `
+  --client-name "Pilot Mukellef" `
+  --period 2026-05 `
+  --privacy-level real
+```
+
+Bu komut `private_samples/intake_manifest.csv` ve
+`private_samples/intake_manifest.json` uretir. Manifest dosya tipi, boyut, hash,
+mukellef, donem ve gizlilik bilgisini saklar; ham belgeyi GitHub'a eklemez.

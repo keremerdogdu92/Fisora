@@ -192,6 +192,28 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(claimed["status"], "processing")
         self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
 
+    def test_json_store_tracks_operation_events_in_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            event = store.record_operation_event(
+                client_id="client-1",
+                event={
+                    "event_id": "event-1",
+                    "client_id": "client-1",
+                    "event_type": "processing_run",
+                    "status": "ok",
+                    "message": "Worker calisti.",
+                    "metadata": {"completed_count": 1},
+                    "created_at": "2026-06-03T10:00:00+00:00",
+                },
+            )
+            events = store.list_operation_events(client_id="client-1")
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(event["event_type"], "processing_run")
+        self.assertEqual(events[0]["metadata"]["completed_count"], 1)
+        self.assertEqual(workspace["operation_events"][0]["event_id"], "event-1")
+
     def test_json_store_applies_review_correction_to_stored_document(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

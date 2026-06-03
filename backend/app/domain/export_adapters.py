@@ -5,11 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from app.domain.exporters import export_universal_journal_csv
+from app.domain.exporters import export_universal_journal_csv, export_zirve_trial_csv
 from app.domain.journal_entries import JournalEntry
 
 
-ExportAdapterType = Literal["zirve_universal_csv", "json_manifest"]
+ExportAdapterType = Literal["zirve_universal_csv", "zirve_trial_csv", "json_manifest"]
+ValidationStatus = Literal["field_test_pending", "verified", "audit_only"]
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,8 @@ class ExportAdapter:
     mime_type: str
     display_name: str
     verified_in_zirve: bool
+    validation_status: ValidationStatus = "field_test_pending"
+    field_mapping_notes: tuple[str, ...] = ()
 
 
 SUPPORTED_EXPORT_ADAPTERS: dict[str, ExportAdapter] = {
@@ -28,6 +31,19 @@ SUPPORTED_EXPORT_ADAPTERS: dict[str, ExportAdapter] = {
         mime_type="text/csv; charset=utf-8",
         display_name="Zirve Universal Journal CSV",
         verified_in_zirve=False,
+        field_mapping_notes=("Internal universal CSV; use for audit and first field comparison.",),
+    ),
+    "zirve_trial_csv": ExportAdapter(
+        export_type="zirve_trial_csv",
+        file_extension=".csv",
+        mime_type="text/csv; charset=utf-8",
+        display_name="Zirve Trial Voucher CSV",
+        verified_in_zirve=False,
+        validation_status="field_test_pending",
+        field_mapping_notes=(
+            "Unverified semicolon CSV for Zirve field mapping tests.",
+            "Columns: fis_tarihi, fis_turu, fis_aciklama, satir_no, hesap_kodu, satir_aciklama, borc, alacak, belge_no, vergi_no, kaynak_belge.",
+        ),
     ),
     "json_manifest": ExportAdapter(
         export_type="json_manifest",
@@ -35,6 +51,8 @@ SUPPORTED_EXPORT_ADAPTERS: dict[str, ExportAdapter] = {
         mime_type="application/json; charset=utf-8",
         display_name="JSON audit manifest",
         verified_in_zirve=False,
+        validation_status="audit_only",
+        field_mapping_notes=("Audit manifest only; not intended for Zirve import.",),
     ),
 }
 
@@ -80,6 +98,8 @@ def write_export_file(
     path = Path(output_path)
     if adapter.export_type == "zirve_universal_csv":
         return export_universal_journal_csv(list(entries), path)
+    if adapter.export_type == "zirve_trial_csv":
+        return export_zirve_trial_csv(list(entries), path)
     if adapter.export_type == "json_manifest":
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -88,6 +108,8 @@ def write_export_file(
             "adapter": {
                 "display_name": adapter.display_name,
                 "verified_in_zirve": adapter.verified_in_zirve,
+                "validation_status": adapter.validation_status,
+                "field_mapping_notes": list(adapter.field_mapping_notes),
             },
             "entry_count": len(entries),
             "entries": [journal_entry_payload(entry) for entry in entries],

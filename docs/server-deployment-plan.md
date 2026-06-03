@@ -88,6 +88,8 @@ Ilk production env:
 ```text
 FISORA_ENV=production
 FISORA_STORE_BACKEND=postgres
+FISORA_AUTH_MODE=trusted_header
+FISORA_AUTH_HEADER=X-Fisora-User-Id
 FISORA_DOCUMENT_STORAGE_PATH=/opt/fisora/data/documents
 FISORA_EXPORT_PATH=/opt/fisora/data/exports
 DATABASE_URL=postgresql://...
@@ -130,26 +132,61 @@ Saklama:
 9. Mukellef upload -> worker -> review -> export akisi test edilir.
 10. Gercek Zirve export saha testi yapilir.
 
-## Yerel Docker Kontrol Notu
+Detayli canliya gecis checklist'i: `docs/production-deploy-checklist.md`.
 
-2026-06-02 yerel kontrolde:
+## Yerel Docker ve MCP Kontrol Notu
 
-- `docker --version`: Docker CLI kurulu.
-- `docker compose version`: Docker Compose kurulu.
-- `docker compose --env-file deploy/production.env.example -f docker-compose.production.yml config`: compose dosyasi
-  parse edildi.
-- `docker info`: Docker Desktop Service durdugu ve `docker_engine` pipe erisimi reddedildigi icin container
-  baslatma testi yapilamadi.
-- `C:\Users\kerem\.docker` altinda izin hatasi gorundu; Docker Desktop acildiktan veya kullanici izinleri
-  duzeltildikten sonra `docker info` tekrar denenmeli.
+2026-06-03 yerel kontrolde Docker Desktop aktif ve compose smoke testi gecti.
 
-Container smoke test icin hedef komut:
+- `docker --version`: Docker `29.5.2`.
+- `docker info`: Docker Desktop Linux engine calisiyor.
+- Docker MCP Catalog Codex global config'e baglandi: `codex: connected`.
+- MCP profilinde `docker-docs` aktif. Bu server Docker dokumantasyonu icindir.
+- Docker MCP katalogda yerel daemon/container/compose yoneten ayri server
+  bulunmadigi icin container operasyonlari Docker CLI ile surdurulur.
+- Docker MCP araclarinin Codex arac listesinde gorunmesi icin Codex uygulamasini
+  yeniden baslatmak gerekebilir.
+
+Kosulan compose smoke komutlari:
 
 ```powershell
+$env:FISORA_HTTP_PORT='8088'
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml config
 docker compose --env-file deploy/production.env.example -f docker-compose.production.yml up -d postgres redis
-python backend/scripts/apply_migrations.py
-python backend/scripts/run_postgres_smoke.py
-docker compose --env-file deploy/production.env.example -f docker-compose.production.yml down
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml up --build migrate
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml run --rm migrate python /app/backend/scripts/run_postgres_smoke.py
+docker compose --env-file deploy/production.env.example -f docker-compose.production.yml up -d --build backend frontend nginx
+```
+
+Sonuclar:
+
+- Postgres ve Redis `healthy`.
+- Migration runner `001_initial_schema.sql` ve `002_counterparty_iban.sql`
+  migrationlarini uyguladi.
+- Postgres smoke sonucu: `status=ok`, `completed_jobs=1`,
+  `document_export_status=export_ready`.
+- Nginx `http://localhost:8088` uzerinden cevap verdi.
+- `GET /health`: `{"status":"ok"}`.
+- Frontend ana sayfa HTTP `200`.
+- `GET /api/phase0/summary`: Faz 0 summary cevap verdi.
+
+Uctan uca Docker smoke:
+
+1. Nginx uzerinden demo mukellef onboarding paketi olusturuldu.
+2. Atanmis portal kullanicisiyle banka ekstresi upload edildi.
+3. Worker container'i `FISORA_WORKER_RUN_ONCE=1` ile calistirildi.
+4. Job `completed`, belge `export_ready`, fis taslagi `statement_entries_ready`
+   ve `draft_line_count=2` oldu.
+5. Workspace export package olusturuldu.
+6. CSV ve manifest download endpointleri HTTP `200` dondu.
+7. Backup job `FISORA_BACKUP_RUN_ONCE=1` ile Postgres dump ve belge manifesti
+   uretti.
+
+Backup smoke dosyalari:
+
+```text
+postgres-20260603T083426Z.sql
+documents-20260603T083426Z.manifest.tsv
 ```
 
 ## Repo Icindeki Ilk Iskelet

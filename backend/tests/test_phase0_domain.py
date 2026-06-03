@@ -29,7 +29,7 @@ from app.domain.chart_accounts import ChartAccount
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.export_adapters import get_export_adapter, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
-from app.domain.exporters import export_universal_journal_csv
+from app.domain.exporters import export_universal_journal_csv, export_zirve_trial_csv
 from app.domain.invoice_lines import extract_invoice_lines_from_text
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_operations import (
@@ -777,6 +777,26 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn('"document_ref": "ready.pdf"', text)
         with self.assertRaises(ValueError):
             get_export_adapter("zirve_verified_format")
+
+    def test_zirve_trial_csv_adapter_writes_field_mapping_candidate(self) -> None:
+        entry = build_bank_payment_entry(
+            entry_date="2026-05-03",
+            amount=money("500.00"),
+            bank_account="102.01",
+            counterparty_account="360",
+            counterparty_tax_id="1111111111",
+            document_ref="BNK-0001",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = export_zirve_trial_csv([entry], Path(temp_dir) / "zirve-trial.csv")
+            adapter = get_export_adapter("zirve_trial_csv")
+            text = output.read_text(encoding="utf-8-sig")
+
+        self.assertEqual(adapter.validation_status, "field_test_pending")
+        self.assertFalse(adapter.verified_in_zirve)
+        self.assertIn("fis_tarihi;fis_turu;fis_aciklama", text)
+        self.assertIn("2026-05-03;BANKA", text)
+        self.assertIn("360;Cari odeme;500.00;0.00;BNK-0001;1111111111", text)
 
     def test_workspace_export_package_includes_only_ready_balanced_entries(self) -> None:
         workspace = {

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
+from app.domain.auth_policy import auth_status_payload, build_auth_config, resolve_user_id
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.document_uploads import decode_base64_content, store_document_content
@@ -284,8 +285,25 @@ def _require_mock_client_access(
     user_id: str | None,
     allowed_roles: tuple[str, ...] = (),
 ) -> dict[str, object]:
+    auth_config = build_auth_config()
     if not user_id:
-        return {"allowed": True, "reason": "mock_auth_disabled", "role": "anonymous", "client_id": client_id}
+        if auth_config.allows_anonymous_access:
+            return {
+                "allowed": True,
+                "reason": "mock_auth_optional_anonymous",
+                "role": "anonymous",
+                "client_id": client_id,
+                "auth_mode": auth_config.mode,
+            }
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "allowed": False,
+                "reason": "portal_user_required",
+                "auth_mode": auth_config.mode,
+                "user_header_name": auth_config.user_header_name,
+            },
+        )
     access = get_workflow_store().verify_portal_access(client_id=client_id, user_id=user_id)
     if not access.get("allowed"):
         raise HTTPException(status_code=403, detail=access)
@@ -303,7 +321,7 @@ def _require_mock_client_access(
 
 
 def _mock_user_header(value: str | None) -> str:
-    return (value or "").strip()
+    return resolve_user_id(value, build_auth_config())
 
 
 def _safe_export_file_name(client_id: str, export_type: str, extension: str = ".csv") -> str:
@@ -622,6 +640,11 @@ def store_portal_access_check(payload: PortalAccessPayload) -> dict[str, object]
     if not payload.client_id.strip() or not payload.user_id.strip():
         raise HTTPException(status_code=400, detail="client_id and user_id are required")
     return get_workflow_store().verify_portal_access(client_id=payload.client_id, user_id=payload.user_id)
+
+
+@router.get("/store/auth/status")
+def store_auth_status() -> dict[str, object]:
+    return auth_status_payload(build_auth_config())
 
 
 @router.post("/store/document-upload")
@@ -948,6 +971,8 @@ def store_export_package_from_workspace(
             "file_extension": adapter.file_extension,
             "mime_type": adapter.mime_type,
             "verified_in_zirve": adapter.verified_in_zirve,
+            "validation_status": adapter.validation_status,
+            "field_mapping_notes": list(adapter.field_mapping_notes),
         },
         "candidate_count": build.candidate_count,
         "entry_count": len(build.package.entries),

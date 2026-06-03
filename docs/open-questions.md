@@ -52,8 +52,8 @@ netlestirilecek.
 
 ## Sunucu ve AI API
 
-26. Ilk production kendi kiralik sunucuda mi, yoksa cloud app/object storage
-    kombinasyonunda mi baslayacak?
+26. Ilk production kendi kiralik sunucuda baslayacak; secilen saglayicida paket
+    buyutme, disk artirma ve veri tasima gerekip gerekmedigi yazili netlesmeli.
 27. Ham belge storage volume'u sifreli olacak mi, dis backup hangi Turkiye
     lokasyonunda tutulacak?
 28. Dis AI API sadece kategori/gerekce icin mi kullanilacak, yoksa banka
@@ -70,3 +70,14 @@ netlestirilecek.
     nasil ayrilacak?
 35. OpenAI/Gemini/Manus benchmarkinda hangi 20-50 marka/model ve genel gider
     case seti standart kabul edilecek?
+
+## Auth ve Canli Portal
+
+36. Gercek login/session icin custom session mi, Keycloak/Auth0/Clerk gibi
+    provider mi secilecek?
+37. `trusted_header` kullanilacaksa header'i hangi gateway dogrulayip backend'e
+    enjekte edecek?
+38. Mustavir/ofis kullanici daveti, sifre sifirlama ve 2FA politikasi nasil
+    olacak?
+39. Mukellef kullanicisi export dosyalarini indirebilecek mi, yoksa sadece
+    belge yukleme ve durum takibi mi yapacak?

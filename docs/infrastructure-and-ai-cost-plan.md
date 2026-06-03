@@ -120,6 +120,8 @@ Bu karar:
 
 ## Sonraki Teknik Adim
 
-Belge upload modeli once local storage adapter ile dogrulanacak. Sonra ayni
-davranis production'da sunucu volume'u veya S3-compatible object storage'a
-tasinarak korunacak.
+Yerel Docker smoke testinde Postgres, Redis, backend, frontend, nginx, worker,
+export ve backup akisi dogrulandi. Sonraki teknik adim ayni komut setini gercek
+Turkiye lokasyonlu sunucuda calistirmak, env secret/TLS/firewall ayarlarini
+eklemek ve belge volume'u icin sifreleme ile harici backup hedefini
+netlestirmektir.

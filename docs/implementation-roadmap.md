@@ -37,7 +37,7 @@ Tamamlanan ana dilimler:
 - Review duzeltmesini UI taslagina uygulama: girilen hesap/cari kodlari secili fis satirinda aninda gorunur.
 - Review duzeltmesini kalici taslaga uygulama: mustavir onayi workspace refresh sonrasi korunur.
 - Export indirme izi: CSV indirildiginde `downloaded_at` ve `download_count` saklanir.
-- Docker compose config kontrolu: production compose dosyasi parse edildi; daemon/container smoke testi Docker Desktop izinleri duzelince kosulacak.
+- Docker compose saha kontrolu: production compose parse edildi, Postgres/Redis healthy basladi, migration runner ve Postgres smoke testi gecti.
 - Portal yetki iskeleti: upload icin mukellef onboarding kaydi ve atanmis portal kullanicisi zorunlu hale geldi.
 - Banka/POS cari eslestirme: ekstre satirlari VKN/TCKN/unvan uzerinden 120/320 hesap plani adaylarina baglanabilir.
 - Client onboarding paketi: mukellef karti, hesap plani ve portal kullanicilari tek API cagrisiyla hazirlanabilir.
@@ -59,37 +59,54 @@ Tamamlanan ana dilimler:
 - Sentetik AI benchmark seti: bos benchmark cagrisi Urban Care, Rexton, pil,
   e-fatura, cloud, elektrik, internet, GIB ve bilinmeyen model case'leriyle
   calisir.
+- Docker MCP baglantisi: Docker MCP Catalog Codex global config'e baglandi;
+  `docker-docs` profilde aktif. Yerel container/compose yonetimi icin MCP server
+  bulunmadigindan bu isler Docker CLI ile surduruluyor.
+- Full Docker stack smoke: nginx `http://localhost:8088`, backend, frontend,
+  Postgres ve Redis ayaga kalkti; `/health`, frontend ve API summary cevap verdi.
+- Worker/export/backup smoke: API'den onboarding ve upload yapildi, worker
+  container'i job'i tamamladi, workspace `export_ready` oldu, CSV/manifest
+  indirildi ve backup job Postgres dump + belge manifesti uretti.
+- Auth stratejisi ilk surumu: `mock_header_optional`, `mock_header_required`
+  ve `trusted_header` modlari tanimlandi; production env `trusted_header`
+  kararini tasir, backend auth status endpoint'i verir.
+- Zirve trial export adapter'i: `zirve_trial_csv` dogrulanmamis saha eslestirme
+  adayi olarak eklendi; manifestte validation status ve field mapping notlari
+  tasinir.
+- Production deploy checklist: TLS, firewall, env secret, worker/export/backup
+  smoke ve 90 gun belge retention kontrolu tek runbook'a baglandi.
 
 ## Siradaki Adimlar
 
-1. Docker daemon ve PostgreSQL saha smoke testi
-   - `backend/scripts/apply_migrations.py` gercek Postgres'e uygulanir.
-   - `FISORA_STORE_BACKEND=postgres` ile client -> upload -> worker -> workspace akisi denenir.
-   - Compose config ve container start senaryosu sunucuda dogrulanir.
+1. Zirve saha testi ve verified adapter kilidi
+   - `zirve_trial_csv` veya mustavirden gelen ornek format Zirve'de denenir.
+   - Calisan kolon/format sabitlenince adapter `verified_in_zirve=true` olacak
+     sekilde ayrilir.
 
-2. Export dosya adapter'i genisletme
-   - Zirve saha testinde calisan kolon/format sabitlenir.
-   - Manifestteki kolon/entry metadatasi gercek Zirve saha raporuna baglanir.
+2. Gercek login/session implementasyonu
+   - Custom session, Keycloak/Auth0/Clerk veya trusted gateway rotasi secilir.
+   - Header bootstrap yerine dogrulanmis session/token akisi eklenir.
+   - Kullanici davet, sifre sifirlama ve 2FA karari verilir.
 
-3. Portal auth ve yetki genisletmesi
-   - Gercek login/session provider secilir.
-   - Musavir birden cok mukellef gorur.
-   - Kullanici listesi ve davet akisi eklenir.
-
-4. Direct object storage hazirligi
+3. Direct object storage hazirligi
    - Sunucu volume'u disinda S3-compatible storage opsiyonu adapter olarak eklenir.
    - 90 gun retention politikasiyla uyumlu download URL akisi planlanir.
 
-5. AI API batch benchmark
+4. AI API batch benchmark
    - Statik kuralla cozulmeyen kalemlerde OpenAI/Gemini/Manus adaylari test edilir.
    - Belge basina maliyet ve dogruluk karsilastirilir.
 
-6. AI assisted draft pilot entegrasyonu
+5. AI assisted draft pilot entegrasyonu
    - Soguk baslangic icin AI taslak modu backend payload'inda acik durum olarak
      tutulur.
    - Review ekraninda AI gerekcesi, deterministic denge ve export gate nedeni
      birlikte gosterilir.
    - Gercek fatura ile test lokal kalir; public demo sentetik veriyle ayrilir.
+
+6. Production hardening saha uygulamasi
+   - `docs/production-deploy-checklist.md` gercek sunucuda uygulanir.
+   - TLS, firewall, backup hedefi, disk monitor ve env secret kontrolleri
+     tamamlanir.
 
 Sonraki saha kilidi: Zirve export formati gercek programda denenmeden "tamam" sayilmaz.
 

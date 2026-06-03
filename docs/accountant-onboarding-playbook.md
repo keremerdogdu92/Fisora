@@ -135,3 +135,6 @@ Her karar denetim izi ve ogrenme olayi olarak saklanir.
 
 Yarinki kisa demo ve gorusme akisi icin ayrica
 `docs/accountant-demo-meeting-pack.md` kullanilir.
+
+Demo oncesi mustavire gonderilecek net dosya/veri talep listesi icin
+`docs/accountant-pre-demo-request.md` kullanilir.

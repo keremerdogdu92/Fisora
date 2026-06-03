@@ -28,11 +28,14 @@ gereken minimum dosyalari netlestirmektir.
 4. Rexton gibi alan ici kalemde fis taslagini goster.
 5. Urban Care gibi supheli kalemde export kapisinin kapali kaldigini goster.
 6. AI/kural gerekcesinin mustavire nasil yardim ettigini goster.
-7. Cari/hessap duzeltme alanina ornek kod gir.
+7. Cari/hesap duzeltme alanina ornek kod gir.
 8. "Duzelt ve onayla" kararinin learning event'e donustugunu anlat.
 9. Export paketi olustur ve manifest mantigini anlat.
 
 ## Mustavirden Istenen Minimum Dosyalar
+
+Demo oncesi gonderilecek daha net talep listesi icin
+`docs/accountant-pre-demo-request.md` kullanilir.
 
 Zorunlu:
 

@@ -125,7 +125,7 @@ Mustavir aksiyonlari:
 
 ## Export Politikasi
 
-- `export_ready`: dengeli, cari/hessap eslesmesi net, risk bayragi yok veya
+- `export_ready`: dengeli, cari/hesap eslesmesi net, risk bayragi yok veya
   mustavir politikasiyla izinli.
 - `review_required`: fis taslagi var ama mustavir kontrolu gerekir.
 - `blocked`: eksik mukellef, eksik hesap plani, okunamayan belge veya kritik

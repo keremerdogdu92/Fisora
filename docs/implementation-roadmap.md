@@ -41,7 +41,7 @@ Tamamlanan ana dilimler:
 - Portal yetki iskeleti: upload icin mukellef onboarding kaydi ve atanmis portal kullanicisi zorunlu hale geldi.
 - Banka/POS cari eslestirme: ekstre satirlari VKN/TCKN/unvan uzerinden 120/320 hesap plani adaylarina baglanabilir.
 - Client onboarding paketi: mukellef karti, hesap plani ve portal kullanicilari tek API cagrisiyla hazirlanabilir.
-- Mukkellef listesi API'si: musavir ekraninin cok-mukellef secimine hazir client listesi saglanir.
+- Mukellef listesi API'si: musavir ekraninin cok-mukellef secimine hazir client listesi saglanir.
 - Export manifest dosyasi: CSV ile birlikte audit/icerik manifest JSON'u uretilir ve indirilebilir.
 - Versioned migration runner: `backend/db/migrations` altindaki SQL dosyalari checksum ile `schema_migrations` tablosuna islenir.
 - Portal cok-mukellef secimi: musavir ekraninda API'deki mukellef listesi secilebilir ve secime gore workspace yenilenir.
@@ -53,7 +53,7 @@ Tamamlanan ana dilimler:
   taslagini hazirlayabilir, ancak export mustavir onayi veya mustavir/ofis
   politikasi olmadan acilmaz.
 
-## Siradaki 5 Adim
+## Siradaki Adimlar
 
 1. Docker daemon ve PostgreSQL saha smoke testi
    - `backend/scripts/apply_migrations.py` gercek Postgres'e uygulanir.
@@ -85,6 +85,9 @@ Tamamlanan ana dilimler:
    - Gercek fatura ile test lokal kalir; public demo sentetik veriyle ayrilir.
 
 Sonraki saha kilidi: Zirve export formati gercek programda denenmeden "tamam" sayilmaz.
+
+Docker ve mustavir verisi beklemeden yapilabilecek ayrintili demo oncesi is
+sirasi icin `docs/pre-demo-execution-plan.md` kullanilir.
 
 ## Genel Kalan Is Haritasi
 

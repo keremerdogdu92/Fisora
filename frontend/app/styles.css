@@ -235,7 +235,7 @@ h2 {
 .admin-readiness {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   margin-bottom: 14px;
 }
 
@@ -920,7 +920,7 @@ tbody tr.selected {
 
 @media (max-width: 1180px) {
   .admin-readiness {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .layout {

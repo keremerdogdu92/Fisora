@@ -140,12 +140,16 @@ class AuthPolicyTests(unittest.TestCase):
         previous = os.environ.get("FISORA_AUTH_MODE")
         previous_document_path = phase0.DEFAULT_DOCUMENT_STORAGE_PATH
         previous_export_path = phase0.DEFAULT_EXPORT_PATH
+        previous_backup_path = phase0.DEFAULT_BACKUP_PATH
         os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 base = Path(temp_dir)
                 phase0.DEFAULT_DOCUMENT_STORAGE_PATH = base / "documents"
                 phase0.DEFAULT_EXPORT_PATH = base / "exports"
+                phase0.DEFAULT_BACKUP_PATH = base / "backups"
+                phase0.DEFAULT_BACKUP_PATH.mkdir()
+                (phase0.DEFAULT_BACKUP_PATH / "postgres-20260603T100000Z.sql").write_text("backup", encoding="utf-8")
                 client = TestClient(app)
 
                 response = client.get("/phase0/store/system/readiness")
@@ -156,12 +160,16 @@ class AuthPolicyTests(unittest.TestCase):
                 os.environ["FISORA_AUTH_MODE"] = previous
             phase0.DEFAULT_DOCUMENT_STORAGE_PATH = previous_document_path
             phase0.DEFAULT_EXPORT_PATH = previous_export_path
+            phase0.DEFAULT_BACKUP_PATH = previous_backup_path
 
         payload = response.json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["ready"])
         self.assertEqual(payload["auth"]["auth_mode"], "mock_header_required")
         self.assertTrue(payload["document_storage"]["ok"])
+        self.assertTrue(payload["backup"]["ok"])
+        self.assertEqual(payload["backup"]["database_backup_count"], 1)
+        self.assertIn("disk_used_percent", payload["storage_usage"])
         self.assertIn("zirve_verified_adapter_missing", payload["warnings"])
 
     def test_operation_log_and_health_endpoint_summarize_jobs(self) -> None:

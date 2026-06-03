@@ -45,6 +45,7 @@ services:
       FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
       FISORA_EXPORT_PATH: /opt/fisora/data/exports
+      FISORA_BACKUP_PATH: /opt/fisora/data/backups
       FISORA_AI_PROVIDER: ${FISORA_AI_PROVIDER:-disabled}
       FISORA_AI_MONTHLY_CAP_USD: ${FISORA_AI_MONTHLY_CAP_USD:-100}
       DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}
@@ -52,6 +53,7 @@ services:
     volumes:
       - fisora_documents:/opt/fisora/data/documents
       - fisora_exports:/opt/fisora/data/exports
+      - fisora_backups:/opt/fisora/data/backups:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

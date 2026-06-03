@@ -14,6 +14,7 @@ if str(BACKEND) not in sys.path:
 from app.persistence.workflow_store import JsonWorkflowStore
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
+from backend.scripts.import_private_intake_manifest import import_manifest
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
 
@@ -627,6 +628,73 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.888")
         self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "learning_event")
         self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.888")
+
+    def test_private_intake_manifest_imports_chart_accounts_and_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            source_dir = base / "pilot"
+            source_dir.mkdir()
+            (source_dir / "zirve_hesap_plani.csv").write_text(
+                "account_code,account_name,is_detail_account\n"
+                "102.01,Banka,true\n"
+                "360,Vergi Borclari,true\n",
+                encoding="utf-8",
+            )
+            (source_dir / "banka_ekstresi.csv").write_text(
+                "transaction_date,description,amount,direction\n"
+                "2026-06-03,GIB ODEME,100.00,out\n",
+                encoding="utf-8",
+            )
+            manifest_path = base / "intake_manifest.json"
+            manifest_path.write_text(
+                """
+{
+  "source_dir": "%s",
+  "files": [
+    {
+      "client_id": "client-1",
+      "client_name": "Pilot",
+      "relative_path": "zirve_hesap_plani.csv",
+      "file_name": "zirve_hesap_plani.csv",
+      "extension": ".csv",
+      "document_kind": "chart_accounts"
+    },
+    {
+      "client_id": "client-1",
+      "client_name": "Pilot",
+      "relative_path": "banka_ekstresi.csv",
+      "file_name": "banka_ekstresi.csv",
+      "extension": ".csv",
+      "document_kind": "bank_statement"
+    }
+  ]
+}
+"""
+                % str(source_dir).replace("\\", "\\\\"),
+                encoding="utf-8",
+            )
+
+            summary = import_manifest(
+                manifest_path=manifest_path,
+                source_dir=None,
+                document_storage_path=base / "documents",
+                output_path=base / "summary.json",
+                client_id="client-1",
+                client_name="Pilot",
+                tax_id="1111111111",
+                activity="genel isletme",
+                run_worker=True,
+                store_backend="json",
+                json_store_path=base / "store.json",
+            )
+            workspace = JsonWorkflowStore(base / "store.json").get_workspace("client-1")
+
+        self.assertEqual(summary["chart_account_count"], 2)
+        self.assertEqual(summary["imported_document_count"], 1)
+        self.assertEqual(workspace["chart_accounts"]["account_count"], 2)
+        self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
+        self.assertEqual(workspace["documents"][0]["result"]["statement_lines"][0]["transaction_type"], "tax_payment")
+        self.assertEqual(workspace["operation_events"][-1]["event_type"], "private_intake_imported")
 
     def test_store_factory_selects_json_and_requires_postgres_dsn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

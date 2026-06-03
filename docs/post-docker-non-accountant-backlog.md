@@ -59,6 +59,28 @@ ve Zirve saha testi beklemeden ilerletilebilecek teknik isleri ayirir.
    - Ham dosyalari kopyalamaz; sadece dosya tipi, hash, boyut ve mukellef/donem
      metadata'si yazar.
 
+10. Real-data local import araclari ikinci dilim
+    - `backend/scripts/import_private_intake_manifest.py` manifestten hesap
+      plani, fatura, XML, banka ve POS dosyalarini store/upload job hattina
+      aktarir.
+    - Istenirse import sonrasi worker lokal olarak calistirilir.
+    - Import summary `private_samples/intake_import_summary.json` altinda
+      git disinda tutulur.
+
+11. Backup/disk health sinyali ilk surumu
+    - Readiness payload'i backup klasoru, son database backup'i, document
+      manifest sayisi, belge/export/backup boyutlari ve disk doluluk oranini
+      tasir.
+    - Frontend admin panelinde Backup karti ve disk uyarisi gorunur.
+
+12. Docker production hardening scriptleri ilk surumu
+    - `deploy/scripts/fisora-prod.sh` check, deploy, migrate, smoke,
+      backup-once, logs, ps, down ve restore-postgres komutlarini toplar.
+    - `deploy/scripts/fisora-health.ps1` local/Windows health ve readiness
+      kontrolu yapar.
+    - `docs/production-ops-runbook.md` server gelince izlenecek sira olarak
+      eklendi.
+
 ## Mustavir Beklemeden Kalan Isler
 
 1. S3-compatible object storage hazirligi
@@ -66,20 +88,25 @@ ve Zirve saha testi beklemeden ilerletilebilecek teknik isleri ayirir.
    - Presigned download URL veya backend proxy karari.
    - 90 gun retention ile object delete davranisi.
 
-2. Docker production hardening scriptleri
-   - Sunucu ilk kurulum komutlari.
-   - `.env` template kopyalama ve secret checklist.
-   - `docker compose pull/build/up` runbook.
-   - Backup restore deneme komutlari.
+2. AI provider hazirligi ikinci dilim
+   - OpenAI/Gemini provider adapter taslagi.
+   - Synthetic ve real/anonymized benchmark komutlari.
+   - Aylik cap asiminda provider cagrilarini durduran guard.
 
-3. Real-data local import araclari ikinci dilim
-   - Manifestten hesap plani/fatura/ekstre upload job'u olusturma.
-   - Private sample ciktilarini store'a kontrollu baglama.
-   - Gercek veriyi anonim/public demo hattindan ayri tutan runbook.
+3. Auth/UI tamamlayici isler
+   - Invite/reset token akisini admin panelinden yonetme.
+   - Production bootstrap kapali oldugunda net UI durumu.
+   - Mulkellef kullanicisi icin sifre degistirme ekrani.
 
-4. Backup/disk health sinyali
-   - Son backup zamani ve backup path manifesti API'de gorunur.
-   - Disk doluluk orani veya belge volume boyutu readiness'e eklenir.
+4. Upload limit ve guvenlik kontrolleri
+   - Dosya boyutu limiti.
+   - Izinli uzanti/MIME kontrolu.
+   - Buyuk/yanlis dosya tipi icin net hata payload'i.
+
+5. Demo reset/seed akisi
+   - Tek komutla sentetik mukellef, hesap plani, fatura ve banka ekstresi
+     seed edilir.
+   - Demo oncesi temiz ortam hazirlama kolaylasir.
 
 ## Mustavir veya Zirve Gerektiren Kilitler
 

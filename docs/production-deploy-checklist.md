@@ -37,6 +37,7 @@ gecis icin kullanilir.
 - `FISORA_AI_PROVIDER=disabled` baslangicta korunur.
 - AI API key varsa sadece benchmark/pilot onayi sonrasi eklenir.
 - `FISORA_AI_MONTHLY_CAP_USD` ofis politikasina gore ayarlanir.
+- `FISORA_BACKUP_PATH=/opt/fisora/data/backups`.
 
 ## 4. TLS ve Nginx
 
@@ -49,12 +50,10 @@ gecis icin kullanilir.
 
 ## 5. Ilk Smoke Komutlari
 
-```powershell
-docker compose --env-file deploy/production.env -f docker-compose.production.yml config
-docker compose --env-file deploy/production.env -f docker-compose.production.yml up -d postgres redis
-docker compose --env-file deploy/production.env -f docker-compose.production.yml up --build migrate
-docker compose --env-file deploy/production.env -f docker-compose.production.yml run --rm migrate python /app/backend/scripts/run_postgres_smoke.py
-docker compose --env-file deploy/production.env -f docker-compose.production.yml up -d --build backend frontend nginx
+```bash
+sh deploy/scripts/fisora-prod.sh check
+sh deploy/scripts/fisora-prod.sh deploy
+sh deploy/scripts/fisora-prod.sh smoke
 ```
 
 Kabul:
@@ -66,6 +65,7 @@ Kabul:
 - Frontend aciliyor.
 - `/api/phase0/summary` 200.
 - `/api/phase0/store/system/readiness` 200 ve `ready=true`.
+- Readiness payload'inda `backup` ve `storage_usage` alanlari gorunur.
 
 ## 6. Worker, Export ve Backup Smoke
 
@@ -73,7 +73,7 @@ Kabul:
 - Atanmis kullaniciyla bir banka CSV veya fatura PDF yuklenir.
 - Worker tek sefer kosulur:
 
-```powershell
+```bash
 docker compose --env-file deploy/production.env -f docker-compose.production.yml run --rm -e FISORA_WORKER_RUN_ONCE=1 worker
 ```
 
@@ -85,8 +85,8 @@ Kabul:
 - CSV ve manifest indirilebilir.
 - Backup tek sefer kosulur ve dump/manifest uretilir:
 
-```powershell
-docker compose --env-file deploy/production.env -f docker-compose.production.yml run --rm -e FISORA_BACKUP_RUN_ONCE=1 backup
+```bash
+sh deploy/scripts/fisora-prod.sh backup-once
 ```
 
 ## 7. Canliya Almadan Once

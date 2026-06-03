@@ -256,6 +256,23 @@ type SystemReadiness = {
     ok?: boolean;
     backend?: string;
   };
+  backup?: {
+    ok?: boolean;
+    database_backup_count?: number;
+    document_manifest_count?: number;
+    latest_database_backup?: {
+      file_name?: string;
+      modified_at?: string;
+    } | null;
+  };
+  storage_usage?: {
+    document_size_bytes?: number;
+    export_size_bytes?: number;
+    backup_size_bytes?: number;
+    disk_free_bytes?: number;
+    disk_used_percent?: number;
+    disk_warning?: boolean;
+  };
   ai_provider?: string;
   store_backend?: string;
   export_adapters?: {
@@ -493,6 +510,15 @@ function formatDateText(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString("tr-TR");
+}
+
+function formatBytes(value?: number) {
+  const bytes = Number(value ?? 0);
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const amount = bytes / 1024 ** unitIndex;
+  return `${amount.toFixed(amount >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
 function apiDocumentType(kind: UploadKind) {
@@ -1432,6 +1458,8 @@ function AdminReadinessPanel({
   const latestEvent = operationHealth?.summary?.latest_event;
   const aiSummary = aiUsageStatus?.summary;
   const hasVerifiedZirve = Boolean(readiness?.export_adapters?.some((adapter) => adapter.verified_in_zirve));
+  const storageUsage = readiness?.storage_usage;
+  const backup = readiness?.backup;
   return (
     <section className="admin-readiness" aria-label="Admin operasyon durumu">
       <ReadinessCard
@@ -1443,8 +1471,18 @@ function AdminReadinessPanel({
       <ReadinessCard
         label="Storage"
         status={readiness?.document_storage?.ok && readiness?.export_storage?.ok ? "Yazilabilir" : "Kontrol gerekli"}
-        detail={`Belge: ${readiness?.document_storage?.backend ?? "-"} / Export: ${readiness?.export_storage?.backend ?? "-"}`}
+        detail={`Belge: ${formatBytes(storageUsage?.document_size_bytes)} / Export: ${formatBytes(storageUsage?.export_size_bytes)}`}
         tone={readiness?.document_storage?.ok && readiness?.export_storage?.ok ? "good" : "bad"}
+      />
+      <ReadinessCard
+        label="Backup"
+        status={backup?.ok ? "Backup var" : "Backup bekleniyor"}
+        detail={
+          backup?.latest_database_backup
+            ? `${backup.latest_database_backup.file_name ?? "postgres backup"} / ${formatDateText(backup.latest_database_backup.modified_at)}`
+            : `DB: ${backup?.database_backup_count ?? 0}, manifest: ${backup?.document_manifest_count ?? 0}`
+        }
+        tone={backup?.ok ? "good" : "warn"}
       />
       <ReadinessCard
         label="Worker"
@@ -1461,7 +1499,11 @@ function AdminReadinessPanel({
       <ReadinessCard
         label="Zirve"
         status={hasVerifiedZirve ? "Verified adapter var" : "Saha testi bekliyor"}
-        detail={(readiness?.warnings ?? []).length ? readiness?.warnings?.join(", ") ?? "" : `Aktif mukellef: ${clientId}`}
+        detail={
+          storageUsage?.disk_warning
+            ? `Disk kullanim: %${storageUsage.disk_used_percent ?? 0}`
+            : (readiness?.warnings ?? []).length ? readiness?.warnings?.join(", ") ?? "" : `Aktif mukellef: ${clientId}`
+        }
         tone={hasVerifiedZirve ? "good" : "warn"}
       />
       <ReadinessCard

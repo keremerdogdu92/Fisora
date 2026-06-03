@@ -50,6 +50,7 @@ router = APIRouter()
 DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
 DEFAULT_DOCUMENT_STORAGE_PATH = Path(os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "exports/documents"))
 DEFAULT_EXPORT_PATH = Path(os.environ.get("FISORA_EXPORT_PATH", "exports/generated"))
+DEFAULT_BACKUP_PATH = Path(os.environ.get("FISORA_BACKUP_PATH", os.environ.get("FISORA_BACKUP_DIR", "exports/backups")))
 
 ReviewAction = Literal[
     "approve",
@@ -914,6 +915,7 @@ def store_system_readiness() -> dict[str, object]:
     return production_readiness_payload(
         document_storage_path=DEFAULT_DOCUMENT_STORAGE_PATH,
         export_path=DEFAULT_EXPORT_PATH,
+        backup_path=DEFAULT_BACKUP_PATH,
     )
 
 

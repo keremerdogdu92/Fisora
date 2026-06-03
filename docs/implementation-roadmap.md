@@ -100,14 +100,22 @@ Tamamlanan ana dilimler:
 - Private intake manifest araci: mustavirden gelen lokal pilot klasoru hash,
   belge tipi, mukellef, donem ve gizlilik seviyesiyle `private_samples/`
   manifestine donusur.
+- Private intake import araci: manifestten hesap plani, fatura/XML ve
+  banka/POS dosyalari store/upload job hattina aktarilabilir.
+- Backup/disk health: readiness payload'i son backup, backup manifest sayisi,
+  belge/export/backup boyutlari ve disk doluluk oranini tasir; admin panelde
+  Backup karti gorunur.
+- Production ops scriptleri: check, deploy, migrate, smoke, backup-once, logs,
+  ps, down ve restore-postgres komutlari `deploy/scripts/fisora-prod.sh`
+  altinda toplandi.
 
 ## MVP Ilerleme Degerlendirmesi
 
 2026-06-03 itibariyle muhendislik tahmini:
 
-- Genel MVP prototip: %78-82.
-- Server kiralama ve mustavir gorusmesi oncesi hazirlik: %82-86.
-- Production-ready canli MVP: %60-65.
+- Genel MVP prototip: %82-85.
+- Server kiralama ve mustavir gorusmesi oncesi hazirlik: %90-93.
+- Production-ready canli MVP: %63-68.
 
 Bu oranlar gercek Zirve import dogrulamasi, gercek pilot veri kosusu ve
 production sunucu kurulumu tamamlanmadan daha yukari sayilmamalidir.
@@ -118,18 +126,17 @@ production sunucu kurulumu tamamlanmadan daha yukari sayilmamalidir.
    - Local storage adapter yanina object storage sozlesmesi eklenir.
    - 90 gun retention ve download URL stratejisi belirlenir.
 
-2. Docker production hardening scriptleri
-   - Sunucu kurulum, env template, compose deploy ve backup restore komutlari
-     scriptlesir.
+2. AI provider hazirligi ikinci dilim
+   - OpenAI/Gemini provider adapter taslagi eklenir.
+   - Sentetik ve gercek/anonim benchmark ayni komutla kosulabilir hale gelir.
+   - Aylik cap asiminda AI cagrisi durdurulur.
 
-3. Real-data local import araclari ikinci dilim
-   - Manifestten store upload/import job'lari uretilir.
-   - Hesap plani, cari, fatura ve ekstre dosyalari local/private store hattina
-     baglanir.
+3. Upload limit ve guvenlik kontrolleri
+   - Dosya boyutu, uzanti ve MIME kontrolleri net hata payload'i uretir.
 
-4. Backup ve disk health sinyali
-   - Son backup, backup manifesti ve belge volume boyutu API/readiness paneline
-     eklenir.
+4. Auth/UI tamamlayici isler
+   - Invite/reset akisi admin panelinden daha rahat yonetilir.
+   - Production bootstrap kapali durumu UI'da net gorunur.
 
 6. Zirve saha testi ve verified adapter kilidi
    - `zirve_trial_csv` veya mustavirden gelen ornek format Zirve'de denenir.

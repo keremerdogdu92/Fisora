@@ -46,6 +46,30 @@ Manifest su alanlari tutar:
 - `document_kind`
 - `size_bytes`, `sha256`
 
+## Manifestten Store Import
+
+Manifest uretildikten sonra lokal store'a belge ve job kaydi acmak icin:
+
+```powershell
+python backend/scripts/import_private_intake_manifest.py `
+  --manifest private_samples/intake_manifest.json `
+  --client-id pilot-isitme-merkezi `
+  --client-name "Pilot Isitme Merkezi" `
+  --tax-id 1111111111 `
+  --activity "isitme cihazi satis ve servis" `
+  --run-worker
+```
+
+Bu komut:
+
+- `chart_accounts` dosyasini hesap plani olarak import eder.
+- PDF faturayi `invoice`, XML faturayi `einvoice_xml` olarak kaydeder.
+- Banka/POS ekstrelerini ilgili parser job'una alir.
+- Ham dosyanin uygulama storage kopyasini `exports/documents` altina yazar.
+- Import sonucunu `private_samples/intake_import_summary.json` olarak tutar.
+
+Gercek veri kullanildiginda bu ciktilar GitHub'a eklenmez.
+
 ## Belge Tipi Tahmini
 
 Script dosya adindan ve uzantidan su tipleri ayirir:

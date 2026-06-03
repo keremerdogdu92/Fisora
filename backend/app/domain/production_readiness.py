@@ -7,12 +7,14 @@ from typing import Mapping
 from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
 from app.domain.storage_adapters import storage_readiness
+from app.domain.system_health import backup_health, storage_usage_health
 
 
 def production_readiness_payload(
     *,
     document_storage_path: Path | str,
     export_path: Path | str,
+    backup_path: Path | str,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     source = env if env is not None else os.environ
@@ -24,6 +26,12 @@ def production_readiness_payload(
     export_storage = storage_readiness(
         base_dir=export_path,
         backend="local",
+    )
+    backup = backup_health(backup_path=backup_path)
+    storage_usage = storage_usage_health(
+        document_path=document_storage_path,
+        export_path=export_path,
+        backup_path=backup_path,
     )
     adapters = [
         {
@@ -53,6 +61,10 @@ def production_readiness_payload(
         warnings.append("zirve_verified_adapter_missing")
     if source.get("FISORA_AI_PROVIDER", "disabled").lower() == "disabled":
         warnings.append("ai_provider_disabled")
+    if not backup["ok"]:
+        warnings.append("backup_missing")
+    if storage_usage["disk_warning"]:
+        warnings.append("disk_usage_high")
     return {
         "ready": not blocking,
         "blocking": blocking,
@@ -61,6 +73,8 @@ def production_readiness_payload(
         "auth": auth,
         "document_storage": document_storage,
         "export_storage": export_storage,
+        "backup": backup,
+        "storage_usage": storage_usage,
         "store_backend": source.get("FISORA_STORE_BACKEND", "json"),
         "ai_provider": source.get("FISORA_AI_PROVIDER", "disabled"),
         "export_adapters": adapters,

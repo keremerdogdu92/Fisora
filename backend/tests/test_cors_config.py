@@ -19,6 +19,15 @@ except ModuleNotFoundError:
 
 
 class CorsConfigTests(unittest.TestCase):
+    def test_production_compose_passes_auth_env_to_backend_and_worker(self) -> None:
+        compose_file = ROOT / "docker-compose.production.yml"
+        compose_text = compose_file.read_text(encoding="utf-8")
+
+        self.assertIn("FISORA_AUTH_MODE: ${FISORA_AUTH_MODE:-mock_header_required}", compose_text)
+        self.assertIn("FISORA_AUTH_HEADER: ${FISORA_AUTH_HEADER:-X-Fisora-User-Id}", compose_text)
+        self.assertGreaterEqual(compose_text.count("FISORA_AUTH_MODE:"), 2)
+        self.assertGreaterEqual(compose_text.count("FISORA_AUTH_HEADER:"), 2)
+
     def test_lan_frontend_origin_can_call_backend(self) -> None:
         if TestClient is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from decimal import Decimal, InvalidOperation
+import hashlib
+import re
+import unicodedata
 
 from app.domain.journal_entries import JournalEntry, JournalLine, money
 from app.domain.statement_lines import StatementLine
@@ -63,11 +66,35 @@ def build_statement_entries(
     bank_account: str = "102.01",
     document_ref: str | None = None,
 ) -> tuple[JournalEntry, ...]:
+    return tuple(entry for _, entry in build_statement_entry_records(lines=lines, bank_account=bank_account, document_ref=document_ref))
+
+
+def build_statement_entry_records(
+    *,
+    lines: tuple[StatementLine, ...],
+    bank_account: str = "102.01",
+    document_ref: str | None = None,
+) -> tuple[tuple[StatementLine, JournalEntry], ...]:
     return tuple(
-        build_statement_entry(line=line, bank_account=bank_account, document_ref=document_ref)
+        (line, build_statement_entry(line=line, bank_account=bank_account, document_ref=document_ref))
         for line in lines
         if _amount(line.amount) > 0 and line.direction in {"in", "out"}
     )
+
+
+def statement_line_fingerprint(line: StatementLine) -> str:
+    normalized_description = unicodedata.normalize("NFKD", line.description)
+    normalized_description = "".join(character for character in normalized_description if not unicodedata.combining(character))
+    normalized_description = re.sub(r"[^a-zA-Z0-9]+", " ", normalized_description).strip().lower()
+    raw_key = "|".join(
+        (
+            line.transaction_date.strip(),
+            line.direction.strip(),
+            line.amount.strip(),
+            normalized_description,
+        )
+    )
+    return hashlib.sha1(raw_key.encode("utf-8")).hexdigest()[:24]
 
 
 def journal_entry_payload(entry: JournalEntry) -> dict[str, object]:
@@ -87,4 +114,19 @@ def journal_entry_payload(entry: JournalEntry) -> dict[str, object]:
             }
             for line in entry.lines
         ],
+    }
+
+
+def statement_entry_payload(
+    *,
+    line: StatementLine,
+    entry: JournalEntry,
+    source_document_ref: str,
+) -> dict[str, object]:
+    return {
+        **journal_entry_payload(entry),
+        "statement_line_no": line.line_no,
+        "statement_fingerprint": statement_line_fingerprint(line),
+        "source_document_ref": source_document_ref,
+        "accountant_review_status": "",
     }

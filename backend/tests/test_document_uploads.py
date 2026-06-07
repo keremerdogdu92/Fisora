@@ -74,6 +74,22 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertEqual(document.size_bytes, 123)
         self.assertEqual(document.sha256, "declared")
 
+    def test_special_document_keeps_intake_category_for_manual_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document = store_document_content(
+                base_dir=Path(temp_dir),
+                client_id="client-1",
+                file_name="sozlesme.pdf",
+                document_type="special_document",
+                intake_category="special_document",
+                uploaded_by="mukellef-user",
+                content=b"manual-review",
+            )
+
+        self.assertEqual(document.document_type, "special_document")
+        self.assertEqual(document.intake_category, "special_document")
+        self.assertEqual(document.status, "stored")
+
     def test_invalid_document_type_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             with self.assertRaises(ValueError):

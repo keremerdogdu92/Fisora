@@ -13,6 +13,43 @@ class WorkspaceExportBuild:
     candidate_count: int
 
 
+STATEMENT_APPROVAL_GATE_FLAGS = {
+    "statement_review_required",
+    "statement_accountant_approval_required",
+}
+
+
+def _statement_entry_risk_flags(entry: JournalEntry, *, accountant_approved: bool) -> tuple[str, ...]:
+    if not accountant_approved:
+        return entry.risk_flags
+    return tuple(flag for flag in entry.risk_flags if flag not in STATEMENT_APPROVAL_GATE_FLAGS)
+
+
+def _statement_export_risk_flags(
+    *,
+    entry: JournalEntry,
+    entry_payload: dict[str, Any],
+    accountant_approved: bool,
+    seen_fingerprints: set[str],
+) -> tuple[str, ...]:
+    risks = list(_statement_entry_risk_flags(entry, accountant_approved=accountant_approved))
+    if not entry.is_balanced:
+        risks.append("unbalanced_statement_entry")
+    account_codes = [line.account_code.strip() for line in entry.lines if line.account_code.strip()]
+    if not any(account.startswith("102") for account in account_codes):
+        risks.append("bank_account_missing")
+    if not any(account and not account.startswith("102") for account in account_codes):
+        risks.append("counterpart_account_missing")
+    fingerprint = str(entry_payload.get("statement_fingerprint") or "").strip()
+    if not fingerprint:
+        risks.append("statement_fingerprint_missing")
+    elif fingerprint in seen_fingerprints:
+        risks.append("duplicate_statement_line")
+    else:
+        seen_fingerprints.add(fingerprint)
+    return tuple(dict.fromkeys(risks))
+
+
 def _lines_from_payload(lines: list[dict[str, Any]], *, document_ref: str) -> tuple[JournalLine, ...]:
     return tuple(
         JournalLine(
@@ -55,6 +92,7 @@ def _invoice_entry_from_result(result: dict[str, Any], *, document_ref: str) -> 
 
 def export_candidates_from_workspace(workspace: dict[str, Any]) -> list[ExportCandidate]:
     candidates: list[ExportCandidate] = []
+    seen_statement_fingerprints: set[str] = set()
     for document in workspace.get("documents", []):
         document_ref = str(document.get("document_ref") or document.get("id") or "")
         result = document.get("result") or {}
@@ -63,18 +101,32 @@ def export_candidates_from_workspace(workspace: dict[str, Any]) -> list[ExportCa
 
         statement_entries = list(result.get("statement_entries") or [])
         if statement_entries:
+            statement_export_approved = (
+                result.get("accountant_export_override") is True
+                and str(document.get("export_status") or result.get("export_status") or "") == "export_ready"
+            )
             for index, entry_payload in enumerate(statement_entries, start=1):
                 if not isinstance(entry_payload, dict):
                     continue
                 entry = _entry_from_payload(entry_payload, document_ref=f"{document_ref}#statement-{index}")
                 if entry is None:
                     continue
+                entry_approved = statement_export_approved or str(entry_payload.get("accountant_review_status") or "") == "approved"
+                entry_rejected = str(entry_payload.get("accountant_review_status") or "") == "rejected"
+                risk_flags = _statement_export_risk_flags(
+                    entry=entry,
+                    entry_payload=entry_payload,
+                    accountant_approved=entry_approved,
+                    seen_fingerprints=seen_statement_fingerprints,
+                )
                 candidates.append(
                     ExportCandidate(
                         document_ref=f"{document_ref}#statement-{index}",
-                        export_status="export_ready" if entry.is_balanced and not entry.risk_flags else "review_required",
+                        export_status="export_ready"
+                        if entry_approved and not entry_rejected and entry.is_balanced and not risk_flags
+                        else "review_required",
                         journal_entry=entry,
-                        risk_flags=entry.risk_flags,
+                        risk_flags=risk_flags,
                     )
                 )
             continue

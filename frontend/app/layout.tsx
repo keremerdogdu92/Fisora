@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "Muhasebe Operasyon Otomasyonu",
-  description: "Faz 0 dogrulama arayuzu",
+  title: "Fisora Private Pilot",
+  description: "Mali müşavir kontrollü private pilot arayüzü",
 };
 
 export default function RootLayout({

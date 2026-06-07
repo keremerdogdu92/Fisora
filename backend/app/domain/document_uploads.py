@@ -12,7 +12,21 @@ from uuid import uuid4
 from app.domain.storage_adapters import build_document_storage_adapter
 
 
-ALLOWED_DOCUMENT_TYPES = {"invoice", "einvoice_xml", "bank_statement", "pos_statement"}
+ALLOWED_DOCUMENT_TYPES = {"invoice", "einvoice_xml", "bank_statement", "pos_statement", "special_document"}
+ALLOWED_INTAKE_CATEGORIES = {
+    "sales_invoice",
+    "purchase_invoice",
+    "bank_statement",
+    "pos_statement",
+    "special_document",
+}
+DEFAULT_INTAKE_CATEGORY_BY_DOCUMENT_TYPE = {
+    "invoice": "purchase_invoice",
+    "einvoice_xml": "purchase_invoice",
+    "bank_statement": "bank_statement",
+    "pos_statement": "pos_statement",
+    "special_document": "special_document",
+}
 DEFAULT_RETENTION_DAYS = 90
 DEFAULT_EXPIRING_WARNING_DAYS = 15
 
@@ -22,6 +36,7 @@ class StoredDocument:
     document_id: str
     client_id: str
     document_type: str
+    intake_category: str
     original_file_name: str
     stored_file_name: str
     storage_path: str
@@ -63,6 +78,13 @@ def decode_base64_content(content_base64: str) -> bytes:
         return base64.b64decode(content_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
         raise ValueError("content_base64 is not valid base64") from exc
+
+
+def normalize_intake_category(*, document_type: str, intake_category: str = "") -> str:
+    selected = intake_category.strip() or DEFAULT_INTAKE_CATEGORY_BY_DOCUMENT_TYPE.get(document_type, "purchase_invoice")
+    if selected not in ALLOWED_INTAKE_CATEGORIES:
+        raise ValueError(f"unsupported intake_category: {selected}")
+    return selected
 
 
 def utc_now() -> datetime:
@@ -112,6 +134,7 @@ def store_document_content(
     client_id: str,
     file_name: str,
     document_type: str,
+    intake_category: str = "",
     uploaded_by: str,
     content: bytes | None = None,
     declared_size_bytes: int = 0,
@@ -121,6 +144,10 @@ def store_document_content(
 ) -> StoredDocument:
     if document_type not in ALLOWED_DOCUMENT_TYPES:
         raise ValueError(f"unsupported document_type: {document_type}")
+    normalized_intake_category = normalize_intake_category(
+        document_type=document_type,
+        intake_category=intake_category,
+    )
     if not client_id.strip():
         raise ValueError("client_id is required")
     if not file_name.strip():
@@ -157,6 +184,7 @@ def store_document_content(
         document_id=document_id,
         client_id=client_id,
         document_type=document_type,
+        intake_category=normalized_intake_category,
         original_file_name=file_name,
         stored_file_name=safe_name,
         storage_path=str(storage_path),

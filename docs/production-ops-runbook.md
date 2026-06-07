@@ -8,7 +8,25 @@ akisini bilmek icindir.
 
 ## Ilk Kurulum
 
-1. Repo server'a alin.
+0. Server'a girdikten sonra OS ve Docker durumunu kontrol et:
+
+```bash
+cat /etc/os-release
+docker --version
+docker compose version
+```
+
+Docker yoksa once Ubuntu LTS icin Docker Engine kurulumu tamamlanir.
+
+1. Repo server'a alin:
+
+```bash
+mkdir -p /opt/fisora
+cd /opt/fisora
+git clone <repo-url> app
+cd app
+```
+
 2. Env dosyasini hazirla:
 
 ```bash
@@ -20,9 +38,17 @@ cp deploy/production.env.example deploy/production.env
 ```text
 POSTGRES_PASSWORD=...
 FISORA_HTTP_PORT=80
-FISORA_AUTH_MODE=trusted_header
+FISORA_AUTH_MODE=mock_header_required
 FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED=false
+FISORA_AI_PROVIDER=groq
+FISORA_AI_MODEL=openai/gpt-oss-20b
+FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b
+FISORA_AI_MONTHLY_CAP_USD=0.01
+GROQ_API_KEY=...
 ```
+
+`GROQ_API_KEY` chat'e, GitHub'a veya commit'e yazilmaz; yalnizca serverdaki
+`deploy/production.env` dosyasinda tutulur.
 
 4. Compose config kontrolu:
 

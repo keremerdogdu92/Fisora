@@ -138,6 +138,47 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["processing_job"]["parser_kind"], "bank_statement")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "bank.csv")
 
+    def test_special_document_upload_goes_to_manual_review_queue(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            response = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "special_document",
+                    "intake_category": "special_document",
+                    "file_name": "sozlesme.pdf",
+                    "uploaded_by_user_id": "mukellef-user",
+                    "content_base64": "bWFudWFs",
+                },
+            )
+            payload = response.json()
+            workspace = client.get("/phase0/store/workspace/client-1").json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["document_type"], "special_document")
+        self.assertEqual(payload["intake_category"], "special_document")
+        self.assertEqual(payload["processing_job"]["parser_kind"], "manual_review")
+        self.assertEqual(workspace["uploaded_documents"][0]["intake_category"], "special_document")
+
     def test_client_onboarding_package_creates_upload_ready_workspace(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -344,6 +385,67 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertIn("770.01", download.text)
         self.assertEqual(manifest.status_code, 200)
         self.assertIn("ready.pdf", manifest.text)
+
+    def test_statement_ai_suggestions_endpoint_returns_review_only_structured_payload(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            client = TestClient(app)
+
+            response = client.post(
+                "/phase0/statement/ai-suggestions",
+                json={
+                    "client_id": "client-1",
+                    "ai_policy": {"enabled": True, "confidence_threshold": 70, "max_provider_calls": 2},
+                    "provider_name": "replay_provider",
+                    "provider_payloads": [
+                        {
+                            "transaction_type": "counterparty_payment",
+                            "suggested_account_code": "320.01.123",
+                            "confidence": 82,
+                            "reason": "Satir tedarikci odemesi gibi gorunuyor.",
+                            "evidence": ["tedarikci", "odeme"],
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "line_no": 1,
+                            "transaction_date": "2026-06-01",
+                            "description": "GIB ODEME",
+                            "amount": "100.00",
+                            "direction": "out",
+                            "suggested_account_code": "360",
+                            "transaction_type": "tax_payment",
+                            "confidence": 86,
+                            "risk_flags": [],
+                        },
+                        {
+                            "line_no": 2,
+                            "transaction_date": "2026-06-02",
+                            "description": "BILINMEYEN TEDARIKCI ODEME",
+                            "amount": "250.00",
+                            "direction": "out",
+                            "transaction_type": "unknown",
+                            "confidence": 35,
+                            "risk_flags": ["statement_review_required", "counterparty_not_found"],
+                        },
+                    ],
+                },
+            )
+            summary_response = client.post(
+                "/phase0/store/ai-usage/summary",
+                json={"client_id": "client-1", "monthly_cap_usd": "100.00"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["ai_used_count"], 1)
+        self.assertEqual(payload["skipped_count"], 1)
+        self.assertEqual(payload["suggestions"][0]["line_no"], 2)
+        self.assertEqual(payload["suggestions"][0]["suggested_account_code"], "320.01.123")
+        self.assertFalse(payload["suggestions"][0]["export_allowed"])
+        self.assertEqual(summary_response.json()["summary"]["ai_used_count"], 1)
 
 
 if __name__ == "__main__":

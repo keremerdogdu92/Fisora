@@ -33,26 +33,59 @@ class AiClassificationPolicy:
 
 
 @dataclass(frozen=True)
+class AiClassificationContext:
+    client_activity: str = ""
+    account_candidates: tuple[str, ...] = ()
+    counterparty_candidates: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AiClassificationRequest:
     raw_line: str
     supplier_hint: str
     allowed_categories: tuple[str, ...]
     max_input_chars: int
+    context: AiClassificationContext = AiClassificationContext()
 
     def to_schema_payload(self) -> dict[str, object]:
+        account_candidates = _limited_strings(self.context.account_candidates, limit=12)
+        counterparty_candidates = _limited_strings(self.context.counterparty_candidates, limit=12)
         return {
             "raw_line": self.raw_line[: self.max_input_chars].strip(),
             "supplier_hint": self.supplier_hint[: self.max_input_chars].strip(),
+            "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
+            "account_candidates": list(account_candidates),
+            "counterparty_candidates": list(counterparty_candidates),
             "allowed_categories": list(self.allowed_categories),
             "output_schema": {
                 "type": "object",
-                "required": ["category", "confidence", "reason"],
+                "required": [
+                    "category",
+                    "confidence",
+                    "reason",
+                    "evidence",
+                    "suggested_account_code",
+                    "suggested_counterparty_code",
+                    "risk_flags",
+                    "account_reason",
+                ],
                 "properties": {
                     "category": {"type": "string", "enum": list(self.allowed_categories)},
                     "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
                     "reason": {"type": "string", "maxLength": 240},
                     "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                    "suggested_account_code": {
+                        "type": "string",
+                        "enum": ["", *account_candidates],
+                    },
+                    "suggested_counterparty_code": {
+                        "type": "string",
+                        "enum": ["", *counterparty_candidates],
+                    },
+                    "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+                    "account_reason": {"type": "string", "maxLength": 240},
                 },
+                "additionalProperties": False,
             },
         }
 
@@ -63,6 +96,10 @@ class AiProviderClassification:
     confidence: int
     reason: str
     evidence: tuple[str, ...] = ()
+    suggested_account_code: str = ""
+    suggested_counterparty_code: str = ""
+    risk_flags: tuple[str, ...] = ()
+    account_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,10 +110,20 @@ class AiClassificationResult:
     skipped_reason: str = ""
     provider_reason: str = ""
     estimated_input_chars: int = 0
+    suggested_account_code: str = ""
+    suggested_counterparty_code: str = ""
+    risk_flags: tuple[str, ...] = ()
+    account_reason: str = ""
 
 
 class ProductClassifier(Protocol):
-    def classify(self, raw_line: str, *, supplier_hint: str = "") -> AiClassificationResult:
+    def classify(
+        self,
+        raw_line: str,
+        *,
+        supplier_hint: str = "",
+        context: AiClassificationContext | None = None,
+    ) -> AiClassificationResult:
         ...
 
 
@@ -87,7 +134,18 @@ class ProductClassificationProvider(Protocol):
         ...
 
 
-def _validate_provider_payload(payload: dict[str, Any]) -> AiProviderClassification | None:
+def _limited_strings(value: tuple[str, ...] | list[str], *, limit: int) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))[:limit]
+
+
+def _validated_suggestion(value: object, allowed: tuple[str, ...]) -> str:
+    candidate = str(value or "").strip()
+    if not candidate:
+        return ""
+    return candidate if candidate in set(allowed) else ""
+
+
+def _validate_provider_payload(payload: dict[str, Any], request: AiClassificationRequest) -> AiProviderClassification | None:
     category = str(payload.get("category", "")).strip()
     if category not in ALLOWED_AI_CATEGORIES:
         return None
@@ -105,11 +163,16 @@ def _validate_provider_payload(payload: dict[str, Any]) -> AiProviderClassificat
         evidence = tuple(str(item).strip() for item in evidence_payload if str(item).strip())[:5]
     else:
         evidence = ()
+    risk_flags = _limited_strings(payload.get("risk_flags") or [], limit=8) if isinstance(payload.get("risk_flags"), list) else ()
     return AiProviderClassification(
         category=category,
         confidence=confidence,
         reason=reason[:240],
         evidence=evidence,
+        suggested_account_code=_validated_suggestion(payload.get("suggested_account_code"), request.context.account_candidates),
+        suggested_counterparty_code=_validated_suggestion(payload.get("suggested_counterparty_code"), request.context.counterparty_candidates),
+        risk_flags=risk_flags,
+        account_reason=str(payload.get("account_reason") or "").strip()[:240],
     )
 
 
@@ -123,9 +186,16 @@ class StaticFirstClassifier:
         self.policy = policy or AiClassificationPolicy()
         self.provider_calls = 0
 
-    def classify(self, raw_line: str, *, supplier_hint: str = "") -> AiClassificationResult:
+    def classify(
+        self,
+        raw_line: str,
+        *,
+        supplier_hint: str = "",
+        context: AiClassificationContext | None = None,
+    ) -> AiClassificationResult:
         static = classify_product_line(raw_line, supplier_hint)
         estimated_chars = min(len(raw_line) + len(supplier_hint), self.policy.max_input_chars * 2)
+        resolved_context = context or AiClassificationContext()
 
         if static.category != "bilinmeyen" and static.confidence >= self.policy.static_confidence_threshold:
             return AiClassificationResult(
@@ -166,9 +236,10 @@ class StaticFirstClassifier:
             supplier_hint=supplier_hint,
             allowed_categories=ALLOWED_AI_CATEGORIES,
             max_input_chars=self.policy.max_input_chars,
+            context=resolved_context,
         )
         provider_payload = self.provider.classify_product(request)
-        provider_result = _validate_provider_payload(provider_payload)
+        provider_result = _validate_provider_payload(provider_payload, request)
         if provider_result is None:
             return AiClassificationResult(
                 classification=ProductClassification(
@@ -195,6 +266,10 @@ class StaticFirstClassifier:
             provider=self.provider.provider_name,
             provider_reason=provider_result.reason,
             estimated_input_chars=estimated_chars,
+            suggested_account_code=provider_result.suggested_account_code,
+            suggested_counterparty_code=provider_result.suggested_counterparty_code,
+            risk_flags=provider_result.risk_flags,
+            account_reason=provider_result.account_reason,
         )
 
 

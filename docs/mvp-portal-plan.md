@@ -3,9 +3,11 @@
 ## Amac
 
 Fisora MVP, mustavirin mevcut tanitim sitesinden erisilecek uyelikli bir belge
-yukleme ve review portali olarak baslar. Portal kendi basina "kesin kayit atan
-AI" degildir; mukellef belgelerini toplar, fis taslagi uretir, riskleri gosterir
-ve mustavir kontrollu Zirve export paketi hazirlar.
+yukleme ve review portali olarak baslar. Ilk gosterim halka acik demo degildir;
+gercek veya pilot veriler Git disi local snapshot ile ya da yetisirse private
+login arkasindaki server uzerinden mustavire gosterilir. Portal kendi basina
+"kesin kayit atan AI" degildir; mukellef belgelerini toplar, fis taslagi uretir,
+riskleri gosterir ve mustavir kontrollu Zirve export paketi hazirlar.
 
 ## Roller
 
@@ -55,7 +57,7 @@ kuyruguna dusurur ve ogrenmeyi mustavir onaylarindan baslatir.
 kullanici giris yapar
   -> yetkili mukellef secilir veya otomatik atanir
   -> fatura, e-fatura XML/PDF, banka ekstresi veya POS ekstresi yuklenir
-  -> belge "isleniyor" durumuna gecer
+  -> belge otomatik kuyruga duser ve "isleniyor" durumuna gecer
   -> worker parse ve siniflandirma yapar
   -> fis taslagi ve risk sonucu uretilir
   -> sonuc mustavir review ekranina duser
@@ -66,13 +68,19 @@ kaynak dosya ve isleme durumu ile saklanir.
 
 ## Portal Ekranlari
 
-Ilk MVP arayuzu iki moda ayrilir:
+Ilk MVP arayuzu halka acik demo gibi degil, private pilot calisma alani olarak
+ayrilir:
 
-- Mukellef yukleme modu: mukellef adi sabit gorunur, kullanici fatura,
-  e-fatura XML/PDF, banka ekstresi veya POS ekstresi yukler ve kendi belge
-  kuyrugunu izler.
-- Mustavir review modu: mustavir bir mukellefin belgelerini inceler, fatura
-  gorunumunu ve uretilen muhasebe fisini ayni ekranda gormeden karar vermez.
+- Mukellef portali: mukellef adi sabit gorunur, kullanici ay bazinda belge
+  sayilarini, sade belge listesini ve iptal/duzeltme talebini gorur. Muhasebe
+  fisi, AI gerekcesi ve export paketi mukellefe gosterilmez.
+- Mustavir masasi: mustavir mukellef arar/secer, secili mukellefi sabit
+  gorur, belgeleri inceler, belge gorunumu ile uretilen muhasebe fisini ayni
+  calisma alaninda gormeden karar vermez.
+- Cikti listesi: mustavir tamamladigi mukellefleri listeye ekler; en son toplu
+  veya mukellef bazli cikti almayi secer.
+- Operasyon ekrani: private/local veri kaynagi ve sistem durumu gibi teknik
+  bilgiler ana review akisini kalabaliklastirmadan ayrica gosterilir.
 
 Mustavir ekraninda ayni anda gorunmesi gereken ana alanlar:
 
@@ -82,9 +90,9 @@ Mustavir ekraninda ayni anda gorunmesi gereken ana alanlar:
 - Sag panel: onerilen muhasebe fisi, cari/hesap eslesmeleri, AI/kural
   gerekcesi, export gate nedeni ve onay/duzeltme aksiyonlari.
 
-Bu ekran ilk etapta mock/local snapshot ile calisabilir; ancak UI davranisi
-production API sozlesmesine hazir tutulur. Sonraki adimda dosya yukleme,
-store/workspace ve review decision endpointleri bu ekrana baglanir.
+Bu ekran ilk etapta Git disi private/local snapshot ile calisabilir; ancak UI
+davranisi production API sozlesmesine hazir tutulur. Sonraki adimda dosya
+yukleme, store/workspace ve review decision endpointleri bu ekrana baglanir.
 
 ## AI Destekli Taslak Davranisi
 
@@ -121,6 +129,9 @@ Mustavir aksiyonlari:
 - Export disi birak
 - Is alani disi/reddet
 - Kontrol kuyrugunda tut
+- Iptal/duzeltme talebini kabul et
+- Iptal/duzeltme talebini reddet
+- Cikti listesine ekle
 - Bu karari sonraki benzer belgelerde oner
 
 ## Export Politikasi

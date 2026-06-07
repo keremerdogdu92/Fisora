@@ -34,9 +34,15 @@ gecis icin kullanilir.
   enjekte ediyorsa kullaniliyor.
 - Gateway hazir degilse canliya alinmaz; pilot demo icin
   `mock_header_required` ve kapali erisim tercih edilir.
-- `FISORA_AI_PROVIDER=disabled` baslangicta korunur.
-- AI API key varsa sadece benchmark/pilot onayi sonrasi eklenir.
-- `FISORA_AI_MONTHLY_CAP_USD` ofis politikasina gore ayarlanir.
+- Mustavir oncesi kapali server demo icin `FISORA_AI_PROVIDER=groq` kullanilir.
+- `GROQ_API_KEY` sadece server env dosyasina yazilir; GitHub'a veya koda
+  eklenmez.
+- `FISORA_AI_MODEL=openai/gpt-oss-20b`, karsilastirma icin
+  `FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b` ayarlanir.
+- Ilk Groq demo cap'i uygulama ledger'inda `FISORA_AI_MONTHLY_CAP_USD=0.01`
+  olarak tutulur; asil sinir Groq console free-tier/rate-limit kurallaridir.
+- Ucretli OpenAI kalite kiyasi ayrica istenirse `FISORA_AI_PROVIDER=openai`,
+  `OPENAI_API_KEY` ve OpenAI billing cap ile acilir.
 - `FISORA_BACKUP_PATH=/opt/fisora/data/backups`.
 
 ## 4. TLS ve Nginx

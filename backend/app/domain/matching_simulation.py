@@ -17,7 +17,7 @@ from app.domain.business_relevance import (
 )
 from app.domain.chart_accounts import ChartAccount, extract_counterparty_candidates, parse_chart_accounts, validate_vat_accounts
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
-from app.domain.ai_classification import ProductClassifier
+from app.domain.ai_classification import AiClassificationContext, ProductClassifier
 from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, money
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
 
@@ -74,6 +74,10 @@ class SimulatedInvoiceResult:
     ai_classification_skipped_reason: str
     ai_classification_reason: str
     ai_estimated_input_chars: int
+    ai_suggested_account_code: str
+    ai_suggested_counterparty_code: str
+    ai_risk_flags: tuple[str, ...]
+    ai_account_reason: str
     learning_rule_applied: bool
     learning_rule_scope: str
     learning_rule_reason: str
@@ -189,6 +193,40 @@ def _normalize_processing_mode(mode: str | None) -> ProcessingMode:
 
 def _product_line_hint(invoice: ParsedInvoice) -> str:
     return invoice.line_items[0] if invoice.line_items else invoice.provider_hint or invoice.invoice_type or invoice.file_name
+
+
+def _ai_context(
+    *,
+    selection: AccountSelection,
+    client_profile: ClientProfile | None,
+    counterparty_match: CounterpartyMatch | None,
+) -> AiClassificationContext:
+    account_candidates = tuple(
+        dict.fromkeys(
+            code
+            for code in (
+                selection.expense_account,
+                selection.purchase_vat_account,
+                selection.bank_account,
+            )
+            if code
+        )
+    )
+    counterparty_candidates = tuple(
+        dict.fromkeys(
+            code
+            for code in (
+                counterparty_match.account_code if counterparty_match else "",
+                selection.supplier_account,
+            )
+            if code
+        )
+    )
+    return AiClassificationContext(
+        client_activity=client_profile.activity_description if client_profile else "",
+        account_candidates=account_candidates,
+        counterparty_candidates=counterparty_candidates,
+    )
 
 
 def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
@@ -308,13 +346,25 @@ def simulate_invoice(
     ai_skipped_reason = "client_profile_not_provided"
     ai_reason = ""
     ai_estimated_chars = 0
+    ai_suggested_account_code = ""
+    ai_suggested_counterparty_code = ""
+    ai_risk_flags: tuple[str, ...] = ()
+    ai_account_reason = ""
     relevance = (
         assess_business_relevance(raw_line, client_profile, supplier_hint=invoice.provider_hint)
         if client_profile
         else _not_assessed_relevance(raw_line)
     )
     if client_profile and product_classifier:
-        classification_result = product_classifier.classify(raw_line, supplier_hint=invoice.provider_hint)
+        classification_result = product_classifier.classify(
+            raw_line,
+            supplier_hint=invoice.provider_hint,
+            context=_ai_context(
+                selection=selection,
+                client_profile=client_profile,
+                counterparty_match=counterparty_match,
+            ),
+        )
         relevance = assess_business_relevance(
             raw_line,
             client_profile,
@@ -326,6 +376,10 @@ def simulate_invoice(
         ai_skipped_reason = classification_result.skipped_reason
         ai_reason = classification_result.provider_reason
         ai_estimated_chars = classification_result.estimated_input_chars
+        ai_suggested_account_code = classification_result.suggested_account_code
+        ai_suggested_counterparty_code = classification_result.suggested_counterparty_code
+        ai_risk_flags = classification_result.risk_flags
+        ai_account_reason = classification_result.account_reason
     elif client_profile:
         ai_skipped_reason = "classifier_not_configured"
     counterparty_reasons: tuple[str, ...] = ()
@@ -410,6 +464,10 @@ def simulate_invoice(
         ai_classification_skipped_reason=ai_skipped_reason,
         ai_classification_reason=ai_reason,
         ai_estimated_input_chars=ai_estimated_chars,
+        ai_suggested_account_code=ai_suggested_account_code,
+        ai_suggested_counterparty_code=ai_suggested_counterparty_code,
+        ai_risk_flags=ai_risk_flags,
+        ai_account_reason=ai_account_reason,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",
@@ -571,6 +629,10 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "aiClassificationSkippedReason": result.ai_classification_skipped_reason,
                     "aiClassificationReason": result.ai_classification_reason,
                     "aiEstimatedInputChars": result.ai_estimated_input_chars,
+                    "aiSuggestedAccountCode": result.ai_suggested_account_code,
+                    "aiSuggestedCounterpartyCode": result.ai_suggested_counterparty_code,
+                    "aiRiskFlags": list(result.ai_risk_flags),
+                    "aiAccountReason": result.ai_account_reason,
                     "learningRuleApplied": result.learning_rule_applied,
                     "learningRuleScope": result.learning_rule_scope,
                     "learningRuleReason": result.learning_rule_reason,

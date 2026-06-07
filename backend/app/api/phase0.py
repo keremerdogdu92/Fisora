@@ -13,9 +13,17 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
-from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
+from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, estimate_ai_cost_usd, summarize_ai_usage
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
+from app.domain.openai_provider import (
+    DEFAULT_COMPARISON_MODEL,
+    DEFAULT_GROQ_COMPARISON_MODEL,
+    DEFAULT_GROQ_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    GroqAccountingProvider,
+    OpenAiAccountingProvider,
+)
 from app.domain.auth_policy import auth_status_payload, build_auth_config, resolve_user_id
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
@@ -42,6 +50,13 @@ from app.domain.session_auth import (
     session_expires_at,
     verify_password,
 )
+from app.domain.statement_ai_suggestions import (
+    ReplayStatementSuggestionProvider,
+    StatementAiSuggestionPolicy,
+    statement_ai_batch_payload,
+    suggest_statement_lines,
+)
+from app.domain.statement_lines import StatementLine
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
@@ -145,6 +160,38 @@ class AiClassificationPolicyPayload(BaseModel):
     max_provider_calls: int = 1
 
 
+class StatementAiSuggestionPolicyPayload(BaseModel):
+    enabled: bool = False
+    confidence_threshold: int = 70
+    max_input_chars: int = 420
+    max_provider_calls: int = 3
+
+
+class StatementLineSuggestionPayload(BaseModel):
+    line_no: int
+    transaction_date: str = ""
+    description: str
+    amount: str = "0.00"
+    direction: Literal["in", "out", ""] = ""
+    balance_after: str = ""
+    counterparty_name: str = ""
+    tax_id: str = ""
+    iban: str = ""
+    suggested_account_code: str = ""
+    transaction_type: str = "unknown"
+    confidence: int = 35
+    risk_flags: list[str] = Field(default_factory=list)
+    review_reason: str = ""
+
+
+class StatementAiSuggestionsPayload(BaseModel):
+    client_id: str = ""
+    lines: list[StatementLineSuggestionPayload] = Field(default_factory=list)
+    ai_policy: StatementAiSuggestionPolicyPayload = Field(default_factory=StatementAiSuggestionPolicyPayload)
+    provider_name: str = "replay_provider"
+    provider_payloads: list[dict[str, object]] = Field(default_factory=list)
+
+
 class LearnedPostingRulePayload(BaseModel):
     scope: str = "client_rule"
     action: str = "approve_with_changes"
@@ -189,7 +236,15 @@ class AiBatchBenchmarkPayload(BaseModel):
     cases: list[AiBenchmarkCasePayload] = Field(default_factory=list)
     ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
     provider_name: str = "static_rules"
+    model: str = ""
     provider_payloads: list[dict[str, object]] = Field(default_factory=list)
+
+
+class AiModelComparisonPayload(BaseModel):
+    cases: list[AiBenchmarkCasePayload] = Field(default_factory=list)
+    ai_policy: AiClassificationPolicyPayload = Field(default_factory=AiClassificationPolicyPayload)
+    provider_name: str = ""
+    models: list[str] = Field(default_factory=list)
 
 
 class AiUsageEventPayload(BaseModel):
@@ -224,6 +279,7 @@ class ReviewDecisionPayload(BaseModel):
     reason: str = ""
     apply_to_similar: bool = False
     prior_consistent_approval_count: int = 0
+    statement_line_no: int = 0
 
 
 class JournalLinePayload(BaseModel):
@@ -269,7 +325,8 @@ class ClientOnboardingPackagePayload(BaseModel):
 
 class DocumentUploadPayload(BaseModel):
     client_id: str
-    document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = "invoice"
+    document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement", "special_document"] = "invoice"
+    intake_category: str = ""
     file_name: str
     uploaded_by: str = ""
     uploaded_by_user_id: str = ""
@@ -489,6 +546,7 @@ def _save_uploaded_document_with_job(
     *,
     client_id: str,
     document_type: str,
+    intake_category: str = "",
     file_name: str,
     uploaded_by: str,
     uploaded_by_user_id: str = "",
@@ -523,6 +581,7 @@ def _save_uploaded_document_with_job(
             client_id=client_id,
             file_name=file_name,
             document_type=document_type,
+            intake_category=intake_category,
             uploaded_by=uploaded_by,
             content=content,
             declared_size_bytes=size_bytes,
@@ -543,6 +602,7 @@ def _save_uploaded_document_with_job(
         document_ref=str(saved["document_ref"]),
         document_type=document_type,
         parser_kind=parser_kind_for_document_type(document_type),
+        intake_category=str(saved.get("intake_category") or ""),
     )
     _record_operation_event(
         store=store,
@@ -553,6 +613,7 @@ def _save_uploaded_document_with_job(
         metadata={
             "document_ref": saved["document_ref"],
             "document_type": document_type,
+            "intake_category": saved.get("intake_category", ""),
             "file_name": file_name,
             "processing_job_id": job["id"],
             "parser_kind": job["parser_kind"],
@@ -635,8 +696,91 @@ def _ai_policy(payload: AiClassificationPolicyPayload | None) -> AiClassificatio
     )
 
 
+def _ai_provider_from_env(*, model: str = "") -> OpenAiAccountingProvider | GroqAccountingProvider | None:
+    provider_name = os.environ.get("FISORA_AI_PROVIDER", "disabled").strip().lower()
+    if provider_name == "groq":
+        api_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if not api_key:
+            return None
+        return GroqAccountingProvider(
+            api_key=api_key,
+            model=model or os.environ.get("FISORA_AI_MODEL", DEFAULT_GROQ_MODEL),
+        )
+    if provider_name == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            return None
+        return OpenAiAccountingProvider(
+            api_key=api_key,
+            model=model or os.environ.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL),
+        )
+    return None
+
+
 def _static_first_classifier(payload: AiClassificationPolicyPayload | None) -> StaticFirstClassifier:
-    return StaticFirstClassifier(policy=_ai_policy(payload))
+    policy = _ai_policy(payload)
+    return StaticFirstClassifier(
+        provider=_ai_provider_from_env() if policy.enabled else None,
+        policy=policy,
+    )
+
+
+def _statement_ai_policy(payload: StatementAiSuggestionPolicyPayload | None) -> StatementAiSuggestionPolicy:
+    if payload is None:
+        return StatementAiSuggestionPolicy()
+    return StatementAiSuggestionPolicy(
+        enabled=payload.enabled,
+        confidence_threshold=payload.confidence_threshold,
+        max_input_chars=payload.max_input_chars,
+        max_provider_calls=payload.max_provider_calls,
+    )
+
+
+def _statement_line(payload: StatementLineSuggestionPayload) -> StatementLine:
+    return StatementLine(
+        line_no=payload.line_no,
+        transaction_date=payload.transaction_date,
+        description=payload.description,
+        amount=payload.amount,
+        direction=payload.direction,
+        balance_after=payload.balance_after,
+        counterparty_name=payload.counterparty_name,
+        tax_id=payload.tax_id,
+        iban=payload.iban,
+        suggested_account_code=payload.suggested_account_code,
+        transaction_type=payload.transaction_type,
+        confidence=payload.confidence,
+        risk_flags=tuple(payload.risk_flags),
+        review_reason=payload.review_reason,
+    )
+
+
+def _benchmark_cases(cases: list[AiBenchmarkCasePayload]) -> tuple[AiBenchmarkCase, ...]:
+    return tuple(
+        AiBenchmarkCase(
+            case_id=case.case_id,
+            raw_line=case.raw_line,
+            supplier_hint=case.supplier_hint,
+            expected_category=case.expected_category,
+        )
+        for case in cases
+    )
+
+
+def _benchmark_response(summary, *, model: str = "") -> dict[str, object]:
+    estimated_cost = estimate_ai_cost_usd(provider=summary.provider, input_chars=summary.estimated_input_chars)
+    return {
+        "case_count": summary.case_count,
+        "ai_used_count": summary.ai_used_count,
+        "matched_count": summary.matched_count,
+        "evaluated_count": summary.evaluated_count,
+        "accuracy_percent": summary.accuracy_percent,
+        "estimated_input_chars": summary.estimated_input_chars,
+        "estimated_cost_usd": f"{estimated_cost:.6f}",
+        "provider": summary.provider,
+        "model": model,
+        "results": [asdict(result) for result in summary.results],
+    }
 
 
 def _learned_rule(payload: LearnedPostingRulePayload) -> LearnedPostingRule:
@@ -993,6 +1137,7 @@ def store_document_upload(
     return _save_uploaded_document_with_job(
         client_id=payload.client_id,
         document_type=payload.document_type,
+        intake_category=payload.intake_category,
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
         uploaded_by_user_id=payload.uploaded_by_user_id,
@@ -1007,7 +1152,8 @@ def store_document_upload(
 @router.post("/store/document-upload-multipart")
 async def store_document_upload_multipart(
     client_id: str = Form(...),
-    document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement"] = Form("invoice"),
+    document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement", "special_document"] = Form("invoice"),
+    intake_category: str = Form(""),
     uploaded_by: str = Form(""),
     uploaded_by_user_id: str = Form(""),
     retention_policy_days: int = Form(90),
@@ -1019,6 +1165,7 @@ async def store_document_upload_multipart(
     return _save_uploaded_document_with_job(
         client_id=client_id,
         document_type=document_type,
+        intake_category=intake_category,
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
         uploaded_by_user_id=uploaded_by_user_id,
@@ -1124,6 +1271,48 @@ def product_classification(payload: ProductClassificationPayload) -> dict[str, o
     }
 
 
+@router.post("/statement/ai-suggestions")
+def statement_ai_suggestions(
+    payload: StatementAiSuggestionsPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
+    if payload.client_id.strip():
+        _require_mock_client_access(
+            client_id=payload.client_id.strip(),
+            user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        )
+    replay_provider = (
+        ReplayStatementSuggestionProvider(
+            list(payload.provider_payloads),
+            provider_name=payload.provider_name,
+        )
+        if payload.provider_payloads
+        else None
+    )
+    provider = replay_provider or (_ai_provider_from_env() if payload.ai_policy.enabled else None)
+    batch = suggest_statement_lines(
+        tuple(_statement_line(line) for line in payload.lines),
+        provider=provider,
+        policy=_statement_ai_policy(payload.ai_policy),
+    )
+    data = statement_ai_batch_payload(batch)
+    usage_event = None
+    if payload.client_id.strip():
+        usage_event = ai_usage_payload(
+            build_ai_usage_event(
+                client_id=payload.client_id.strip(),
+                provider=batch.provider,
+                operation="statement_ai_suggestions",
+                input_chars=batch.estimated_input_chars,
+                ai_used=batch.ai_used_count > 0,
+                skipped_reason="" if batch.ai_used_count > 0 else "statement_ai_skipped",
+            )
+        )
+        get_workflow_store().record_ai_usage(client_id=payload.client_id.strip(), event=usage_event)
+    return {**data, "usage_event": usage_event}
+
+
 @router.post("/store/ai-usage")
 def store_ai_usage(payload: AiUsageEventPayload) -> dict[str, object]:
     if not payload.client_id.strip():
@@ -1155,29 +1344,78 @@ def store_ai_usage_summary(payload: AiUsageSummaryPayload) -> dict[str, object]:
 
 @router.post("/classification/batch-benchmark")
 def classification_batch_benchmark(payload: AiBatchBenchmarkPayload) -> dict[str, object]:
+    provider = None
+    if payload.provider_name.strip().lower() in {"openai", "groq"} and not payload.provider_payloads:
+        provider = _ai_provider_from_env(model=payload.model.strip())
+        if provider is None:
+            raise HTTPException(status_code=400, detail=f"{payload.provider_name} provider requires matching FISORA_AI_PROVIDER and API key")
     summary = run_ai_batch_benchmark(
-        tuple(
-            AiBenchmarkCase(
-                case_id=case.case_id,
-                raw_line=case.raw_line,
-                supplier_hint=case.supplier_hint,
-                expected_category=case.expected_category,
-            )
-            for case in payload.cases
-        ),
+        _benchmark_cases(payload.cases),
         policy=_ai_policy(payload.ai_policy),
+        provider=provider,
         provider_payloads=payload.provider_payloads,
         provider_name=payload.provider_name,
     )
+    return _benchmark_response(summary, model=payload.model.strip())
+
+
+@router.post("/classification/model-comparison")
+def classification_model_comparison(payload: AiModelComparisonPayload) -> dict[str, object]:
+    provider_name = (payload.provider_name or os.environ.get("FISORA_AI_PROVIDER", "disabled")).strip().lower()
+    if provider_name == "groq":
+        api_key = os.environ.get("GROQ_API_KEY", "").strip()
+        default_models = [
+            os.environ.get("FISORA_AI_MODEL", "").strip() or DEFAULT_GROQ_MODEL,
+            os.environ.get("FISORA_AI_COMPARISON_MODEL", "").strip() or DEFAULT_GROQ_COMPARISON_MODEL,
+        ]
+        provider_factory = lambda selected_model: GroqAccountingProvider(api_key=api_key, model=selected_model)
+    elif provider_name == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        default_models = [
+            os.environ.get("FISORA_AI_MODEL", "").strip() or DEFAULT_OPENAI_MODEL,
+            os.environ.get("FISORA_AI_COMPARISON_MODEL", "").strip() or DEFAULT_COMPARISON_MODEL,
+        ]
+        provider_factory = lambda selected_model: OpenAiAccountingProvider(api_key=api_key, model=selected_model)
+    else:
+        raise HTTPException(status_code=400, detail="Model comparison requires FISORA_AI_PROVIDER=openai or groq")
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"{provider_name} comparison requires API key")
+    models = [
+        model.strip()
+        for model in (payload.models or default_models)
+        if model.strip()
+    ]
+    models = list(dict.fromkeys(models))[:3]
+    cases = _benchmark_cases(payload.cases)
+    case_count = len(cases) or 10
+    base_policy = _ai_policy(payload.ai_policy)
+    policy = AiClassificationPolicy(
+        enabled=True,
+        static_confidence_threshold=base_policy.static_confidence_threshold,
+        max_input_chars=base_policy.max_input_chars,
+        max_provider_calls=max(base_policy.max_provider_calls, case_count),
+    )
+    comparisons = []
+    for model in models:
+        summary = run_ai_batch_benchmark(
+            cases,
+            policy=policy,
+            provider=provider_factory(model),
+            provider_name=provider_name,
+        )
+        comparisons.append(_benchmark_response(summary, model=model))
+    ranked = sorted(
+        comparisons,
+        key=lambda item: (
+            -int(item["accuracy_percent"]),
+            Decimal(str(item["estimated_cost_usd"])),
+            -int(item["ai_used_count"]),
+        ),
+    )
     return {
-        "case_count": summary.case_count,
-        "ai_used_count": summary.ai_used_count,
-        "matched_count": summary.matched_count,
-        "evaluated_count": summary.evaluated_count,
-        "accuracy_percent": summary.accuracy_percent,
-        "estimated_input_chars": summary.estimated_input_chars,
-        "provider": summary.provider,
-        "results": [asdict(result) for result in summary.results],
+        "provider": provider_name,
+        "models": comparisons,
+        "recommended_model": ranked[0]["model"] if ranked else "",
     }
 
 
@@ -1269,6 +1507,7 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
         category=payload.category,
         reason=payload.reason,
         apply_to_similar=payload.apply_to_similar,
+        statement_line_no=payload.statement_line_no,
     )
     event = build_learning_event(
         decision,
@@ -1283,6 +1522,7 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
         "corrected_counterparty_code": event.corrected_counterparty_code,
         "reason": event.reason,
         "automation_candidate": event.automation_candidate,
+        "statement_line_no": event.statement_line_no,
     }
 
 

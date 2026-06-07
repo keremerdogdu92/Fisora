@@ -6,6 +6,7 @@ from typing import Any
 from app.domain.ai_classification import (
     AiClassificationPolicy,
     AiClassificationRequest,
+    ProductClassificationProvider,
     StaticFirstClassifier,
 )
 
@@ -86,13 +87,18 @@ def run_ai_batch_benchmark(
     cases: tuple[AiBenchmarkCase, ...],
     *,
     policy: AiClassificationPolicy | None = None,
+    provider: ProductClassificationProvider | None = None,
     provider_payloads: list[dict[str, Any]] | None = None,
     provider_name: str = "static_rules",
 ) -> AiBenchmarkSummary:
     if not cases:
         cases = DEFAULT_AI_BENCHMARK_CASES
-    provider = ReplayClassificationProvider(provider_payloads or [], provider_name=provider_name) if provider_payloads else None
-    classifier = StaticFirstClassifier(provider=provider, policy=policy or AiClassificationPolicy())
+    resolved_provider = provider or (
+        ReplayClassificationProvider(provider_payloads or [], provider_name=provider_name)
+        if provider_payloads
+        else None
+    )
+    classifier = StaticFirstClassifier(provider=resolved_provider, policy=policy or AiClassificationPolicy())
     results: list[AiBenchmarkCaseResult] = []
     for case in cases:
         classification = classifier.classify(case.raw_line, supplier_hint=case.supplier_hint)
@@ -125,6 +131,6 @@ def run_ai_batch_benchmark(
         evaluated_count=len(evaluated),
         accuracy_percent=accuracy,
         estimated_input_chars=sum(result.estimated_input_chars for result in results),
-        provider=provider_name if provider else "static_rules",
+        provider=provider_name if resolved_provider else "static_rules",
         results=tuple(results),
     )

@@ -350,6 +350,7 @@ class JsonWorkflowStore:
         document_ref: str,
         document_type: str,
         parser_kind: str,
+        intake_category: str = "",
     ) -> dict[str, Any]:
         data = self._read()
         created_at = utc_now()
@@ -358,6 +359,7 @@ class JsonWorkflowStore:
             "client_id": client_id,
             "document_ref": document_ref,
             "document_type": document_type,
+            "intake_category": intake_category,
             "parser_kind": parser_kind,
             "status": "queued",
             "attempt_count": 0,

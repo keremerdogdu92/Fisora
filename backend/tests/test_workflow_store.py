@@ -12,13 +12,40 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.persistence.workflow_store import JsonWorkflowStore
+from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
 from backend.scripts.import_private_intake_manifest import import_manifest
-from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
+from app.workflows.document_processing import build_ai_runtime_from_env, build_statement_processing_result, parser_kind_for_document_type, process_queued_documents
+
+
+class FakeStatementSuggestionProvider:
+    provider_name = "fake_statement_llm"
+
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.requests: list[object] = []
+
+    def suggest_statement_line(self, request: object) -> dict[str, object]:
+        self.requests.append(request)
+        return self.response
 
 
 class WorkflowStoreTests(unittest.TestCase):
+    def test_ai_runtime_from_env_builds_groq_provider_for_worker(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER": "groq",
+                "GROQ_API_KEY": "gsk-test",
+                "FISORA_AI_MODEL": "",
+            }
+        )
+
+        provider = runtime["statement_ai_provider"]
+
+        self.assertEqual(provider.provider_name, "groq")
+        self.assertEqual(provider.model, "openai/gpt-oss-20b")
+
     def test_json_store_persists_client_documents_reviews_and_export_packages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store_path = Path(temp_dir) / "phase0_store.json"
@@ -275,6 +302,166 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["export_status"], "export_ready")
         self.assertEqual(len(export_build.package.entries), 1)
 
+    def test_json_store_exports_statement_entry_after_accountant_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="statement.csv",
+                result={
+                    "file_name": "statement.csv",
+                    "simulated_status": "review_required",
+                    "export_status": "review_required",
+                    "review_reason_codes": ["statement_accountant_approval_required"],
+                    "risk_flags": ["statement_accountant_approval_required"],
+                    "is_balanced": True,
+                    "statement_entries": [
+                        {
+                            "entry_type": "bank_payment",
+                            "entry_date": "2026-05-02",
+                            "description": "GIB ODEME",
+                            "statement_line_no": 1,
+                            "statement_fingerprint": "approved-statement-1",
+                            "risk_flags": [],
+                            "lines": [
+                                {"account_code": "360", "description": "tax_payment", "debit": "50.00", "credit": "0.00"},
+                                {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "50.00"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+            store.save_review_decision(
+                client_id="client-1",
+                decision={
+                    "document_ref": "statement.csv",
+                    "action": "approve",
+                    "reviewer": "mali-musavir",
+                    "reason": "Banka satiri kontrol edildi",
+                },
+                learning_event={
+                    "document_ref": "statement.csv",
+                    "scope": "general_candidate",
+                    "action": "approve",
+                    "category": "tax_payment",
+                    "corrected_account_code": "",
+                    "corrected_counterparty_code": "",
+                    "reason": "Banka satiri kontrol edildi",
+                    "automation_candidate": False,
+                },
+            )
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            export_build = build_workspace_export_package(workspace)
+
+        self.assertTrue(result["accountant_export_override"])
+        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(len(export_build.package.entries), 1)
+        self.assertEqual(export_build.package.excluded_document_refs, ())
+
+    def test_json_store_applies_statement_line_review_without_approving_other_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="statement.csv",
+                result={
+                    "file_name": "statement.csv",
+                    "simulated_status": "review_required",
+                    "export_status": "review_required",
+                    "review_reason_codes": ["statement_accountant_approval_required"],
+                    "risk_flags": ["statement_accountant_approval_required"],
+                    "is_balanced": True,
+                    "statement_lines": [
+                        {
+                            "line_no": 1,
+                            "transaction_date": "2026-05-02",
+                            "description": "TEDARIKCI ODEME",
+                            "amount": "50.00",
+                            "direction": "out",
+                            "transaction_type": "bank_transfer_out",
+                            "suggested_account_code": "320",
+                            "confidence": 68,
+                            "risk_flags": ["statement_review_required"],
+                        },
+                        {
+                            "line_no": 2,
+                            "transaction_date": "2026-05-03",
+                            "description": "BASKA ODEME",
+                            "amount": "60.00",
+                            "direction": "out",
+                            "transaction_type": "bank_transfer_out",
+                            "suggested_account_code": "320",
+                            "confidence": 68,
+                            "risk_flags": ["statement_review_required"],
+                        },
+                    ],
+                    "statement_entries": [
+                        {
+                            "entry_type": "bank_payment",
+                            "entry_date": "2026-05-02",
+                            "description": "TEDARIKCI ODEME",
+                            "statement_line_no": 1,
+                            "statement_fingerprint": "statement-line-1",
+                            "risk_flags": ["statement_review_required"],
+                            "lines": [
+                                {"account_code": "320", "description": "bank_transfer_out", "debit": "50.00", "credit": "0.00"},
+                                {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "50.00"},
+                            ],
+                        },
+                        {
+                            "entry_type": "bank_payment",
+                            "entry_date": "2026-05-03",
+                            "description": "BASKA ODEME",
+                            "statement_line_no": 2,
+                            "statement_fingerprint": "statement-line-2",
+                            "risk_flags": ["statement_review_required"],
+                            "lines": [
+                                {"account_code": "320", "description": "bank_transfer_out", "debit": "60.00", "credit": "0.00"},
+                                {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "60.00"},
+                            ],
+                        },
+                    ],
+                },
+            )
+
+            store.save_review_decision(
+                client_id="client-1",
+                decision={
+                    "document_ref": "statement.csv",
+                    "statement_line_no": 1,
+                    "action": "approve_with_changes",
+                    "reviewer": "mali-musavir",
+                    "corrected_counterparty_code": "320.01.111",
+                    "reason": "Ilk satir tedarikci cari hesabi ile onaylandi.",
+                },
+                learning_event={
+                    "document_ref": "statement.csv",
+                    "statement_line_no": 1,
+                    "scope": "client_rule",
+                    "action": "approve_with_changes",
+                    "category": "tedarikci_odeme",
+                    "corrected_account_code": "",
+                    "corrected_counterparty_code": "320.01.111",
+                    "reason": "Ilk satir tedarikci cari hesabi ile onaylandi.",
+                    "automation_candidate": False,
+                },
+            )
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            export_build = build_workspace_export_package(workspace)
+
+        self.assertEqual(result["statement_lines"][0]["accountant_review_status"], "approved")
+        self.assertEqual(result["statement_lines"][0]["suggested_account_code"], "320.01.111")
+        self.assertEqual(result["statement_lines"][1].get("accountant_review_status", ""), "")
+        self.assertEqual(result["statement_entries"][0]["accountant_review_status"], "approved")
+        self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.111")
+        self.assertEqual(result["statement_entries"][1]["lines"][0]["account_code"], "320")
+        self.assertEqual(result["export_status"], "review_required")
+        self.assertEqual(len(export_build.package.entries), 1)
+        self.assertEqual(export_build.package.excluded_document_refs, ("statement.csv#statement-2",))
+
     def test_json_store_marks_export_package_downloaded(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
@@ -448,12 +635,118 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertTrue(result["is_balanced"])
         self.assertEqual(result["draft_quality"], "statement_entries_ready")
         self.assertEqual(len(result["statement_entries"]), 3)
+        self.assertEqual(result["statement_entries"][0]["statement_line_no"], 1)
+        self.assertTrue(result["statement_entries"][0]["statement_fingerprint"])
+        self.assertEqual(result["statement_entries"][0]["source_document_ref"], "bank-doc")
         self.assertEqual(result["statement_entries"][0]["total_debit"], "500.00")
         self.assertEqual(result["statement_entries"][0]["total_credit"], "500.00")
         self.assertTrue(result["draft_lines"])
         self.assertEqual(result["statement_lines"][0]["transaction_type"], "tax_payment")
         self.assertEqual(result["statement_lines"][1]["suggested_account_code"], "361")
         self.assertEqual(result["statement_lines"][2]["transaction_type"], "pos_blocked")
+
+    def test_statement_processing_result_attaches_ai_suggestions_without_export_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            statement_path = Path(temp_dir) / "bank.csv"
+            statement_path.write_text(
+                "transaction_date,description,amount,direction\n"
+                "2026-05-03,BILINMEYEN TEDARIKCI ODEME,1200.00,out\n",
+                encoding="utf-8",
+            )
+            provider = FakeStatementSuggestionProvider(
+                {
+                    "transaction_type": "counterparty_payment",
+                    "suggested_account_code": "320.01.123",
+                    "confidence": 82,
+                    "reason": "Satir tedarikci odemesi gibi gorunuyor.",
+                    "evidence": ["tedarikci", "odeme"],
+                }
+            )
+
+            result = build_statement_processing_result(
+                {
+                    "document_ref": "bank-doc",
+                    "document_type": "bank_statement",
+                    "original_file_name": "bank.csv",
+                },
+                {"document_type": "bank_statement"},
+                statement_path,
+                {},
+                statement_ai_provider=provider,
+                statement_ai_policy=StatementAiSuggestionPolicy(enabled=True),
+            )
+
+        self.assertEqual(len(provider.requests), 1)
+        self.assertTrue(result["ai_classification_used"])
+        self.assertEqual(result["ai_classification_provider"], "fake_statement_llm")
+        self.assertEqual(result["statement_ai_suggestions"][0]["line_no"], 1)
+        self.assertEqual(result["statement_ai_suggestions"][0]["suggested_account_code"], "320.01.123")
+        self.assertFalse(result["statement_ai_suggestions"][0]["export_allowed"])
+        self.assertEqual(result["export_status"], "review_required")
+
+    def test_processing_worker_records_ai_usage_when_statement_ai_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            statement_path = Path(temp_dir) / "bank.csv"
+            statement_path.write_text(
+                "transaction_date,description,amount,direction\n"
+                "2026-05-03,BILINMEYEN TEDARIKCI ODEME,1200.00,out\n",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                    {"raw_account_code": "320.01.123", "normalized_account_code": "320.01.123", "account_name": "Bilinmeyen Tedarikci", "is_detail_account": True},
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "bank-doc",
+                    "document_ref": "bank-doc",
+                    "document_type": "bank_statement",
+                    "original_file_name": "bank.csv",
+                    "storage_path": str(statement_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="bank_statement",
+                parser_kind=parser_kind_for_document_type("bank_statement"),
+            )
+            provider = FakeStatementSuggestionProvider(
+                {
+                    "transaction_type": "counterparty_payment",
+                    "suggested_account_code": "320.01.123",
+                    "confidence": 82,
+                    "reason": "Satir tedarikci odemesi gibi gorunuyor.",
+                    "evidence": ["tedarikci", "odeme"],
+                }
+            )
+
+            summary = process_queued_documents(
+                store,
+                statement_ai_provider=provider,
+                statement_ai_policy=StatementAiSuggestionPolicy(enabled=True, confidence_threshold=101),
+            )
+            workspace = store.get_workspace("client-1")
+            usage_events = store.list_ai_usage(client_id="client-1")
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(len(workspace["operation_events"]), 0)
+        self.assertEqual(len(usage_events), 1)
+        self.assertEqual(usage_events[0]["provider"], "fake_statement_llm")
+        self.assertEqual(usage_events[0]["operation"], "worker_ai_assisted_draft")
+        self.assertTrue(usage_events[0]["ai_used"])
+        self.assertGreater(int(usage_events[0]["input_chars"]), 0)
 
     def test_processing_worker_matches_bank_statement_counterparty_by_tax_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -499,7 +792,8 @@ class WorkflowStoreTests(unittest.TestCase):
             result = workspace["documents"][0]["result"]
 
         self.assertEqual(summary["completed_count"], 1)
-        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["export_status"], "review_required")
+        self.assertIn("statement_accountant_approval_required", result["review_reason_codes"])
         self.assertEqual(result["statement_lines"][0]["transaction_type"], "counterparty_payment")
         self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.015")
         self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "tax_id_exact")
@@ -555,7 +849,8 @@ class WorkflowStoreTests(unittest.TestCase):
             result = workspace["documents"][0]["result"]
 
         self.assertEqual(summary["completed_count"], 1)
-        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["export_status"], "review_required")
+        self.assertIn("statement_accountant_approval_required", result["review_reason_codes"])
         self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.777")
         self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "iban_exact")
         self.assertEqual(result["statement_entries"][0]["lines"][0]["account_code"], "320.01.777")
@@ -623,7 +918,8 @@ class WorkflowStoreTests(unittest.TestCase):
             result = workspace["documents"][0]["result"]
 
         self.assertEqual(summary["completed_count"], 1)
-        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["export_status"], "review_required")
+        self.assertIn("statement_accountant_approval_required", result["review_reason_codes"])
         self.assertTrue(result["learning_rule_applied"])
         self.assertEqual(result["statement_lines"][0]["counterparty_match_code"], "320.01.888")
         self.assertEqual(result["statement_lines"][0]["counterparty_match_reason"], "learning_event")

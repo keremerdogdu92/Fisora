@@ -47,7 +47,11 @@ services:
       FISORA_EXPORT_PATH: /opt/fisora/data/exports
       FISORA_BACKUP_PATH: /opt/fisora/data/backups
       FISORA_AI_PROVIDER: ${FISORA_AI_PROVIDER:-disabled}
-      FISORA_AI_MONTHLY_CAP_USD: ${FISORA_AI_MONTHLY_CAP_USD:-100}
+      FISORA_AI_MODEL: ${FISORA_AI_MODEL:-}
+      FISORA_AI_COMPARISON_MODEL: ${FISORA_AI_COMPARISON_MODEL:-}
+      FISORA_AI_MONTHLY_CAP_USD: ${FISORA_AI_MONTHLY_CAP_USD:-10}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}
       REDIS_URL: redis://redis:6379/0
     volumes:
@@ -79,6 +83,12 @@ services:
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
       FISORA_WORKER_RETENTION_INTERVAL_SECONDS: ${FISORA_WORKER_RETENTION_INTERVAL_SECONDS:-86400}
       FISORA_WORKER_PROCESSING_INTERVAL_SECONDS: ${FISORA_WORKER_PROCESSING_INTERVAL_SECONDS:-30}
+      FISORA_AI_PROVIDER: ${FISORA_AI_PROVIDER:-disabled}
+      FISORA_AI_MODEL: ${FISORA_AI_MODEL:-}
+      FISORA_AI_COMPARISON_MODEL: ${FISORA_AI_COMPARISON_MODEL:-}
+      FISORA_AI_MONTHLY_CAP_USD: ${FISORA_AI_MONTHLY_CAP_USD:-10}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}
       REDIS_URL: redis://redis:6379/0
     volumes:
@@ -97,6 +107,12 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
   nginx:
     image: nginx:1.27-alpine
@@ -105,8 +121,12 @@ services:
     volumes:
       - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_healthy
+        restart: true
+      backend:
+        condition: service_healthy
+        restart: true
 
   backup:
     image: postgres:16-alpine

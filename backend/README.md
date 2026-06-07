@@ -8,8 +8,8 @@ Faz 0 backend'i iki katmandan olusur:
 
 ## Kurulum
 
-Python 3.11-3.13 kullanin. Bu repo icin pinlenen `pydantic-core`
-surumu Python 3.14 ile wheel bulamazsa Rust/PyO3 derlemesinde takilabilir.
+Python 3.11-3.14 kullanin. Yerel Windows Python 3.14 kurulumlari icin
+`pydantic` ve `psycopg` pinleri wheel uyumlu tutulur.
 
 ```powershell
 python -m venv .venv
@@ -166,16 +166,30 @@ Ilk yerel endpoint:
 
 - `POST /phase0/classification/product`
 - `POST /phase0/classification/batch-benchmark`
+- `POST /phase0/classification/model-comparison`
+- `POST /phase0/statement/ai-suggestions`
 
 Simulation endpointleri `aiClassificationUsed`, `aiClassificationProvider`,
 `aiClassificationSkippedReason`, `aiClassificationReason` ve
-`aiEstimatedInputChars` alanlarini dondurur. Bu alanlar muhasebe kararini tek
-basina vermez; sadece siniflandirma izini ve maliyet sinyalini tasir.
+`aiEstimatedInputChars`, `aiSuggestedAccountCode`,
+`aiSuggestedCounterpartyCode`, `aiRiskFlags` ve `aiAccountReason` alanlarini
+dondurur. Bu alanlar muhasebe kararini tek basina vermez; sadece siniflandirma
+izini, hesap/cari adayini, gerekceyi ve maliyet sinyalini tasir.
 
 `classification/batch-benchmark` dis API'ye cikmadan statik kurallari veya
-replay provider payload'larini ayni schema ile kiyaslar. Gercek OpenAI, Gemini
-veya Manus kosulari baglandiginda ayni benchmark yapisi belge basina maliyet ve
-dogruluk karsilastirmasi icin kullanilacak.
+replay provider payload'larini ayni schema ile kiyaslar. `provider_name=groq`
+ve server env'inde `FISORA_AI_PROVIDER=groq`, `GROQ_API_KEY` ve
+`FISORA_AI_MODEL` varsa Groq OpenAI-compatible adapter gercek JSON schema
+cagrisi yapar. Ayni endpoint `provider_name=openai` ile ucretli OpenAI kalite
+kiyasi icin de kullanilabilir.
+`classification/model-comparison` ayni 5-10 case setini
+`FISORA_AI_MODEL` ve `FISORA_AI_COMPARISON_MODEL` ile kosup dogruluk, JSON uyumu
+ve tahmini maliyeti karsilastirir.
+
+AI adapter ham PDF/XML/ekstre dosyasini gondermez. Parser ve hesap plani
+katmani once sinirli metin, tutar/KDV sinyali, hesap adaylari, cari adaylari ve
+mukellef faaliyet ozetini hazirlar; provider yalnizca bu sinirli JSON payload ile
+kategori, guven, gerekce, risk ve hesap/cari onerisi dondurur.
 
 `store/export-package/from-workspace`, workspace'teki fatura ve statement
 sonuclarindan yalnizca dengeli ve risksiz entry'leri export paketine alir.

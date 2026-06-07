@@ -16,11 +16,14 @@ exports/*
 private_samples/*
 !private_samples/.gitkeep
 frontend/public/local-review-data.json
+frontend/public/local-workspace-data.json
+frontend/public/local-pilot-data.json
 
 # Secrets and local config
 .env
 .env.*
 !.env.example
+deploy/production.env
 
 # OS/editor
 .DS_Store

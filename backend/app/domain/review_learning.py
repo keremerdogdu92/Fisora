@@ -28,6 +28,7 @@ class ReviewDecision:
     category: str = ""
     reason: str = ""
     apply_to_similar: bool = False
+    statement_line_no: int = 0
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class LearningEvent:
     corrected_counterparty_code: str
     reason: str
     automation_candidate: bool
+    statement_line_no: int = 0
 
 
 def build_learning_event(decision: ReviewDecision, *, prior_consistent_approval_count: int = 0) -> LearningEvent:
@@ -63,4 +65,5 @@ def build_learning_event(decision: ReviewDecision, *, prior_consistent_approval_
         corrected_counterparty_code=decision.corrected_counterparty_code,
         reason=decision.reason,
         automation_candidate=automation_candidate,
+        statement_line_no=decision.statement_line_no,
     )

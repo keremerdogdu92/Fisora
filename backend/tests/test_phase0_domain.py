@@ -18,7 +18,9 @@ from app.domain.chart_accounts import (
     validate_vat_accounts,
 )
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
-from app.domain.ai_classification import AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
+from app.domain.ai_classification import AiClassificationContext, AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
+from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
+from app.domain.openai_provider import GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.business_relevance import (
     ClientProfile,
     assess_business_relevance,
@@ -47,8 +49,11 @@ from app.domain.journal_entries import (
     money,
 )
 from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
+from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
-from app.domain.workspace_exports import build_workspace_export_package
+from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, suggest_statement_lines
+from app.domain.statement_lines import StatementLine
+from app.domain.workspace_exports import build_workspace_export_package, export_candidates_from_workspace
 
 
 class FakeProductProvider:
@@ -63,7 +68,126 @@ class FakeProductProvider:
         return self.response
 
 
+class FakeStatementSuggestionProvider:
+    provider_name = "fake_statement_llm"
+
+    def __init__(self, responses: list[dict[str, object]]) -> None:
+        self.responses = list(responses)
+        self.requests: list[object] = []
+
+    def suggest_statement_line(self, request: object) -> dict[str, object]:
+        self.requests.append(request)
+        return self.responses.pop(0)
+
+
 class Phase0DomainTests(unittest.TestCase):
+    def test_ai_usage_summary_tracks_ten_dollar_cap(self) -> None:
+        events = [
+            ai_usage_payload(
+                build_ai_usage_event(
+                    client_id="client-1",
+                    provider="openai",
+                    operation="worker_ai_assisted_draft",
+                    input_chars=420,
+                    ai_used=True,
+                )
+            )
+        ]
+
+        summary = summarize_ai_usage(events, monthly_cap_usd=Decimal("10"))
+
+        self.assertEqual(summary["monthly_cap_usd"], "10.00")
+        self.assertEqual(summary["estimated_total_cost_usd"], "0.000420")
+        self.assertEqual(summary["remaining_cap_usd"], "9.999580")
+        self.assertFalse(summary["cap_exceeded"])
+
+    def test_ai_usage_summary_tracks_groq_free_tier_as_zero_cost(self) -> None:
+        events = [
+            ai_usage_payload(
+                build_ai_usage_event(
+                    client_id="client-1",
+                    provider="groq",
+                    operation="worker_ai_assisted_draft",
+                    input_chars=1200,
+                    ai_used=True,
+                )
+            )
+        ]
+
+        summary = summarize_ai_usage(events, monthly_cap_usd=Decimal("0.01"))
+
+        self.assertEqual(summary["estimated_total_cost_usd"], "0.000000")
+        self.assertEqual(summary["remaining_cap_usd"], "0.010000")
+        self.assertFalse(summary["cap_exceeded"])
+
+    def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER": "openai",
+                    "FISORA_AI_MODEL": "gpt-5.4-mini",
+                },
+            )
+
+        self.assertFalse(payload["checks"]["ai_provider_configured"])
+        self.assertIn("ai_provider_configured", payload["blocking"])
+        self.assertIn("ai_openai_key_missing", payload["warnings"])
+
+    def test_production_readiness_accepts_groq_key_when_groq_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "FISORA_AI_MODEL": "openai/gpt-oss-20b",
+                    "GROQ_API_KEY": "gsk-test",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["ai_provider_configured"])
+        self.assertEqual(payload["ai_provider"], "groq")
+        self.assertTrue(payload["ai_groq_key_present"])
+        self.assertNotIn("ai_groq_key_missing", payload["warnings"])
+
+    def test_production_readiness_uses_groq_default_model_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "GROQ_API_KEY": "gsk-test",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["ai_provider_configured"])
+        self.assertEqual(payload["ai_model"], "openai/gpt-oss-20b")
+        self.assertNotIn("ai_model_missing", payload["warnings"])
+
     def test_chart_account_import_marks_detail_accounts(self) -> None:
         accounts = parse_chart_accounts(ROOT / "samples" / "chart_accounts" / "chart_accounts_sample_a.csv")
         account_by_code = {account.normalized_account_code: account for account in accounts}
@@ -479,6 +603,10 @@ class Phase0DomainTests(unittest.TestCase):
                 "confidence": 84,
                 "reason": "Model odyoloji cihaz ailesine benziyor.",
                 "evidence": ["ai:model_family"],
+                "suggested_account_code": "770.01",
+                "suggested_counterparty_code": "320.01.015",
+                "risk_flags": ["accountant_review_required"],
+                "account_reason": "Hesap plani adaylari icinden medikal gider hesabi secildi.",
             }
         )
         classifier = StaticFirstClassifier(
@@ -486,13 +614,26 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, max_input_chars=24),
         )
 
-        result = classifier.classify("ZX Sonic Pro 9 receiver unit", supplier_hint="Medikal Tedarik")
+        result = classifier.classify(
+            "ZX Sonic Pro 9 receiver unit",
+            supplier_hint="Medikal Tedarik",
+            context=AiClassificationContext(
+                client_activity="Isitme cihazi satis ve servis",
+                account_candidates=("770.01", "760.01"),
+                counterparty_candidates=("320.01.015",),
+            ),
+        )
 
         self.assertTrue(result.ai_used)
         self.assertEqual(result.provider, "fake_llm")
         self.assertEqual(result.classification.category, "isitme_cihazi")
+        self.assertEqual(result.suggested_account_code, "770.01")
+        self.assertEqual(result.suggested_counterparty_code, "320.01.015")
+        self.assertEqual(result.risk_flags, ("accountant_review_required",))
+        self.assertIn("medikal gider", result.account_reason)
         self.assertIn("ai_schema_validated", result.classification.evidence)
         self.assertEqual(provider.requests[0].to_schema_payload()["raw_line"], "ZX Sonic Pro 9 receiver")
+        self.assertEqual(provider.requests[0].to_schema_payload()["account_candidates"], ["770.01", "760.01"])
 
     def test_static_first_classifier_rejects_invalid_provider_schema(self) -> None:
         classifier = StaticFirstClassifier(
@@ -505,6 +646,182 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.ai_used)
         self.assertEqual(result.classification.category, "bilinmeyen")
         self.assertIn("ai_invalid_schema", result.classification.evidence)
+
+    def test_openai_accounting_provider_posts_limited_structured_payload(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": (
+                                        '{"category":"isitme_cihazi","confidence":86,'
+                                        '"reason":"Kalem isitme cihazi parcasina benziyor.",'
+                                        '"evidence":["receiver"],"suggested_account_code":"770.01",'
+                                        '"suggested_counterparty_code":"320.01.015",'
+                                        '"risk_flags":["accountant_review_required"],'
+                                        '"account_reason":"Mevcut hesap adaylari icinden secildi."}'
+                                    ),
+                                }
+                            ]
+                        }
+                    ]
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["json"] = json
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        provider = OpenAiAccountingProvider(api_key="sk-test", model="gpt-5.4-mini", http_client=FakeClient())
+        response = provider.classify_product(
+            AiClassificationRequest(
+                raw_line="ZX Sonic Pro 9 receiver unit",
+                supplier_hint="Medikal Tedarik",
+                allowed_categories=("isitme_cihazi", "bilinmeyen"),
+                max_input_chars=80,
+                context=AiClassificationContext(
+                    client_activity="Isitme cihazi satis ve servis",
+                    account_candidates=("770.01",),
+                    counterparty_candidates=("320.01.015",),
+                ),
+            )
+        )
+
+        request_payload = captured["json"]
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer sk-test")
+        self.assertEqual(request_payload["model"], "gpt-5.4-mini")
+        self.assertEqual(request_payload["text"]["format"]["type"], "json_schema")
+        user_content = request_payload["input"][1]["content"]
+        self.assertIn("ZX Sonic Pro 9 receiver unit", user_content)
+        self.assertIn("770.01", user_content)
+        self.assertNotIn("raw_pdf", user_content.lower())
+        self.assertEqual(response["suggested_account_code"], "770.01")
+        self.assertEqual(response["suggested_counterparty_code"], "320.01.015")
+
+    def test_groq_accounting_provider_posts_openai_compatible_structured_payload(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "output_text": (
+                        '{"category":"bilinmeyen","confidence":52,'
+                        '"reason":"Kalem belirsiz, musavir kontrolu gerekli.",'
+                        '"evidence":["belirsiz"],"suggested_account_code":"",'
+                        '"suggested_counterparty_code":"",'
+                        '"risk_flags":["accountant_review_required"],'
+                        '"account_reason":"Hesap adayi yeterli degil."}'
+                    )
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["json"] = json
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        provider = GroqAccountingProvider(api_key="gsk-test", http_client=FakeClient())
+        response = provider.classify_product(
+            AiClassificationRequest(
+                raw_line="Bilinmeyen banka hizmet bedeli",
+                supplier_hint="Banka",
+                allowed_categories=("genel_gider", "bilinmeyen"),
+                max_input_chars=80,
+            )
+        )
+
+        request_payload = captured["json"]
+        self.assertEqual(captured["url"], "https://api.groq.com/openai/v1/responses")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer gsk-test")
+        self.assertEqual(request_payload["model"], "openai/gpt-oss-20b")
+        self.assertEqual(request_payload["text"]["format"]["type"], "json_schema")
+        self.assertEqual(provider.provider_name, "groq")
+        self.assertIn("Bilinmeyen banka hizmet bedeli", request_payload["input"][1]["content"])
+        self.assertEqual(response["category"], "bilinmeyen")
+
+    def test_statement_ai_suggestions_only_call_provider_for_uncertain_statement_lines(self) -> None:
+        provider = FakeStatementSuggestionProvider(
+            [
+                {
+                    "transaction_type": "bank_transfer_out",
+                    "suggested_account_code": "320.01.111",
+                    "confidence": 74,
+                    "reason": "Açıklama tedarikçi ödemesine benziyor.",
+                    "evidence": ["odeme", "tedarikci"],
+                },
+                {
+                    "transaction_type": "counterparty_payment",
+                    "suggested_account_code": "320.01.222",
+                    "confidence": 81,
+                    "reason": "Düşük güvenli havale satırı cari ödemeye benziyor.",
+                    "evidence": ["havale"],
+                },
+            ]
+        )
+        lines = (
+            StatementLine(
+                line_no=1,
+                transaction_date="2026-06-01",
+                description="GIB ODEME",
+                amount="100.00",
+                direction="out",
+                suggested_account_code="360",
+                transaction_type="tax_payment",
+                confidence=86,
+                risk_flags=(),
+            ),
+            StatementLine(
+                line_no=2,
+                transaction_date="2026-06-02",
+                description="BILINMEYEN TEDARIKCI ODEME",
+                amount="250.00",
+                direction="out",
+                transaction_type="unknown",
+                confidence=35,
+                risk_flags=("statement_review_required", "counterparty_not_found"),
+            ),
+            StatementLine(
+                line_no=3,
+                transaction_date="2026-06-03",
+                description="GIDEN HAVALE",
+                amount="400.00",
+                direction="out",
+                suggested_account_code="320",
+                transaction_type="bank_transfer_out",
+                confidence=68,
+                risk_flags=("statement_review_required",),
+            ),
+        )
+
+        batch = suggest_statement_lines(
+            lines,
+            provider=provider,
+            policy=StatementAiSuggestionPolicy(enabled=True, confidence_threshold=70, max_provider_calls=5),
+        )
+
+        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(batch.ai_used_count, 2)
+        self.assertEqual([suggestion.line_no for suggestion in batch.suggestions], [2, 3])
+        self.assertEqual(batch.suggestions[0].suggested_account_code, "320.01.111")
+        self.assertFalse(batch.suggestions[0].export_allowed)
+        self.assertEqual(batch.skipped_count, 1)
 
     def test_invoice_line_extraction_keeps_brand_model_rows(self) -> None:
         text = """
@@ -567,17 +884,26 @@ class Phase0DomainTests(unittest.TestCase):
                     "confidence": 84,
                     "reason": "Model odyoloji cihaz ailesine benziyor.",
                     "evidence": ["ai:model_family"],
+                    "suggested_account_code": "770.01",
+                    "suggested_counterparty_code": "320.01",
+                    "risk_flags": ["accountant_review_required"],
+                    "account_reason": "AI mevcut hesap adaylari icinden gider ve cari onerdi.",
                 }
             ),
             policy=AiClassificationPolicy(enabled=True),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier)
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.ai_classification_provider, "fake_llm")
         self.assertEqual(result.product_category, "isitme_cihazi")
         self.assertEqual(result.business_relevance_status, "uygun")
+        self.assertEqual(result.ai_suggested_account_code, "770.01")
+        self.assertEqual(result.ai_suggested_counterparty_code, "320.01")
+        self.assertEqual(result.ai_risk_flags, ("accountant_review_required",))
+        self.assertIn("gider ve cari", result.ai_account_reason)
+        self.assertEqual(result.export_status, "review_required")
 
     def test_ai_assisted_draft_mode_keeps_clean_draft_in_review(self) -> None:
         invoice = ParsedInvoice(
@@ -818,13 +1144,17 @@ class Phase0DomainTests(unittest.TestCase):
                 },
                 {
                     "document_ref": "statement.csv",
-                    "export_status": "review_required",
+                    "export_status": "export_ready",
                     "result": {
+                        "export_status": "export_ready",
+                        "accountant_export_override": True,
                         "statement_entries": [
                             {
                                 "entry_type": "bank_payment",
                                 "entry_date": "2026-05-02",
                                 "description": "GIB ODEME",
+                                "statement_line_no": 1,
+                                "statement_fingerprint": "statement-ready-1",
                                 "risk_flags": [],
                                 "lines": [
                                     {"account_code": "360", "description": "tax_payment", "debit": "50.00", "credit": "0.00"},
@@ -835,6 +1165,8 @@ class Phase0DomainTests(unittest.TestCase):
                                 "entry_type": "bank_collection",
                                 "entry_date": "2026-05-03",
                                 "description": "POS BLOKE",
+                                "statement_line_no": 2,
+                                "statement_fingerprint": "statement-pos-2",
                                 "risk_flags": ["pos_policy_review_required"],
                                 "lines": [
                                     {"account_code": "102.01", "description": "Banka girisi", "debit": "80.00", "credit": "0.00"},
@@ -852,6 +1184,103 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(build.candidate_count, 3)
         self.assertEqual(len(build.package.entries), 2)
         self.assertEqual(build.package.excluded_document_refs, ("statement.csv#statement-2",))
+
+    def test_workspace_export_package_blocks_statement_entries_until_accountant_approval(self) -> None:
+        workspace = {
+            "documents": [
+                {
+                    "document_ref": "statement.csv",
+                    "export_status": "export_ready",
+                    "result": {
+                        "export_status": "export_ready",
+                        "statement_entries": [
+                            {
+                                "entry_type": "bank_payment",
+                                "entry_date": "2026-05-02",
+                                "description": "GIB ODEME",
+                                "risk_flags": [],
+                                "lines": [
+                                    {"account_code": "360", "description": "tax_payment", "debit": "50.00", "credit": "0.00"},
+                                    {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "50.00"},
+                                ],
+                            },
+                        ],
+                    },
+                },
+            ]
+        }
+
+        build = build_workspace_export_package(workspace)
+
+        self.assertEqual(build.candidate_count, 1)
+        self.assertEqual(len(build.package.entries), 0)
+        self.assertEqual(build.package.excluded_document_refs, ("statement.csv#statement-1",))
+
+    def test_workspace_export_package_blocks_duplicate_approved_statement_entry(self) -> None:
+        entry_payload = {
+            "entry_type": "bank_payment",
+            "entry_date": "2026-05-02",
+            "description": "GIB ODEME",
+            "accountant_review_status": "approved",
+            "statement_fingerprint": "2026-05-02|out|50.00|gib-odeme",
+            "risk_flags": [],
+            "lines": [
+                {"account_code": "360", "description": "tax_payment", "debit": "50.00", "credit": "0.00"},
+                {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "50.00"},
+            ],
+        }
+        workspace = {
+            "documents": [
+                {
+                    "document_ref": "statement.csv",
+                    "result": {
+                        "statement_entries": [
+                            {**entry_payload, "statement_line_no": 1},
+                            {**entry_payload, "statement_line_no": 2},
+                        ]
+                    },
+                },
+            ]
+        }
+
+        candidates = export_candidates_from_workspace(workspace)
+        build = build_workspace_export_package(workspace)
+
+        self.assertEqual(candidates[0].export_status, "export_ready")
+        self.assertEqual(candidates[1].export_status, "review_required")
+        self.assertIn("duplicate_statement_line", candidates[1].risk_flags)
+        self.assertEqual(len(build.package.entries), 1)
+        self.assertEqual(build.package.excluded_document_refs, ("statement.csv#statement-2",))
+
+    def test_workspace_export_package_blocks_statement_entry_without_bank_account(self) -> None:
+        workspace = {
+            "documents": [
+                {
+                    "document_ref": "statement.csv",
+                    "result": {
+                        "statement_entries": [
+                            {
+                                "entry_type": "bank_payment",
+                                "entry_date": "2026-05-02",
+                                "description": "Eksik banka satiri",
+                                "accountant_review_status": "approved",
+                                "statement_fingerprint": "2026-05-02|out|50.00|eksik",
+                                "risk_flags": [],
+                                "lines": [
+                                    {"account_code": "320.01", "description": "Cari", "debit": "50.00", "credit": "0.00"},
+                                    {"account_code": "320.02", "description": "Cari", "debit": "0.00", "credit": "50.00"},
+                                ],
+                            },
+                        ]
+                    },
+                },
+            ]
+        }
+
+        candidate = export_candidates_from_workspace(workspace)[0]
+
+        self.assertEqual(candidate.export_status, "review_required")
+        self.assertIn("bank_account_missing", candidate.risk_flags)
 
     def test_ai_batch_benchmark_scores_static_and_replay_provider_results(self) -> None:
         static_summary = run_ai_batch_benchmark(

@@ -74,12 +74,27 @@ AI cagrisi su sozlesmeyle sinirlanmalidir:
 
 AI'a verilen baglam:
 
-- Fatura metni ve kalem satirlari.
-- Mukellef faaliyet/NACE aciklamasi.
-- Isyeri adresi.
+- Ham PDF/XML/ekstre dosyasi degil, parser'in cikardigi sinirli metin.
+- Mukellef faaliyet/NACE aciklamasi veya kisa faaliyet ozeti.
 - Mevcut hesap plani adaylari.
 - Cari adaylari.
-- Varsa gecmis mustavir kararlari.
+- Belge tipi, tutar/KDV sinyali ve risk bayraklari.
+- Varsa gecmis mustavir kararlarindan turetilen ozet sinyal.
+
+Kapali server demo env karari:
+
+```text
+FISORA_AI_PROVIDER=groq
+FISORA_AI_MODEL=openai/gpt-oss-20b
+FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b
+FISORA_AI_MONTHLY_CAP_USD=0.01
+GROQ_API_KEY=server-env-only
+```
+
+Groq, mustavir oncesi ucretsiz/limitli test hatti olarak kullanilir. Gercek
+musteri verisinde yine ham PDF/XML/ekstre gonderilmez; yalnizca parser'in
+sinirladigi JSON payload gonderilir. Ucretli OpenAI kalite kiyasina gecilecekse
+ayni env yapisi `FISORA_AI_PROVIDER=openai` ve `OPENAI_API_KEY` ile calisir.
 
 AI su islemleri yapamaz:
 
@@ -95,6 +110,8 @@ Mustavire gosterilecek minimum ekran:
 - Secili mukellef adi ve kart bilgisi.
 - O an incelenen fatura/ekstre onizlemesi.
 - Fatura kalemleri ve AI/kural kategori gerekcesi.
+- AI provider, guven, hesap onerisi, cari onerisi ve "neden bu hesap/cari"
+  gerekcesi.
 - Onerilen muhasebe fisi.
 - Borc/alacak dengesi.
 - Cari ve hesap plani eslesme guveni.

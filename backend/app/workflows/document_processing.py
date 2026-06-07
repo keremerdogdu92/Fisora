@@ -2,16 +2,25 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from decimal import Decimal
+from os import environ
 from pathlib import Path
 from typing import Any
 
-from app.domain.ai_classification import StaticFirstClassifier
+from app.domain.ai_classification import AiClassificationPolicy, ProductClassifier, StaticFirstClassifier
+from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
 from app.domain.business_relevance import ClientProfile
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
+from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
-from app.domain.statement_journal_entries import build_statement_entries, journal_entry_payload
+from app.domain.statement_ai_suggestions import (
+    StatementAiSuggestionPolicy,
+    StatementSuggestionProvider,
+    statement_ai_batch_payload,
+    suggest_statement_lines,
+)
+from app.domain.statement_journal_entries import build_statement_entry_records, statement_entry_payload
 from app.domain.statement_lines import enrich_statement_lines_with_counterparties, parse_statement_file
 from app.domain.xml_invoices import parse_xml_invoice
 
@@ -21,6 +30,7 @@ PARSER_BY_DOCUMENT_TYPE = {
     "einvoice_xml": "einvoice_xml",
     "bank_statement": "bank_statement",
     "pos_statement": "pos_statement",
+    "special_document": "manual_review",
 }
 
 
@@ -85,7 +95,12 @@ def _chart_accounts(workspace: dict[str, Any]) -> list[ChartAccount]:
     return [_chart_account(account) for account in chart_accounts.get("accounts", [])]
 
 
-def _serializable_simulation(invoice: ParsedInvoice, workspace: dict[str, Any]) -> dict[str, Any]:
+def _serializable_simulation(
+    invoice: ParsedInvoice,
+    workspace: dict[str, Any],
+    *,
+    product_classifier: ProductClassifier | None = None,
+) -> dict[str, Any]:
     accounts = _chart_accounts(workspace)
     counterparty = match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint) if accounts else None
     result = simulate_invoice(
@@ -93,12 +108,14 @@ def _serializable_simulation(invoice: ParsedInvoice, workspace: dict[str, Any]) 
         _account_selection(workspace),
         _client_profile(workspace),
         counterparty,
-        StaticFirstClassifier(),
+        product_classifier or StaticFirstClassifier(),
+        processing_mode="ai_assisted_draft" if product_classifier else "controlled_automation",
     )
     data = asdict(result)
     for key in (
         "vat_rates",
         "risk_flags",
+        "ai_risk_flags",
         "parse_notes",
         "review_reason_codes",
         "deterministic_checks",
@@ -107,6 +124,44 @@ def _serializable_simulation(invoice: ParsedInvoice, workspace: dict[str, Any]) 
     ):
         data[key] = list(data[key])
     return data
+
+
+def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, object]:
+    source = env or environ
+    provider_name = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower()
+    if provider_name not in {"openai", "groq"}:
+        return {
+            "product_classifier": None,
+            "statement_ai_provider": None,
+            "statement_ai_policy": StatementAiSuggestionPolicy(),
+        }
+    if provider_name == "groq":
+        provider = GroqAccountingProvider(
+            api_key=source.get("GROQ_API_KEY", ""),
+            model=source.get("FISORA_AI_MODEL", DEFAULT_GROQ_MODEL),
+        )
+    else:
+        provider = OpenAiAccountingProvider(
+            api_key=source.get("OPENAI_API_KEY", ""),
+            model=source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL),
+        )
+    product_policy = AiClassificationPolicy(
+        enabled=True,
+        static_confidence_threshold=int(source.get("FISORA_AI_STATIC_CONFIDENCE_THRESHOLD", "101")),
+        max_input_chars=int(source.get("FISORA_AI_MAX_INPUT_CHARS", "420")),
+        max_provider_calls=int(source.get("FISORA_AI_MAX_PROVIDER_CALLS", "1")),
+    )
+    statement_policy = StatementAiSuggestionPolicy(
+        enabled=True,
+        confidence_threshold=int(source.get("FISORA_AI_STATEMENT_CONFIDENCE_THRESHOLD", "101")),
+        max_input_chars=int(source.get("FISORA_AI_STATEMENT_MAX_INPUT_CHARS", "420")),
+        max_provider_calls=int(source.get("FISORA_AI_STATEMENT_MAX_PROVIDER_CALLS", "3")),
+    )
+    return {
+        "product_classifier": StaticFirstClassifier(provider=provider, policy=product_policy),
+        "statement_ai_provider": provider,
+        "statement_ai_policy": statement_policy,
+    }
 
 
 def _stored_path(document: dict[str, Any]) -> Path | None:
@@ -138,6 +193,9 @@ def build_statement_processing_result(
     job: dict[str, Any],
     path: Path,
     workspace: dict[str, Any],
+    *,
+    statement_ai_provider: StatementSuggestionProvider | None = None,
+    statement_ai_policy: StatementAiSuggestionPolicy | None = None,
 ) -> dict[str, Any]:
     lines = enrich_statement_lines_with_counterparties(
         parse_statement_file(path),
@@ -145,17 +203,29 @@ def build_statement_processing_result(
         workspace.get("learning_events") or (),
     )
     selection = _account_selection(workspace)
-    entries = build_statement_entries(
+    source_document_ref = str(document.get("document_ref") or document.get("document_id") or document.get("original_file_name") or "")
+    entry_records = build_statement_entry_records(
         lines=lines,
         bank_account=selection.bank_account,
-        document_ref=str(document.get("document_ref") or document.get("document_id") or document.get("original_file_name") or ""),
+        document_ref=source_document_ref,
     )
-    risk_flags = tuple(dict.fromkeys(flag for line in lines for flag in line.risk_flags))
-    if not lines:
-        risk_flags = ("statement_parser_required",)
+    entries = tuple(entry for _, entry in entry_records)
+    line_risk_flags = tuple(dict.fromkeys(flag for line in lines for flag in line.risk_flags))
+    risk_flags = (
+        tuple(dict.fromkeys((*line_risk_flags, "statement_accountant_approval_required")))
+        if lines
+        else ("statement_parser_required",)
+    )
     review_reason_codes = risk_flags
     is_balanced = bool(entries) and all(entry.is_balanced for entry in entries)
     draft_lines = entries[0].lines if entries else ()
+    ai_batch = suggest_statement_lines(
+        lines,
+        provider=statement_ai_provider,
+        policy=statement_ai_policy,
+    )
+    ai_batch_data = statement_ai_batch_payload(ai_batch)
+    ai_used = ai_batch.ai_used_count > 0
     return {
         "chart_file_name": "workspace-store",
         "file_name": str(document.get("original_file_name") or path.name),
@@ -176,10 +246,11 @@ def build_statement_processing_result(
         "deterministic_checks": [
             "statement_lines_parsed" if lines else "statement_lines_missing",
             "balanced_entry" if is_balanced else "balanced_entry_missing",
-            "statement_risk_flags_clear" if not risk_flags else "statement_risk_flags_present",
+            "statement_risk_flags_clear" if not line_risk_flags else "statement_risk_flags_present",
+            "statement_accountant_approval_required" if lines else "statement_accountant_approval_missing",
         ],
-        "export_gate_reason": "Ekstre satirlari dengeli ve risksiz; export paketine alinabilir."
-        if is_balanced and not risk_flags
+        "export_gate_reason": "Ekstre satirlari musavir onayindan sonra export paketine alinabilir."
+        if is_balanced
         else "Ekstre satirlari musavir kontrolu veya risk temizligi gerektiriyor.",
         "product_line_hint": lines[0].description if lines else "",
         "product_category": lines[0].transaction_type if lines else "",
@@ -188,17 +259,17 @@ def build_statement_processing_result(
         "business_relevance_confidence": lines[0].confidence if lines else 0,
         "business_relevance_reason": "Ekstre satirlari muhasebe taslagi icin musavir kontrolune hazirlandi.",
         "business_relevance_evidence": [f"{line.transaction_type}:{line.suggested_account_code}" for line in lines[:5]],
-        "ai_classification_used": False,
-        "ai_classification_provider": "static_statement_rules",
-        "ai_classification_skipped_reason": "static_statement_rules",
-        "ai_classification_reason": "",
-        "ai_estimated_input_chars": sum(len(line.description) for line in lines),
+        "ai_classification_used": ai_used,
+        "ai_classification_provider": ai_batch.provider if ai_used else "static_statement_rules",
+        "ai_classification_skipped_reason": "" if ai_used else "static_statement_rules",
+        "ai_classification_reason": "AI banka satiri icin yapilandirilmis oneriler uretti." if ai_used else "",
+        "ai_estimated_input_chars": ai_batch.estimated_input_chars,
         "learning_rule_applied": any(line.counterparty_match_reason == "learning_event" for line in lines),
         "learning_rule_scope": "",
         "learning_rule_reason": "Banka satiri onceki musavir kararina gore cariyle eslesti."
         if any(line.counterparty_match_reason == "learning_event" for line in lines)
         else "",
-        "export_status": "export_ready" if is_balanced and not risk_flags else "review_required",
+        "export_status": "review_required",
         "selected_expense_account": "",
         "selected_vat_account": "",
         "selected_supplier_account": lines[0].suggested_account_code if lines else "",
@@ -215,7 +286,14 @@ def build_statement_processing_result(
             for line in draft_lines
         ],
         "statement_lines": [asdict(line) for line in lines],
-        "statement_entries": [journal_entry_payload(entry) for entry in entries],
+        "statement_entries": [
+            statement_entry_payload(line=line, entry=entry, source_document_ref=source_document_ref)
+            for line, entry in entry_records
+        ],
+        "statement_ai_suggestions": ai_batch_data["suggestions"],
+        "statement_ai_summary": {
+            key: value for key, value in ai_batch_data.items() if key != "suggestions"
+        },
     }
 
 
@@ -226,6 +304,8 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
     review_code = "parser_output_required"
     if document_type in {"bank_statement", "pos_statement"}:
         review_code = "statement_parser_required"
+    if parser_kind == "manual_review":
+        review_code = "manual_review_required"
     return {
         "chart_file_name": "workspace-store",
         "file_name": file_name,
@@ -244,7 +324,9 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
         "processing_mode": "ai_assisted_draft",
         "draft_decision_source": "parser_placeholder",
         "deterministic_checks": ["parse_output_missing", "balanced_entry_missing"],
-        "export_gate_reason": "Parse sonucu henuz fis taslagina donusmedigi icin export kapali.",
+        "export_gate_reason": "Belge musavir kontrolu olmadan export'a alinmaz."
+        if parser_kind == "manual_review"
+        else "Parse sonucu henuz fis taslagina donusmedigi icin export kapali.",
         "product_line_hint": "",
         "product_category": "",
         "product_confidence": 0,
@@ -271,18 +353,57 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
     }
 
 
-def build_processing_result(document: dict[str, Any], job: dict[str, Any], workspace: dict[str, Any]) -> dict[str, Any]:
+def build_processing_result(
+    document: dict[str, Any],
+    job: dict[str, Any],
+    workspace: dict[str, Any],
+    *,
+    product_classifier: ProductClassifier | None = None,
+    statement_ai_provider: StatementSuggestionProvider | None = None,
+    statement_ai_policy: StatementAiSuggestionPolicy | None = None,
+) -> dict[str, Any]:
     document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
     path = _stored_path(document)
     if path is None:
         return build_initial_processing_result(document, job)
     if document_type in {"bank_statement", "pos_statement"}:
-        return build_statement_processing_result(document, job, path, workspace)
+        return build_statement_processing_result(
+            document,
+            job,
+            path,
+            workspace,
+            statement_ai_provider=statement_ai_provider,
+            statement_ai_policy=statement_ai_policy,
+        )
     invoice = _parse_invoice_document(path, document_type)
-    return _serializable_simulation(invoice, workspace)
+    return _serializable_simulation(invoice, workspace, product_classifier=product_classifier)
 
 
-def process_next_job_once(store: Any) -> dict[str, Any]:
+def _record_ai_usage_from_result(store: Any, *, client_id: str, result: dict[str, Any]) -> None:
+    if not hasattr(store, "record_ai_usage") or not result.get("ai_classification_used"):
+        return
+    provider = str(result.get("ai_classification_provider") or "unknown")
+    input_chars = int(result.get("ai_estimated_input_chars") or 0)
+    event = ai_usage_payload(
+        build_ai_usage_event(
+            client_id=client_id,
+            provider=provider,
+            operation="worker_ai_assisted_draft",
+            input_chars=input_chars,
+            ai_used=True,
+            skipped_reason="",
+        )
+    )
+    store.record_ai_usage(client_id=client_id, event=event)
+
+
+def process_next_job_once(
+    store: Any,
+    *,
+    product_classifier: ProductClassifier | None = None,
+    statement_ai_provider: StatementSuggestionProvider | None = None,
+    statement_ai_policy: StatementAiSuggestionPolicy | None = None,
+) -> dict[str, Any]:
     job = store.claim_next_processing_job()
     if job is None:
         return {"processed_count": 0, "completed_count": 0, "failed_count": 0}
@@ -299,12 +420,29 @@ def process_next_job_once(store: Any) -> dict[str, Any]:
         )
         if document is None:
             raise ValueError(f"uploaded document not found: {job.get('document_ref')}")
-        result = build_processing_result(document, job, workspace)
+        runtime = (
+            {
+                "product_classifier": product_classifier,
+                "statement_ai_provider": statement_ai_provider,
+                "statement_ai_policy": statement_ai_policy,
+            }
+            if product_classifier or statement_ai_provider or statement_ai_policy
+            else build_ai_runtime_from_env()
+        )
+        result = build_processing_result(
+            document,
+            job,
+            workspace,
+            product_classifier=runtime["product_classifier"],
+            statement_ai_provider=runtime["statement_ai_provider"],
+            statement_ai_policy=runtime["statement_ai_policy"],
+        )
         store.save_simulation_result(
             client_id=str(job["client_id"]),
             document_ref=str(job["document_ref"]),
             result=result,
         )
+        _record_ai_usage_from_result(store, client_id=str(job["client_id"]), result=result)
         store.update_processing_job(job_id=str(job["id"]), status="completed")
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
@@ -312,10 +450,22 @@ def process_next_job_once(store: Any) -> dict[str, Any]:
         return {"processed_count": 1, "completed_count": 0, "failed_count": 1}
 
 
-def process_queued_documents(store: Any, *, max_jobs: int = 10) -> dict[str, Any]:
+def process_queued_documents(
+    store: Any,
+    *,
+    max_jobs: int = 10,
+    product_classifier: ProductClassifier | None = None,
+    statement_ai_provider: StatementSuggestionProvider | None = None,
+    statement_ai_policy: StatementAiSuggestionPolicy | None = None,
+) -> dict[str, Any]:
     summary = {"processed_count": 0, "completed_count": 0, "failed_count": 0}
     for _ in range(max_jobs):
-        result = process_next_job_once(store)
+        result = process_next_job_once(
+            store,
+            product_classifier=product_classifier,
+            statement_ai_provider=statement_ai_provider,
+            statement_ai_policy=statement_ai_policy,
+        )
         if result["processed_count"] == 0:
             break
         for key in summary:

@@ -88,20 +88,29 @@ Ilk production env:
 ```text
 FISORA_ENV=production
 FISORA_STORE_BACKEND=postgres
-FISORA_AUTH_MODE=trusted_header
+FISORA_AUTH_MODE=mock_header_required
 FISORA_AUTH_HEADER=X-Fisora-User-Id
 FISORA_DOCUMENT_STORAGE_PATH=/opt/fisora/data/documents
 FISORA_EXPORT_PATH=/opt/fisora/data/exports
 DATABASE_URL=postgresql://...
 REDIS_URL=redis://redis:6379/0
-FISORA_AI_PROVIDER=disabled
-FISORA_AI_MONTHLY_CAP_USD=100
+FISORA_AI_PROVIDER=groq
+FISORA_AI_MODEL=openai/gpt-oss-20b
+FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b
+FISORA_AI_MONTHLY_CAP_USD=0.01
+GROQ_API_KEY=server-env-only
 FISORA_WORKER_RETENTION_INTERVAL_SECONDS=86400
 FISORA_WORKER_PROCESSING_INTERVAL_SECONDS=30
 ```
 
-AI provider canliya alindiginda `FISORA_AI_PROVIDER` `openai`, `gemini` veya
-`manus` gibi bir degere cekilir. Kendi sunucuda model runtime'i kurulmaz.
+AI provider mustavir oncesi demo icin dis Groq API uzerinden calisir. Kendi
+sunucuda model runtime'i kurulmaz; key sadece kapali server env dosyasinda
+tutulur. Ucretli OpenAI kiyasi gerekirse ayni adapter hatti OpenAI env'i ile
+calistirilir.
+
+Ilk kapali IP demosunda gateway/session katmani hazir degilse
+`FISORA_AUTH_MODE=mock_header_required` kullanilir. Domain, TLS ve gateway
+dogrulanmis user header'i hazirlandiginda `trusted_header` moduna gecilir.
 
 ## Backup Politikasi
 

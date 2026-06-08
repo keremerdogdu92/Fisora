@@ -60,6 +60,9 @@ class StatementAiSuggestionRequest:
     max_input_chars: int
 
     def to_schema_payload(self) -> dict[str, object]:
+        suggested_account_candidates = list(
+            dict.fromkeys(["", self.current_suggested_account_code.strip()])
+        )
         return {
             "line_no": self.line_no,
             "transaction_date": self.transaction_date,
@@ -89,10 +92,10 @@ class StatementAiSuggestionRequest:
                     },
                     "suggested_account_code": {
                         "type": "string",
-                        "pattern": r"^\d{3}(?:\.\d{1,4}){0,5}$|^$",
+                        "enum": suggested_account_candidates,
                     },
                     "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
-                    "reason": {"type": "string", "maxLength": 240},
+                    "reason": {"type": "string", "maxLength": 500},
                     "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
                     "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                 },

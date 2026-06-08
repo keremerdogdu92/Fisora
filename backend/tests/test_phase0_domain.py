@@ -815,6 +815,8 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual(schema["additionalProperties"], False)
         self.assertEqual(set(schema["required"]), set(schema["properties"].keys()))
+        self.assertEqual(schema["properties"]["suggested_account_code"]["enum"], ["", "320.01.001"])
+        self.assertEqual(schema["properties"]["reason"]["maxLength"], 500)
 
     def test_statement_ai_suggestions_only_call_provider_for_uncertain_statement_lines(self) -> None:
         provider = FakeStatementSuggestionProvider(

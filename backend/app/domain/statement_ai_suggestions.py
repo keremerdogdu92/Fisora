@@ -74,7 +74,14 @@ class StatementAiSuggestionRequest:
             "allowed_transaction_types": list(ALLOWED_STATEMENT_TRANSACTION_TYPES),
             "output_schema": {
                 "type": "object",
-                "required": ["transaction_type", "suggested_account_code", "confidence", "reason"],
+                "required": [
+                    "transaction_type",
+                    "suggested_account_code",
+                    "confidence",
+                    "reason",
+                    "evidence",
+                    "risk_flags",
+                ],
                 "properties": {
                     "transaction_type": {
                         "type": "string",

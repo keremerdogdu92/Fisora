@@ -814,6 +814,7 @@ class Phase0DomainTests(unittest.TestCase):
         schema = request.to_schema_payload()["output_schema"]
 
         self.assertEqual(schema["additionalProperties"], False)
+        self.assertEqual(set(schema["required"]), set(schema["properties"].keys()))
 
     def test_statement_ai_suggestions_only_call_provider_for_uncertain_statement_lines(self) -> None:
         provider = FakeStatementSuggestionProvider(

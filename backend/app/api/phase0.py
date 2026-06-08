@@ -76,6 +76,7 @@ ReviewAction = Literal[
     "business_out_of_scope",
     "wrong_counterparty",
     "wrong_account",
+    "review_required",
     "suggest_for_similar",
 ]
 

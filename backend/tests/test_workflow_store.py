@@ -193,6 +193,47 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "deleted")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "expired.pdf")
 
+    def test_json_store_keeps_document_under_review_for_review_required_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="purchase.xml",
+                result={
+                    "file_name": "purchase.xml",
+                    "simulated_status": "review_required",
+                    "export_status": "export_ready",
+                    "is_balanced": True,
+                },
+            )
+
+            store.save_review_decision(
+                client_id="client-1",
+                decision={
+                    "document_ref": "purchase.xml",
+                    "action": "review_required",
+                    "reviewer": "mali-musavir",
+                    "reason": "Kontrolde tut",
+                },
+                learning_event={
+                    "document_ref": "purchase.xml",
+                    "scope": "general_candidate",
+                    "action": "review_required",
+                    "category": "live_screen_smoke",
+                    "corrected_account_code": "",
+                    "corrected_counterparty_code": "",
+                    "reason": "Kontrolde tut",
+                    "automation_candidate": False,
+                },
+            )
+            workspace = store.get_workspace("client-1")
+            document = workspace["documents"][0]
+
+        self.assertEqual(document["export_status"], "review_required")
+        self.assertEqual(document["result"]["export_status"], "review_required")
+        self.assertEqual(document["result"]["accountant_decision_action"], "review_required")
+        self.assertEqual(document["result"]["accountant_decision_reason"], "Kontrolde tut")
+
     def test_json_store_tracks_processing_jobs_in_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

@@ -99,6 +99,43 @@ class DocumentUploadApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_store_review_decision_accepts_review_required_action(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            response = client.post(
+                "/phase0/store/review-decision",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "client-1",
+                    "decision": {
+                        "document_ref": "purchase.xml",
+                        "action": "review_required",
+                        "reviewer": "mali-musavir",
+                        "reason": "Kontrolde tut",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["decision"]["action"], "review_required")
+
     def test_store_document_upload_multipart_writes_content(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

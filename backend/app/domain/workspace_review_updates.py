@@ -11,7 +11,7 @@ REJECTED_EXPORT_ACTIONS = {
     "out_of_scope",
     "business_out_of_scope",
 }
-REVIEW_REQUIRED_ACTIONS = {"wrong_account", "wrong_counterparty"}
+REVIEW_REQUIRED_ACTIONS = {"wrong_account", "wrong_counterparty", "review_required"}
 
 
 def apply_review_decision_to_document(

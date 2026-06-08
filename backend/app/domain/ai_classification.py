@@ -238,7 +238,23 @@ class StaticFirstClassifier:
             max_input_chars=self.policy.max_input_chars,
             context=resolved_context,
         )
-        provider_payload = self.provider.classify_product(request)
+        try:
+            provider_payload = self.provider.classify_product(request)
+        except Exception as exc:  # noqa: BLE001 - provider boundaries must not fail document processing
+            return AiClassificationResult(
+                classification=ProductClassification(
+                    raw_line=raw_line,
+                    category=static.category,
+                    confidence=static.confidence,
+                    evidence=(*static.evidence, "ai_provider_error"),
+                ),
+                ai_used=False,
+                provider=self.provider.provider_name,
+                skipped_reason="ai_provider_error",
+                provider_reason=f"{type(exc).__name__}: {str(exc)[:200]}",
+                estimated_input_chars=estimated_chars,
+                risk_flags=("ai_provider_error",),
+            )
         provider_result = _validate_provider_payload(provider_payload, request)
         if provider_result is None:
             return AiClassificationResult(

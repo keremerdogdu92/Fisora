@@ -217,6 +217,22 @@ def _invalid_schema_suggestion(line: StatementLine, *, provider: str) -> Stateme
     )
 
 
+def _provider_error_suggestion(line: StatementLine, *, provider: str) -> StatementAiSuggestion:
+    return StatementAiSuggestion(
+        line_no=line.line_no,
+        transaction_type=line.transaction_type,
+        suggested_account_code=line.suggested_account_code,
+        confidence=line.confidence,
+        reason="AI provider unavailable; static statement result kept for accountant review.",
+        evidence=("ai_provider_error",),
+        risk_flags=tuple(dict.fromkeys((*line.risk_flags, "ai_provider_error"))),
+        ai_used=False,
+        provider=provider,
+        skipped_reason="ai_provider_error",
+        export_allowed=False,
+    )
+
+
 def _string_tuple(value: object, *, limit: int) -> tuple[str, ...]:
     if not isinstance(value, list | tuple):
         return ()
@@ -251,7 +267,11 @@ def suggest_statement_lines(
             skipped_count += 1
             continue
         provider_calls += 1
-        payload = provider.suggest_statement_line(_request_from_line(line, resolved_policy))
+        try:
+            payload = provider.suggest_statement_line(_request_from_line(line, resolved_policy))
+        except Exception:  # noqa: BLE001 - provider boundaries must not fail document processing
+            suggestions.append(_provider_error_suggestion(line, provider=provider.provider_name))
+            continue
         suggestion = _validated_suggestion(line=line, provider=provider.provider_name, payload=payload)
         if suggestion is None:
             invalid_schema_count += 1

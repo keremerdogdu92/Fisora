@@ -647,6 +647,27 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.classification.category, "bilinmeyen")
         self.assertIn("ai_invalid_schema", result.classification.evidence)
 
+    def test_static_first_classifier_falls_back_when_provider_raises(self) -> None:
+        class RaisingProductProvider:
+            provider_name = "raising_llm"
+
+            def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
+                raise RuntimeError("provider unavailable")
+
+        classifier = StaticFirstClassifier(
+            provider=RaisingProductProvider(),
+            policy=AiClassificationPolicy(enabled=True),
+        )
+
+        result = classifier.classify("Bilinmeyen marka kalem")
+
+        self.assertFalse(result.ai_used)
+        self.assertEqual(result.provider, "raising_llm")
+        self.assertEqual(result.skipped_reason, "ai_provider_error")
+        self.assertEqual(result.classification.category, "bilinmeyen")
+        self.assertIn("ai_provider_error", result.classification.evidence)
+        self.assertIn("provider unavailable", result.provider_reason)
+
     def test_openai_accounting_provider_posts_limited_structured_payload(self) -> None:
         captured: dict[str, object] = {}
 
@@ -822,6 +843,44 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(batch.suggestions[0].suggested_account_code, "320.01.111")
         self.assertFalse(batch.suggestions[0].export_allowed)
         self.assertEqual(batch.skipped_count, 1)
+
+    def test_statement_ai_suggestions_fall_back_when_provider_raises(self) -> None:
+        class RaisingStatementProvider:
+            provider_name = "raising_statement_llm"
+
+            def __init__(self) -> None:
+                self.requests: list[object] = []
+
+            def suggest_statement_line(self, request: object) -> dict[str, object]:
+                self.requests.append(request)
+                raise RuntimeError("statement provider unavailable")
+
+        provider = RaisingStatementProvider()
+        line = StatementLine(
+            line_no=1,
+            transaction_date="2026-06-02",
+            description="BILINMEYEN TEDARIKCI ODEME",
+            amount="250.00",
+            direction="out",
+            transaction_type="unknown",
+            confidence=35,
+            risk_flags=("statement_review_required",),
+        )
+
+        batch = suggest_statement_lines(
+            (line,),
+            provider=provider,
+            policy=StatementAiSuggestionPolicy(enabled=True, confidence_threshold=70, max_provider_calls=5),
+        )
+
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(batch.ai_used_count, 0)
+        self.assertEqual(batch.invalid_schema_count, 0)
+        self.assertEqual(len(batch.suggestions), 1)
+        self.assertEqual(batch.suggestions[0].provider, "raising_statement_llm")
+        self.assertEqual(batch.suggestions[0].skipped_reason, "ai_provider_error")
+        self.assertIn("ai_provider_error", batch.suggestions[0].risk_flags)
+        self.assertFalse(batch.suggestions[0].export_allowed)
 
     def test_invoice_line_extraction_keeps_brand_model_rows(self) -> None:
         text = """

@@ -144,6 +144,8 @@ def _extract_json_response(payload: Mapping[str, Any]) -> dict[str, Any]:
                 continue
             if isinstance(content.get("parsed"), dict):
                 return dict(content["parsed"])
+            if content.get("type") not in {"output_text", "text"}:
+                continue
             text = content.get("text")
             if isinstance(text, str):
                 chunks.append(text)

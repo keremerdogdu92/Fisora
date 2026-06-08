@@ -89,6 +89,7 @@ class StatementAiSuggestionRequest:
                     "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
                     "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                 },
+                "additionalProperties": False,
             },
         }
 

@@ -51,7 +51,7 @@ from app.domain.journal_entries import (
 from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
 from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
-from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, suggest_statement_lines
+from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, StatementAiSuggestionRequest, suggest_statement_lines
 from app.domain.statement_lines import StatementLine
 from app.domain.workspace_exports import build_workspace_export_package, export_candidates_from_workspace
 
@@ -740,14 +740,33 @@ class Phase0DomainTests(unittest.TestCase):
 
             def json(self) -> dict[str, object]:
                 return {
-                    "output_text": (
-                        '{"category":"bilinmeyen","confidence":52,'
-                        '"reason":"Kalem belirsiz, musavir kontrolu gerekli.",'
-                        '"evidence":["belirsiz"],"suggested_account_code":"",'
-                        '"suggested_counterparty_code":"",'
-                        '"risk_flags":["accountant_review_required"],'
-                        '"account_reason":"Hesap adayi yeterli degil."}'
-                    )
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "content": [
+                                {
+                                    "type": "reasoning_text",
+                                    "text": "Internal reasoning text must not be parsed as JSON.",
+                                }
+                            ],
+                        },
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": (
+                                        '{"category":"bilinmeyen","confidence":52,'
+                                        '"reason":"Kalem belirsiz, musavir kontrolu gerekli.",'
+                                        '"evidence":["belirsiz"],"suggested_account_code":"",'
+                                        '"suggested_counterparty_code":"",'
+                                        '"risk_flags":["accountant_review_required"],'
+                                        '"account_reason":"Hesap adayi yeterli degil."}'
+                                    ),
+                                }
+                            ],
+                        },
+                    ]
                 }
 
         class FakeClient:
@@ -776,6 +795,25 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(provider.provider_name, "groq")
         self.assertIn("Bilinmeyen banka hizmet bedeli", request_payload["input"][1]["content"])
         self.assertEqual(response["category"], "bilinmeyen")
+
+    def test_statement_ai_request_schema_disallows_extra_properties_for_groq(self) -> None:
+        request = StatementAiSuggestionRequest(
+            line_no=1,
+            transaction_date="2026-06-08",
+            description="Sentetik Tedarikci A odeme",
+            amount="500.00",
+            direction="out",
+            current_transaction_type="unknown",
+            current_suggested_account_code="320.01.001",
+            current_confidence=35,
+            risk_flags=("statement_review_required",),
+            review_reason="demo",
+            max_input_chars=120,
+        )
+
+        schema = request.to_schema_payload()["output_schema"]
+
+        self.assertEqual(schema["additionalProperties"], False)
 
     def test_statement_ai_suggestions_only_call_provider_for_uncertain_statement_lines(self) -> None:
         provider = FakeStatementSuggestionProvider(

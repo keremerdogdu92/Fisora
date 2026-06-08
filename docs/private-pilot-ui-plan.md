@@ -10,11 +10,17 @@ AI/kural gerekcesini ve cikti listesini calisir bir arayuzde gorebilmelidir.
 - Gercek PDF/XML/CSV/XLSX dosyalari GitHub'a eklenmez.
 - Local deneme verileri `private_samples/` veya ignored frontend snapshot
   dosyalarinda tutulur.
-- Frontend sirasiyla su kaynaklari okur:
+- Frontend once backend workspace API'sini okur:
+  - `GET /phase0/store/clients`
+  - `GET /phase0/store/workspace/{client_id}`
+- Backend bos, kapali veya yetkisizse arayuz sirasiyla su local kaynaklara
+  duser:
   - `frontend/public/local-pilot-data.json`
   - `frontend/public/local-workspace-data.json`
   - `frontend/public/local-review-data.json`
 - Bu dosyalar yoksa arayuz private pilot fallback verisiyle acilir.
+- Upload ve musavir karar kaydi basarili oldugunda frontend backend workspace'i
+  yeniden okuyarak kuyruk, belge ve export durumunu ekrana geri yansitir.
 
 ## Ekranlar
 
@@ -26,6 +32,23 @@ AI/kural gerekcesini ve cikti listesini calisir bir arayuzde gorebilmelidir.
   veya mukellef bazli paket secimi arayuzde temsil edilir.
 - Operasyon: hangi private/local veri kaynaginin okundugunu ve Git disi veri
   kuralini gosterir.
+
+## Ayni Domain Path Sozlesmesi
+
+Tanitim sitesindeki iki giris butonu ayni domain altindaki uyelikli portal
+path'lerine gider:
+
+- `https://siteadi.com/portal/mukellef`: mukellef kullanicisi icin sade yukleme
+  ve belge durum ekrani.
+- `https://siteadi.com/portal/musavir`: musavir icin review masasi.
+
+Musavir link ailesinin alt ekranlari ayni portal icinde kalir:
+
+- `/portal/cikti`: tamamlanan mukelleflerin cikti listesi.
+- `/portal/operasyon`: private veri kaynagi ve sistem durumu ekrani.
+
+Server tarafinda ayni domain kullanildiginda `/portal/*` frontend'e, `/api/*`
+backend'e gider. Production Nginx sozlesmesi bu ayrimi korumalidir.
 
 ## UI Sozlesmesi
 

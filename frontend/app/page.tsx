@@ -17,6 +17,12 @@ import {
   storeReviewDecision,
   uploadDocumentToBackend,
 } from "./upload-api";
+import { fetchBackendPilotData } from "./workspace-api";
+import {
+  normalizeSessionForPortalConfig,
+  PORTAL_NAV_ITEMS,
+  portalConfigForRouteKey,
+} from "./portal-routes";
 
 type IntakeCategory = "sales_invoice" | "purchase_invoice" | "bank_statement" | "special_document";
 
@@ -226,6 +232,8 @@ type ReviewData = {
 };
 
 type PilotMode = "client" | "accountant" | "exports" | "operations";
+type PortalRouteKey = "home" | "mukellef" | "musavir" | "cikti" | "operasyon";
+type PortalNavItem = { mode: PilotMode; label: string; href: string };
 type ReviewFilter = "all" | "review_required" | "export_ready" | "cancel_requested";
 type ExportMode = "bulk" | "by_client";
 
@@ -757,20 +765,27 @@ async function fetchJson(path: string) {
   return response.json();
 }
 
-export default function Home() {
+export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
+  const portalConfig = portalConfigForRouteKey(routeKey);
+  const lockedRole = portalConfig.lockedRole as LocalSession["role"] | undefined;
+  const visibleNavItems = (PORTAL_NAV_ITEMS as PortalNavItem[]).filter((item) =>
+    portalConfig.visibleModes.includes(item.mode),
+  );
   const [data, setData] = useState<PilotData>(() => normalizeReviewData(fallbackReviewData as ReviewData));
   const [source, setSource] = useState("Private pilot demo verisi");
-  const [mode, setMode] = useState<PilotMode>("accountant");
+  const [mode, setModeState] = useState<PilotMode>(portalConfig.initialMode as PilotMode);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("review_required");
   const [clientSearch, setClientSearch] = useState("");
-  const [session, setSession] = useState<LocalSession | null>(() => readStoredSession());
-  const [loginUserId, setLoginUserId] = useState("mali-musavir");
+  const [session, setSession] = useState<LocalSession | null>(() =>
+    normalizeSessionForPortalConfig(readStoredSession(), portalConfig),
+  );
+  const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
   const [loginPassword, setLoginPassword] = useState("");
-  const [loginRole, setLoginRole] = useState<"client_user" | "accountant">("accountant");
+  const [loginRole, setLoginRole] = useState<"client_user" | "accountant">(portalConfig.defaultRole as "client_user" | "accountant");
   const [loginStatus, setLoginStatus] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [decisionStatus, setDecisionStatus] = useState("");
@@ -785,18 +800,45 @@ export default function Home() {
     reason: "",
   });
 
+  function applyPilotData(payload: PilotData, nextSource: string) {
+    setData(payload);
+    setSource(nextSource);
+    setSelectedClientId((current) =>
+      current && payload.clients.some((client) => client.clientId === current)
+        ? current
+        : payload.clients[0]?.clientId ?? "",
+    );
+    setSelectedPeriod(Array.from(new Set(payload.documents.map((document) => document.period))).sort().at(-1) ?? "");
+  }
+
+  async function refreshBackendPilotData(shouldCancel: () => boolean = () => false) {
+    try {
+      const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
+      const backendPayload = await fetchBackendPilotData({
+        apiBaseUrl,
+        sessionToken: session?.sessionToken,
+        userId: session?.userId || portalConfig.defaultUserId,
+      });
+      const payload = normalizePilotData(backendPayload as PilotData);
+      if (!payload.clients.length) return false;
+      if (shouldCancel()) return true;
+      applyPilotData(payload, payload.generatedFrom || "Backend workspace");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function loadPilotData() {
+      if (await refreshBackendPilotData(() => cancelled)) return;
       const paths = ["/local-pilot-data.json", "/local-workspace-data.json", "/local-review-data.json"];
       for (const path of paths) {
         try {
           const payload = normalizePilotData(await fetchJson(path));
           if (cancelled) return;
-          setData(payload);
-          setSource(path);
-          setSelectedClientId(payload.clients[0]?.clientId ?? "");
-          setSelectedPeriod(Array.from(new Set(payload.documents.map((document) => document.period))).sort().at(-1) ?? "");
+          applyPilotData(payload, path);
           return;
         } catch {
           // Try the next private/local source.
@@ -804,16 +846,13 @@ export default function Home() {
       }
       const fallback = normalizeReviewData(fallbackReviewData as ReviewData);
       if (cancelled) return;
-      setData(fallback);
-      setSource("Private pilot demo verisi");
-      setSelectedClientId(fallback.clients[0]?.clientId ?? "");
-      setSelectedPeriod(Array.from(new Set(fallback.documents.map((document) => document.period))).sort().at(-1) ?? "");
+      applyPilotData(fallback, "Private pilot demo verisi");
     }
     void loadPilotData();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [routeKey, session?.sessionToken, session?.userId]);
 
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
@@ -852,9 +891,14 @@ export default function Home() {
   }, [clientSearch, clients]);
   const openCancellationRequests = data.cancellationRequests.filter((request) => request.status === "open");
 
+  function setMode(nextMode: PilotMode) {
+    if (portalConfig.visibleModes.includes(nextMode)) setModeState(nextMode);
+  }
+
   async function login() {
     const userId = loginUserId.trim() || "pilot-user";
     const password = loginPassword.trim();
+    const effectiveRole = (lockedRole ?? loginRole) as "client_user" | "accountant";
     if (password) {
       setLoginStatus("Backend session açılıyor.");
       try {
@@ -865,7 +909,7 @@ export default function Home() {
         });
         const nextSession: LocalSession = {
           userId: backendSession.userId || userId,
-          role: loginRole,
+          role: effectiveRole,
           sessionToken: backendSession.sessionToken,
           expiresAt: backendSession.expiresAt,
         };
@@ -873,7 +917,7 @@ export default function Home() {
         setSession(nextSession);
         setLoginPassword("");
         setLoginStatus(`${nextSession.userId} için backend session açıldı.`);
-        setMode(nextSession.role === "client_user" ? "client" : "accountant");
+        setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -881,11 +925,11 @@ export default function Home() {
         return;
       }
     }
-    const nextSession: LocalSession = { userId, role: loginRole };
+    const nextSession: LocalSession = { userId, role: effectiveRole };
     persistSession(nextSession);
     setSession(nextSession);
     setLoginStatus(`${nextSession.userId} için lokal private pilot oturumu açıldı.`);
-    setMode(nextSession.role === "client_user" ? "client" : "accountant");
+    setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
   }
 
   function logout() {
@@ -968,6 +1012,7 @@ export default function Home() {
         ),
       );
       setUploadStatus(`${selectedFiles.length} belge backend kuyruğuna alındı.`);
+      await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setUploadStatus(`Backend yükleme tamamlanamadı; belge lokal listede tutuldu. ${message}`);
@@ -1126,6 +1171,7 @@ export default function Home() {
         sessionToken: session?.sessionToken,
       });
       setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satır: ${label} backend'e kaydedildi.`);
+      await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satır lokal uygulandı; backend kaydı tamamlanamadı. ${message}`);
@@ -1173,6 +1219,7 @@ export default function Home() {
         sessionToken: session?.sessionToken,
       });
       setDecisionStatus(`${selectedDocument.fileName}: ${label} backend'e kaydedildi.`);
+      await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setDecisionStatus(`${selectedDocument.fileName}: ${label} lokal uygulandı; backend kaydı tamamlanamadı. ${message}`);
@@ -1197,6 +1244,7 @@ export default function Home() {
         loginRole={loginRole}
         loginStatus={loginStatus}
         loginUserId={loginUserId}
+        lockedRole={lockedRole}
         onLogin={login}
         onLogout={logout}
         session={session}
@@ -1205,12 +1253,13 @@ export default function Home() {
         setLoginUserId={setLoginUserId}
       />
 
-      <nav className="portal-nav" aria-label="Private pilot ekranları">
-        <ModeButton active={mode === "client"} label="Mükellef portalı" onClick={() => setMode("client")} />
-        <ModeButton active={mode === "accountant"} label="Müşavir masası" onClick={() => setMode("accountant")} />
-        <ModeButton active={mode === "exports"} label="Çıktı listesi" onClick={() => setMode("exports")} />
-        <ModeButton active={mode === "operations"} label="Operasyon" onClick={() => setMode("operations")} />
-      </nav>
+      {visibleNavItems.length > 1 ? (
+        <nav className="portal-nav" aria-label="Private pilot ekranları">
+          {visibleNavItems.map((item: { mode: PilotMode; label: string; href: string }) => (
+            <ModeButton active={mode === item.mode} href={item.href} key={item.mode} label={item.label} />
+          ))}
+        </nav>
+      ) : null}
 
       {mode === "accountant" ? null : (
         <SelectedClientStrip client={selectedClient} documents={clientDocuments} openCancellationCount={openCancellationRequests.length} />
@@ -1280,11 +1329,16 @@ export default function Home() {
   );
 }
 
+export default function Home() {
+  return <FisoraPortalApp routeKey="home" />;
+}
+
 function SessionPanel({
   loginPassword,
   loginRole,
   loginStatus,
   loginUserId,
+  lockedRole,
   onLogin,
   onLogout,
   session,
@@ -1296,6 +1350,7 @@ function SessionPanel({
   loginRole: "client_user" | "accountant";
   loginStatus: string;
   loginUserId: string;
+  lockedRole?: "client_user" | "accountant";
   onLogin: () => void | Promise<void>;
   onLogout: () => void;
   session: LocalSession | null;
@@ -1324,7 +1379,12 @@ function SessionPanel({
           type="password"
           value={loginPassword}
         />
-        <select aria-label="Rol" onChange={(event) => setLoginRole(event.target.value as "client_user" | "accountant")} value={loginRole}>
+        <select
+          aria-label="Rol"
+          disabled={Boolean(lockedRole)}
+          onChange={(event) => setLoginRole(event.target.value as "client_user" | "accountant")}
+          value={lockedRole ?? loginRole}
+        >
           <option value="accountant">Müşavir</option>
           <option value="client_user">Mükellef</option>
         </select>
@@ -1335,11 +1395,11 @@ function SessionPanel({
   );
 }
 
-function ModeButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function ModeButton({ active, href, label }: { active: boolean; href: string; label: string }) {
   return (
-    <button aria-pressed={active} className={active ? "mode-tab active" : "mode-tab"} onClick={onClick} type="button">
+    <a aria-current={active ? "page" : undefined} className={active ? "mode-tab active" : "mode-tab"} href={href}>
       {label}
-    </button>
+    </a>
   );
 }
 

@@ -9,6 +9,13 @@ login arkasindaki server uzerinden mustavire gosterilir. Portal kendi basina
 "kesin kayit atan AI" degildir; mukellef belgelerini toplar, fis taslagi uretir,
 riskleri gosterir ve mustavir kontrollu Zirve export paketi hazirlar.
 
+Tanitim sitesi ayni domain altinda iki sabit path'e link verir:
+
+- `https://siteadi.com/portal/mukellef` -> mukellef girisi.
+- `https://siteadi.com/portal/musavir` -> musavir girisi.
+
+Bu path'ler public demo degil, uyelikli/private pilot portal girisleridir.
+
 ## Roller
 
 - Ofis yoneticisi: mustavir/ofis ayarlarini, kullanicilari ve mukellefleri
@@ -90,9 +97,11 @@ Mustavir ekraninda ayni anda gorunmesi gereken ana alanlar:
 - Sag panel: onerilen muhasebe fisi, cari/hesap eslesmeleri, AI/kural
   gerekcesi, export gate nedeni ve onay/duzeltme aksiyonlari.
 
-Bu ekran ilk etapta Git disi private/local snapshot ile calisabilir; ancak UI
-davranisi production API sozlesmesine hazir tutulur. Sonraki adimda dosya
-yukleme, store/workspace ve review decision endpointleri bu ekrana baglanir.
+Bu ekran Git disi private/local snapshot ile calisabilir; ancak UI davranisi
+production API sozlesmesine hazir tutulur. Mevcut private portal arayuzu
+acilista backend `store/clients` ve
+`store/workspace/{client_id}` endpointlerini dener; backend bos veya kapaliysa
+Git disi local snapshot/fallback verisine duser.
 
 ## AI Destekli Taslak Davranisi
 

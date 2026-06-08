@@ -246,8 +246,12 @@ button {
 }
 
 .mode-tab {
+  align-items: center;
   background: transparent;
   color: var(--muted);
+  display: inline-flex;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .mode-tab.active,

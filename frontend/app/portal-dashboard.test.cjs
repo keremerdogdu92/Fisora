@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  buildClientCancellationViewModel,
   buildPortalDashboard,
   clientDashboardRows,
   clientUploadTracking,
@@ -78,6 +79,32 @@ test("documentsForProcessing filters by client and accountant document segment",
     documentsForProcessing({ documents, clientId: "client-2", segment: "other_documents" }).map((document) => document.id),
     ["doc-4"],
   );
+});
+
+test("buildClientCancellationViewModel keeps cancellation actions bound to a selected document", () => {
+  assert.equal(typeof buildClientCancellationViewModel, "function");
+
+  const noSelection = buildClientCancellationViewModel({
+    documents,
+    selectedDocumentId: "",
+    requestDocumentId: "",
+    cancellationReason: "",
+  });
+  assert.equal(noSelection.selectedDocument, null);
+  assert.equal(noSelection.requestDocument, null);
+  assert.equal(noSelection.canSubmitCancellation, false);
+  assert.equal(noSelection.emptyActionText, "Önce belge seçin.");
+
+  const selected = buildClientCancellationViewModel({
+    documents,
+    selectedDocumentId: "doc-1",
+    requestDocumentId: "doc-1",
+    cancellationReason: "Yanlış belge yüklendi",
+  });
+  assert.equal(selected.selectedDocument.id, "doc-1");
+  assert.equal(selected.requestDocument.id, "doc-1");
+  assert.equal(selected.canSubmitCancellation, true);
+  assert.equal(selected.requestReason, "Yanlış belge yüklendi");
 });
 
 test("clientDashboardRows derives per-client follow-up status", () => {

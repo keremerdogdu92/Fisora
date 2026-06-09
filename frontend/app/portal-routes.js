@@ -1,12 +1,31 @@
-const ACCOUNTANT_MODES = ["accountant", "documents", "clients", "settings", "exports", "operations"];
+const ACCOUNTANT_MODES = ["accountant", "documents", "clients", "exports", "settings"];
+
+const LANDING_ROLE_ENTRIES = [
+  {
+    role: "accountant",
+    label: "Müşavir girişi",
+    href: "/portal/musavir",
+    defaultUserId: "mali-musavir",
+    cta: "Çalışma alanına gir",
+    description: "Belge kontrolü, müşavir kararları ve çıktı listesi.",
+  },
+  {
+    role: "client_user",
+    label: "Mükellef girişi",
+    href: "/portal/mukellef",
+    defaultUserId: "mukellef-user",
+    cta: "Belge yükleme ekranına gir",
+    description: "Ay bazlı belge yükleme, önizleme ve talep takibi.",
+  },
+];
 
 const PORTAL_NAV_ITEMS = [
-  { mode: "client", label: "Mukellef portali", href: "/portal/mukellef" },
+  { mode: "client", label: "Mükellef portalı", href: "/portal/mukellef" },
   { mode: "accountant", label: "Anasayfa", href: "/portal/musavir" },
-  { mode: "documents", label: "Belge Isleme", href: "/portal/belgeler" },
-  { mode: "clients", label: "Mukellefler", href: "/portal/mukellefler" },
+  { mode: "documents", label: "Belge işleme", href: "/portal/belgeler" },
+  { mode: "clients", label: "Mükellefler", href: "/portal/mukellefler" },
+  { mode: "exports", label: "Çıktı listesi", href: "/portal/cikti" },
   { mode: "settings", label: "Ayarlar", href: "/portal/ayarlar" },
-  { mode: "exports", label: "Cikti listesi", href: "/portal/cikti" },
   { mode: "operations", label: "Operasyon", href: "/portal/operasyon" },
 ];
 
@@ -80,6 +99,10 @@ function portalConfigForRouteKey(routeKey) {
   return PORTAL_ROUTE_CONFIGS[routeKey] || PORTAL_ROUTE_CONFIGS.home;
 }
 
+function portalEntryForRole(role) {
+  return LANDING_ROLE_ENTRIES.find((entry) => entry.role === role) || LANDING_ROLE_ENTRIES[0];
+}
+
 function portalConfigForPath(pathname) {
   const path = String(pathname || "").replace(/\/+$/, "") || "/";
   if (path === "/portal/mukellef") return PORTAL_ROUTE_CONFIGS.mukellef;
@@ -99,9 +122,11 @@ function normalizeSessionForPortalConfig(session, portalConfig) {
 
 module.exports = {
   ACCOUNTANT_MODES,
+  LANDING_ROLE_ENTRIES,
   PORTAL_NAV_ITEMS,
   PORTAL_ROUTE_CONFIGS,
   normalizeSessionForPortalConfig,
+  portalEntryForRole,
   portalConfigForPath,
   portalConfigForRouteKey,
 };

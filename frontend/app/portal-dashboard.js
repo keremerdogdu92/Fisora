@@ -129,7 +129,28 @@ function documentsForProcessing({ documents = [], clientId = "", segment = "invo
   });
 }
 
+function buildClientCancellationViewModel({
+  documents = [],
+  selectedDocumentId = "",
+  requestDocumentId = "",
+  cancellationReason = "",
+} = {}) {
+  const rows = safeList(documents);
+  const selectedDocument = rows.find((document) => String(document?.id || "") === String(selectedDocumentId || "")) || null;
+  const requestDocument = rows.find((document) => String(document?.id || "") === String(requestDocumentId || "")) || null;
+  const requestReason = String(cancellationReason || "").trim();
+
+  return {
+    selectedDocument,
+    requestDocument,
+    requestReason,
+    canSubmitCancellation: Boolean(requestDocument),
+    emptyActionText: selectedDocument ? "Talep açmak için belge önizlemesini veya liste aksiyonunu kullanın." : "Önce belge seçin.",
+  };
+}
+
 module.exports = {
+  buildClientCancellationViewModel,
   buildPortalDashboard,
   clientDashboardRows,
   clientUploadTracking,

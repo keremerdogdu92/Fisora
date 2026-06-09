@@ -53,11 +53,179 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .private-shell {
   max-width: calc(100vw - 24px);
   margin: 0 auto;
   padding: 18px 0 34px;
   width: min(1760px, calc(100% - 24px));
+}
+
+.landing-shell {
+  margin: 0 auto;
+  min-height: 100vh;
+  padding: 18px clamp(16px, 4vw, 64px) 40px;
+  width: min(1320px, 100%);
+}
+
+.landing-header {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: clamp(36px, 7vh, 72px);
+}
+
+.landing-brand {
+  color: var(--text);
+  font-size: 1.08rem;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.landing-header nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.landing-header nav a {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  padding: 9px 12px;
+  text-decoration: none;
+}
+
+.role-gateway {
+  align-items: start;
+  display: grid;
+  gap: clamp(22px, 4vw, 52px);
+  grid-template-columns: minmax(320px, 0.82fr) minmax(420px, 1fr);
+}
+
+.role-copy {
+  padding-top: 18px;
+}
+
+.role-copy span,
+.landing-login span,
+.role-card span,
+.workflow-strip span,
+.cancellation-request-panel span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.role-copy h1 {
+  font-size: clamp(2.1rem, 5.1vw, 4.8rem);
+  line-height: 1;
+  margin: 12px 0 18px;
+  max-width: 720px;
+}
+
+.role-copy p {
+  color: var(--muted);
+  font-size: clamp(1rem, 1.4vw, 1.15rem);
+  line-height: 1.6;
+  margin: 0;
+  max-width: 640px;
+}
+
+.role-entry-panel {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.role-card-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.role-card {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  min-height: 156px;
+  padding: 16px;
+  text-align: left;
+}
+
+.role-card.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.role-card strong {
+  display: block;
+  font-size: 1.15rem;
+  line-height: 1.22;
+  margin: 12px 0 9px;
+}
+
+.role-card small {
+  color: var(--muted);
+  display: block;
+  line-height: 1.45;
+}
+
+.landing-login {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.landing-login label {
+  display: grid;
+  gap: 6px;
+}
+
+.landing-login input {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 42px;
+  padding: 9px 11px;
+}
+
+.workflow-strip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: clamp(22px, 5vh, 56px);
+  padding: 12px;
+}
+
+.workflow-strip div {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 72px;
+  padding: 12px;
+}
+
+.workflow-strip strong {
+  display: block;
+  margin-top: 8px;
 }
 
 .private-topbar {
@@ -66,6 +234,27 @@ button {
   gap: 18px;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.portal-statusbar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.pilot-source.compact {
+  min-width: 180px;
+}
+
+.compact-exit {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 800;
+  min-height: 38px;
+  padding: 8px 11px;
 }
 
 .private-topbar > div:first-child {
@@ -277,7 +466,7 @@ button {
   align-items: start;
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(360px, 0.8fr) minmax(520px, 1.2fr);
+  grid-template-columns: minmax(300px, 0.7fr) minmax(360px, 0.9fr) minmax(360px, 1fr);
 }
 
 .panel {
@@ -422,6 +611,32 @@ button {
   padding: 11px 12px;
 }
 
+.client-document-row.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.document-row-main {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  min-height: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.document-row-main:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.16);
+}
+
+.client-document-row .document-row-main {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  min-height: 0;
+  padding: 0;
+}
+
 .client-document-row strong,
 .client-document-row span,
 .document-row strong,
@@ -442,6 +657,69 @@ button {
   color: var(--muted);
   font-size: 0.78rem;
   font-style: normal;
+  margin-top: 4px;
+}
+
+.client-document-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.empty-detail {
+  align-content: start;
+  min-height: 260px;
+}
+
+.client-preview-paper {
+  background: #fffdf8;
+  border: 1px solid #e3d8bf;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  min-height: 260px;
+  padding: 18px;
+}
+
+.client-preview-paper > span {
+  color: var(--accent);
+  font-size: 1.15rem;
+  font-weight: 900;
+}
+
+.client-preview-paper > strong {
+  overflow-wrap: anywhere;
+}
+
+.client-preview-paper p {
+  color: var(--text);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.preview-meta-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: auto;
+}
+
+.cancellation-request-panel {
+  background: var(--amber-soft);
+  border: 1px solid rgba(183, 121, 31, 0.28);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.cancellation-request-panel strong,
+.cancellation-request-panel small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.cancellation-request-panel small {
+  color: var(--muted);
   margin-top: 4px;
 }
 
@@ -1371,6 +1649,19 @@ code {
 }
 
 @media (max-width: 1020px) {
+  .role-gateway,
+  .role-card-grid,
+  .workflow-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-statusbar {
+    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
   .private-topbar,
   .panel-heading,
   .workbench-toolbar {

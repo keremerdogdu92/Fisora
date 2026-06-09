@@ -34,6 +34,20 @@ export type PortalChartRow = {
 
 export type PortalDocumentSegment = "invoices" | "bank_statements" | "other_documents";
 
+export type ClientCancellationViewModel<TDocument = unknown> = {
+  selectedDocument: TDocument | null;
+  requestDocument: TDocument | null;
+  requestReason: string;
+  canSubmitCancellation: boolean;
+  emptyActionText: string;
+};
+
+export function buildClientCancellationViewModel<TDocument extends { id?: unknown } = unknown>(input?: {
+  documents?: TDocument[];
+  selectedDocumentId?: string;
+  requestDocumentId?: string;
+  cancellationReason?: string;
+}): ClientCancellationViewModel<TDocument>;
 export function buildPortalDashboard(input?: PortalDashboardInput): PortalDashboardMetrics;
 export function clientDashboardRows(input?: PortalDashboardInput): PortalClientDashboardRow[];
 export function clientUploadTracking(input?: PortalDashboardInput): PortalChartRow[];

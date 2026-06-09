@@ -81,6 +81,10 @@ class SimulatedInvoiceResult:
     learning_rule_applied: bool
     learning_rule_scope: str
     learning_rule_reason: str
+    learning_rule_source_summary: str
+    accounting_intent: str
+    accounting_intent_confidence: int
+    rule_prompt: dict[str, object]
     export_status: str
     draft_lines: tuple[dict[str, str], ...]
 
@@ -471,6 +475,10 @@ def simulate_invoice(
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",
+        learning_rule_source_summary="",
+        accounting_intent="",
+        accounting_intent_confidence=0,
+        rule_prompt={},
         export_status=export_status,
         draft_lines=_entry_lines(entry),
     )
@@ -561,6 +569,9 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "learning_rule_applied",
         "learning_rule_scope",
         "learning_rule_reason",
+        "learning_rule_source_summary",
+        "accounting_intent",
+        "accounting_intent_confidence",
         "export_status",
         "risk_flags",
         "parse_notes",
@@ -636,6 +647,10 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "learningRuleApplied": result.learning_rule_applied,
                     "learningRuleScope": result.learning_rule_scope,
                     "learningRuleReason": result.learning_rule_reason,
+                    "learningRuleSourceSummary": result.learning_rule_source_summary,
+                    "accountingIntent": result.accounting_intent,
+                    "accountingIntentConfidence": result.accounting_intent_confidence,
+                    "rulePrompt": result.rule_prompt,
                     "exportStatus": result.export_status,
                     "selectedExpenseAccount": result.selected_expense_account,
                     "selectedVatAccount": result.selected_vat_account,

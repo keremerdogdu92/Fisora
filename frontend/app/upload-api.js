@@ -47,6 +47,55 @@ function buildPortalUserBootstrapPayload({ userId, displayName, clientId }) {
   };
 }
 
+function slugifyClientId(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("tr-TR")
+    .replace(/ç/g, "c")
+    .replace(/ğ/g, "g")
+    .replace(/ı/g, "i")
+    .replace(/ö/g, "o")
+    .replace(/ş/g, "s")
+    .replace(/ü/g, "u")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+function buildClientOnboardingPackagePayload({
+  clientId = "",
+  title = "",
+  taxId = "",
+  activityDescription = "",
+  naceCode = "",
+  portalUserId = "",
+  portalDisplayName = "",
+} = {}) {
+  const normalizedTitle = String(title || "").trim();
+  const normalizedClientId = String(clientId || slugifyClientId(normalizedTitle) || "yeni-mukellef").trim();
+  const normalizedPortalUserId = String(portalUserId || `${normalizedClientId}-user`).trim();
+  return {
+    client: {
+      client_id: normalizedClientId,
+      title: normalizedTitle || normalizedClientId,
+      tax_id: String(taxId || "").trim(),
+      activity_description: String(activityDescription || "").trim(),
+      nace_code: String(naceCode || "").trim(),
+      workplace_addresses: [],
+      has_chart_accounts: true,
+    },
+    chart_accounts: [],
+    portal_users: [
+      {
+        user_id: normalizedPortalUserId,
+        display_name: String(portalDisplayName || normalizedTitle || normalizedPortalUserId).trim(),
+        role: "client_user",
+        allowed_client_ids: [normalizedClientId],
+      },
+    ],
+  };
+}
+
 async function responseErrorMessage(response, fallback) {
   try {
     const payload = await response.json();
@@ -116,6 +165,108 @@ async function ensureUploadWorkspace({ apiBaseUrl, client, userId, displayName, 
     headers,
     fetchImpl,
   });
+}
+
+async function createClientOnboardingPackage({
+  apiBaseUrl,
+  client,
+  sessionToken = "",
+  userId = "",
+  fetchImpl = fetch,
+}) {
+  const headers = sessionToken
+    ? { "X-Fisora-Session": String(sessionToken) }
+    : userId
+      ? { "X-Fisora-User-Id": String(userId) }
+      : {};
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/client-onboarding-package",
+    payload: buildClientOnboardingPackagePayload(client),
+    headers,
+    fetchImpl,
+  });
+}
+
+async function createPortalInvite({
+  apiBaseUrl,
+  userId,
+  displayName = "",
+  clientId,
+  invitedBy = "",
+  ttlHours = 48,
+  sessionToken = "",
+  userHeader = "",
+  fetchImpl = fetch,
+}) {
+  const headers = sessionToken
+    ? { "X-Fisora-Session": String(sessionToken) }
+    : userHeader
+      ? { "X-Fisora-User-Id": String(userHeader) }
+      : {};
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/invite",
+    payload: {
+      user_id: String(userId || "").trim(),
+      display_name: String(displayName || userId || "").trim(),
+      role: "client_user",
+      allowed_client_ids: [String(clientId || "").trim()].filter(Boolean),
+      invited_by: String(invitedBy || "").trim(),
+      ttl_hours: Number(ttlHours || 48),
+    },
+    headers,
+    fetchImpl,
+  });
+}
+
+async function setPortalPassword({
+  apiBaseUrl,
+  userId,
+  password,
+  sessionToken = "",
+  userHeader = "",
+  fetchImpl = fetch,
+}) {
+  const headers = sessionToken
+    ? { "X-Fisora-Session": String(sessionToken) }
+    : userHeader
+      ? { "X-Fisora-User-Id": String(userHeader) }
+      : {};
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/password",
+    payload: {
+      user_id: String(userId || "").trim(),
+      password: String(password || ""),
+    },
+    headers,
+    fetchImpl,
+  });
+}
+
+async function uploadChartAccountsToBackend({
+  apiBaseUrl,
+  clientId,
+  userId = "",
+  sessionToken = "",
+  file,
+  fetchImpl = fetch,
+  FormDataCtor = FormData,
+}) {
+  const formData = new FormDataCtor();
+  formData.append("client_id", String(clientId || ""));
+  formData.append("file", file);
+
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/chart-accounts/upload`, {
+    method: "POST",
+    headers: sessionToken ? { "X-Fisora-Session": String(sessionToken) } : userId ? { "X-Fisora-User-Id": String(userId) } : {},
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `chart account upload failed with ${response.status}`));
+  }
+  return response.json();
 }
 
 async function uploadDocumentToBackend({
@@ -252,12 +403,17 @@ async function storeReviewDecision({
 module.exports = {
   DEFAULT_UPLOAD_USER_ID,
   buildClientBootstrapPayload,
+  buildClientOnboardingPackagePayload,
   buildPortalUserBootstrapPayload,
+  createClientOnboardingPackage,
+  createPortalInvite,
   ensureUploadWorkspace,
   loginWithPassword,
   pickUploadUser,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
+  setPortalPassword,
   storeReviewDecision,
+  uploadChartAccountsToBackend,
   uploadDocumentToBackend,
 };

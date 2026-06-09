@@ -11,6 +11,7 @@ from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
 from app.domain.business_relevance import ClientProfile
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
+from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
@@ -110,6 +111,10 @@ def _serializable_simulation(
         counterparty,
         product_classifier or StaticFirstClassifier(),
         processing_mode="ai_assisted_draft" if product_classifier else "controlled_automation",
+    )
+    result = apply_learning_rules(
+        result,
+        [rule_from_event_payload(event) for event in workspace.get("learning_events") or []],
     )
     data = asdict(result)
     for key in (

@@ -39,7 +39,8 @@ from app.domain.invoice_operations import (
     run_invoice_operations,
     vat_rate_decimal,
 )
-from app.domain.learning_rules import apply_learning_rules, rule_from_learning_event
+from app.domain.learning_intelligence import LearningPolicy, enrich_learning_event
+from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload, rule_from_learning_event
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.journal_entries import (
     build_bank_payment_entry,
@@ -1150,6 +1151,143 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(learned.draft_lines[0]["account_code"], "770.05")
         self.assertTrue(learned.learning_rule_applied)
         self.assertEqual(learned.learning_rule_scope, "client_rule")
+
+    def test_learning_event_enriches_accounting_intent_and_rule_prompt_after_three_consistent_decisions(self) -> None:
+        base_event = {
+            "document_ref": "kolaysoft-uc.pdf",
+            "scope": "client_rule",
+            "action": "approve_with_changes",
+            "category": "e_fatura_hizmeti",
+            "corrected_account_code": "770.05",
+            "corrected_counterparty_code": "320.01.888",
+            "reason": "Bu mukellefte Kolay Soft e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
+            "automation_candidate": False,
+            "statement_line_no": 0,
+        }
+        prior_events = [
+            {
+                **base_event,
+                "document_ref": "kolaysoft-bir.pdf",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "corrected_account_code": "770.05",
+                "corrected_counterparty_code": "320.01.888",
+            },
+            {
+                **base_event,
+                "document_ref": "kolaysoft-iki.pdf",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "corrected_account_code": "770.05",
+                "corrected_counterparty_code": "320.01.888",
+            },
+        ]
+        document = {
+            "document_ref": "kolaysoft-uc.pdf",
+            "result": {
+                "invoice_type": "ALIS",
+                "provider_hint": "Kolay Soft",
+                "product_line_hint": "Kolay Soft e-fatura hizmeti",
+                "product_category": "bilinmeyen",
+            },
+        }
+
+        enriched = enrich_learning_event(
+            base_event,
+            client_id="client-1",
+            decision=base_event,
+            document=document,
+            prior_learning_events=prior_events,
+            policy=LearningPolicy(client_rule_threshold=3, office_client_threshold=3, office_decision_threshold=5),
+        )
+
+        self.assertEqual(enriched["accounting_intent"], "e_fatura_yazilim_gideri")
+        self.assertEqual(enriched["client_consistent_decision_count"], 3)
+        self.assertEqual(enriched["rule_prompt"]["show"], True)
+        self.assertEqual(enriched["rule_prompt"]["default_scope"], "client_narrow")
+        self.assertIn("kolay", enriched["normalized_terms"])
+
+    def test_direct_rule_request_opens_client_rule_prompt_without_threshold(self) -> None:
+        event = {
+            "document_ref": "kolaysoft-tek.pdf",
+            "scope": "client_rule",
+            "action": "suggest_for_similar",
+            "category": "e_fatura_hizmeti",
+            "corrected_account_code": "770.05",
+            "corrected_counterparty_code": "",
+            "reason": "KolaySoft e-fatura hizmetini bu mukellefte 770.05 alt hesabina al.",
+            "automation_candidate": False,
+            "statement_line_no": 0,
+        }
+
+        enriched = enrich_learning_event(event, client_id="client-1", decision=event, prior_learning_events=())
+
+        self.assertEqual(enriched["client_consistent_decision_count"], 1)
+        self.assertEqual(enriched["rule_prompt"]["show"], True)
+        self.assertEqual(enriched["rule_prompt"]["status"], "client_rule_prompt")
+        self.assertEqual(enriched["rule_prompt"]["default_scope"], "client_narrow")
+
+    def test_learning_rule_matches_next_invoice_by_intent_and_terms_without_opening_export(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=(),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="kolaysoft-tekrar.pdf",
+            provider_hint="Kolay Soft",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kolay Soft e-fatura hizmeti",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        event = {
+            "client_id": "client-1",
+            "scope": "client_rule",
+            "action": "approve_with_changes",
+            "category": "baska_kategori",
+            "corrected_account_code": "770.05",
+            "corrected_counterparty_code": "",
+            "reason": "Kolay Soft e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
+            "accounting_intent": "e_fatura_yazilim_gideri",
+            "normalized_terms": ["kolay", "soft", "e", "fatura", "hizmeti"],
+            "automation_candidate": False,
+            "rule_prompt": {"show": True, "default_scope": "client_narrow"},
+        }
+
+        result = simulate_invoice(invoice, selection, profile)
+        learned = apply_learning_rules(result, [rule_from_event_payload(event)])
+
+        self.assertEqual(learned.selected_expense_account, "770.05")
+        self.assertIn("learning_rule_review_required", learned.review_reason_codes)
+        self.assertEqual(learned.export_status, "review_required")
+        self.assertIn("Kolay Soft", learned.learning_rule_reason)
 
     def test_export_package_excludes_risky_or_review_required_entries(self) -> None:
         ready = build_purchase_entry(

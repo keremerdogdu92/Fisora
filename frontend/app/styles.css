@@ -173,6 +173,7 @@ button {
 .cancel-reason,
 .correction-form input,
 .correction-form textarea,
+.new-client-card input,
 .compact-field select,
 .toolbar-controls select {
   background: #fff;
@@ -191,6 +192,7 @@ button {
 .cancel-reason:focus,
 .correction-form input:focus,
 .correction-form textarea:focus,
+.new-client-card input:focus,
 .compact-field select:focus,
 .toolbar-controls select:focus {
   border-color: var(--accent);
@@ -207,6 +209,7 @@ button {
 .statement-review-heading button,
 .statement-ai-box button,
 .statement-actions button,
+.toolbar-controls button,
 .line-select {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -230,6 +233,7 @@ button {
 .statement-review-heading button,
 .statement-ai-box button,
 .statement-actions button,
+.toolbar-controls button,
 .line-select {
   background: var(--surface);
   color: var(--text);
@@ -448,6 +452,13 @@ button {
   grid-template-columns: 230px minmax(0, 1fr);
 }
 
+.office-dashboard {
+  display: grid;
+  gap: 10px;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .accountant-workspace > *,
 .review-split > *,
 .review-focus,
@@ -463,6 +474,48 @@ button {
   padding: 14px;
   position: sticky;
   top: 12px;
+}
+
+.dashboard-client-list {
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.client-row em {
+  color: var(--muted);
+  display: block;
+  font-size: 0.72rem;
+  font-style: normal;
+  line-height: 1.3;
+  margin-top: 4px;
+}
+
+.new-client-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+}
+
+.new-client-card span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.new-client-card strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.new-client-inline {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .client-emblem {
@@ -556,8 +609,17 @@ button {
 .toolbar-controls {
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(150px, 0.75fr) minmax(250px, 1.25fr);
-  min-width: min(520px, 48vw);
+  grid-template-columns: minmax(132px, 0.75fr) minmax(210px, 1fr) repeat(3, minmax(94px, auto));
+  min-width: min(820px, 58vw);
+}
+
+.document-queue {
+  display: grid;
+  gap: 8px;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(220px, 280px);
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .request-strip {
@@ -815,6 +877,36 @@ button {
 .journal-meta .info strong {
   font-size: 0.95rem;
   text-align: left;
+}
+
+.learning-rule-card {
+  background: #f7faf8;
+  border: 1px solid rgba(22, 163, 74, 0.24);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px;
+}
+
+.learning-rule-card span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.learning-rule-card strong {
+  display: block;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.learning-rule-meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .correction-form {
@@ -1118,6 +1210,137 @@ tbody tr:last-child td {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.topbar-user {
+  align-items: flex-end;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: right;
+}
+
+.topbar-user strong {
+  color: var(--text);
+}
+
+.accountant-dashboard-page,
+.document-processing-page,
+.settings-page {
+  display: grid;
+  gap: 16px;
+}
+
+.dashboard-visual-grid,
+.client-management-page {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.chart-panel {
+  min-height: 210px;
+}
+
+.section-heading {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section-heading span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.bar-list {
+  display: grid;
+  gap: 12px;
+}
+
+.bar-row {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(110px, 1fr) minmax(120px, 2fr) auto;
+}
+
+.bar-row span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.bar-track {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.bar-fill {
+  background: var(--accent);
+  height: 100%;
+}
+
+.segment-tabs {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 8px;
+}
+
+.segment-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 40px;
+}
+
+.segment-tabs button.active,
+.segment-tabs button[aria-selected="true"] {
+  background: var(--surface-muted);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.onboarding-panel,
+.settings-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.settings-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.settings-card span {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.compact-upload {
+  min-height: 92px;
+}
+
+.request-list {
+  display: grid;
+  gap: 12px;
+}
+
 .plain-list {
   color: var(--muted);
   line-height: 1.8;
@@ -1165,9 +1388,13 @@ code {
   .selected-client-strip,
   .client-portal,
   .accountant-workspace,
+  .dashboard-visual-grid,
+  .client-management-page,
+  .office-dashboard,
   .summary-grid,
   .ai-guidance,
   .journal-meta,
+  .learning-rule-meta,
   .decision-actions,
   .statement-grid,
   .statement-detail-meta,
@@ -1200,12 +1427,17 @@ code {
   }
 
   .portal-nav,
+  .segment-tabs,
+  .dashboard-visual-grid,
+  .client-management-page,
   .intake-tabs,
   .toolbar-controls,
+  .new-client-inline,
   .paper-totals,
   .correction-form,
   .statement-ai-box,
   .statement-review-heading,
+  .learning-rule-meta,
   .reason-grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -1221,6 +1453,15 @@ code {
 
   .inline-actions {
     display: grid;
+  }
+
+  .bar-row {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar-user {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .document-canvas {

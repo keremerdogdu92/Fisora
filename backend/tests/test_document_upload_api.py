@@ -136,6 +136,51 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["decision"]["action"], "review_required")
 
+    def test_store_review_decision_enriches_learning_event_and_rule_prompt(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            for index in range(1, 4):
+                response = client.post(
+                    "/phase0/store/review-decision",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={
+                        "client_id": "client-1",
+                        "decision": {
+                            "document_ref": f"kolaysoft-{index}.xml",
+                            "action": "approve_with_changes",
+                            "reviewer": "mali-musavir",
+                            "corrected_account_code": "770.05",
+                            "corrected_counterparty_code": "320.01.888",
+                            "category": "e_fatura_hizmeti",
+                            "reason": "Bu mukellefte Kolay Soft e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
+                        },
+                    },
+                )
+
+        payload = response.json()
+        learning_event = payload["learning_event"]
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(learning_event["client_id"], "client-1")
+        self.assertEqual(learning_event["accounting_intent"], "e_fatura_yazilim_gideri")
+        self.assertEqual(learning_event["client_consistent_decision_count"], 3)
+        self.assertTrue(learning_event["rule_prompt"]["show"])
+
     def test_store_document_upload_multipart_writes_content(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -270,6 +315,48 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(upload.status_code, 200)
         self.assertEqual(clients.json()["clients"][0]["client_id"], "client-1")
         self.assertEqual(package.json()["workspace"]["portal_users"][0]["user_id"], "mukellef-user")
+
+    def test_chart_accounts_multipart_upload_parses_and_replaces_workspace_accounts(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["*"],
+                },
+            )
+            response = client.post(
+                "/phase0/store/chart-accounts/upload",
+                data={"client_id": "client-1"},
+                files={
+                    "file": (
+                        "hesap-plani.csv",
+                        b"hesap_kodu,hesap_adi\n320.01,Rexton Medikal\n191.01,Indirilecek KDV\n",
+                        "text/csv",
+                    )
+                },
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            )
+            workspace = client.get(
+                "/phase0/store/workspace/client-1",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["account_count"], 2)
+        self.assertEqual(workspace["chart_accounts"]["account_count"], 2)
+        self.assertEqual(workspace["chart_accounts"]["accounts"][0]["normalized_account_code"], "320.01")
 
     def test_store_document_upload_rejects_unassigned_portal_user(self) -> None:
         if TestClient is None or phase0 is None or app is None:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { fallbackReviewData } from "./demo-data";
 import {
   INTAKE_TABS,
@@ -10,14 +10,27 @@ import {
 } from "./upload-intake";
 import {
   ensureUploadWorkspace,
+  buildClientOnboardingPackagePayload,
+  createClientOnboardingPackage,
+  createPortalInvite,
   loginWithPassword,
   pickUploadUser,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
+  setPortalPassword as setBackendPortalPassword,
   storeReviewDecision,
+  uploadChartAccountsToBackend,
   uploadDocumentToBackend,
 } from "./upload-api";
 import { fetchBackendPilotData } from "./workspace-api";
+import {
+  buildPortalDashboard,
+  clientDashboardRows,
+  clientUploadTracking,
+  documentIntakeDistribution,
+  documentsForProcessing,
+  statusFunnel,
+} from "./portal-dashboard";
 import {
   normalizeSessionForPortalConfig,
   PORTAL_NAV_ITEMS,
@@ -75,6 +88,15 @@ type StatementAiSuggestionView = {
   export_allowed: boolean;
 };
 
+type RulePromptView = {
+  show: boolean;
+  defaultScope: string;
+  message: string;
+  clientConsistentDecisionCount: number;
+  officeDistinctClientCount: number;
+  officeConsistentDecisionCount: number;
+};
+
 type PilotStatus =
   | "uploaded"
   | "queued"
@@ -125,6 +147,12 @@ type PilotDocument = {
   statementEntries: StatementEntryReview[];
   statementAiSuggestions: StatementAiSuggestionView[];
   statementAiSummary: string;
+  accountingIntent: string;
+  accountingIntentConfidence: number;
+  learningRuleScope: string;
+  learningRuleReason: string;
+  learningRuleSourceSummary: string;
+  rulePrompt: RulePromptView;
 };
 
 type PilotClient = {
@@ -228,11 +256,24 @@ type ReviewData = {
     statement_ai_suggestions?: unknown[];
     statementAiSummary?: string;
     statement_ai_summary?: string;
+    accountingIntent?: string;
+    accounting_intent?: string;
+    accountingIntentConfidence?: number;
+    accounting_intent_confidence?: number;
+    learningRuleScope?: string;
+    learning_rule_scope?: string;
+    learningRuleReason?: string;
+    learning_rule_reason?: string;
+    learningRuleSourceSummary?: string;
+    learning_rule_source_summary?: string;
+    rulePrompt?: unknown;
+    rule_prompt?: unknown;
   }[];
 };
 
-type PilotMode = "client" | "accountant" | "exports" | "operations";
-type PortalRouteKey = "home" | "mukellef" | "musavir" | "cikti" | "operasyon";
+type PilotMode = "client" | "accountant" | "documents" | "clients" | "settings" | "exports" | "operations";
+type PortalRouteKey = "home" | "mukellef" | "musavir" | "belgeler" | "mukellefler" | "ayarlar" | "cikti" | "operasyon";
+type DocumentSegment = "invoices" | "bank_statements" | "other_documents";
 type PortalNavItem = { mode: PilotMode; label: string; href: string };
 type ReviewFilter = "all" | "review_required" | "export_ready" | "cancel_requested";
 type ExportMode = "bulk" | "by_client";
@@ -241,6 +282,35 @@ type CorrectionDraft = {
   accountCode: string;
   counterpartyCode: string;
   reason: string;
+};
+
+type NewClientDraft = {
+  clientId: string;
+  title: string;
+  taxId: string;
+  activityDescription: string;
+  naceCode: string;
+  portalUserId: string;
+  portalDisplayName: string;
+};
+
+type DashboardClientRow = {
+  clientId: string;
+  clientName: string;
+  taxId: string;
+  documentCount: number;
+  pendingReviewCount: number;
+  exportReadyCount: number;
+  inProgressCount: number;
+  cancellationCount: number;
+  lastUploadedAt: string;
+  status: string;
+};
+
+type ChartRow = {
+  key: string;
+  label: string;
+  count: number;
 };
 
 type LocalSession = {
@@ -408,6 +478,18 @@ function normalizeStatementAiSuggestions(value: unknown): StatementAiSuggestionV
   });
 }
 
+function normalizeRulePrompt(value: unknown): RulePromptView {
+  const row = safeRecord(value);
+  return {
+    show: Boolean(row.show),
+    defaultScope: safeText(row.defaultScope ?? row.default_scope),
+    message: safeText(row.message),
+    clientConsistentDecisionCount: safeNumber(row.clientConsistentDecisionCount ?? row.client_consistent_decision_count),
+    officeDistinctClientCount: safeNumber(row.officeDistinctClientCount ?? row.office_distinct_client_count),
+    officeConsistentDecisionCount: safeNumber(row.officeConsistentDecisionCount ?? row.office_consistent_decision_count),
+  };
+}
+
 function normalizeStatus(value?: string): PilotStatus {
   if (value === "export_ready" || value === "auto_ready") return "export_ready";
   if (value === "processing") return "processing";
@@ -498,6 +580,7 @@ function statementStatusLabel(status?: string) {
 function reviewActionLabel(action: string) {
   if (action === "approve") return "Onaylandı";
   if (action === "approve_with_changes") return "Düzeltilip onaylandı";
+  if (action === "suggest_for_similar") return "Kural adayı yapıldı";
   if (action === "exclude_export") return "Export dışı bırakıldı";
   return "Kontrolde tutuldu";
 }
@@ -632,6 +715,12 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       statementEntries: normalizeStatementEntries(row.statementEntries ?? row.statement_entries),
       statementAiSuggestions: normalizeStatementAiSuggestions(row.statementAiSuggestions ?? row.statement_ai_suggestions),
       statementAiSummary: safeText(row.statementAiSummary ?? row.statement_ai_summary),
+      accountingIntent: safeText(row.accountingIntent ?? row.accounting_intent),
+      accountingIntentConfidence: safeNumber(row.accountingIntentConfidence ?? row.accounting_intent_confidence),
+      learningRuleScope: safeText(row.learningRuleScope ?? row.learning_rule_scope),
+      learningRuleReason: safeText(row.learningRuleReason ?? row.learning_rule_reason),
+      learningRuleSourceSummary: safeText(row.learningRuleSourceSummary ?? row.learning_rule_source_summary),
+      rulePrompt: normalizeRulePrompt(row.rulePrompt ?? row.rule_prompt),
     };
   });
 
@@ -675,6 +764,12 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       statementEntries: [],
       statementAiSuggestions: [],
       statementAiSummary: "",
+      accountingIntent: "",
+      accountingIntentConfidence: 0,
+      learningRuleScope: "",
+      learningRuleReason: "",
+      learningRuleSourceSummary: "",
+      rulePrompt: normalizeRulePrompt({}),
     }));
 
   const documents = [...documentsFromRows, ...uploadOnlyDocuments];
@@ -751,6 +846,12 @@ function normalizePilotData(raw: unknown): PilotData {
         statementEntries: normalizeStatementEntries(document.statementEntries),
         statementAiSuggestions: normalizeStatementAiSuggestions(document.statementAiSuggestions),
         statementAiSummary: safeText(document.statementAiSummary),
+        accountingIntent: safeText(document.accountingIntent, ""),
+        accountingIntentConfidence: safeNumber(document.accountingIntentConfidence),
+        learningRuleScope: safeText(document.learningRuleScope, ""),
+        learningRuleReason: safeText(document.learningRuleReason, ""),
+        learningRuleSourceSummary: safeText(document.learningRuleSourceSummary, ""),
+        rulePrompt: normalizeRulePrompt(document.rulePrompt),
       })),
       cancellationRequests: Array.isArray(maybePilot.cancellationRequests) ? (maybePilot.cancellationRequests as CancellationRequest[]) : [],
       exportBasket: Array.isArray(maybePilot.exportBasket) ? (maybePilot.exportBasket as ExportBasketItem[]) : [],
@@ -778,6 +879,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
+  const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("invoices");
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("review_required");
   const [clientSearch, setClientSearch] = useState("");
   const [session, setSession] = useState<LocalSession | null>(() =>
@@ -799,6 +901,20 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     counterpartyCode: "",
     reason: "",
   });
+  const [newClientDraft, setNewClientDraft] = useState<NewClientDraft>({
+    clientId: "",
+    title: "",
+    taxId: "",
+    activityDescription: "",
+    naceCode: "",
+    portalUserId: "",
+    portalDisplayName: "",
+  });
+  const [newClientStatus, setNewClientStatus] = useState("");
+  const [chartUploadStatus, setChartUploadStatus] = useState("");
+  const [inviteStatus, setInviteStatus] = useState("");
+  const [portalPassword, setPortalPasswordDraft] = useState("");
+  const [portalPasswordStatus, setPortalPasswordStatus] = useState("");
 
   function applyPilotData(payload: PilotData, nextSource: string) {
     setData(payload);
@@ -870,9 +986,22 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     if (reviewFilter === "cancel_requested") return clientDocuments.filter((document) => isCancelStatus(document.status));
     return clientDocuments.filter((document) => document.status === reviewFilter);
   }, [clientDocuments, reviewFilter]);
+  const segmentedClientDocuments = useMemo(() => {
+    return documentsForProcessing({
+      documents: data.documents,
+      clientId: selectedClient?.clientId,
+      segment: selectedDocumentSegment,
+    }) as PilotDocument[];
+  }, [data.documents, selectedClient?.clientId, selectedDocumentSegment]);
+  const visibleProcessingDocuments = useMemo(() => {
+    if (reviewFilter === "all") return segmentedClientDocuments;
+    if (reviewFilter === "cancel_requested") return segmentedClientDocuments.filter((document) => isCancelStatus(document.status));
+    return segmentedClientDocuments.filter((document) => document.status === reviewFilter);
+  }, [reviewFilter, segmentedClientDocuments]);
+  const activeReviewDocuments = mode === "documents" ? visibleProcessingDocuments : visibleReviewDocuments;
   const selectedDocument =
-    visibleReviewDocuments.find((document) => document.id === selectedDocumentId) ??
-    visibleReviewDocuments[0] ??
+    activeReviewDocuments.find((document) => document.id === selectedDocumentId) ??
+    activeReviewDocuments[0] ??
     clientDocuments[0];
   const selectedStatementLineKey = selectedDocument?.statementLines.map((line) => line.line_no).join("|") ?? "";
   useEffect(() => {
@@ -890,6 +1019,15 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     return clients.filter((client) => `${client.clientName} ${client.clientId} ${client.taxId}`.toLocaleLowerCase("tr-TR").includes(query));
   }, [clientSearch, clients]);
   const openCancellationRequests = data.cancellationRequests.filter((request) => request.status === "open");
+  const dashboardMetrics = useMemo(() => buildPortalDashboard(data), [data]);
+  const dashboardClientRows = useMemo(() => clientDashboardRows(data), [data]);
+  const intakeDistribution = useMemo(() => documentIntakeDistribution(data.documents), [data.documents]);
+  const funnelRows = useMemo(() => statusFunnel(data.documents), [data.documents]);
+  const uploadTrackingRows = useMemo(() => clientUploadTracking(data), [data]);
+  const visibleDashboardClientRows = useMemo(() => {
+    const visibleIds = new Set(filteredClients.map((client) => client.clientId));
+    return dashboardClientRows.filter((row: { clientId: string }) => visibleIds.has(row.clientId));
+  }, [dashboardClientRows, filteredClients]);
 
   function setMode(nextMode: PilotMode) {
     if (portalConfig.visibleModes.includes(nextMode)) setModeState(nextMode);
@@ -938,6 +1076,127 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     setLoginStatus("Oturum kapatıldı.");
   }
 
+  function selectAdjacentReviewDocument(direction: 1 | -1 = 1) {
+    if (!activeReviewDocuments.length || !selectedDocument) return;
+    const currentIndex = activeReviewDocuments.findIndex((document) => document.id === selectedDocument.id);
+    const nextDocument =
+      activeReviewDocuments[currentIndex + direction] ??
+      activeReviewDocuments[currentIndex - direction] ??
+      activeReviewDocuments[0];
+    if (nextDocument) setSelectedDocumentId(nextDocument.id);
+  }
+
+  async function approveSelectedAndMoveNext() {
+    if (!selectedDocument) return;
+    const selectedLineIndex = selectedDocument.statementLines.findIndex((line) => line.line_no === selectedStatementLineNo);
+    if (selectedDocument.statementLines.length && selectedLineIndex >= 0) {
+      await saveStatementLineDecision("approve");
+      const nextLine = selectedDocument.statementLines[selectedLineIndex + 1];
+      if (nextLine) {
+        setSelectedStatementLineNo(nextLine.line_no);
+        return;
+      }
+      selectAdjacentReviewDocument(1);
+      return;
+    }
+    await saveDecision("approve");
+    selectAdjacentReviewDocument(1);
+  }
+
+  async function createNewClient() {
+    if (!newClientDraft.title.trim()) {
+      setNewClientStatus("Mükellef adı gerekli.");
+      return;
+    }
+    const payload = buildClientOnboardingPackagePayload(newClientDraft);
+    setNewClientStatus("Mükellef kaydediliyor.");
+    try {
+      await createClientOnboardingPackage({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        client: newClientDraft,
+        sessionToken: session?.sessionToken,
+        userId: session?.userId || loginUserId.trim() || "mali-musavir",
+      });
+      setSelectedClientId(payload.client.client_id);
+      setNewClientDraft({
+        clientId: "",
+        title: "",
+        taxId: "",
+        activityDescription: "",
+        naceCode: "",
+        portalUserId: "",
+        portalDisplayName: "",
+      });
+      setNewClientStatus(`${payload.client.title} eklendi.`);
+      await refreshBackendPilotData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNewClientStatus(`Mükellef kaydedilemedi. ${message}`);
+    }
+  }
+
+  async function uploadChartAccounts(files: FileList | null) {
+    const file = files?.[0];
+    if (!file || !selectedClient) return;
+    setChartUploadStatus(`${file.name} hesap plani import ediliyor...`);
+    try {
+      const result = await uploadChartAccountsToBackend({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        clientId: selectedClient.clientId,
+        userId: session?.userId || loginUserId.trim() || "mali-musavir",
+        sessionToken: session?.sessionToken,
+        file,
+      });
+      setChartUploadStatus(`${selectedClient.clientName}: ${result.account_count ?? 0} hesap backend store'a yazildi.`);
+      await refreshBackendPilotData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setChartUploadStatus(`Hesap plani importu tamamlanamadi. ${message}`);
+    }
+  }
+
+  async function createInviteForSelectedClient() {
+    if (!selectedClient) return;
+    const userId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
+    setInviteStatus(`${userId} icin davet tokeni hazirlaniyor...`);
+    try {
+      const result = await createPortalInvite({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        userId,
+        displayName: selectedClient.userLabel || selectedClient.clientName,
+        clientId: selectedClient.clientId,
+        invitedBy: session?.userId || loginUserId.trim() || "mali-musavir",
+        sessionToken: session?.sessionToken,
+        userHeader: session?.userId || loginUserId.trim(),
+      });
+      setInviteStatus(`Davet tokeni: ${String(result.invite_token || "")}`);
+      await refreshBackendPilotData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setInviteStatus(`Davet tokeni olusturulamadi. ${message}`);
+    }
+  }
+
+  async function setPasswordForSelectedClient() {
+    if (!selectedClient) return;
+    const userId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
+    setPortalPasswordStatus(`${userId} icin sifre kuruluyor...`);
+    try {
+      const result = await setBackendPortalPassword({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        userId,
+        password: portalPassword,
+        sessionToken: session?.sessionToken,
+        userHeader: session?.userId || loginUserId.trim(),
+      });
+      setPortalPasswordStatus(result.has_password ? `${userId} icin sifre hazir.` : `${userId} icin sifre sonucu alindi.`);
+      setPortalPasswordDraft("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setPortalPasswordStatus(`Sifre kurulumu tamamlanamadi. ${message}`);
+    }
+  }
+
   async function addLocalUploads(files: FileList | null) {
     const selectedFiles = Array.from(files ?? []);
     if (!selectedFiles.length || !selectedClient) return;
@@ -981,6 +1240,12 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       statementEntries: [],
       statementAiSuggestions: [],
       statementAiSummary: "",
+      accountingIntent: "",
+      accountingIntentConfidence: 0,
+      learningRuleScope: "",
+      learningRuleReason: "",
+      learningRuleSourceSummary: "",
+      rulePrompt: normalizeRulePrompt({}),
     }));
     setData((current) => ({ ...current, documents: [...nextDocuments, ...current.documents] }));
     setSelectedPeriod(period);
@@ -1163,6 +1428,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         documentRef: selectedDocument.id,
         action,
         reviewer,
+        applyToSimilar: action === "suggest_for_similar",
         statementLineNo: lineNo,
         correctedAccountCode,
         correctedCounterpartyCode,
@@ -1184,7 +1450,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     const correctedAccountCode = correctionDraft.accountCode.trim();
     const correctedCounterpartyCode = correctionDraft.counterpartyCode.trim();
     const reason = correctionDraft.reason.trim();
-    const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" ? "export_ready" : "review_required";
+    const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar" ? "export_ready" : "review_required";
     const label = reviewActionLabel(action);
     setData((current) => ({
       ...current,
@@ -1212,6 +1478,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         documentRef: selectedDocument.id,
         action,
         reviewer,
+        applyToSimilar: action === "suggest_for_similar",
         correctedAccountCode,
         correctedCounterpartyCode,
         category: selectedDocument.productCategory,
@@ -1226,12 +1493,14 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     }
   }
 
+  const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
+
   return (
-    <main className="private-shell">
+    <main className="private-shell portal-shell">
       <header className="private-topbar">
         <div>
-          <p className="eyebrow">Fisora private pilot</p>
-          <h1>Belge ve fiş inceleme masası</h1>
+          <p className="eyebrow">Fisero</p>
+          <h1>Müşavir çalışma alanı</h1>
         </div>
         <div className="pilot-source">
           <span>Veri kaynağı</span>
@@ -1283,15 +1552,44 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       ) : null}
 
       {mode === "accountant" ? (
+        <AccountantDashboard
+          clientRows={visibleDashboardClientRows}
+          dashboardMetrics={dashboardMetrics}
+          funnelRows={funnelRows}
+          intakeDistribution={intakeDistribution}
+          onClientSelect={(clientId) => {
+            setSelectedClientId(clientId);
+            setSelectedDocumentId("");
+          }}
+          selectedClientId={selectedClient?.clientId ?? ""}
+          uploadTrackingRows={uploadTrackingRows}
+        />
+      ) : null}
+
+      {mode === "documents" ? (
+        <DocumentProcessingWorkspace
+          selectedDocumentSegment={selectedDocumentSegment}
+          setSelectedDocumentSegment={(segment) => {
+            setSelectedDocumentSegment(segment);
+            setSelectedDocumentId("");
+          }}
+        >
         <AccountantWorkspace
           cancellationRequests={openCancellationRequests}
           statementAiStatus={statementAiStatus}
           clientSearch={clientSearch}
+          clientRows={visibleDashboardClientRows}
           clients={filteredClients}
           correctionDraft={correctionDraft}
+          dashboardMetrics={dashboardMetrics}
           decisionStatus={decisionStatus}
-          documents={visibleReviewDocuments}
+          documents={activeReviewDocuments}
+          allClientDocuments={segmentedClientDocuments}
+          newClientDraft={newClientDraft}
+          newClientStatus={newClientStatus}
           onAddToBasket={addSelectedClientToBasket}
+          onApproveAndNext={approveSelectedAndMoveNext}
+          onCreateNewClient={createNewClient}
           onClientSearchChange={setClientSearch}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
           onResolveCancellation={resolveCancellation}
@@ -1302,6 +1600,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           selectedDocument={selectedDocument}
           selectedStatementLineNo={selectedStatementLineNo}
           setCorrectionDraft={setCorrectionDraft}
+          setNewClientDraft={setNewClientDraft}
           setReviewFilter={setReviewFilter}
           setSelectedClientId={(clientId) => {
             setSelectedClientId(clientId);
@@ -1309,6 +1608,53 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           }}
           setSelectedDocumentId={setSelectedDocumentId}
           setSelectedStatementLineNo={setSelectedStatementLineNo}
+        />
+        </DocumentProcessingWorkspace>
+      ) : null}
+
+      {mode === "clients" ? (
+        <ClientManagementView
+          cancellationRequests={openCancellationRequests}
+          chartUploadStatus={chartUploadStatus}
+          clientRows={visibleDashboardClientRows}
+          clients={filteredClients}
+          clientSearch={clientSearch}
+          inviteStatus={inviteStatus}
+          newClientDraft={newClientDraft}
+          newClientStatus={newClientStatus}
+          onChartFileSelected={uploadChartAccounts}
+          onClientSearchChange={setClientSearch}
+          onCreateInvite={createInviteForSelectedClient}
+          onCreateNewClient={createNewClient}
+          onResolveCancellation={resolveCancellation}
+          onSetPassword={setPasswordForSelectedClient}
+          portalPassword={portalPassword}
+          portalPasswordStatus={portalPasswordStatus}
+          selectedClient={selectedClient}
+          setNewClientDraft={setNewClientDraft}
+          setPortalPassword={setPortalPasswordDraft}
+          setSelectedClientId={(clientId) => {
+            setSelectedClientId(clientId);
+            setSelectedDocumentId("");
+          }}
+        />
+      ) : null}
+
+      {mode === "settings" ? (
+        <SettingsView
+          dashboardMetrics={dashboardMetrics}
+          loginPassword={loginPassword}
+          loginRole={loginRole}
+          loginStatus={loginStatus}
+          loginUserId={loginUserId}
+          lockedRole={lockedRole}
+          onLogin={login}
+          onLogout={logout}
+          session={session}
+          setLoginPassword={setLoginPassword}
+          setLoginRole={setLoginRole}
+          setLoginUserId={setLoginUserId}
+          source={source}
         />
       ) : null}
 
@@ -1519,7 +1865,7 @@ function ClientPortal({
         <div className="panel-heading">
           <div>
             <h2>Ay bazlı belge listesi</h2>
-            <span>Mükellef tarafında fiş ve AI gerekçesi gösterilmez.</span>
+            <span>{selectedPeriod ? periodLabel(selectedPeriod) : "Dönem seçilmedi"}</span>
           </div>
         </div>
         <textarea
@@ -1547,16 +1893,334 @@ function ClientPortal({
   );
 }
 
+function AccountantDashboard({
+  clientRows,
+  dashboardMetrics,
+  funnelRows,
+  intakeDistribution,
+  onClientSelect,
+  selectedClientId,
+  uploadTrackingRows,
+}: {
+  clientRows: DashboardClientRow[];
+  dashboardMetrics: {
+    totalClients: number;
+    uploadedClients: number;
+    notUploadedClients: number;
+    pendingReviewDocuments: number;
+    exportReadyDocuments: number;
+    openCancellationRequests: number;
+  };
+  funnelRows: ChartRow[];
+  intakeDistribution: ChartRow[];
+  onClientSelect: (clientId: string) => void;
+  selectedClientId: string;
+  uploadTrackingRows: ChartRow[];
+}) {
+  return (
+    <section className="accountant-dashboard-page">
+      <section className="office-dashboard" aria-label="Ofis durumu">
+        <Metric label="Mukellef" value={dashboardMetrics.totalClients} />
+        <Metric label="Yukleyen" value={dashboardMetrics.uploadedClients} />
+        <Metric label="Yuklemeyen" value={dashboardMetrics.notUploadedClients} />
+        <Metric label="Kontrol" value={dashboardMetrics.pendingReviewDocuments} />
+        <Metric label="Cikti hazir" value={dashboardMetrics.exportReadyDocuments} />
+        <Metric label="Talep" value={dashboardMetrics.openCancellationRequests} />
+      </section>
+      <section className="dashboard-visual-grid">
+        <ChartBars title="Belge turu" rows={intakeDistribution} />
+        <ChartBars title="Durum hunisi" rows={funnelRows} />
+        <ChartBars title="Yukleme takibi" rows={uploadTrackingRows} />
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <span>Mukellef takibi</span>
+          <strong>Yukleme ve kontrol sirasi</strong>
+        </div>
+        <div className="client-list dashboard-client-list">
+          {clientRows.map((row) => (
+            <button
+              className={selectedClientId === row.clientId ? "client-row active" : "client-row"}
+              key={row.clientId}
+              onClick={() => onClientSelect(row.clientId)}
+              type="button"
+            >
+              <strong>{row.clientName}</strong>
+              <span>{row.status}</span>
+              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazir</em>
+            </button>
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function ChartBars({ rows, title }: { rows: ChartRow[]; title: string }) {
+  const max = Math.max(...rows.map((row) => row.count), 1);
+  return (
+    <section className="panel chart-panel">
+      <div className="section-heading">
+        <span>{title}</span>
+        <strong>{rows.reduce((sum, row) => sum + row.count, 0)}</strong>
+      </div>
+      <div className="bar-list">
+        {rows.map((row) => (
+          <div className="bar-row" key={row.key}>
+            <span>{row.label}</span>
+            <div className="bar-track">
+              <div className="bar-fill" style={{ width: `${Math.max((row.count / max) * 100, row.count ? 8 : 0)}%` }} />
+            </div>
+            <strong>{row.count}</strong>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DocumentProcessingWorkspace({
+  children,
+  selectedDocumentSegment,
+  setSelectedDocumentSegment,
+}: {
+  children: ReactNode;
+  selectedDocumentSegment: DocumentSegment;
+  setSelectedDocumentSegment: (segment: DocumentSegment) => void;
+}) {
+  const tabs: { id: DocumentSegment; label: string }[] = [
+    { id: "invoices", label: "Faturalar" },
+    { id: "bank_statements", label: "Banka ekstreleri" },
+    { id: "other_documents", label: "Diger belgeler" },
+  ];
+  return (
+    <section className="document-processing-page">
+      <div className="segment-tabs" role="tablist" aria-label="Belge segmentleri">
+        {tabs.map((tab) => (
+          <button
+            aria-selected={selectedDocumentSegment === tab.id}
+            className={selectedDocumentSegment === tab.id ? "active" : ""}
+            key={tab.id}
+            onClick={() => setSelectedDocumentSegment(tab.id)}
+            role="tab"
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ClientManagementView({
+  cancellationRequests,
+  chartUploadStatus,
+  clientRows,
+  clients,
+  clientSearch,
+  inviteStatus,
+  newClientDraft,
+  newClientStatus,
+  onChartFileSelected,
+  onClientSearchChange,
+  onCreateInvite,
+  onCreateNewClient,
+  onResolveCancellation,
+  onSetPassword,
+  portalPassword,
+  portalPasswordStatus,
+  selectedClient,
+  setNewClientDraft,
+  setPortalPassword,
+  setSelectedClientId,
+}: {
+  cancellationRequests: CancellationRequest[];
+  chartUploadStatus: string;
+  clientRows: DashboardClientRow[];
+  clients: PilotClient[];
+  clientSearch: string;
+  inviteStatus: string;
+  newClientDraft: NewClientDraft;
+  newClientStatus: string;
+  onChartFileSelected: (files: FileList | null) => void | Promise<void>;
+  onClientSearchChange: (value: string) => void;
+  onCreateInvite: () => void | Promise<void>;
+  onCreateNewClient: () => void | Promise<void>;
+  onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
+  onSetPassword: () => void | Promise<void>;
+  portalPassword: string;
+  portalPasswordStatus: string;
+  selectedClient?: PilotClient;
+  setNewClientDraft: (value: NewClientDraft) => void;
+  setPortalPassword: (value: string) => void;
+  setSelectedClientId: (value: string) => void;
+}) {
+  return (
+    <section className="client-management-page">
+      <section className="panel">
+        <div className="section-heading">
+          <span>Mukellef listesi</span>
+          <strong>{clients.length}</strong>
+        </div>
+        <input
+          className="search-input"
+          onChange={(event) => onClientSearchChange(event.target.value)}
+          placeholder="Mukellef ara"
+          value={clientSearch}
+        />
+        <div className="client-list dashboard-client-list">
+          {clientRows.map((row) => (
+            <button
+              className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
+              key={row.clientId}
+              onClick={() => setSelectedClientId(row.clientId)}
+              type="button"
+            >
+              <strong>{row.clientName}</strong>
+              <span>{row.status}</span>
+              <em>{row.documentCount} belge / {row.cancellationCount} talep</em>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="panel onboarding-panel">
+        <NewClientCard draft={newClientDraft} onCreate={onCreateNewClient} setDraft={setNewClientDraft} status={newClientStatus} />
+        <div className="settings-card">
+          <span>Hesap plani import</span>
+          <strong>{selectedClient?.clientName ?? "-"}</strong>
+          <label className="upload-dropzone compact-upload">
+            <input
+              accept=".csv,.xlsx,.xlsm"
+              onChange={(event) => onChartFileSelected(event.target.files)}
+              type="file"
+            />
+            CSV/XLSX hesap plani sec
+          </label>
+          {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
+        </div>
+        <div className="settings-card">
+          <span>Portal erisimi</span>
+          <strong>{selectedClient?.portalUserId ?? "-"}</strong>
+          <div className="inline-actions">
+            <button onClick={onCreateInvite} type="button">Davet tokeni olustur</button>
+            <input
+              aria-label="Portal sifresi"
+              onChange={(event) => setPortalPassword(event.target.value)}
+              placeholder="Gecici sifre"
+              type="password"
+              value={portalPassword}
+            />
+            <button className="primary" onClick={onSetPassword} type="button">Sifre kur</button>
+          </div>
+          {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
+          {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
+        </div>
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <span>Iptal / duzeltme talepleri</span>
+          <strong>{cancellationRequests.length}</strong>
+        </div>
+        <div className="request-list">
+          {cancellationRequests.length ? cancellationRequests.map((request) => (
+            <div className="request-compact" key={request.id}>
+              <span>{request.clientId}</span>
+              <strong>{request.fileName}</strong>
+              <p>{request.reason}</p>
+              <div className="inline-actions">
+                <button onClick={() => onResolveCancellation(request.id, "approved")} type="button">Kabul</button>
+                <button onClick={() => onResolveCancellation(request.id, "rejected")} type="button">Red</button>
+              </div>
+            </div>
+          )) : <p className="empty">Acik talep yok.</p>}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function SettingsView({
+  dashboardMetrics,
+  loginPassword,
+  loginRole,
+  loginStatus,
+  loginUserId,
+  lockedRole,
+  onLogin,
+  onLogout,
+  session,
+  setLoginPassword,
+  setLoginRole,
+  setLoginUserId,
+  source,
+}: {
+  dashboardMetrics: {
+    totalClients: number;
+    uploadedClients: number;
+    notUploadedClients: number;
+    pendingReviewDocuments: number;
+    exportReadyDocuments: number;
+    openCancellationRequests: number;
+  };
+  loginPassword: string;
+  loginRole: "client_user" | "accountant";
+  loginStatus: string;
+  loginUserId: string;
+  lockedRole?: "client_user" | "accountant";
+  onLogin: () => void | Promise<void>;
+  onLogout: () => void;
+  session: LocalSession | null;
+  setLoginPassword: (value: string) => void;
+  setLoginRole: (value: "client_user" | "accountant") => void;
+  setLoginUserId: (value: string) => void;
+  source: string;
+}) {
+  return (
+    <section className="settings-page">
+      <SessionPanel
+        loginPassword={loginPassword}
+        loginRole={loginRole}
+        loginStatus={loginStatus}
+        loginUserId={loginUserId}
+        lockedRole={lockedRole}
+        onLogin={onLogin}
+        onLogout={onLogout}
+        session={session}
+        setLoginPassword={setLoginPassword}
+        setLoginRole={setLoginRole}
+        setLoginUserId={setLoginUserId}
+      />
+      <section className="panel settings-grid">
+        <Info label="Veri kaynagi" value={source} />
+        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Lokal demo oturumu yok"} />
+        <Info label="Backend/Auth" value="Backend-first workspace, session veya mock header" />
+        <Info label="Davet/Sifre" value="Token ve sifre sonucu UI'da gosterilir; e-posta gonderimi yok" />
+        <Info label="Mukellef" value={String(dashboardMetrics.totalClients)} />
+        <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
+      </section>
+    </section>
+  );
+}
+
 function AccountantWorkspace({
   cancellationRequests,
   statementAiStatus,
   clientSearch,
+  clientRows,
   clients,
   correctionDraft,
+  dashboardMetrics,
   decisionStatus,
   documents,
+  allClientDocuments,
+  newClientDraft,
+  newClientStatus,
   onAddToBasket,
+  onApproveAndNext,
   onClientSearchChange,
+  onCreateNewClient,
   onRequestStatementAi,
   onResolveCancellation,
   onSaveDecision,
@@ -1566,6 +2230,7 @@ function AccountantWorkspace({
   selectedDocument,
   selectedStatementLineNo,
   setCorrectionDraft,
+  setNewClientDraft,
   setReviewFilter,
   setSelectedClientId,
   setSelectedDocumentId,
@@ -1574,12 +2239,26 @@ function AccountantWorkspace({
   cancellationRequests: CancellationRequest[];
   statementAiStatus: string;
   clientSearch: string;
+  clientRows: DashboardClientRow[];
   clients: PilotClient[];
   correctionDraft: CorrectionDraft;
+  dashboardMetrics: {
+    totalClients: number;
+    uploadedClients: number;
+    notUploadedClients: number;
+    pendingReviewDocuments: number;
+    exportReadyDocuments: number;
+    openCancellationRequests: number;
+  };
   decisionStatus: string;
   documents: PilotDocument[];
+  allClientDocuments: PilotDocument[];
+  newClientDraft: NewClientDraft;
+  newClientStatus: string;
   onAddToBasket: () => void;
+  onApproveAndNext: () => void | Promise<void>;
   onClientSearchChange: (value: string) => void;
+  onCreateNewClient: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onSaveDecision: (action: string) => void | Promise<void>;
@@ -1589,6 +2268,7 @@ function AccountantWorkspace({
   selectedDocument?: PilotDocument;
   selectedStatementLineNo: number;
   setCorrectionDraft: (value: CorrectionDraft) => void;
+  setNewClientDraft: (value: NewClientDraft) => void;
   setReviewFilter: (value: ReviewFilter) => void;
   setSelectedClientId: (value: string) => void;
   setSelectedDocumentId: (value: string) => void;
@@ -1603,6 +2283,14 @@ function AccountantWorkspace({
 
   return (
     <section className="accountant-workspace">
+      <section className="office-dashboard" aria-label="Ofis durumu">
+        <Metric label="Mükellef" value={dashboardMetrics.totalClients} />
+        <Metric label="Belge yükleyen" value={dashboardMetrics.uploadedClients} />
+        <Metric label="Yüklemeyen" value={dashboardMetrics.notUploadedClients} />
+        <Metric label="Kontrol" value={dashboardMetrics.pendingReviewDocuments} />
+        <Metric label="Çıktı hazır" value={dashboardMetrics.exportReadyDocuments} />
+        <Metric label="Talep" value={dashboardMetrics.openCancellationRequests} />
+      </section>
       <aside className="client-context-rail" aria-label="Seçili mükellef">
         <div className="client-emblem">
           <span>Mükellef</span>
@@ -1615,6 +2303,23 @@ function AccountantWorkspace({
           placeholder="Mükellef ara"
           value={clientSearch}
         />
+        <div className="client-list dashboard-client-list">
+          {clientRows.map((row) => (
+            <button
+              className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
+              key={row.clientId}
+              onClick={() => {
+                setSelectedClientId(row.clientId);
+                setSelectedDocumentId("");
+              }}
+              type="button"
+            >
+              <strong>{row.clientName}</strong>
+              <span>{row.status}</span>
+              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazır</em>
+            </button>
+          ))}
+        </div>
         <label className="compact-field">
           <span>Mükellef seç</span>
           <select
@@ -1652,6 +2357,12 @@ function AccountantWorkspace({
             </div>
           </div>
         ) : null}
+        <NewClientCard
+          draft={newClientDraft}
+          onCreate={onCreateNewClient}
+          setDraft={setNewClientDraft}
+          status={newClientStatus}
+        />
       </aside>
 
       <section className="review-focus">
@@ -1679,7 +2390,25 @@ function AccountantWorkspace({
                 </option>
               ))}
             </select>
+            <button onClick={() => setSelectedDocumentId(documents[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
+            <button onClick={() => setSelectedDocumentId(documents[selectedDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+            <button className="primary" onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </div>
+        </div>
+
+        <div className="document-queue" aria-label="Mükellef evrakları">
+          {allClientDocuments.map((document) => (
+            <button
+              className={selectedDocument?.id === document.id ? "document-row active" : "document-row"}
+              key={document.id}
+              onClick={() => setSelectedDocumentId(document.id)}
+              type="button"
+            >
+              <strong>{document.fileName}</strong>
+              <span>{labelForIntakeCategory(document.intakeCategory)} / {document.amount}</span>
+              <em>{formatStatus(document.status)}</em>
+            </button>
+          ))}
         </div>
 
         {cancellationRequests.length && !selectedRequest ? (
@@ -1699,6 +2428,7 @@ function AccountantWorkspace({
             correctionDraft={correctionDraft}
             decisionStatus={decisionStatus}
             document={selectedDocument}
+            onApproveAndNext={onApproveAndNext}
             onRequestStatementAi={onRequestStatementAi}
             onSaveDecision={onSaveDecision}
             onSaveStatementDecision={onSaveStatementDecision}
@@ -1709,6 +2439,61 @@ function AccountantWorkspace({
           />
         </section>
       </section>
+    </section>
+  );
+}
+
+function NewClientCard({
+  draft,
+  onCreate,
+  setDraft,
+  status,
+}: {
+  draft: NewClientDraft;
+  onCreate: () => void | Promise<void>;
+  setDraft: (value: NewClientDraft) => void;
+  status: string;
+}) {
+  return (
+    <section className="new-client-card">
+      <div>
+        <span>Yeni mükellef</span>
+        <strong>Hızlı kayıt</strong>
+      </div>
+      <input
+        aria-label="Mükellef adı"
+        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+        placeholder="Mükellef adı"
+        value={draft.title}
+      />
+      <input
+        aria-label="VKN veya TCKN"
+        onChange={(event) => setDraft({ ...draft, taxId: event.target.value })}
+        placeholder="VKN/TCKN"
+        value={draft.taxId}
+      />
+      <input
+        aria-label="Faaliyet"
+        onChange={(event) => setDraft({ ...draft, activityDescription: event.target.value })}
+        placeholder="Faaliyet"
+        value={draft.activityDescription}
+      />
+      <div className="new-client-inline">
+        <input
+          aria-label="NACE"
+          onChange={(event) => setDraft({ ...draft, naceCode: event.target.value })}
+          placeholder="NACE"
+          value={draft.naceCode}
+        />
+        <input
+          aria-label="Portal kullanıcısı"
+          onChange={(event) => setDraft({ ...draft, portalUserId: event.target.value })}
+          placeholder="Portal kullanıcı"
+          value={draft.portalUserId}
+        />
+      </div>
+      <button className="primary full" onClick={onCreate} type="button">Mükellef ekle</button>
+      {status ? <p className="decision-status">{status}</p> : null}
     </section>
   );
 }
@@ -1777,6 +2562,7 @@ function JournalPanel({
   correctionDraft,
   decisionStatus,
   document,
+  onApproveAndNext,
   onRequestStatementAi,
   onSaveDecision,
   onSaveStatementDecision,
@@ -1788,6 +2574,7 @@ function JournalPanel({
   correctionDraft: CorrectionDraft;
   decisionStatus: string;
   document?: PilotDocument;
+  onApproveAndNext: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onSaveDecision: (action: string) => void | Promise<void>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
@@ -1824,6 +2611,7 @@ function JournalPanel({
         <Info label="AI cari önerisi" value={document.aiSuggestedCounterpartyCode || document.selectedCounterpartyAccount || "-"} />
         <Info label="AI risk" value={document.aiRiskFlags.length ? document.aiRiskFlags.join(", ") : "risk_yok"} />
       </div>
+      <LearningRuleCard document={document} />
       <div className="journal-meta">
         <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Banka hesabı" : "Gider hesabı"} value={document.selectedExpenseAccount} />
         <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Fiş KDV" : "KDV hesabı"} value={document.selectedVatAccount} />
@@ -1897,12 +2685,37 @@ function JournalPanel({
         </table>
       </div>
       <div className="decision-actions">
-        <button onClick={() => onSaveDecision("approve")} type="button">Onayla</button>
+        <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
         <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
+        <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural yap</button>
         <button onClick={() => onSaveDecision("exclude_export")} type="button">Export dışı</button>
         <button onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
       </div>
       <p className="decision-status">{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</p>
+    </section>
+  );
+}
+
+function LearningRuleCard({ document }: { document: PilotDocument }) {
+  const hasLearningSignal = Boolean(
+    document.accountingIntent ||
+    document.learningRuleReason ||
+    document.learningRuleSourceSummary ||
+    document.rulePrompt.show,
+  );
+  if (!hasLearningSignal) return null;
+  return (
+    <section className="learning-rule-card">
+      <div>
+        <span>Öğrenme kaynağı</span>
+        <strong>{document.rulePrompt.message || document.learningRuleSourceSummary || document.learningRuleReason}</strong>
+      </div>
+      <div className="learning-rule-meta">
+        <Info label="Muhasebe niyeti" value={document.accountingIntent || "-"} />
+        <Info label="Güven" value={document.accountingIntentConfidence ? `%${document.accountingIntentConfidence}` : "-"} />
+        <Info label="Mükellef kararı" value={String(document.rulePrompt.clientConsistentDecisionCount || 0)} />
+        <Info label="Ofis adayi" value={`${document.rulePrompt.officeDistinctClientCount || 0} / ${document.rulePrompt.officeConsistentDecisionCount || 0}`} />
+      </div>
     </section>
   );
 }
@@ -2008,6 +2821,7 @@ function StatementReviewPanel({
           <div className="statement-actions">
             <button onClick={() => onSaveStatementDecision("approve")} type="button">Satırı onayla</button>
             <button onClick={() => onSaveStatementDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
+            <button onClick={() => onSaveStatementDecision("suggest_for_similar")} type="button">Kural yap</button>
             <button onClick={() => onSaveStatementDecision("exclude_from_export")} type="button">Export dışı</button>
             <button onClick={() => onSaveStatementDecision("wrong_account")} type="button">Kontrolde tut</button>
           </div>

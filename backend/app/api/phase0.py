@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import tempfile
 from typing import Literal
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
@@ -25,12 +26,13 @@ from app.domain.openai_provider import (
     OpenAiAccountingProvider,
 )
 from app.domain.auth_policy import auth_status_payload, build_auth_config, resolve_user_id
-from app.domain.chart_accounts import ChartAccount, normalize_account_code
+from app.domain.chart_accounts import ChartAccount, normalize_account_code, parse_chart_accounts
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.document_uploads import decode_base64_content, store_document_content
 from app.domain.export_adapters import get_export_adapter, journal_entry_payload, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.journal_entries import JournalEntry, JournalLine, build_sample_entries, money
+from app.domain.learning_intelligence import enrich_learning_event
 from app.domain.learning_rules import LearnedPostingRule, apply_learning_rules
 from app.domain.matching_simulation import AccountSelection, ProcessingMode, simulate_invoice
 from app.domain.operation_monitoring import (
@@ -867,6 +869,46 @@ def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object
     return get_workflow_store().replace_chart_accounts(client_id=payload.client_id, accounts=accounts)
 
 
+@router.post("/store/chart-accounts/upload")
+async def store_chart_accounts_upload(
+    client_id: str = Form(...),
+    file: UploadFile = File(...),
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+) -> dict[str, object]:
+    normalized_client_id = client_id.strip()
+    if not normalized_client_id:
+        raise HTTPException(status_code=400, detail="client_id is required for chart account upload")
+    _require_mock_client_access(
+        client_id=normalized_client_id,
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        allowed_roles=("accountant", "admin"),
+    )
+    original_name = Path(file.filename or "chart_accounts.csv").name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in {".csv", ".xlsx", ".xlsm"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported chart account format: {suffix or 'unknown'}")
+    content = await file.read()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / original_name
+        temp_path.write_bytes(content)
+        try:
+            parsed_accounts = parse_chart_accounts(temp_path)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    accounts = [asdict(account) for account in parsed_accounts]
+    stored = get_workflow_store().replace_chart_accounts(client_id=normalized_client_id, accounts=accounts)
+    _record_operation_event(
+        store=get_workflow_store(),
+        client_id=normalized_client_id,
+        event_type="chart_accounts_uploaded",
+        status="ok" if accounts else "warning",
+        message="Hesap plani import edildi.",
+        metadata={"file_name": original_name, "account_count": len(accounts)},
+    )
+    return {**stored, "file_name": original_name}
+
+
 @router.post("/store/client-onboarding-package")
 def store_client_onboarding_package(payload: ClientOnboardingPackagePayload) -> dict[str, object]:
     if not payload.client.client_id.strip():
@@ -1527,6 +1569,15 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
     }
 
 
+def _workspace_document(workspace: dict[str, object], document_ref: str) -> dict[str, object] | None:
+    for document in workspace.get("documents", []) or []:
+        if not isinstance(document, dict):
+            continue
+        if str(document.get("document_ref") or document.get("id") or "") == document_ref:
+            return document
+    return None
+
+
 @router.post("/store/review-decision")
 def store_review_decision(
     payload: StoredReviewDecisionPayload,
@@ -1540,8 +1591,16 @@ def store_review_decision(
         user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
         allowed_roles=("accountant", "admin"),
     )
-    event = review_learning_event(payload.decision)
     store = get_workflow_store()
+    workspace = store.get_workspace(payload.client_id)
+    event = review_learning_event(payload.decision)
+    event = enrich_learning_event(
+        event,
+        client_id=payload.client_id,
+        decision=payload.decision.model_dump(),
+        document=_workspace_document(workspace, payload.decision.document_ref),
+        prior_learning_events=workspace.get("learning_events") or (),
+    )
     saved = store.save_review_decision(
         client_id=payload.client_id,
         decision=payload.decision.model_dump(),

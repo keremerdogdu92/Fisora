@@ -53,6 +53,19 @@ const workspaceRecord = {
         product_category: "Satis",
         ai_classification_provider: "static_rules",
         ai_classification_reason: "Kalem satis olarak siniflandi.",
+        accounting_intent: "e_fatura_yazilim_gideri",
+        accounting_intent_confidence: 84,
+        learning_rule_scope: "client_rule",
+        learning_rule_reason: "Kolay Soft e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
+        learning_rule_source_summary: "Bu oneride 3 onceki musavir karari kullanildi.",
+        rule_prompt: {
+          show: true,
+          default_scope: "client_narrow",
+          message: "Bu karari 3 kez benzer sekilde verdiniz.",
+          client_consistent_decision_count: 3,
+          office_distinct_client_count: 1,
+          office_consistent_decision_count: 3,
+        },
         selected_expense_account: "600.01",
         selected_vat_account: "391.01",
         selected_supplier_account: "120.01",
@@ -120,6 +133,17 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].status, "export_ready");
   assert.equal(data.documents[0].intakeCategory, "sales_invoice");
   assert.equal(data.documents[0].draftLines.length, 3);
+  assert.equal(data.documents[0].accountingIntent, "e_fatura_yazilim_gideri");
+  assert.equal(data.documents[0].accountingIntentConfidence, 84);
+  assert.deepEqual(data.documents[0].rulePrompt, {
+    show: true,
+    defaultScope: "client_narrow",
+    message: "Bu karari 3 kez benzer sekilde verdiniz.",
+    clientConsistentDecisionCount: 3,
+    officeDistinctClientCount: 1,
+    officeConsistentDecisionCount: 3,
+  });
+  assert.equal(data.documents[0].learningRuleSourceSummary, "Bu oneride 3 onceki musavir karari kullanildi.");
   assert.equal(data.documents[1].id, "upload-1");
   assert.equal(data.documents[1].status, "queued");
   assert.equal(data.documents[1].previewText, "Backend'e yuklendi; worker sonucu bekleniyor.");

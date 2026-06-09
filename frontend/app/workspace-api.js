@@ -170,6 +170,12 @@ function processedBackendDocument(document, workspace, client) {
     statementEntries: safeList(result.statement_entries),
     statementAiSuggestions: safeList(result.statement_ai_suggestions),
     statementAiSummary: statementAiSummaryText(result.statement_ai_summary),
+    accountingIntent: safeText(result.accounting_intent),
+    accountingIntentConfidence: safeNumber(result.accounting_intent_confidence),
+    learningRuleScope: safeText(result.learning_rule_scope),
+    learningRuleReason: safeText(result.learning_rule_reason),
+    learningRuleSourceSummary: safeText(result.learning_rule_source_summary || result.learning_rule_reason),
+    rulePrompt: normalizeRulePrompt(result.rule_prompt),
   };
 }
 
@@ -214,6 +220,12 @@ function pendingBackendDocument(document, workspace, client) {
     statementEntries: [],
     statementAiSuggestions: [],
     statementAiSummary: "",
+    accountingIntent: "",
+    accountingIntentConfidence: 0,
+    learningRuleScope: "",
+    learningRuleReason: "",
+    learningRuleSourceSummary: "",
+    rulePrompt: normalizeRulePrompt({}),
   };
 }
 
@@ -282,6 +294,27 @@ function statementAiSummaryText(value) {
   } catch {
     return "";
   }
+}
+
+function normalizeRulePrompt(value) {
+  if (!value || typeof value !== "object") {
+    return {
+      show: false,
+      defaultScope: "",
+      message: "",
+      clientConsistentDecisionCount: 0,
+      officeDistinctClientCount: 0,
+      officeConsistentDecisionCount: 0,
+    };
+  }
+  return {
+    show: Boolean(value.show),
+    defaultScope: safeText(value.default_scope || value.defaultScope),
+    message: safeText(value.message),
+    clientConsistentDecisionCount: safeNumber(value.client_consistent_decision_count || value.clientConsistentDecisionCount),
+    officeDistinctClientCount: safeNumber(value.office_distinct_client_count || value.officeDistinctClientCount),
+    officeConsistentDecisionCount: safeNumber(value.office_consistent_decision_count || value.officeConsistentDecisionCount),
+  };
 }
 
 module.exports = {

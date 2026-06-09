@@ -24,20 +24,26 @@ test("same-domain portal paths open the correct private pilot screen", () => {
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",
-    visibleModes: ["accountant", "exports", "operations"],
+    visibleModes: ["accountant", "documents", "clients", "settings", "exports", "operations"],
   });
 });
 
 test("accountant subpaths stay under the accountant link family", () => {
+  assert.equal(portalConfigForPath("/portal/belgeler").initialMode, "documents");
+  assert.equal(portalConfigForPath("/portal/mukellefler").initialMode, "clients");
+  assert.equal(portalConfigForPath("/portal/ayarlar").initialMode, "settings");
   assert.equal(portalConfigForPath("/portal/cikti").initialMode, "exports");
   assert.equal(portalConfigForPath("/portal/operasyon").initialMode, "operations");
-  assert.deepEqual(portalConfigForRouteKey("cikti").visibleModes, ["accountant", "exports", "operations"]);
-  assert.deepEqual(portalConfigForRouteKey("operasyon").visibleModes, ["accountant", "exports", "operations"]);
+  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "documents", "clients", "settings", "exports", "operations"]);
+  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "documents", "clients", "settings", "exports", "operations"]);
 });
 
 test("website entry paths have Next app route files", () => {
   assert.equal(existsSync(join(__dirname, "portal", "mukellef", "page.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal", "musavir", "page.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal", "belgeler", "page.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal", "mukellefler", "page.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal", "ayarlar", "page.tsx")), true);
 });
 
 test("locked portal links ignore stale sessions from the other role", () => {

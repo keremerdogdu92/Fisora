@@ -322,6 +322,8 @@ def _learning_counterparty_match(
         hints = (
             str(event.get("category") or ""),
             str(event.get("reason") or ""),
+            str(event.get("accounting_intent") or ""),
+            " ".join(str(term) for term in event.get("normalized_terms") or ()),
             str(event.get("document_ref") or ""),
         )
         if not any(_learning_hint_matches(normalized_text, hint) for hint in hints):

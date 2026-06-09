@@ -1,9 +1,12 @@
-const ACCOUNTANT_MODES = ["accountant", "exports", "operations"];
+const ACCOUNTANT_MODES = ["accountant", "documents", "clients", "settings", "exports", "operations"];
 
 const PORTAL_NAV_ITEMS = [
-  { mode: "client", label: "Mükellef portalı", href: "/portal/mukellef" },
-  { mode: "accountant", label: "Müşavir masası", href: "/portal/musavir" },
-  { mode: "exports", label: "Çıktı listesi", href: "/portal/cikti" },
+  { mode: "client", label: "Mukellef portali", href: "/portal/mukellef" },
+  { mode: "accountant", label: "Anasayfa", href: "/portal/musavir" },
+  { mode: "documents", label: "Belge Isleme", href: "/portal/belgeler" },
+  { mode: "clients", label: "Mukellefler", href: "/portal/mukellefler" },
+  { mode: "settings", label: "Ayarlar", href: "/portal/ayarlar" },
+  { mode: "exports", label: "Cikti listesi", href: "/portal/cikti" },
   { mode: "operations", label: "Operasyon", href: "/portal/operasyon" },
 ];
 
@@ -26,6 +29,30 @@ const PORTAL_ROUTE_CONFIGS = {
   musavir: {
     routeKey: "musavir",
     initialMode: "accountant",
+    defaultUserId: "mali-musavir",
+    defaultRole: "accountant",
+    lockedRole: "accountant",
+    visibleModes: ACCOUNTANT_MODES,
+  },
+  belgeler: {
+    routeKey: "belgeler",
+    initialMode: "documents",
+    defaultUserId: "mali-musavir",
+    defaultRole: "accountant",
+    lockedRole: "accountant",
+    visibleModes: ACCOUNTANT_MODES,
+  },
+  mukellefler: {
+    routeKey: "mukellefler",
+    initialMode: "clients",
+    defaultUserId: "mali-musavir",
+    defaultRole: "accountant",
+    lockedRole: "accountant",
+    visibleModes: ACCOUNTANT_MODES,
+  },
+  ayarlar: {
+    routeKey: "ayarlar",
+    initialMode: "settings",
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",
@@ -57,6 +84,9 @@ function portalConfigForPath(pathname) {
   const path = String(pathname || "").replace(/\/+$/, "") || "/";
   if (path === "/portal/mukellef") return PORTAL_ROUTE_CONFIGS.mukellef;
   if (path === "/portal/musavir") return PORTAL_ROUTE_CONFIGS.musavir;
+  if (path === "/portal/belgeler") return PORTAL_ROUTE_CONFIGS.belgeler;
+  if (path === "/portal/mukellefler") return PORTAL_ROUTE_CONFIGS.mukellefler;
+  if (path === "/portal/ayarlar") return PORTAL_ROUTE_CONFIGS.ayarlar;
   if (path === "/portal/cikti") return PORTAL_ROUTE_CONFIGS.cikti;
   if (path === "/portal/operasyon") return PORTAL_ROUTE_CONFIGS.operasyon;
   return PORTAL_ROUTE_CONFIGS.home;

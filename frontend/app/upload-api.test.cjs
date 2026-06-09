@@ -3,13 +3,18 @@ const assert = require("node:assert/strict");
 
 const {
   buildClientBootstrapPayload,
+  buildClientOnboardingPackagePayload,
   buildPortalUserBootstrapPayload,
+  createClientOnboardingPackage,
+  createPortalInvite,
   ensureUploadWorkspace,
   loginWithPassword,
   pickUploadUser,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
+  setPortalPassword,
   storeReviewDecision,
+  uploadChartAccountsToBackend,
   uploadDocumentToBackend,
 } = require("./upload-api.js");
 
@@ -110,6 +115,61 @@ test("ensureUploadWorkspace upserts client then portal user", async () => {
   });
 });
 
+test("buildClientOnboardingPackagePayload builds a backend onboarding package", () => {
+  assert.deepEqual(
+    buildClientOnboardingPackagePayload({
+      title: "Yeni İşitme Merkezi",
+      taxId: "1234567890",
+      activityDescription: "İşitme cihazı satış ve servis",
+      naceCode: "47.74",
+      portalDisplayName: "Yeni İşitme Kullanıcısı",
+    }),
+    {
+      client: {
+        client_id: "yeni-isitme-merkezi",
+        title: "Yeni İşitme Merkezi",
+        tax_id: "1234567890",
+        activity_description: "İşitme cihazı satış ve servis",
+        nace_code: "47.74",
+        workplace_addresses: [],
+        has_chart_accounts: true,
+      },
+      chart_accounts: [],
+      portal_users: [
+        {
+          user_id: "yeni-isitme-merkezi-user",
+          display_name: "Yeni İşitme Kullanıcısı",
+          role: "client_user",
+          allowed_client_ids: ["yeni-isitme-merkezi"],
+        },
+      ],
+    },
+  );
+});
+
+test("createClientOnboardingPackage posts to the backend package endpoint", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ workspace: { client: { client_id: "client-1" } } }) };
+  };
+
+  const result = await createClientOnboardingPackage({
+    apiBaseUrl: "http://localhost:8000",
+    client: { clientId: "client-1", title: "Client One", portalUserId: "client-one-user" },
+    userId: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/client-onboarding-package");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.equal(JSON.parse(request.init.body).client.client_id, "client-1");
+  assert.deepEqual(result, { workspace: { client: { client_id: "client-1" } } });
+});
+
 test("uploadDocumentToBackend posts the selected intake category as multipart data", async () => {
   let request;
   const file = { name: "satis.pdf" };
@@ -148,6 +208,36 @@ test("uploadDocumentToBackend posts the selected intake category as multipart da
   );
 });
 
+test("uploadChartAccountsToBackend posts chart account files to parser endpoint", async () => {
+  let request;
+  const file = { name: "hesap-plani.csv" };
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ client_id: "client-1", account_count: 2 }) };
+  };
+
+  const result = await uploadChartAccountsToBackend({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    file,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+
+  assert.deepEqual(result, { client_id: "client-1", account_count: 2 });
+  assert.equal(request.url, "http://localhost:8000/phase0/store/chart-accounts/upload");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, { "X-Fisora-User-Id": "mali-musavir" });
+  assert.deepEqual(
+    request.init.body.fields.map(([key, value]) => [key, value && value.name ? value.name : value]),
+    [
+      ["client_id", "client-1"],
+      ["file", "hesap-plani.csv"],
+    ],
+  );
+});
+
 test("loginWithPassword posts credentials and returns a backend session", async () => {
   let request;
   const fetchImpl = async (url, init) => {
@@ -177,6 +267,66 @@ test("loginWithPassword posts credentials and returns a backend session", async 
   });
   assert.equal(result.sessionToken, "session-token-1");
   assert.equal(result.userId, "mali-musavir");
+});
+
+test("createPortalInvite posts invite payload without sending email", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ invite_token: "invite-1" }) };
+  };
+
+  const result = await createPortalInvite({
+    apiBaseUrl: "http://localhost:8000",
+    userId: "client-user",
+    displayName: "Client User",
+    clientId: "client-1",
+    invitedBy: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/auth/invite");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    user_id: "client-user",
+    display_name: "Client User",
+    role: "client_user",
+    allowed_client_ids: ["client-1"],
+    invited_by: "mali-musavir",
+    ttl_hours: 48,
+  });
+  assert.deepEqual(result, { invite_token: "invite-1" });
+});
+
+test("setPortalPassword posts password bootstrap payload", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ has_password: true }) };
+  };
+
+  const result = await setPortalPassword({
+    apiBaseUrl: "http://localhost:8000",
+    userId: "client-user",
+    password: "GizliSifre123",
+    userHeader: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/auth/password");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    user_id: "client-user",
+    password: "GizliSifre123",
+  });
+  assert.deepEqual(result, { has_password: true });
 });
 
 test("requestStatementAiSuggestions posts structured statement lines", async () => {
@@ -298,4 +448,30 @@ test("storeReviewDecision posts statement line accountant decisions", async () =
     },
   });
   assert.deepEqual(result, { updated_at: "2026-06-06T10:00:00" });
+});
+
+test("storeReviewDecision marks one-click rule requests as apply-to-similar", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ learning_event: { scope: "client_rule" } }) };
+  };
+
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "kolaysoft.pdf",
+    action: "suggest_for_similar",
+    reviewer: "mali-musavir",
+    correctedAccountCode: "770.05",
+    category: "software_service",
+    reason: "KolaySoft e-fatura hizmeti bu alt hesaba alinsin.",
+    applyToSimilar: true,
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/review-decision");
+  assert.equal(JSON.parse(request.init.body).decision.apply_to_similar, true);
+  assert.equal(JSON.parse(request.init.body).decision.action, "suggest_for_similar");
 });

@@ -68,6 +68,7 @@ function buildClientOnboardingPackagePayload({
   taxId = "",
   activityDescription = "",
   naceCode = "",
+  workplaceAddresses,
   portalUserId = "",
   portalDisplayName = "",
 } = {}) {
@@ -81,7 +82,7 @@ function buildClientOnboardingPackagePayload({
       tax_id: String(taxId || "").trim(),
       activity_description: String(activityDescription || "").trim(),
       nace_code: String(naceCode || "").trim(),
-      workplace_addresses: [],
+      workplace_addresses: Array.isArray(workplaceAddresses) ? workplaceAddresses.map(String).map((value) => value.trim()).filter(Boolean) : [],
       has_chart_accounts: true,
     },
     chart_accounts: [],
@@ -165,6 +166,32 @@ async function ensureUploadWorkspace({ apiBaseUrl, client, userId, displayName, 
     headers,
     fetchImpl,
   });
+}
+
+async function parseTaxCertificateFromBackend({
+  apiBaseUrl,
+  userId = "",
+  sessionToken = "",
+  file,
+  fetchImpl = fetch,
+  FormDataCtor = FormData,
+}) {
+  const formData = new FormDataCtor();
+  formData.append("file", file);
+  const headers = sessionToken
+    ? { "X-Fisora-Session": String(sessionToken) }
+    : userId
+      ? { "X-Fisora-User-Id": String(userId) }
+      : {};
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/tax-certificate/parse`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `tax certificate parse failed with ${response.status}`));
+  }
+  return response.json();
 }
 
 async function createClientOnboardingPackage({
@@ -303,6 +330,32 @@ async function uploadDocumentToBackend({
   return response.json();
 }
 
+function uploadTaxCertificateToBackend({
+  apiBaseUrl,
+  clientId,
+  userId,
+  uploadedBy,
+  file,
+  retentionPolicyDays = 365,
+  sessionToken = "",
+  fetchImpl = fetch,
+  FormDataCtor = FormData,
+}) {
+  return uploadDocumentToBackend({
+    apiBaseUrl,
+    clientId,
+    userId,
+    uploadedBy,
+    documentType: "special_document",
+    intakeCategory: "special_document",
+    file,
+    retentionPolicyDays,
+    sessionToken,
+    fetchImpl,
+    FormDataCtor,
+  });
+}
+
 function normalizeStatementLinePayload(line) {
   return {
     line_no: Number(line?.line_no || line?.lineNo || 0),
@@ -409,6 +462,7 @@ module.exports = {
   createPortalInvite,
   ensureUploadWorkspace,
   loginWithPassword,
+  parseTaxCertificateFromBackend,
   pickUploadUser,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
@@ -416,4 +470,5 @@ module.exports = {
   storeReviewDecision,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
+  uploadTaxCertificateToBackend,
 };

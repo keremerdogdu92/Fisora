@@ -10,12 +10,14 @@ const {
   ensureUploadWorkspace,
   loginWithPassword,
   pickUploadUser,
+  parseTaxCertificateFromBackend,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
   setPortalPassword,
   storeReviewDecision,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
+  uploadTaxCertificateToBackend,
 } = require("./upload-api.js");
 
 class CapturingFormData {
@@ -147,6 +149,15 @@ test("buildClientOnboardingPackagePayload builds a backend onboarding package", 
   );
 });
 
+test("buildClientOnboardingPackagePayload preserves extracted workplace addresses", () => {
+  const payload = buildClientOnboardingPackagePayload({
+    title: "Yeni Isitme Merkezi",
+    workplaceAddresses: ["Meclis Mah. Ataturk Cad. No: 10"],
+  });
+
+  assert.deepEqual(payload.client.workplace_addresses, ["Meclis Mah. Ataturk Cad. No: 10"]);
+});
+
 test("createClientOnboardingPackage posts to the backend package endpoint", async () => {
   let request;
   const fetchImpl = async (url, init) => {
@@ -168,6 +179,43 @@ test("createClientOnboardingPackage posts to the backend package endpoint", asyn
   });
   assert.equal(JSON.parse(request.init.body).client.client_id, "client-1");
   assert.deepEqual(result, { workspace: { client: { client_id: "client-1" } } });
+});
+
+test("parseTaxCertificateFromBackend posts the selected certificate for extraction", async () => {
+  let request;
+  const file = { name: "vergi-levhasi.pdf" };
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return {
+      ok: true,
+      json: async () => ({
+        title: "IBRAHIM DEGERLI",
+        tax_id: "1234567890",
+        activity_description: "Isitme cihazi satisi",
+        nace_code: "477401",
+        workplace_addresses: ["Meclis Mah."],
+      }),
+    };
+  };
+
+  const result = await parseTaxCertificateFromBackend({
+    apiBaseUrl: "http://localhost:8000",
+    userId: "mali-musavir",
+    file,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/tax-certificate/parse");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, { "X-Fisora-User-Id": "mali-musavir" });
+  assert.deepEqual(
+    request.init.body.fields.map(([key, value]) => [key, value && value.name ? value.name : value]),
+    [["file", "vergi-levhasi.pdf"]],
+  );
+  assert.equal(result.title, "IBRAHIM DEGERLI");
+  assert.equal(result.tax_id, "1234567890");
+  assert.deepEqual(result.workplace_addresses, ["Meclis Mah."]);
 });
 
 test("uploadDocumentToBackend posts the selected intake category as multipart data", async () => {
@@ -204,6 +252,42 @@ test("uploadDocumentToBackend posts the selected intake category as multipart da
       ["uploaded_by_user_id", "client-user"],
       ["retention_policy_days", "90"],
       ["file", "satis.pdf"],
+    ],
+  );
+});
+
+test("uploadTaxCertificateToBackend stores the certificate as a special document", async () => {
+  let request;
+  const file = { name: "vergi-levhasi.pdf" };
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ document_ref: "tax-cert-1" }) };
+  };
+
+  const result = await uploadTaxCertificateToBackend({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    uploadedBy: "Mali Musavir",
+    file,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+
+  assert.deepEqual(result, { document_ref: "tax-cert-1" });
+  assert.equal(request.url, "http://localhost:8000/phase0/store/document-upload-multipart");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, { "X-Fisora-User-Id": "mali-musavir" });
+  assert.deepEqual(
+    request.init.body.fields.map(([key, value]) => [key, value && value.name ? value.name : value]),
+    [
+      ["client_id", "client-1"],
+      ["document_type", "special_document"],
+      ["intake_category", "special_document"],
+      ["uploaded_by", "Mali Musavir"],
+      ["uploaded_by_user_id", "mali-musavir"],
+      ["retention_policy_days", "365"],
+      ["file", "vergi-levhasi.pdf"],
     ],
   );
 });

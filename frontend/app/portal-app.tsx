@@ -14,6 +14,7 @@ import {
   createClientOnboardingPackage,
   createPortalInvite,
   loginWithPassword,
+  parseTaxCertificateFromBackend,
   pickUploadUser,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
@@ -21,6 +22,7 @@ import {
   storeReviewDecision,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
+  uploadTaxCertificateToBackend,
 } from "./upload-api";
 import { fetchBackendPilotData } from "./workspace-api";
 import {
@@ -291,6 +293,7 @@ type NewClientDraft = {
   taxId: string;
   activityDescription: string;
   naceCode: string;
+  workplaceAddresses: string[];
   portalUserId: string;
   portalDisplayName: string;
 };
@@ -909,9 +912,12 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     taxId: "",
     activityDescription: "",
     naceCode: "",
+    workplaceAddresses: [],
     portalUserId: "",
     portalDisplayName: "",
   });
+  const [newClientTaxCertificateFile, setNewClientTaxCertificateFile] = useState<File | null>(null);
+  const [newClientTaxCertificateInputKey, setNewClientTaxCertificateInputKey] = useState(0);
   const [newClientStatus, setNewClientStatus] = useState("");
   const [chartUploadStatus, setChartUploadStatus] = useState("");
   const [inviteStatus, setInviteStatus] = useState("");
@@ -1114,29 +1120,98 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       return;
     }
     const payload = buildClientOnboardingPackagePayload(newClientDraft);
-    setNewClientStatus("Mükellef kaydediliyor.");
+    const taxCertificateFile = newClientTaxCertificateFile;
+    const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
+    const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+    setNewClientStatus(taxCertificateFile ? "Mükellef kaydediliyor, vergi levhası yüklenecek." : "Mükellef kaydediliyor.");
     try {
       await createClientOnboardingPackage({
-        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        apiBaseUrl,
         client: newClientDraft,
         sessionToken: session?.sessionToken,
-        userId: session?.userId || loginUserId.trim() || "mali-musavir",
+        userId: actingUserId,
       });
       setSelectedClientId(payload.client.client_id);
+      let certificateStatus = "";
+      if (taxCertificateFile) {
+        setNewClientStatus("Mükellef kaydedildi. Vergi levhası yükleniyor.");
+        try {
+          await uploadTaxCertificateToBackend({
+            apiBaseUrl,
+            clientId: payload.client.client_id,
+            userId: actingUserId,
+            uploadedBy: actingUserId,
+            sessionToken: session?.sessionToken,
+            file: taxCertificateFile,
+          });
+          certificateStatus = " Vergi levhası yüklendi.";
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
+        }
+      }
       setNewClientDraft({
         clientId: "",
         title: "",
         taxId: "",
         activityDescription: "",
         naceCode: "",
+        workplaceAddresses: [],
         portalUserId: "",
         portalDisplayName: "",
       });
-      setNewClientStatus(`${payload.client.title} eklendi.`);
+      setNewClientTaxCertificateFile(null);
+      setNewClientTaxCertificateInputKey((current) => current + 1);
+      setNewClientStatus(`${payload.client.title} eklendi.${certificateStatus}`);
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setNewClientStatus(`Mükellef kaydedilemedi. ${message}`);
+    }
+  }
+
+  async function selectNewClientTaxCertificate(file: File | null) {
+    setNewClientTaxCertificateFile(file);
+    if (!file) return;
+    const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
+    const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+    setNewClientStatus(`${file.name} vergi levhası okunuyor.`);
+    try {
+      const extraction = await parseTaxCertificateFromBackend({
+        apiBaseUrl,
+        userId: actingUserId,
+        sessionToken: session?.sessionToken,
+        file,
+      });
+      const title = String(extraction?.title || "").trim();
+      const taxId = String(extraction?.tax_id || "").trim();
+      const activityDescription = String(extraction?.activity_description || "").trim();
+      const naceCode = String(extraction?.nace_code || "").trim();
+      const workplaceAddresses = Array.isArray(extraction?.workplace_addresses)
+        ? (extraction.workplace_addresses as unknown[]).map((value) => String(value).trim()).filter(Boolean)
+        : [];
+      setNewClientDraft((current) => ({
+        ...current,
+        title: current.title.trim() || title,
+        taxId: current.taxId.trim() || taxId,
+        activityDescription: current.activityDescription.trim() || activityDescription,
+        naceCode: current.naceCode.trim() || naceCode,
+        workplaceAddresses: current.workplaceAddresses.length ? current.workplaceAddresses : workplaceAddresses,
+      }));
+      const filledFields = [
+        title ? "unvan" : "",
+        taxId ? "VKN" : "",
+        activityDescription || naceCode ? "faaliyet" : "",
+        workplaceAddresses.length ? "adres" : "",
+      ].filter(Boolean);
+      const confidence = Number(extraction?.confidence || 0);
+      const note = filledFields.length
+        ? `Vergi levhası okundu: ${filledFields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
+        : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
+      setNewClientStatus(note);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
     }
   }
 
@@ -1595,10 +1670,13 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           allClientDocuments={segmentedClientDocuments}
           newClientDraft={newClientDraft}
           newClientStatus={newClientStatus}
+          newClientTaxCertificateFile={newClientTaxCertificateFile}
+          newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
           onAddToBasket={addSelectedClientToBasket}
           onApproveAndNext={approveSelectedAndMoveNext}
           onCreateNewClient={createNewClient}
           onClientSearchChange={setClientSearch}
+          onTaxCertificateFileChange={selectNewClientTaxCertificate}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
           onResolveCancellation={resolveCancellation}
           onSaveDecision={saveDecision}
@@ -1630,12 +1708,15 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           inviteStatus={inviteStatus}
           newClientDraft={newClientDraft}
           newClientStatus={newClientStatus}
+          newClientTaxCertificateFile={newClientTaxCertificateFile}
+          newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
           onChartFileSelected={uploadChartAccounts}
           onClientSearchChange={setClientSearch}
           onCreateInvite={createInviteForSelectedClient}
           onCreateNewClient={createNewClient}
           onResolveCancellation={resolveCancellation}
           onSetPassword={setPasswordForSelectedClient}
+          onTaxCertificateFileChange={selectNewClientTaxCertificate}
           portalPassword={portalPassword}
           portalPasswordStatus={portalPasswordStatus}
           selectedClient={selectedClient}
@@ -1797,7 +1878,7 @@ function SelectedClientStrip({
   return (
     <section className="selected-client-strip" aria-label="Seçili mükellef">
       <Info label="Seçili mükellef" value={client?.clientName ?? "-"} />
-      <Info label="VKN/TCKN" value={client?.taxId ?? "-"} />
+      <Info label="VKN" value={client?.taxId ?? "-"} />
       <Info label="Belge" value={String(documents.length)} />
       <Info label="Kontrol" value={String(reviewCount)} />
       <Info label="Çıktı hazır" value={String(readyCount)} />
@@ -2155,12 +2236,15 @@ function ClientManagementView({
   inviteStatus,
   newClientDraft,
   newClientStatus,
+  newClientTaxCertificateFile,
+  newClientTaxCertificateInputKey,
   onChartFileSelected,
   onClientSearchChange,
   onCreateInvite,
   onCreateNewClient,
   onResolveCancellation,
   onSetPassword,
+  onTaxCertificateFileChange,
   portalPassword,
   portalPasswordStatus,
   selectedClient,
@@ -2176,12 +2260,15 @@ function ClientManagementView({
   inviteStatus: string;
   newClientDraft: NewClientDraft;
   newClientStatus: string;
+  newClientTaxCertificateFile: File | null;
+  newClientTaxCertificateInputKey: number;
   onChartFileSelected: (files: FileList | null) => void | Promise<void>;
   onClientSearchChange: (value: string) => void;
   onCreateInvite: () => void | Promise<void>;
   onCreateNewClient: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onSetPassword: () => void | Promise<void>;
+  onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
   portalPassword: string;
   portalPasswordStatus: string;
   selectedClient?: PilotClient;
@@ -2218,7 +2305,15 @@ function ClientManagementView({
         </div>
       </section>
       <section className="panel onboarding-panel">
-        <NewClientCard draft={newClientDraft} onCreate={onCreateNewClient} setDraft={setNewClientDraft} status={newClientStatus} />
+        <NewClientCard
+          draft={newClientDraft}
+          onCreate={onCreateNewClient}
+          onTaxCertificateFileChange={onTaxCertificateFileChange}
+          setDraft={setNewClientDraft}
+          status={newClientStatus}
+          taxCertificateFile={newClientTaxCertificateFile}
+          taxCertificateInputKey={newClientTaxCertificateInputKey}
+        />
         <div className="settings-card">
           <span>Hesap plani import</span>
           <strong>{selectedClient?.clientName ?? "-"}</strong>
@@ -2346,6 +2441,8 @@ function AccountantWorkspace({
   allClientDocuments,
   newClientDraft,
   newClientStatus,
+  newClientTaxCertificateFile,
+  newClientTaxCertificateInputKey,
   onAddToBasket,
   onApproveAndNext,
   onClientSearchChange,
@@ -2354,6 +2451,7 @@ function AccountantWorkspace({
   onResolveCancellation,
   onSaveDecision,
   onSaveStatementDecision,
+  onTaxCertificateFileChange,
   reviewFilter,
   selectedClient,
   selectedDocument,
@@ -2384,6 +2482,8 @@ function AccountantWorkspace({
   allClientDocuments: PilotDocument[];
   newClientDraft: NewClientDraft;
   newClientStatus: string;
+  newClientTaxCertificateFile: File | null;
+  newClientTaxCertificateInputKey: number;
   onAddToBasket: () => void;
   onApproveAndNext: () => void | Promise<void>;
   onClientSearchChange: (value: string) => void;
@@ -2392,6 +2492,7 @@ function AccountantWorkspace({
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onSaveDecision: (action: string) => void | Promise<void>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
+  onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
   reviewFilter: ReviewFilter;
   selectedClient?: PilotClient;
   selectedDocument?: PilotDocument;
@@ -2489,8 +2590,11 @@ function AccountantWorkspace({
         <NewClientCard
           draft={newClientDraft}
           onCreate={onCreateNewClient}
+          onTaxCertificateFileChange={onTaxCertificateFileChange}
           setDraft={setNewClientDraft}
           status={newClientStatus}
+          taxCertificateFile={newClientTaxCertificateFile}
+          taxCertificateInputKey={newClientTaxCertificateInputKey}
         />
       </aside>
 
@@ -2575,13 +2679,19 @@ function AccountantWorkspace({
 function NewClientCard({
   draft,
   onCreate,
+  onTaxCertificateFileChange,
   setDraft,
   status,
+  taxCertificateFile,
+  taxCertificateInputKey,
 }: {
   draft: NewClientDraft;
   onCreate: () => void | Promise<void>;
+  onTaxCertificateFileChange: (file: File | null) => void;
   setDraft: (value: NewClientDraft) => void;
   status: string;
+  taxCertificateFile: File | null;
+  taxCertificateInputKey: number;
 }) {
   return (
     <section className="new-client-card">
@@ -2596,9 +2706,12 @@ function NewClientCard({
         value={draft.title}
       />
       <input
-        aria-label="VKN veya TCKN"
+        aria-label="VKN"
+        inputMode="numeric"
+        maxLength={10}
         onChange={(event) => setDraft({ ...draft, taxId: event.target.value })}
-        placeholder="VKN/TCKN"
+        pattern="[0-9]*"
+        placeholder="VKN"
         value={draft.taxId}
       />
       <input
@@ -2621,6 +2734,17 @@ function NewClientCard({
           value={draft.portalUserId}
         />
       </div>
+      <label className="tax-certificate-upload">
+        <span>Vergi levhası</span>
+        <input
+          accept=".pdf,.jpg,.jpeg,.png"
+          aria-label="Vergi levhası"
+          key={taxCertificateInputKey}
+          onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
+          type="file"
+        />
+        <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
+      </label>
       <button className="primary full" onClick={onCreate} type="button">Mükellef ekle</button>
       {status ? <p className="decision-status">{status}</p> : null}
     </section>

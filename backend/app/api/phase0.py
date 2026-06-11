@@ -59,6 +59,7 @@ from app.domain.statement_ai_suggestions import (
     suggest_statement_lines,
 )
 from app.domain.statement_lines import StatementLine
+from app.domain.tax_certificates import parse_tax_certificate_file
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
@@ -941,6 +942,21 @@ def store_client_onboarding_package(payload: ClientOnboardingPackagePayload) -> 
         "portal_users": portal_users,
         "workspace": store.get_workspace(payload.client.client_id),
     }
+
+
+@router.post("/tax-certificate/parse")
+async def parse_tax_certificate_upload(file: UploadFile = File(...)) -> dict[str, object]:
+    suffix = Path(file.filename or "tax-certificate.pdf").suffix.lower() or ".pdf"
+    if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+        raise HTTPException(status_code=400, detail="unsupported tax certificate file type")
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    try:
+        return parse_tax_certificate_file(temp_path).to_payload()
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 @router.post("/store/portal-user")

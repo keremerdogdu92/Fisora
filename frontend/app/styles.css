@@ -796,6 +796,19 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.tax-certificate-upload {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.tax-certificate-upload small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .client-emblem {
   background: linear-gradient(135deg, #102033, #0f766e);
   border-radius: 8px;

@@ -28,14 +28,15 @@ class CorsConfigTests(unittest.TestCase):
         self.assertGreaterEqual(compose_text.count("FISORA_AUTH_MODE:"), 2)
         self.assertGreaterEqual(compose_text.count("FISORA_AUTH_HEADER:"), 2)
 
-    def test_nginx_strips_spoofable_auth_headers_and_is_tls_ready(self) -> None:
+    def test_nginx_keeps_http_pilot_auth_and_tls_template_strips_spoofable_headers(self) -> None:
         nginx_file = ROOT / "deploy" / "nginx" / "default.conf"
         tls_file = ROOT / "deploy" / "nginx" / "default.tls.conf"
         nginx_text = nginx_file.read_text(encoding="utf-8")
         tls_text = tls_file.read_text(encoding="utf-8")
 
-        self.assertIn("proxy_set_header X-Fisora-User-Id \"\";", nginx_text)
+        self.assertIn("proxy_set_header X-Fisora-User-Id $http_x_fisora_user_id;", nginx_text)
         self.assertIn("proxy_set_header X-Fisora-Session $http_x_fisora_session;", nginx_text)
+        self.assertIn("proxy_set_header X-Fisora-User-Id \"\";", tls_text)
         self.assertIn("listen 443 ssl", tls_text)
         self.assertIn("return 301 https://$host$request_uri;", tls_text)
 

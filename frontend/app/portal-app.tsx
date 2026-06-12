@@ -24,7 +24,8 @@ import {
   uploadDocumentToBackend,
   uploadTaxCertificateToBackend,
 } from "./upload-api";
-import { fetchBackendPilotData } from "./workspace-api";
+import { buildPilotReadinessView, canUseLocalPilotFallback } from "./pilot-readiness";
+import { fetchBackendPilotData, fetchBackendReadiness } from "./workspace-api";
 import {
   buildClientCancellationViewModel,
   buildPortalDashboard,
@@ -200,6 +201,20 @@ type PilotData = {
   exportBasket: ExportBasketItem[];
 };
 
+type PilotReadinessView = {
+  status: string;
+  statusLabel: string;
+  productionLabel: string;
+  offerLabel: string;
+  exportLabel: string;
+  zirveLabel: string;
+  authLabel: string;
+  storeLabel: string;
+  aiLabel: string;
+  blocking: string[];
+  warnings: string[];
+};
+
 type ReviewData = {
   generatedFrom?: string;
   clientId?: string;
@@ -333,6 +348,14 @@ type LocalSession = {
 };
 
 const SESSION_STORAGE_KEY = "fisora.privatePilot.session.v1";
+
+const emptyPilotData: PilotData = {
+  generatedFrom: "Backend bekleniyor",
+  clients: [],
+  documents: [],
+  cancellationRequests: [],
+  exportBasket: [],
+};
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -890,8 +913,10 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
   const visibleNavItems = (PORTAL_NAV_ITEMS as PortalNavItem[]).filter((item) =>
     portalConfig.visibleModes.includes(item.mode),
   );
-  const [data, setData] = useState<PilotData>(() => normalizeReviewData(fallbackReviewData as ReviewData));
-  const [source, setSource] = useState("Private pilot demo verisi");
+  const [data, setData] = useState<PilotData>(emptyPilotData);
+  const [source, setSource] = useState("Backend bekleniyor");
+  const [readinessPayload, setReadinessPayload] = useState<Record<string, unknown> | null>(null);
+  const [localFallbackAllowed, setLocalFallbackAllowed] = useState(false);
   const [mode, setModeState] = useState<PilotMode>(portalConfig.initialMode as PilotMode);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
@@ -969,10 +994,36 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     }
   }
 
+  async function refreshBackendReadiness(shouldCancel: () => boolean = () => false) {
+    try {
+      const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
+      const payload = await fetchBackendReadiness({ apiBaseUrl });
+      if (shouldCancel()) return true;
+      setReadinessPayload(payload as Record<string, unknown>);
+      return true;
+    } catch {
+      if (!shouldCancel()) setReadinessPayload(null);
+      return false;
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function loadPilotData() {
+      const pageUrl = typeof window === "undefined" ? "" : window.location.href;
+      const allowLocalFallback = canUseLocalPilotFallback({
+        pageUrl,
+        explicitAllow: process.env.NEXT_PUBLIC_FISORA_ALLOW_LOCAL_FALLBACK === "true",
+      });
+      if (!cancelled) setLocalFallbackAllowed(allowLocalFallback);
+      await refreshBackendReadiness(() => cancelled);
       if (await refreshBackendPilotData(() => cancelled)) return;
+      if (!allowLocalFallback) {
+        if (!cancelled) {
+          applyPilotData(emptyPilotData, "Backend workspace erisilemedi");
+        }
+        return;
+      }
       const paths = ["/local-pilot-data.json", "/local-workspace-data.json", "/local-review-data.json"];
       for (const path of paths) {
         try {
@@ -1046,6 +1097,10 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
   const intakeDistribution = useMemo(() => documentIntakeDistribution(data.documents), [data.documents]);
   const funnelRows = useMemo(() => statusFunnel(data.documents), [data.documents]);
   const uploadTrackingRows = useMemo(() => clientUploadTracking(data), [data]);
+  const readinessView = useMemo(
+    () => buildPilotReadinessView(readinessPayload) as PilotReadinessView,
+    [readinessPayload],
+  );
   const visibleDashboardClientRows = useMemo(() => {
     const visibleIds = new Set(filteredClients.map((client) => client.clientId));
     return dashboardClientRows.filter((row: { clientId: string }) => visibleIds.has(row.clientId));
@@ -1084,6 +1139,10 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         setLoginStatus(`Backend session açılamadı. ${message}`);
         return;
       }
+    }
+    if (!localFallbackAllowed) {
+      setLoginStatus("Bu serverda sifresiz lokal pilot oturumu kapali. Backend sifresi ile girin.");
+      return;
     }
     const nextSession: LocalSession = { userId, role: effectiveRole };
     persistSession(nextSession);
@@ -1361,8 +1420,10 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       learningRuleSourceSummary: "",
       rulePrompt: normalizeRulePrompt({}),
     }));
-    setData((current) => ({ ...current, documents: [...nextDocuments, ...current.documents] }));
-    setSelectedPeriod(period);
+    if (localFallbackAllowed) {
+      setData((current) => ({ ...current, documents: [...nextDocuments, ...current.documents] }));
+      setSelectedPeriod(period);
+    }
     setUploadStatus(`${selectedFiles.length} belge backend kuyruğuna gönderiliyor.`);
 
     const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
@@ -1394,7 +1455,11 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setUploadStatus(`Backend yükleme tamamlanamadı; belge lokal listede tutuldu. ${message}`);
+      setUploadStatus(
+        localFallbackAllowed
+          ? `Backend yükleme tamamlanamadı; belge lokal listede tutuldu. ${message}`
+          : `Backend yükleme tamamlanamadı; serverda belge kaydedilmedi. ${message}`,
+      );
     }
   }
 
@@ -1556,7 +1621,11 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satır lokal uygulandı; backend kaydı tamamlanamadı. ${message}`);
+      setDecisionStatus(
+        localFallbackAllowed
+          ? `${selectedDocument.fileName} / ${lineNo}. satır lokal uygulandı; backend kaydı tamamlanamadı. ${message}`
+          : `${selectedDocument.fileName} / ${lineNo}. satır backend'e kaydedilemedi; serverda kalıcı karar oluşmadı. ${message}`,
+      );
     }
   }
 
@@ -1605,7 +1674,11 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setDecisionStatus(`${selectedDocument.fileName}: ${label} lokal uygulandı; backend kaydı tamamlanamadı. ${message}`);
+      setDecisionStatus(
+        localFallbackAllowed
+          ? `${selectedDocument.fileName}: ${label} lokal uygulandı; backend kaydı tamamlanamadı. ${message}`
+          : `${selectedDocument.fileName}: ${label} backend'e kaydedilemedi; serverda kalıcı karar oluşmadı. ${message}`,
+      );
     }
   }
 
@@ -1618,7 +1691,12 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           <p className="eyebrow">Fisero</p>
           <h1>{mode === "client" ? "Mükellef portalı" : activeNavItem?.label || "Müşavir çalışma alanı"}</h1>
         </div>
-        <PortalTopbarStatus onExit={exitPortal} session={session} source={source} />
+        <PortalTopbarStatus
+          localFallbackAllowed={localFallbackAllowed}
+          onExit={exitPortal}
+          session={session}
+          source={source}
+        />
       </header>
 
       {visibleNavItems.length > 1 ? (
@@ -1773,6 +1851,8 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           lockedRole={lockedRole}
           onLogin={login}
           onLogout={logout}
+          localFallbackAllowed={localFallbackAllowed}
+          readinessView={readinessView}
           session={session}
           setLoginPassword={setLoginPassword}
           setLoginRole={setLoginRole}
@@ -1792,7 +1872,12 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       ) : null}
 
       {mode === "operations" ? (
-        <OperationsView source={source} data={data} />
+        <OperationsView
+          data={data}
+          localFallbackAllowed={localFallbackAllowed}
+          readinessView={readinessView}
+          source={source}
+        />
       ) : null}
     </main>
   );
@@ -1808,6 +1893,7 @@ function SessionPanel({
   loginStatus,
   loginUserId,
   lockedRole,
+  localFallbackAllowed,
   onLogin,
   onLogout,
   session,
@@ -1820,6 +1906,7 @@ function SessionPanel({
   loginStatus: string;
   loginUserId: string;
   lockedRole?: "client_user" | "accountant";
+  localFallbackAllowed: boolean;
   onLogin: () => void | Promise<void>;
   onLogout: () => void;
   session: LocalSession | null;
@@ -1836,7 +1923,9 @@ function SessionPanel({
           {loginStatus ||
             (session?.sessionToken
               ? `Backend session aktif${session.expiresAt ? ` / ${formatDateText(session.expiresAt)}` : ""}.`
-              : "Sunucu yoksa lokal pilot ekranı kullanılır.")}
+              : localFallbackAllowed
+                ? "Local gelistirme icin sifresiz pilot oturumu acilabilir."
+                : "Backend sifresiyle giris zorunlu.")}
         </p>
       </div>
       <div className="session-controls">
@@ -1873,10 +1962,12 @@ function ModeButton({ active, href, label }: { active: boolean; href: string; la
 }
 
 function PortalTopbarStatus({
+  localFallbackAllowed,
   onExit,
   session,
   source,
 }: {
+  localFallbackAllowed: boolean;
   onExit: () => void;
   session: LocalSession | null;
   source: string;
@@ -1884,7 +1975,7 @@ function PortalTopbarStatus({
   return (
     <div className="portal-statusbar" aria-label="Portal oturum durumu">
       <div className="topbar-user">
-        <span>{session ? roleLabels[session.role] : "Lokal pilot"}</span>
+        <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Local gelistirme" : "Backend oturumu yok"}</span>
         <strong>{session?.userId || "Oturum yok"}</strong>
       </div>
       <div className="pilot-source compact">
@@ -2406,8 +2497,10 @@ function SettingsView({
   loginStatus,
   loginUserId,
   lockedRole,
+  localFallbackAllowed,
   onLogin,
   onLogout,
+  readinessView,
   session,
   setLoginPassword,
   setLoginRole,
@@ -2427,8 +2520,10 @@ function SettingsView({
   loginStatus: string;
   loginUserId: string;
   lockedRole?: "client_user" | "accountant";
+  localFallbackAllowed: boolean;
   onLogin: () => void | Promise<void>;
   onLogout: () => void;
+  readinessView: PilotReadinessView;
   session: LocalSession | null;
   setLoginPassword: (value: string) => void;
   setLoginRole: (value: "client_user" | "accountant") => void;
@@ -2443,6 +2538,7 @@ function SettingsView({
         loginStatus={loginStatus}
         loginUserId={loginUserId}
         lockedRole={lockedRole}
+        localFallbackAllowed={localFallbackAllowed}
         onLogin={onLogin}
         onLogout={onLogout}
         session={session}
@@ -2452,9 +2548,14 @@ function SettingsView({
       />
       <section className="panel settings-grid">
         <Info label="Veri kaynagi" value={source} />
-        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Lokal demo oturumu yok"} />
-        <Info label="Backend/Auth" value="Backend-first workspace, session veya mock header" />
-        <Info label="Davet/Sifre" value="Token ve sifre sonucu UI'da gosterilir; e-posta gonderimi yok" />
+        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Backend oturumu yok"} />
+        <Info label="Pilot satis" value={readinessView.statusLabel} />
+        <Info label="Production" value={readinessView.productionLabel} />
+        <Info label="Auth" value={readinessView.authLabel} />
+        <Info label="Store" value={readinessView.storeLabel} />
+        <Info label="AI" value={readinessView.aiLabel} />
+        <Info label="Export" value={readinessView.exportLabel} />
+        <Info label="Lokal fallback" value={localFallbackAllowed ? "Sadece gelistirme" : "Kapali"} />
         <Info label="Mukellef" value={String(dashboardMetrics.totalClients)} />
         <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
       </section>
@@ -3176,14 +3277,26 @@ function ExportBasketView({
   );
 }
 
-function OperationsView({ data, source }: { data: PilotData; source: string }) {
+function OperationsView({
+  data,
+  localFallbackAllowed,
+  readinessView,
+  source,
+}: {
+  data: PilotData;
+  localFallbackAllowed: boolean;
+  readinessView: PilotReadinessView;
+  source: string;
+}) {
   return (
     <section className="operations-grid">
       <div className="panel">
-        <h2>Private veri kuralı</h2>
-        <p className="plain-text">
-          Gerçek veya pilot dosyalar GitHub'a gitmez. Arayüz önce ignored local snapshot dosyalarını okur; server yetişirse aynı private akışı login arkasında gösterir.
-        </p>
+        <h2>Kapali pilot durumu</h2>
+        <Info label="Pilot satis" value={readinessView.statusLabel} />
+        <Info label="Production" value={readinessView.productionLabel} />
+        <Info label="Teklif" value={readinessView.offerLabel} />
+        <Info label="Export" value={readinessView.exportLabel} />
+        <Info label="Zirve" value={readinessView.zirveLabel} />
       </div>
       <div className="panel">
         <h2>Okunan kaynak</h2>
@@ -3193,12 +3306,19 @@ function OperationsView({ data, source }: { data: PilotData; source: string }) {
         <Info label="İptal talebi" value={String(data.cancellationRequests.length)} />
       </div>
       <div className="panel">
-        <h2>Desteklenen local snapshot'lar</h2>
-        <ul className="plain-list">
-          <li><code>frontend/public/local-pilot-data.json</code></li>
-          <li><code>frontend/public/local-workspace-data.json</code></li>
-          <li><code>frontend/public/local-review-data.json</code></li>
-        </ul>
+        <h2>Operasyon kapilari</h2>
+        <Info label="Auth" value={readinessView.authLabel} />
+        <Info label="Store" value={readinessView.storeLabel} />
+        <Info label="AI" value={readinessView.aiLabel} />
+        <Info label="Blokaj" value={readinessView.blocking.length ? readinessView.blocking.join(", ") : "Yok"} />
+        <Info label="Uyari" value={readinessView.warnings.length ? readinessView.warnings.join(", ") : "Yok"} />
+        {localFallbackAllowed ? (
+          <ul className="plain-list">
+            <li><code>frontend/public/local-pilot-data.json</code></li>
+            <li><code>frontend/public/local-workspace-data.json</code></li>
+            <li><code>frontend/public/local-review-data.json</code></li>
+          </ul>
+        ) : null}
       </div>
     </section>
   );

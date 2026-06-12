@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { canUseLocalPilotFallback } from "./pilot-readiness";
 import { LANDING_ROLE_ENTRIES, portalEntryForRole } from "./portal-routes";
 import { loginWithPassword, resolveApiBaseUrl } from "./upload-api";
 
@@ -72,6 +73,14 @@ export default function RoleGatewayLanding() {
       }
     }
 
+    const localFallbackAllowed = canUseLocalPilotFallback({
+      pageUrl: typeof window === "undefined" ? "" : window.location.href,
+      explicitAllow: process.env.NEXT_PUBLIC_FISORA_ALLOW_LOCAL_FALLBACK === "true",
+    });
+    if (!localFallbackAllowed) {
+      setStatus("Bu serverda sifresiz pilot girisi kapali. Backend sifresi ile girin.");
+      return;
+    }
     persistSession({ userId: effectiveUserId, role: selectedRole });
     window.location.assign(selectedEntry.href);
   }

@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   backendAuthHeaders,
+  fetchBackendReadiness,
   fetchBackendPilotData,
   normalizeBackendWorkspaces,
 } = require("./workspace-api");
@@ -200,4 +201,37 @@ test("fetchBackendPilotData loads clients then each allowed workspace", async ()
   );
   assert.deepEqual(requests[0].init.headers, { "X-Fisora-User-Id": "mukellef-user" });
   assert.deepEqual(requests[1].init.headers, { "X-Fisora-User-Id": "mukellef-user" });
+});
+
+test("fetchBackendReadiness loads the system readiness payload without auth headers", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
+    requests.push({ url, init });
+    return {
+      ok: true,
+      json: async () => ({
+        pilot_sellable: true,
+        production_ready: false,
+      }),
+    };
+  };
+
+  const readiness = await fetchBackendReadiness({
+    apiBaseUrl: "http://localhost:8000/",
+    fetchImpl,
+  });
+
+  assert.deepEqual(readiness, {
+    pilot_sellable: true,
+    production_ready: false,
+  });
+  assert.deepEqual(requests, [
+    {
+      url: "http://localhost:8000/phase0/store/system/readiness",
+      init: {
+        method: "GET",
+        headers: {},
+      },
+    },
+  ]);
 });

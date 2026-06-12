@@ -190,6 +190,57 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(payload["ai_model"], "openai/gpt-oss-20b")
         self.assertNotIn("ai_model_missing", payload["warnings"])
 
+    def test_pilot_sellable_allows_closed_pilot_without_verified_zirve_adapter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://fisora:test@localhost:5432/fisora",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "GROQ_API_KEY": "gsk-test",
+                },
+            )
+
+        self.assertTrue(payload["ready"])
+        self.assertTrue(payload["pilot_sellable"])
+        self.assertFalse(payload["production_ready"])
+        self.assertEqual(payload["commercial_readiness"]["status"], "pilot_sellable")
+        self.assertEqual(payload["commercial_readiness"]["primary_offer"], "accountant_reviewed_controlled_export")
+        self.assertIn("zirve_verified_adapter_missing", payload["warnings"])
+        self.assertNotIn("zirve_verified_adapter_available", payload["pilot_blocking"])
+
+    def test_pilot_sellable_blocks_anonymous_or_json_store_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_optional",
+                    "FISORA_STORE_BACKEND": "json",
+                    "FISORA_AI_PROVIDER": "disabled",
+                },
+            )
+
+        self.assertFalse(payload["pilot_sellable"])
+        self.assertEqual(payload["commercial_readiness"]["status"], "blocked")
+        self.assertIn("auth_requires_user", payload["pilot_blocking"])
+        self.assertIn("postgres_store_active", payload["pilot_blocking"])
+
     def test_chart_account_import_marks_detail_accounts(self) -> None:
         accounts = parse_chart_accounts(ROOT / "samples" / "chart_accounts" / "chart_accounts_sample_a.csv")
         account_by_code = {account.normalized_account_code: account for account in accounts}

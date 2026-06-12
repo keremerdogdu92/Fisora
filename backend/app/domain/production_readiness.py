@@ -52,6 +52,8 @@ def production_readiness_payload(
         export_path=export_path,
         backup_path=backup_path,
     )
+    store_backend = source.get("FISORA_STORE_BACKEND", "json").strip().lower() or "json"
+    database_configured = bool(source.get("DATABASE_URL") or source.get("FISORA_DATABASE_URL"))
     adapters = [
         {
             "export_type": adapter.export_type,
@@ -65,8 +67,7 @@ def production_readiness_payload(
         "auth_not_anonymous": not bool(auth["allows_anonymous_access"]),
         "document_storage_writable": bool(document_storage["ok"]),
         "export_storage_writable": bool(export_storage["ok"]),
-        "postgres_configured": (source.get("FISORA_STORE_BACKEND", "json").lower() != "postgres")
-        or bool(source.get("DATABASE_URL") or source.get("FISORA_DATABASE_URL")),
+        "postgres_configured": (store_backend != "postgres") or database_configured,
         "ai_provider_configured": ai_provider_configured,
         "zirve_verified_adapter_available": any(adapter.verified_in_zirve for adapter in SUPPORTED_EXPORT_ADAPTERS.values()),
     }
@@ -94,17 +95,53 @@ def production_readiness_payload(
         warnings.append("backup_missing")
     if storage_usage["disk_warning"]:
         warnings.append("disk_usage_high")
+    controlled_export_available = {
+        "zirve_universal_csv",
+        "json_manifest",
+    }.issubset(SUPPORTED_EXPORT_ADAPTERS)
+    pilot_checks = {
+        "auth_requires_user": bool(auth["requires_portal_user"]),
+        "auth_not_anonymous": not bool(auth["allows_anonymous_access"]),
+        "session_auth_available": True,
+        "postgres_store_active": store_backend == "postgres" and database_configured,
+        "document_storage_writable": bool(document_storage["ok"]),
+        "export_storage_writable": bool(export_storage["ok"]),
+        "backup_available": bool(backup["ok"]),
+        "ai_provider_configured": ai_provider_configured,
+        "controlled_export_available": controlled_export_available,
+    }
+    pilot_blocking = [key for key, passed in pilot_checks.items() if not passed]
+    pilot_sellable = not pilot_blocking
+    production_ready = (
+        not blocking
+        and bool(auth["production_ready"])
+        and bool(checks["zirve_verified_adapter_available"])
+    )
+    commercial_readiness = {
+        "status": "pilot_sellable" if pilot_sellable else "blocked",
+        "primary_offer": "accountant_reviewed_controlled_export",
+        "pilot_sellable": pilot_sellable,
+        "production_ready": production_ready,
+        "requires_accountant_review": True,
+        "export_positioning": "controlled_csv_and_manifest_candidate",
+        "zirve_import_claim": "unverified_until_field_test",
+    }
     return {
         "ready": not blocking,
+        "pilot_sellable": pilot_sellable,
+        "production_ready": production_ready,
         "blocking": blocking,
         "warnings": warnings,
         "checks": checks,
+        "pilot_checks": pilot_checks,
+        "pilot_blocking": pilot_blocking,
+        "commercial_readiness": commercial_readiness,
         "auth": auth,
         "document_storage": document_storage,
         "export_storage": export_storage,
         "backup": backup,
         "storage_usage": storage_usage,
-        "store_backend": source.get("FISORA_STORE_BACKEND", "json"),
+        "store_backend": store_backend,
         "ai_provider": ai_provider,
         "ai_model": ai_model,
         "ai_openai_key_present": openai_key_present,

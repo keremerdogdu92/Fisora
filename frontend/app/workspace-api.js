@@ -76,6 +76,18 @@ async function fetchBackendPilotData({
   });
 }
 
+async function fetchBackendReadiness({
+  apiBaseUrl,
+  fetchImpl = fetch,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: "/phase0/store/system/readiness",
+    headers: {},
+    fetchImpl,
+  });
+}
+
 function normalizeBackendWorkspaces({ clients = [], workspaces = [], source = "Backend workspace" } = {}) {
   const normalizedClients = [];
   const documents = [];
@@ -322,6 +334,7 @@ function normalizeRulePrompt(value) {
 
 module.exports = {
   backendAuthHeaders,
+  fetchBackendReadiness,
   fetchBackendPilotData,
   normalizeBackendWorkspaces,
 };

@@ -1086,7 +1086,8 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     return segmentedClientDocuments.filter((document) => document.status === reviewFilter);
   }, [reviewFilter, segmentedClientDocuments]);
   const activeReviewDocuments = mode === "documents" ? visibleProcessingDocuments : visibleReviewDocuments;
-  const selectedDocument = activeReviewDocuments.find((document) => document.id === selectedDocumentId);
+  const selectedDocumentSource = mode === "documents" ? segmentedClientDocuments : activeReviewDocuments;
+  const selectedDocument = selectedDocumentSource.find((document) => document.id === selectedDocumentId);
   const clientSelectedDocument = periodDocuments.find((document) => document.id === selectedDocumentId);
   const selectedStatementLineKey = selectedDocument?.statementLines.map((line) => line.line_no).join("|") ?? "";
   useEffect(() => {
@@ -2654,8 +2655,11 @@ function AccountantWorkspace({
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
     : undefined;
+  const navigationDocuments = selectedDocument && !documents.some((document) => document.id === selectedDocument.id)
+    ? allClientDocuments
+    : documents;
   const selectedDocumentPosition = selectedDocument
-    ? documents.findIndex((document) => document.id === selectedDocument.id) + 1
+    ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
     : 0;
 
   return (
@@ -2749,7 +2753,7 @@ function AccountantWorkspace({
         <div className="workbench-toolbar">
           <div>
             <span>Belge kontrolü</span>
-            <strong>{selectedDocument ? `${selectedDocumentPosition}/${documents.length} ${selectedDocument.fileName}` : "Önce belge seçin."}</strong>
+            <strong>{selectedDocument ? `${selectedDocumentPosition}/${navigationDocuments.length} ${selectedDocument.fileName}` : "Önce belge seçin."}</strong>
           </div>
           <div className="toolbar-controls">
             <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
@@ -2770,8 +2774,8 @@ function AccountantWorkspace({
                 </option>
               ))}
             </select>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(documents[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(documents[selectedDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
+            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[selectedDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
             <button className="primary" disabled={!selectedDocument} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </div>
         </div>

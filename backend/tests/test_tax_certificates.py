@@ -20,6 +20,7 @@ except ModuleNotFoundError:
     phase0 = None
     app = None
 
+from app.domain.business_relevance import ActivityProfile
 from app.domain.tax_certificates import TaxCertificateExtraction, parse_tax_certificate_text
 
 
@@ -52,6 +53,10 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.workplace_addresses, ("MECLIS MAH. ATATURK CAD. NO: 10 SANCAKTEPE / ISTANBUL",))
         self.assertEqual(extraction.start_date, "01/01/2025")
         self.assertGreaterEqual(extraction.confidence, 80)
+        self.assertIn("hearing_aid", extraction.activity_tags)
+        self.assertIn("medical_retail", extraction.activity_tags)
+        self.assertEqual(extraction.activity_profile.primary_activity, "hearing_aid_sales_service")
+        self.assertFalse(extraction.activity_profile.needs_review)
 
     def test_tax_certificate_parse_endpoint_returns_fields_without_storing_file(self) -> None:
         if TestClient is None or phase0 is None or app is None:
@@ -68,6 +73,16 @@ class TaxCertificateParserTests(unittest.TestCase):
                 nace_code="477401",
                 workplace_addresses=("MECLIS MAH. ISTANBUL",),
                 start_date="01/01/2025",
+                activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+                activity_profile=ActivityProfile(
+                    primary_activity="hearing_aid_sales_service",
+                    display_label="Isitme cihazi satis/servis",
+                    activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+                    nace_family="retail_trade",
+                    relevance_hints=("isitme_cihazi", "isitme_cihazi_pili", "medikal_sarf"),
+                    confidence=90,
+                    needs_review=False,
+                ),
                 confidence=92,
                 extraction_notes=("pdf_text_layer",),
             ),
@@ -88,6 +103,16 @@ class TaxCertificateParserTests(unittest.TestCase):
                 "nace_code": "477401",
                 "workplace_addresses": ["MECLIS MAH. ISTANBUL"],
                 "start_date": "01/01/2025",
+                "activity_tags": ["hearing_aid", "medical_retail", "retail_trade"],
+                "activity_profile": {
+                    "primary_activity": "hearing_aid_sales_service",
+                    "display_label": "Isitme cihazi satis/servis",
+                    "activity_tags": ["hearing_aid", "medical_retail", "retail_trade"],
+                    "nace_family": "retail_trade",
+                    "relevance_hints": ["isitme_cihazi", "isitme_cihazi_pili", "medikal_sarf"],
+                    "confidence": 90,
+                    "needs_review": False,
+                },
                 "confidence": 92,
                 "extraction_notes": ["pdf_text_layer"],
             },

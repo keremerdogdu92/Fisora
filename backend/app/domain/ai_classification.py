@@ -4,9 +4,12 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.domain.business_relevance import (
+    CORE_INPUT_CATEGORIES,
+    FIXED_ASSET_CATEGORIES,
     GENERAL_EXPENSE_CATEGORIES,
     HEARING_CENTER_CATEGORIES,
     PERSONAL_USE_CATEGORIES,
+    REGULATED_ITEM_CATEGORIES,
     ProductClassification,
     classify_product_line,
 )
@@ -17,7 +20,10 @@ ALLOWED_AI_CATEGORIES = tuple(
         {
             *GENERAL_EXPENSE_CATEGORIES,
             *HEARING_CENTER_CATEGORIES,
+            *CORE_INPUT_CATEGORIES,
+            *FIXED_ASSET_CATEGORIES,
             *PERSONAL_USE_CATEGORIES,
+            *REGULATED_ITEM_CATEGORIES,
             "bilinmeyen",
         }
     )
@@ -35,6 +41,7 @@ class AiClassificationPolicy:
 @dataclass(frozen=True)
 class AiClassificationContext:
     client_activity: str = ""
+    activity_tags: tuple[str, ...] = ()
     account_candidates: tuple[str, ...] = ()
     counterparty_candidates: tuple[str, ...] = ()
 
@@ -54,6 +61,7 @@ class AiClassificationRequest:
             "raw_line": self.raw_line[: self.max_input_chars].strip(),
             "supplier_hint": self.supplier_hint[: self.max_input_chars].strip(),
             "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
+            "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
             "account_candidates": list(account_candidates),
             "counterparty_candidates": list(counterparty_candidates),
             "allowed_categories": list(self.allowed_categories),

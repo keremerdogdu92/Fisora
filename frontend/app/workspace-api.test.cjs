@@ -51,6 +51,9 @@ const workspaceRecord = {
         provider_hint: "Pilot Alici",
         product_line_hint: "Cihaz satisi",
         product_category: "Satis",
+        business_relevance_relation: "core_business",
+        business_relevance_account_treatment: "stock_or_cogs",
+        business_relevance_requires_review: false,
         ai_classification_provider: "static_rules",
         ai_classification_reason: "Kalem satis olarak siniflandi.",
         accounting_intent: "e_fatura_yazilim_gideri",
@@ -133,6 +136,9 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].status, "export_ready");
   assert.equal(data.documents[0].intakeCategory, "sales_invoice");
   assert.equal(data.documents[0].draftLines.length, 3);
+  assert.equal(data.documents[0].businessRelation, "core_business");
+  assert.equal(data.documents[0].accountTreatment, "stock_or_cogs");
+  assert.equal(data.documents[0].requiresAccountantReview, false);
   assert.equal(data.documents[0].accountingIntent, "e_fatura_yazilim_gideri");
   assert.equal(data.documents[0].accountingIntentConfidence, 84);
   assert.deepEqual(data.documents[0].rulePrompt, {

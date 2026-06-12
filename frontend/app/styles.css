@@ -796,6 +796,23 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.activity-tag-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.activity-tag-strip span {
+  background: #eef6f4;
+  border: 1px solid #c9e3dc;
+  border-radius: 999px;
+  color: #0f5f56;
+  font-size: 0.68rem;
+  line-height: 1;
+  padding: 5px 7px;
+}
+
 .tax-certificate-upload {
   border: 1px dashed var(--border);
   border-radius: 8px;

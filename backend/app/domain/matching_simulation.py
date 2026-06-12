@@ -69,6 +69,9 @@ class SimulatedInvoiceResult:
     business_relevance_confidence: int
     business_relevance_reason: str
     business_relevance_evidence: tuple[str, ...]
+    business_relevance_relation: str
+    business_relevance_account_treatment: str
+    business_relevance_requires_review: bool
     ai_classification_used: bool
     ai_classification_provider: str
     ai_classification_skipped_reason: str
@@ -228,6 +231,7 @@ def _ai_context(
     )
     return AiClassificationContext(
         client_activity=client_profile.activity_description if client_profile else "",
+        activity_tags=client_profile.activity_tags if client_profile else (),
         account_candidates=account_candidates,
         counterparty_candidates=counterparty_candidates,
     )
@@ -463,6 +467,9 @@ def simulate_invoice(
         business_relevance_confidence=relevance.confidence,
         business_relevance_reason=relevance.reason,
         business_relevance_evidence=relevance.evidence,
+        business_relevance_relation=relevance.relation,
+        business_relevance_account_treatment=relevance.account_treatment,
+        business_relevance_requires_review=relevance.requires_accountant_review,
         ai_classification_used=ai_used,
         ai_classification_provider=ai_provider,
         ai_classification_skipped_reason=ai_skipped_reason,

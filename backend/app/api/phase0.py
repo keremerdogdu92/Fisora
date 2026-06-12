@@ -102,6 +102,8 @@ class ClientProfilePayload(BaseModel):
     tax_id: str = ""
     activity_description: str = ""
     nace_code: str = ""
+    activity_tags: list[str] = Field(default_factory=list)
+    activity_profile: dict[str, object] = Field(default_factory=dict)
     workplace_addresses: list[str] = Field(default_factory=list)
     has_chart_accounts: bool = False
 
@@ -634,6 +636,7 @@ def _client_profile(payload: ClientProfilePayload) -> ClientProfile:
         tax_id=payload.tax_id,
         activity_description=payload.activity_description,
         nace_code=payload.nace_code,
+        activity_tags=tuple(payload.activity_tags),
         workplace_addresses=tuple(payload.workplace_addresses),
         has_chart_accounts=payload.has_chart_accounts,
     )
@@ -1546,6 +1549,9 @@ def relevance_assess(payload: RelevancePayload) -> dict[str, object]:
         "confidence": relevance.confidence,
         "reason": relevance.reason,
         "evidence": list(relevance.evidence),
+        "relation": relevance.relation,
+        "account_treatment": relevance.account_treatment,
+        "requires_accountant_review": relevance.requires_accountant_review,
         "classification": {
             "raw_line": relevance.classification.raw_line,
             "category": relevance.classification.category,

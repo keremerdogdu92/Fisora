@@ -22,6 +22,7 @@ from app.domain.ai_classification import AiClassificationContext, AiClassificati
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
 from app.domain.openai_provider import GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.business_relevance import (
+    build_activity_profile,
     ClientProfile,
     assess_business_relevance,
     check_client_onboarding,
@@ -581,6 +582,80 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(relevance.status, "uygun")
         self.assertEqual(status, "export_ready")
 
+    def test_activity_tag_allows_hearing_device_when_activity_text_is_generic(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Medikal Perakende A",
+            tax_id="1234567890",
+            activity_description="Belirli bir mala tahsis edilmis magazalarda satis",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        relevance = assess_business_relevance("Rexton RLi 20", profile)
+
+        self.assertEqual(relevance.status, "uygun")
+        self.assertEqual(relevance.relation, "core_business")
+        self.assertEqual(relevance.account_treatment, "stock_or_cogs")
+        self.assertFalse(relevance.requires_accountant_review)
+        self.assertIn("activity_tag:hearing_aid", relevance.evidence)
+
+    def test_food_service_tags_treat_food_inputs_as_core_stock_or_cogs(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Kafe A",
+            tax_id="1234567890",
+            activity_description="Restoran ve kafe hizmetleri",
+            nace_code="561001",
+            activity_tags=("food_service",),
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        relevance = assess_business_relevance("Domates ve gida alimi", profile)
+
+        self.assertEqual(relevance.classification.category, "gida_alimi")
+        self.assertEqual(relevance.status, "uygun")
+        self.assertEqual(relevance.relation, "core_business")
+        self.assertEqual(relevance.account_treatment, "stock_or_cogs")
+        self.assertFalse(relevance.requires_accountant_review)
+
+    def test_fixed_asset_candidate_stays_in_review_even_when_activity_is_related(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Yazilim A",
+            tax_id="1234567890",
+            activity_description="Bilgisayar programlama faaliyetleri",
+            nace_code="620101",
+            activity_tags=("software_service", "digital_service"),
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        relevance = assess_business_relevance("Macbook Pro laptop bilgisayar", profile)
+        status = decide_export_status(is_balanced=True, risk_flags=(), relevance=relevance)
+
+        self.assertEqual(relevance.classification.category, "computer_equipment")
+        self.assertEqual(relevance.relation, "adjacent_business")
+        self.assertEqual(relevance.account_treatment, "fixed_asset_review")
+        self.assertTrue(relevance.requires_accountant_review)
+        self.assertEqual(status, "review_required")
+
+    def test_build_activity_profile_creates_controlled_tags_from_nace_and_text(self) -> None:
+        profile = build_activity_profile(
+            activity_description="Belirli bir mala tahsis edilmis magazalarda isitme cihazlari satisi",
+            nace_code="477401",
+        )
+
+        self.assertEqual(profile.primary_activity, "hearing_aid_sales_service")
+        self.assertEqual(profile.nace_family, "retail_trade")
+        self.assertEqual(profile.activity_tags, ("hearing_aid", "medical_retail", "retail_trade"))
+        self.assertIn("isitme_cihazi", profile.relevance_hints)
+        self.assertGreaterEqual(profile.confidence, 85)
+        self.assertFalse(profile.needs_review)
+
     def test_static_first_classifier_skips_ai_for_high_confidence_static_match(self) -> None:
         provider = FakeProductProvider(
             {"category": "bilinmeyen", "confidence": 40, "reason": "fallback", "evidence": []}
@@ -796,6 +871,24 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(provider.provider_name, "groq")
         self.assertIn("Bilinmeyen banka hizmet bedeli", request_payload["input"][1]["content"])
         self.assertEqual(response["category"], "bilinmeyen")
+
+    def test_ai_classification_request_includes_controlled_activity_tags(self) -> None:
+        request = AiClassificationRequest(
+            raw_line="Bilinmeyen medikal sarf",
+            supplier_hint="Tedarikci",
+            allowed_categories=("medikal_sarf", "bilinmeyen"),
+            max_input_chars=120,
+            context=AiClassificationContext(
+                client_activity="Belirli bir mala tahsis edilmis magazalarda satis",
+                activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            ),
+        )
+
+        payload = request.to_schema_payload()
+
+        self.assertEqual(payload["activity_tags"], ["hearing_aid", "medical_retail", "retail_trade"])
+        self.assertNotIn("activity_tags", payload["output_schema"]["properties"])
+        self.assertNotIn("raw_pdf", str(payload).lower())
 
     def test_statement_ai_request_schema_disallows_extra_properties_for_groq(self) -> None:
         request = StatementAiSuggestionRequest(

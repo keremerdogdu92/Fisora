@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import os
 import re
@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import unicodedata
 
+from app.domain.business_relevance import ActivityProfile, build_activity_profile
 from app.domain.pdf_invoices import extract_pdf_text
 
 
@@ -21,12 +22,16 @@ class TaxCertificateExtraction:
     nace_code: str = ""
     workplace_addresses: tuple[str, ...] = ()
     start_date: str = ""
+    activity_tags: tuple[str, ...] = ()
+    activity_profile: ActivityProfile = field(default_factory=ActivityProfile)
     confidence: int = 0
     extraction_notes: tuple[str, ...] = ()
 
     def to_payload(self) -> dict[str, object]:
         payload = asdict(self)
         payload["workplace_addresses"] = list(self.workplace_addresses)
+        payload["activity_tags"] = list(self.activity_tags)
+        payload["activity_profile"] = self.activity_profile.to_payload()
         payload["extraction_notes"] = list(self.extraction_notes)
         return payload
 
@@ -165,6 +170,10 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
     tax_office = value_after_label(lines, "tax_office", max_lines=1)
     activity_value = value_after_label(lines, "activity", max_lines=3)
     nace_code, activity_description = parse_activity(activity_value)
+    activity_profile = build_activity_profile(
+        activity_description=activity_description,
+        nace_code=nace_code,
+    )
     address = value_after_label(lines, "address", max_lines=4)
     start_date = first_date(value_after_label(lines, "start_date", max_lines=1)) or first_date(joined_text)
     addresses = (address,) if address else ()
@@ -186,6 +195,8 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
         nace_code=nace_code,
         workplace_addresses=addresses,
         start_date=start_date,
+        activity_tags=activity_profile.activity_tags,
+        activity_profile=activity_profile,
         confidence=confidence,
         extraction_notes=notes,
     )

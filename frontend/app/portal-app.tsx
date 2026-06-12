@@ -130,6 +130,9 @@ type PilotDocument = {
   vatRates: string[];
   productLine: string;
   productCategory: string;
+  businessRelation: string;
+  accountTreatment: string;
+  requiresAccountantReview: boolean;
   previewText: string;
   aiReason: string;
   aiProvider: string;
@@ -234,6 +237,9 @@ type ReviewData = {
     productCategory?: string;
     productConfidence?: number;
     businessRelevanceReason?: string;
+    businessRelevanceRelation?: string;
+    businessRelevanceAccountTreatment?: string;
+    businessRelevanceRequiresReview?: boolean;
     aiClassificationReason?: string;
     aiClassificationProvider?: string;
     aiClassificationSkippedReason?: string;
@@ -293,6 +299,8 @@ type NewClientDraft = {
   taxId: string;
   activityDescription: string;
   naceCode: string;
+  activityTags: string[];
+  activityProfile: Record<string, unknown>;
   workplaceAddresses: string[];
   portalUserId: string;
   portalDisplayName: string;
@@ -692,6 +700,9 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       vatRates: Array.isArray(row.vatRates) ? row.vatRates.map(String) : [],
       productLine: safeText(row.productLineHint, "-"),
       productCategory: safeText(row.productCategory, "-"),
+      businessRelation: safeText(row.businessRelevanceRelation, "-"),
+      accountTreatment: safeText(row.businessRelevanceAccountTreatment, "-"),
+      requiresAccountantReview: Boolean(row.businessRelevanceRequiresReview),
       previewText: [
         safeText(row.providerHint, "Tedarikçi bilinmiyor"),
         safeText(row.productLineHint, "Belge kalemi okunuyor"),
@@ -748,6 +759,9 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       vatRates: [],
       productLine: "Belge kuyrukta",
       productCategory: "-",
+      businessRelation: "-",
+      accountTreatment: "-",
+      requiresAccountantReview: true,
       previewText: "Belge yüklendi, otomatik kuyruğa alınacak.",
       aiReason: "Henüz yorum yok.",
       aiProvider: "-",
@@ -912,6 +926,8 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     taxId: "",
     activityDescription: "",
     naceCode: "",
+    activityTags: [],
+    activityProfile: {},
     workplaceAddresses: [],
     portalUserId: "",
     portalDisplayName: "",
@@ -1156,6 +1172,8 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         taxId: "",
         activityDescription: "",
         naceCode: "",
+        activityTags: [],
+        activityProfile: {},
         workplaceAddresses: [],
         portalUserId: "",
         portalDisplayName: "",
@@ -1187,6 +1205,13 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       const taxId = String(extraction?.tax_id || "").trim();
       const activityDescription = String(extraction?.activity_description || "").trim();
       const naceCode = String(extraction?.nace_code || "").trim();
+      const activityTags = Array.isArray(extraction?.activity_tags)
+        ? (extraction.activity_tags as unknown[]).map((value) => String(value).trim()).filter(Boolean)
+        : [];
+      const activityProfile =
+        extraction?.activity_profile && typeof extraction.activity_profile === "object"
+          ? (extraction.activity_profile as Record<string, unknown>)
+          : {};
       const workplaceAddresses = Array.isArray(extraction?.workplace_addresses)
         ? (extraction.workplace_addresses as unknown[]).map((value) => String(value).trim()).filter(Boolean)
         : [];
@@ -1196,19 +1221,25 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         taxId: current.taxId.trim() || taxId,
         activityDescription: current.activityDescription.trim() || activityDescription,
         naceCode: current.naceCode.trim() || naceCode,
+        activityTags: current.activityTags.length ? current.activityTags : activityTags,
+        activityProfile: Object.keys(current.activityProfile).length ? current.activityProfile : activityProfile,
         workplaceAddresses: current.workplaceAddresses.length ? current.workplaceAddresses : workplaceAddresses,
       }));
       const filledFields = [
         title ? "unvan" : "",
         taxId ? "VKN" : "",
         activityDescription || naceCode ? "faaliyet" : "",
+        activityTags.length ? "faaliyet tag" : "",
         workplaceAddresses.length ? "adres" : "",
       ].filter(Boolean);
       const confidence = Number(extraction?.confidence || 0);
+      const profileLabel = String(activityProfile.display_label || "").trim();
+      const profileConfidence = Number(activityProfile.confidence || 0);
+      const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
       const note = filledFields.length
         ? `Vergi levhası okundu: ${filledFields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
         : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
-      setNewClientStatus(note);
+      setNewClientStatus(profileSummary ? `${note} ${profileSummary}` : note);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
@@ -1300,6 +1331,9 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       vatRates: [],
       productLine: intakeMetadata.productLine,
       productCategory: intakeMetadata.productCategory,
+      businessRelation: "-",
+      accountTreatment: "-",
+      requiresAccountantReview: true,
       previewText: intakeMetadata.previewText,
       aiReason: intakeMetadata.aiReason,
       aiProvider: "-",
@@ -2734,6 +2768,13 @@ function NewClientCard({
           value={draft.portalUserId}
         />
       </div>
+      {draft.activityTags.length ? (
+        <div className="activity-tag-strip" aria-label="Faaliyet etiketleri">
+          {draft.activityTags.slice(0, 4).map((tag) => (
+            <span key={tag}>{tag.replace(/_/g, " ")}</span>
+          ))}
+        </div>
+      ) : null}
       <label className="tax-certificate-upload">
         <span>Vergi levhası</span>
         <input
@@ -2854,6 +2895,8 @@ function JournalPanel({
       </div>
       <div className="ai-guidance">
         <ReasonCard label="AI/kural yorumu" value={document.aiReason} />
+        <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
+        <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
         <ReasonCard label="Neden bu hesap/cari" value={document.aiAccountReason || "AI hesap/cari gerekçesi yok."} />
         <ReasonCard label="Deterministik kontrol" value={document.deterministicSummary} />
         <ReasonCard label="Onaya gitmeme nedeni" value={document.exportGateReason} />

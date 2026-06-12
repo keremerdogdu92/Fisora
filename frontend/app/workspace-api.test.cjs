@@ -120,17 +120,17 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   const data = normalizeBackendWorkspaces({
     clients: [clientRecord],
     workspaces: [workspaceRecord],
-    source: "Backend workspace",
+    source: "Çalışma alanı",
   });
 
-  assert.equal(data.generatedFrom, "Backend workspace");
+  assert.equal(data.generatedFrom, "Çalışma alanı");
   assert.deepEqual(data.clients[0], {
     clientId: "client-1",
     clientName: "Canli Pilot A.S.",
     taxId: "1111111111",
     userLabel: "Mukellef Kullanici",
     portalUserId: "mukellef-user",
-    onboardingStatus: "Backend workspace",
+    onboardingStatus: "Çalışma alanı",
   });
   assert.equal(data.documents.length, 2);
   assert.equal(data.documents[0].id, "processed-1");
@@ -153,7 +153,7 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].learningRuleSourceSummary, "Bu oneride 3 onceki musavir karari kullanildi.");
   assert.equal(data.documents[1].id, "upload-1");
   assert.equal(data.documents[1].status, "queued");
-  assert.equal(data.documents[1].previewText, "Backend'e yuklendi; worker sonucu bekleniyor.");
+  assert.equal(data.documents[1].previewText, "Belge alındı; işleme sonucu hazırlanıyor.");
   assert.deepEqual(data.exportBasket[0], {
     id: "package-1",
     clientId: "client-1",
@@ -225,13 +225,26 @@ test("fetchBackendReadiness loads the system readiness payload without auth head
     pilot_sellable: true,
     production_ready: false,
   });
-  assert.deepEqual(requests, [
-    {
-      url: "http://localhost:8000/phase0/store/system/readiness",
-      init: {
-        method: "GET",
-        headers: {},
-      },
-    },
-  ]);
+  assert.equal(requests[0].url, "http://localhost:8000/phase0/store/system/readiness");
+  assert.equal(requests[0].init.method, "GET");
+  assert.deepEqual(requests[0].init.headers, {});
+  assert.ok(requests[0].init.signal);
+});
+
+test("fetchBackendPilotData aborts slow backend requests so local fallback can continue", async () => {
+  const fetchImpl = (url, init = {}) =>
+    new Promise((resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(new Error(`aborted ${url}`)));
+    });
+
+  await assert.rejects(
+    () =>
+      fetchBackendPilotData({
+        apiBaseUrl: "http://localhost:8000",
+        fetchImpl,
+        timeoutMs: 5,
+        userId: "mali-musavir",
+      }),
+    /aborted http:\/\/localhost:8000\/phase0\/store\/clients/,
+  );
 });

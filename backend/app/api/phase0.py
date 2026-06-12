@@ -9,7 +9,7 @@ import re
 import tempfile
 from typing import Literal
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -69,6 +69,7 @@ DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_st
 DEFAULT_DOCUMENT_STORAGE_PATH = Path(os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "exports/documents"))
 DEFAULT_EXPORT_PATH = Path(os.environ.get("FISORA_EXPORT_PATH", "exports/generated"))
 DEFAULT_BACKUP_PATH = Path(os.environ.get("FISORA_BACKUP_PATH", os.environ.get("FISORA_BACKUP_DIR", "exports/backups")))
+SESSION_COOKIE_NAME = "fisora_session"
 
 ReviewAction = Literal[
     "approve",
@@ -417,6 +418,37 @@ def get_workflow_store():
     return build_workflow_store(json_path=DEFAULT_STORE_PATH)
 
 
+def _session_cookie_secure() -> bool:
+    return os.environ.get("FISORA_SESSION_COOKIE_SECURE", "true").strip().lower() not in {"0", "false", "no"}
+
+
+def _session_cookie_samesite() -> str:
+    value = os.environ.get("FISORA_SESSION_COOKIE_SAMESITE", "lax").strip().lower()
+    return value if value in {"lax", "strict", "none"} else "lax"
+
+
+def _set_session_cookie(response: Response, token: str, *, ttl_hours: int) -> None:
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        max_age=max(ttl_hours, 1) * 3600,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite=_session_cookie_samesite(),
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=_session_cookie_secure(),
+        samesite=_session_cookie_samesite(),
+        path="/",
+    )
+
+
 def _client_id_from_record(record: dict[str, object]) -> str:
     profile = record.get("profile") if isinstance(record.get("profile"), dict) else {}
     return str(record.get("client_id") or profile.get("client_id") or "").strip()
@@ -467,12 +499,20 @@ def _mock_user_header(value: str | None) -> str:
     return resolve_user_id(value, build_auth_config())
 
 
-def _request_user_id(user_header: str | None, session_header: str | None = None) -> str:
-    user_id = _mock_user_header(user_header)
-    if user_id:
-        return user_id
-    token = (session_header or "").strip()
+def _request_user_id(
+    user_header: str | None,
+    session_header: str | None = None,
+    session_cookie: str | None = None,
+) -> str:
+    auth_config = build_auth_config()
+    if auth_config.accepts_user_header:
+        user_id = _mock_user_header(user_header)
+        if user_id:
+            return user_id
+    token = (session_header or session_cookie or "").strip()
     if not token:
+        if auth_config.mode == "session_required":
+            raise HTTPException(status_code=401, detail={"valid": False, "reason": "session_required"})
         return ""
     session = get_workflow_store().resolve_auth_session(token_hash=hash_session_token(token))
     if not session.get("valid"):
@@ -846,10 +886,11 @@ def store_client(payload: ClientProfilePayload) -> dict[str, object]:
 def store_clients(
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     store = get_workflow_store()
     clients = store.list_clients()
-    user_id = _request_user_id(x_fisora_user_id, x_fisora_session)
+    user_id = _request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
     if user_id:
         clients = [
             client
@@ -879,13 +920,14 @@ async def store_chart_accounts_upload(
     file: UploadFile = File(...),
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     normalized_client_id = client_id.strip()
     if not normalized_client_id:
         raise HTTPException(status_code=400, detail="client_id is required for chart account upload")
     _require_mock_client_access(
         client_id=normalized_client_id,
-        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         allowed_roles=("accountant", "admin"),
     )
     original_name = Path(file.filename or "chart_accounts.csv").name
@@ -993,7 +1035,7 @@ def store_auth_status() -> dict[str, object]:
 def store_auth_password(payload: AuthPasswordPayload) -> dict[str, object]:
     if not payload.user_id.strip():
         raise HTTPException(status_code=400, detail="user_id is required")
-    if build_auth_config().mode == "trusted_header" and not _password_bootstrap_enabled():
+    if build_auth_config().production_ready and not _password_bootstrap_enabled():
         raise HTTPException(status_code=403, detail={"allowed": False, "reason": "password_bootstrap_disabled"})
     try:
         password_hash = create_password_hash(payload.password)
@@ -1003,7 +1045,7 @@ def store_auth_password(payload: AuthPasswordPayload) -> dict[str, object]:
 
 
 @router.post("/store/auth/login")
-def store_auth_login(payload: AuthLoginPayload) -> dict[str, object]:
+def store_auth_login(payload: AuthLoginPayload, response: Response) -> dict[str, object]:
     store = get_workflow_store()
     password_hash = store.get_auth_password_hash(user_id=payload.user_id.strip())
     if not password_hash or not verify_password(payload.password, password_hash):
@@ -1018,6 +1060,7 @@ def store_auth_login(payload: AuthLoginPayload) -> dict[str, object]:
         token_hash=session_token.token_hash,
         expires_at=expires_at,
     )
+    _set_session_cookie(response, session_token.raw_token, ttl_hours=payload.ttl_hours)
     return {"session_token": session_token.raw_token, "session": session}
 
 
@@ -1106,8 +1149,9 @@ def store_auth_password_reset_confirm(payload: AuthPasswordResetConfirmPayload) 
 @router.get("/store/auth/session")
 def store_auth_session(
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
-    token = (x_fisora_session or "").strip()
+    token = (x_fisora_session or fisora_session or "").strip()
     if not token:
         raise HTTPException(status_code=401, detail={"valid": False, "reason": "session_required"})
     session = get_workflow_store().resolve_auth_session(token_hash=hash_session_token(token))
@@ -1130,13 +1174,14 @@ def store_operation_log(
     payload: OperationEventPayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
     if payload.client_id != "__system__":
         _require_mock_client_access(
             client_id=payload.client_id,
-            user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+            user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
             allowed_roles=("accountant", "admin"),
         )
     return _record_operation_event(
@@ -1154,12 +1199,13 @@ def store_operation_health(
     client_id: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
     _require_mock_client_access(
         client_id=client_id,
-        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         allowed_roles=("accountant", "admin"),
     )
     store = get_workflow_store()
@@ -1176,12 +1222,16 @@ def store_operation_health(
 @router.post("/store/auth/logout")
 def store_auth_logout(
     payload: AuthLogoutPayload,
+    response: Response,
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
-    token = (payload.session_token or x_fisora_session or "").strip()
+    token = (payload.session_token or x_fisora_session or fisora_session or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="session token is required")
-    return get_workflow_store().revoke_auth_session(token_hash=hash_session_token(token))
+    result = get_workflow_store().revoke_auth_session(token_hash=hash_session_token(token))
+    _clear_session_cookie(response)
+    return result
 
 
 @router.post("/store/document-upload")
@@ -1189,6 +1239,7 @@ def store_document_upload(
     payload: DocumentUploadPayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     content = None
     if payload.content_base64:
@@ -1203,7 +1254,7 @@ def store_document_upload(
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
         uploaded_by_user_id=payload.uploaded_by_user_id,
-        request_user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        request_user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         content=content,
         size_bytes=payload.size_bytes,
         sha256=payload.sha256,
@@ -1222,6 +1273,7 @@ async def store_document_upload_multipart(
     file: UploadFile = File(...),
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     content = await file.read()
     return _save_uploaded_document_with_job(
@@ -1231,7 +1283,7 @@ async def store_document_upload_multipart(
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
         uploaded_by_user_id=uploaded_by_user_id,
-        request_user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        request_user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         content=content,
         size_bytes=len(content),
         retention_policy_days=retention_policy_days,
@@ -1273,10 +1325,14 @@ def store_processing_jobs(
     client_id: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
-    _require_mock_client_access(client_id=client_id, user_id=_request_user_id(x_fisora_user_id, x_fisora_session))
+    _require_mock_client_access(
+        client_id=client_id,
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
     return {"jobs": get_workflow_store().list_processing_jobs(client_id=client_id)}
 
 
@@ -1338,11 +1394,12 @@ def statement_ai_suggestions(
     payload: StatementAiSuggestionsPayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if payload.client_id.strip():
         _require_mock_client_access(
             client_id=payload.client_id.strip(),
-            user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+            user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         )
     replay_provider = (
         ReplayStatementSuggestionProvider(
@@ -1605,12 +1662,13 @@ def store_review_decision(
     payload: StoredReviewDecisionPayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     _require_mock_client_access(
         client_id=payload.client_id,
-        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         allowed_roles=("accountant", "admin"),
     )
     store = get_workflow_store()
@@ -1691,12 +1749,13 @@ def store_export_package_from_workspace(
     payload: WorkspaceExportPackagePayload,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if not payload.client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required for persistence")
     _require_mock_client_access(
         client_id=payload.client_id,
-        user_id=_request_user_id(x_fisora_user_id, x_fisora_session),
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         allowed_roles=("accountant", "admin"),
     )
     store = get_workflow_store()
@@ -1764,8 +1823,12 @@ def download_export_package(
     file_name: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> FileResponse:
-    _require_mock_client_access(client_id=client_id, user_id=_request_user_id(x_fisora_user_id, x_fisora_session))
+    _require_mock_client_access(
+        client_id=client_id,
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
     safe_name = Path(file_name).name
     path = DEFAULT_EXPORT_PATH / client_id / safe_name
     if not path.exists() or not path.is_file():
@@ -1789,8 +1852,12 @@ def store_workspace(
     client_id: str,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     if not client_id.strip():
         raise HTTPException(status_code=400, detail="client_id is required")
-    _require_mock_client_access(client_id=client_id, user_id=_request_user_id(x_fisora_user_id, x_fisora_session))
+    _require_mock_client_access(
+        client_id=client_id,
+        user_id=_request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
     return get_workflow_store().get_workspace(client_id)

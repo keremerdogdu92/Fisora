@@ -23,7 +23,7 @@ type LocalSession = {
   expiresAt?: string;
 };
 
-const SESSION_STORAGE_KEY = "fisora.privatePilot.session.v1";
+const SESSION_STORAGE_KEY = "fisora.office.session.v1";
 
 function persistSession(session: LocalSession) {
   window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
@@ -51,7 +51,7 @@ export default function RoleGatewayLanding() {
   async function enterPortal() {
     const effectiveUserId = userId.trim() || selectedEntry.defaultUserId;
     if (password.trim()) {
-      setStatus("Backend oturumu açılıyor.");
+      setStatus("Oturum açılıyor.");
       try {
         const backendSession = await loginWithPassword({
           apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -68,7 +68,7 @@ export default function RoleGatewayLanding() {
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setStatus(`Backend oturumu açılamadı. ${message}`);
+        setStatus(`Oturum açılamadı. ${message}`);
         return;
       }
     }
@@ -78,7 +78,7 @@ export default function RoleGatewayLanding() {
       explicitAllow: process.env.NEXT_PUBLIC_FISORA_ALLOW_LOCAL_FALLBACK === "true",
     });
     if (!localFallbackAllowed) {
-      setStatus("Bu serverda sifresiz pilot girisi kapali. Backend sifresi ile girin.");
+      setStatus("Bu ortamda şifresiz giriş kapalı. Kullanıcı şifresi ile girin.");
       return;
     }
     persistSession({ userId: effectiveUserId, role: selectedRole });
@@ -102,11 +102,11 @@ export default function RoleGatewayLanding() {
 
       <section className="role-gateway">
         <div className="role-copy">
-          <span>Private pilot portalı</span>
-          <h1>Belge yükleme ve müşavir kontrolü için tek giriş ekranı</h1>
+          <span>Muhasebe operasyon çalışma alanı</span>
+          <h1>AI ajan destekli fiş taslağı ve müşavir kontrolü</h1>
           <p>
-            Mükellef belgelerini yükler, müşavir aynı çalışma alanında belgeyi,
-            fiş taslağını ve çıktı durumunu kontrol eder.
+            Belge ayrıştırma, muhasebe motoru, AI ajan önerileri ve müşavir
+            kararları aynı çalışma alanında ilerler.
           </p>
         </div>
 
@@ -145,7 +145,7 @@ export default function RoleGatewayLanding() {
               <input
                 aria-label="Şifre"
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Backend şifresi varsa girin"
+                placeholder="Kullanıcı şifresi"
                 type="password"
                 value={password}
               />
@@ -165,11 +165,11 @@ export default function RoleGatewayLanding() {
         </div>
         <div>
           <span>02</span>
-          <strong>Kontrol et</strong>
+          <strong>AI destekli taslak</strong>
         </div>
         <div>
           <span>03</span>
-          <strong>Çıktı hazırla</strong>
+          <strong>Müşavir onayı</strong>
         </div>
       </section>
     </main>

@@ -24,18 +24,19 @@ function canUseLocalPilotFallback({ pageUrl = "", explicitAllow = false } = {}) 
 }
 
 function offerLabel(value) {
-  if (value === "accountant_reviewed_controlled_export") return "Musavir onayli kontrollu export";
-  return safeText(value, "Musavir onayli kontrollu export");
+  if (value === "accountant_reviewed_controlled_export") return "Müşavir onaylı kontrollü aktarım";
+  return safeText(value, "Müşavir onaylı kontrollü aktarım");
 }
 
 function exportLabel(value) {
-  if (value === "controlled_csv_and_manifest_candidate") return "Kontrollu CSV + manifest adayi";
-  return safeText(value, "Kontrollu CSV + manifest adayi");
+  if (value === "controlled_csv_and_manifest_candidate") return "Kontrollü çıktı paketi";
+  return safeText(value, "Kontrollü çıktı paketi");
 }
 
 function zirveLabel(value) {
-  if (value === "unverified_until_field_test") return "Zirve import dogrulanmadi";
-  return safeText(value, "Zirve import dogrulanmadi");
+  if (value === "unverified_until_field_test") return "Format doğrulaması gerekli";
+  if (value === "verified_in_zirve") return "Format doğrulandı";
+  return safeText(value, "Format doğrulaması gerekli");
 }
 
 /**
@@ -52,8 +53,8 @@ function buildPilotReadinessView(payload = null) {
 
   return {
     status,
-    statusLabel: pilotSellable ? "Kapali pilot satilabilir" : "Pilot satis bloklu",
-    productionLabel: productionReady ? "Production hazir" : "Production hazir degil",
+    statusLabel: pilotSellable ? "Kontrollü kullanıma hazır" : "Kurulum kontrolü gerekli",
+    productionLabel: productionReady ? "Canlı kullanım hazır" : "Canlı kullanım için kontrol gerekli",
     offerLabel: offerLabel(commercial.primary_offer),
     exportLabel: exportLabel(commercial.export_positioning),
     zirveLabel: zirveLabel(commercial.zirve_import_claim),

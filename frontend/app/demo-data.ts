@@ -1,28 +1,28 @@
 export const fallbackReviewData = {
-  generatedFrom: "Private pilot demo verisi",
-  clientId: "pilot-isitme-merkezi",
-  clientName: "Pilot İşitme Merkezi",
+  generatedFrom: "Yerel çalışma verisi",
+  clientId: "ofis-isitme-merkezi",
+  clientName: "Ofis İşitme Merkezi",
   portalUsers: [
     {
-      userId: "pilot-mukellef-user",
-      displayName: "Pilot mükellef kullanıcısı",
+      userId: "ofis-mukellef-user",
+      displayName: "Ofis mükellef kullanıcısı",
       role: "client_user",
     },
   ],
   uploadQueue: [
     {
-      id: "demo-upload-1",
+      id: "ornek-belge-1",
       fileName: "rexton-alis-faturasi.pdf",
       kind: "invoice",
-      uploadedBy: "Pilot İşitme Merkezi",
+      uploadedBy: "Ofis İşitme Merkezi",
       status: "export_ready",
       uploadedAt: "01.06.2026 10:12",
     },
     {
-      id: "demo-upload-2",
+      id: "ornek-belge-2",
       fileName: "mayis-banka-ekstresi.xlsx",
       kind: "bank",
-      uploadedBy: "Pilot İşitme Merkezi",
+      uploadedBy: "Ofis İşitme Merkezi",
       status: "processing",
       uploadedAt: "01.06.2026 10:18",
     },
@@ -37,7 +37,7 @@ export const fallbackReviewData = {
   },
   chartRuns: [
     {
-      chartFileName: "PİLOT İŞİTME MERKEZİ HESAP PLANI.xlsx",
+      chartFileName: "OFİS İŞİTME MERKEZİ HESAP PLANI.xlsx",
       accountCount: 593,
       detailAccountCount: 255,
       customerCandidateCount: 20,
@@ -57,7 +57,7 @@ export const fallbackReviewData = {
   ],
   invoiceRows: [
     {
-      chartFileName: "PİLOT İŞİTME MERKEZİ HESAP PLANI.xlsx",
+      chartFileName: "OFİS İŞİTME MERKEZİ HESAP PLANI.xlsx",
       fileName: "rexton-alis-faturasi.pdf",
       providerHint: "Rexton Medikal",
       invoiceType: "ALIS",
@@ -95,7 +95,7 @@ export const fallbackReviewData = {
       processingMode: "controlled_automation",
       draftDecisionSource: "deterministic_rules",
       deterministicChecks: ["amount_positive", "single_vat_rate", "balanced_entry", "counterparty_matched", "client_onboarding_ready"],
-      exportGateReason: "Deterministik kontroller temiz; export paketine alınabilir.",
+      exportGateReason: "Deterministik kontroller temiz; çıktıya alınabilir.",
       draftLines: [
         { account_code: "770.01", description: "Alış gideri", debit: "10000.00", credit: "0.00" },
         { account_code: "191.01", description: "İndirilecek KDV", debit: "2000.00", credit: "0.00" },
@@ -103,7 +103,7 @@ export const fallbackReviewData = {
       ],
     },
     {
-      chartFileName: "PİLOT İŞİTME MERKEZİ HESAP PLANI.xlsx",
+      chartFileName: "OFİS İŞİTME MERKEZİ HESAP PLANI.xlsx",
       fileName: "urban-care-market.pdf",
       providerHint: "Market Tedarik",
       invoiceType: "ALIS",
@@ -129,8 +129,19 @@ export const fallbackReviewData = {
       aiClassificationReason: "",
       aiEstimatedInputChars: 36,
       learningRuleApplied: false,
-      learningRuleScope: "",
-      learningRuleReason: "",
+      learningRuleScope: "office_pattern",
+      learningRuleReason: "Faaliyet dışı kişisel bakım harcamaları müşavir kontrolünde tutuluyor.",
+      accountingIntent: "faaliyet_disi_kontrol",
+      accountingIntentConfidence: 72,
+      learningRuleSourceSummary: "Benzer kararlar düşük riskli tekrar kuralına aday.",
+      rulePrompt: {
+        show: true,
+        default_scope: "office_pattern",
+        message: "Benzer faaliyet dışı harcamalar için aynı kontrol kararı tekrarlandı.",
+        client_consistent_decision_count: 2,
+        office_distinct_client_count: 2,
+        office_consistent_decision_count: 4,
+      },
       exportStatus: "review_required",
       selectedExpenseAccount: "770.01",
       selectedVatAccount: "191.01",
@@ -141,7 +152,7 @@ export const fallbackReviewData = {
       processingMode: "ai_assisted_draft",
       draftDecisionSource: "static_rules_ai_assisted_draft",
       deterministicChecks: ["amount_positive", "single_vat_rate", "balanced_entry", "counterparty_low_confidence", "client_onboarding_ready"],
-      exportGateReason: "AI destekli taslak modu: fiş taslağı hazır, müşavir onayı olmadan export kapalı.",
+      exportGateReason: "AI destekli taslak hazır; müşavir onayı olmadan çıktıya alınmaz.",
       draftLines: [
         { account_code: "770.01", description: "Kontrol bekleyen gider", debit: "375.00", credit: "0.00" },
         { account_code: "191.01", description: "İndirilecek KDV", debit: "75.00", credit: "0.00" },
@@ -149,7 +160,7 @@ export const fallbackReviewData = {
       ],
     },
     {
-      chartFileName: "PİLOT İŞİTME MERKEZİ HESAP PLANI.xlsx",
+      chartFileName: "OFİS İŞİTME MERKEZİ HESAP PLANI.xlsx",
       fileName: "bilinmeyen-tedarikci.pdf",
       providerHint: "Yeni Tedarikçi A.Ş.",
       invoiceType: "ALIS",
@@ -187,7 +198,7 @@ export const fallbackReviewData = {
       processingMode: "ai_assisted_draft",
       draftDecisionSource: "static_rules_ai_assisted_draft",
       deterministicChecks: ["amount_positive", "single_vat_rate", "balanced_entry", "counterparty_missing", "client_onboarding_ready"],
-      exportGateReason: "Cari eşleşmesi net olmadığı için export kapalı.",
+      exportGateReason: "Cari eşleşmesi net olmadığı için müşavir kontrolü gerekir.",
       draftLines: [
         { account_code: "770.01", description: "Gider", debit: "833.25", credit: "0.00" },
         { account_code: "191.01", description: "İndirilecek KDV", debit: "166.65", credit: "0.00" },
@@ -195,9 +206,9 @@ export const fallbackReviewData = {
       ],
     },
     {
-      chartFileName: "PILOT ISITME MERKEZI HESAP PLANI.xlsx",
+      chartFileName: "OFIS ISITME MERKEZI HESAP PLANI.xlsx",
       fileName: "mayis-banka-ekstresi.xlsx",
-      providerHint: "Demo Banka",
+      providerHint: "Örnek Banka",
       invoiceType: "bank_statement",
       intakeCategory: "bank_statement",
       issueDate: "31.05.2026",
@@ -223,8 +234,8 @@ export const fallbackReviewData = {
       processingMode: "statement_rules_first",
       draftDecisionSource: "statement_rule_engine",
       deterministicChecks: ["statement_lines_extracted", "direction_normalized", "accountant_approval_required"],
-      exportGateReason: "Banka satirlari musavir onayi olmadan export'a girmez.",
-      statementAiSummary: "1 AI onerisi hazir; export icin musavir karari gerekir.",
+      exportGateReason: "Banka satırları müşavir onayı olmadan çıktıya alınmaz.",
+      statementAiSummary: "1 AI ajan önerisi hazır; çıktı için müşavir kararı gerekir.",
       statementLines: [
         {
           line_no: 1,
@@ -269,7 +280,7 @@ export const fallbackReviewData = {
       statementEntries: [
         {
           statement_line_no: 1,
-          statement_fingerprint: "demo-bank-202605-001",
+          statement_fingerprint: "ornek-banka-202605-001",
           source_document_ref: "mayis-banka-ekstresi.xlsx",
           accountant_review_status: "review_required",
           risk_flags: ["statement_accountant_approval_required"],
@@ -280,7 +291,7 @@ export const fallbackReviewData = {
         },
         {
           statement_line_no: 2,
-          statement_fingerprint: "demo-bank-202605-002",
+          statement_fingerprint: "ornek-banka-202605-002",
           source_document_ref: "mayis-banka-ekstresi.xlsx",
           accountant_review_status: "review_required",
           risk_flags: ["counterparty_not_found", "statement_accountant_approval_required"],
@@ -291,7 +302,7 @@ export const fallbackReviewData = {
         },
         {
           statement_line_no: 3,
-          statement_fingerprint: "demo-bank-202605-003",
+          statement_fingerprint: "ornek-banka-202605-003",
           source_document_ref: "mayis-banka-ekstresi.xlsx",
           accountant_review_status: "review_required",
           risk_flags: ["statement_accountant_approval_required"],

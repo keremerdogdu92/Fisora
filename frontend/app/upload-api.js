@@ -1,5 +1,5 @@
 const DEFAULT_BACKEND_PORT = "8000";
-const DEFAULT_UPLOAD_USER_ID = "pilot-mukellef-user";
+const DEFAULT_UPLOAD_USER_ID = "ofis-mukellef-user";
 
 function trimSlashes(value) {
   return String(value || "").trim().replace(/\/+$/, "");
@@ -25,20 +25,20 @@ function pickUploadUser({ session, selectedClient, fallbackUserId = DEFAULT_UPLO
 }
 
 function buildClientBootstrapPayload(client) {
-  const clientId = String(client?.clientId || "private-pilot-client").trim();
-  const clientName = String(client?.clientName || clientId || "Private Pilot Client").trim();
+  const clientId = String(client?.clientId || "ofis-calisma-client").trim();
+  const clientName = String(client?.clientName || clientId || "Ofis Mükellefi").trim();
   const taxId = String(client?.taxId || "").trim();
   return {
     client_id: clientId,
     title: clientName,
-    tax_id: taxId === "pilot-local" ? "" : taxId,
+    tax_id: taxId === "pilot-local" || taxId === "ofis-local" ? "" : taxId,
     has_chart_accounts: true,
   };
 }
 
 function buildPortalUserBootstrapPayload({ userId, displayName, clientId }) {
   const normalizedUserId = String(userId || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID;
-  const normalizedClientId = String(clientId || "private-pilot-client").trim();
+  const normalizedClientId = String(clientId || "ofis-calisma-client").trim();
   return {
     user_id: normalizedUserId,
     display_name: String(displayName || normalizedUserId).trim() || normalizedUserId,

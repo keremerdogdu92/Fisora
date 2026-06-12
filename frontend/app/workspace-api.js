@@ -15,6 +15,8 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+const DEFAULT_BACKEND_TIMEOUT_MS = 2500;
+
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
   const token = safeText(sessionToken).trim();
   if (token) return { "X-Fisora-Session": token };
@@ -34,11 +36,27 @@ async function responseErrorMessage(response, fallback) {
   }
 }
 
-async function getJson({ apiBaseUrl, path, headers = {}, fetchImpl = fetch }) {
-  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}${path}`, {
+async function fetchWithTimeout(fetchImpl, url, options, timeoutMs) {
+  if (typeof AbortController === "undefined") {
+    return fetchImpl(url, options);
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function getJson({ apiBaseUrl, path, headers = {}, fetchImpl = fetch, timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS }) {
+  const response = await fetchWithTimeout(fetchImpl, `${trimSlashes(apiBaseUrl)}${path}`, {
     method: "GET",
     headers,
-  });
+  }, timeoutMs);
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response, `${path} failed with ${response.status}`));
   }
@@ -50,6 +68,7 @@ async function fetchBackendPilotData({
   sessionToken = "",
   userId = "",
   fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
 }) {
   const headers = backendAuthHeaders({ sessionToken, userId });
   const clientsPayload = await getJson({
@@ -57,6 +76,7 @@ async function fetchBackendPilotData({
     path: "/phase0/store/clients",
     headers,
     fetchImpl,
+    timeoutMs,
   });
   const clients = safeList(clientsPayload?.clients);
   const workspaces = await Promise.all(
@@ -66,29 +86,32 @@ async function fetchBackendPilotData({
         path: `/phase0/store/workspace/${encodeURIComponent(clientIdFromRecord(client))}`,
         headers,
         fetchImpl,
+        timeoutMs,
       }),
     ),
   );
   return normalizeBackendWorkspaces({
     clients,
     workspaces,
-    source: "Backend workspace",
+    source: "Çalışma alanı",
   });
 }
 
 async function fetchBackendReadiness({
   apiBaseUrl,
   fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
 }) {
   return getJson({
     apiBaseUrl,
     path: "/phase0/store/system/readiness",
     headers: {},
     fetchImpl,
+    timeoutMs,
   });
 }
 
-function normalizeBackendWorkspaces({ clients = [], workspaces = [], source = "Backend workspace" } = {}) {
+function normalizeBackendWorkspaces({ clients = [], workspaces = [], source = "Çalışma alanı" } = {}) {
   const normalizedClients = [];
   const documents = [];
   const exportBasket = [];
@@ -120,11 +143,11 @@ function normalizeBackendClient(clientRecord, workspace) {
   const portalUser = safeList(workspace?.portal_users).find((user) => user?.role === "client_user") || safeList(workspace?.portal_users)[0] || {};
   return {
     clientId,
-    clientName: safeText(profile.title || clientRecord?.title, clientId || "Backend mukellef"),
+    clientName: safeText(profile.title || clientRecord?.title, clientId || "Mükellef"),
     taxId: safeText(profile.tax_id || clientRecord?.tax_id),
-    userLabel: safeText(portalUser.display_name || portalUser.user_id, "Mukellef kullanicisi"),
+    userLabel: safeText(portalUser.display_name || portalUser.user_id, "Mükellef kullanıcısı"),
     portalUserId: safeText(portalUser.user_id, "mukellef-user"),
-    onboardingStatus: "Backend workspace",
+    onboardingStatus: "Çalışma alanı",
   };
 }
 
@@ -156,7 +179,7 @@ function processedBackendDocument(document, workspace, client) {
     uploadedAt: safeText(document?.created_at || document?.updated_at),
     uploadedBy: client.userLabel,
     status: statusForBackendDocument(document?.export_status || result.export_status || result.status),
-    provider: safeText(result.provider_hint, "Backend workspace"),
+    provider: safeText(result.provider_hint, "Çalışma alanı"),
     issueDate: safeText(result.issue_date, "-"),
     amount: safeText(result.payable_total, "0.00"),
     vatRates: safeList(result.vat_rates).map(String),
@@ -165,8 +188,8 @@ function processedBackendDocument(document, workspace, client) {
     businessRelation: safeText(result.business_relevance_relation, "-"),
     accountTreatment: safeText(result.business_relevance_account_treatment, "-"),
     requiresAccountantReview: Boolean(result.business_relevance_requires_review),
-    previewText: safeText(result.business_relevance_reason || result.provider_hint, "Backend workspace sonucu."),
-    aiReason: safeText(result.ai_classification_reason || result.business_relevance_reason, "Backend workspace sonucu."),
+    previewText: safeText(result.business_relevance_reason || result.provider_hint, "İşleme sonucu hazır."),
+    aiReason: safeText(result.ai_classification_reason || result.business_relevance_reason, "Öneri gerekçesi hazır."),
     aiProvider: safeText(result.ai_classification_provider || result.draft_decision_source, "-"),
     aiSuggestedAccountCode: safeText(result.ai_suggested_account_code || result.selected_expense_account),
     aiSuggestedCounterpartyCode: safeText(result.ai_suggested_counterparty_code || result.counterparty_match_code || result.selected_supplier_account),
@@ -209,21 +232,21 @@ function pendingBackendDocument(document, workspace, client) {
     uploadedAt: safeText(document?.created_at || document?.updated_at || job.created_at),
     uploadedBy: safeText(document?.uploaded_by, client.userLabel),
     status: statusForBackendJob(job.status || document?.status),
-    provider: "Backend upload",
+    provider: "Belge yükleme",
     issueDate: "-",
     amount: "-",
     vatRates: [],
     productLine: "-",
     productCategory: documentType,
-    previewText: "Backend'e yuklendi; worker sonucu bekleniyor.",
-    aiReason: "Worker sonucu bekleniyor.",
+    previewText: "Belge alındı; işleme sonucu hazırlanıyor.",
+    aiReason: "İşleme sonucu hazırlanıyor.",
     aiProvider: "-",
     aiSuggestedAccountCode: "",
     aiSuggestedCounterpartyCode: "",
     aiRiskFlags: [],
     aiAccountReason: "",
     deterministicSummary: safeText(job.parser_kind, "queued"),
-    exportGateReason: "Worker sonucu ve musavir kontrolu olmadan export kapali.",
+    exportGateReason: "İşleme ve müşavir kontrolü tamamlanmadan çıktıya alınmaz.",
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",

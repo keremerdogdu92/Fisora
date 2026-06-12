@@ -19,7 +19,7 @@ test("canUseLocalPilotFallback only allows localhost unless explicitly enabled",
   );
 });
 
-test("buildPilotReadinessView presents a closed paid pilot separately from production", () => {
+test("buildPilotReadinessView presents controlled office readiness separately from full production", () => {
   const view = buildPilotReadinessView({
     pilot_sellable: true,
     production_ready: false,
@@ -36,15 +36,15 @@ test("buildPilotReadinessView presents a closed paid pilot separately from produ
   });
 
   assert.equal(view.status, "pilot_sellable");
-  assert.equal(view.statusLabel, "Kapali pilot satilabilir");
-  assert.equal(view.productionLabel, "Production hazir degil");
-  assert.equal(view.exportLabel, "Kontrollu CSV + manifest adayi");
-  assert.equal(view.zirveLabel, "Zirve import dogrulanmadi");
+  assert.equal(view.statusLabel, "Kontrollü kullanıma hazır");
+  assert.equal(view.productionLabel, "Canlı kullanım için kontrol gerekli");
+  assert.equal(view.exportLabel, "Kontrollü çıktı paketi");
+  assert.equal(view.zirveLabel, "Format doğrulaması gerekli");
   assert.deepEqual(view.blocking, []);
   assert.deepEqual(view.warnings, ["zirve_verified_adapter_missing"]);
 });
 
-test("buildPilotReadinessView surfaces blocking pilot gaps", () => {
+test("buildPilotReadinessView surfaces controlled-use gaps", () => {
   const view = buildPilotReadinessView({
     pilot_sellable: false,
     production_ready: false,
@@ -56,7 +56,7 @@ test("buildPilotReadinessView surfaces blocking pilot gaps", () => {
   });
 
   assert.equal(view.status, "blocked");
-  assert.equal(view.statusLabel, "Pilot satis bloklu");
+  assert.equal(view.statusLabel, "Kurulum kontrolü gerekli");
   assert.equal(view.authLabel, "mock_header_optional");
   assert.equal(view.storeLabel, "json");
   assert.deepEqual(view.blocking, ["auth_requires_user", "postgres_store_active"]);

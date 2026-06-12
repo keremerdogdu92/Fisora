@@ -34,6 +34,86 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(status["auth_mode"], "trusted_header")
         self.assertTrue(status["requires_portal_user"])
 
+    def test_session_required_mode_uses_app_session_not_mock_header(self) -> None:
+        config = build_auth_config({"FISORA_AUTH_MODE": "session_required"})
+        status = auth_status_payload(config)
+
+        self.assertTrue(config.requires_portal_user)
+        self.assertTrue(config.production_ready)
+        self.assertEqual(status["auth_mode"], "session_required")
+        self.assertFalse(status["allows_anonymous_access"])
+        self.assertEqual(status["credential_transport"], "secure_cookie")
+
+    def test_session_required_cookie_login_allows_workspace_and_logout_clears_cookie(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous = os.environ.get("FISORA_AUTH_MODE")
+        previous_bootstrap = os.environ.get("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED")
+        previous_cookie_secure = os.environ.get("FISORA_SESSION_COOKIE_SECURE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_AUTH_MODE"] = "session_required"
+        os.environ["FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED"] = "true"
+        os.environ["FISORA_SESSION_COOKIE_SECURE"] = "false"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/client",
+                    json={"client_id": "client-1", "title": "Mukellef A", "has_chart_accounts": True},
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mukellef-user",
+                        "display_name": "Mukellef Kullanici",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/auth/password",
+                    json={"user_id": "mukellef-user", "password": "GizliSifre123"},
+                )
+                header_only = client.get(
+                    "/phase0/store/workspace/client-1",
+                    headers={"X-Fisora-User-Id": "mukellef-user"},
+                )
+                login_response = client.post(
+                    "/phase0/store/auth/login",
+                    json={"user_id": "mukellef-user", "password": "GizliSifre123"},
+                )
+                workspace = client.get("/phase0/store/workspace/client-1")
+                logout = client.post("/phase0/store/auth/logout", json={})
+                revoked_session = client.get("/phase0/store/auth/session")
+        finally:
+            if previous is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous
+            if previous_bootstrap is None:
+                os.environ.pop("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED", None)
+            else:
+                os.environ["FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED"] = previous_bootstrap
+            if previous_cookie_secure is None:
+                os.environ.pop("FISORA_SESSION_COOKIE_SECURE", None)
+            else:
+                os.environ["FISORA_SESSION_COOKIE_SECURE"] = previous_cookie_secure
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(header_only.status_code, 401)
+        self.assertEqual(header_only.json()["detail"]["reason"], "session_required")
+        self.assertEqual(login_response.status_code, 200)
+        self.assertIn("fisora_session=", login_response.headers.get("set-cookie", ""))
+        self.assertIn("HttpOnly", login_response.headers.get("set-cookie", ""))
+        self.assertEqual(workspace.status_code, 200)
+        self.assertEqual(workspace.json()["client"]["client_id"], "client-1")
+        self.assertEqual(logout.status_code, 200)
+        self.assertTrue(logout.json()["revoked"])
+        self.assertIn("fisora_session=", logout.headers.get("set-cookie", ""))
+        self.assertEqual(revoked_session.status_code, 401)
+        self.assertEqual(revoked_session.json()["detail"]["reason"], "session_required")
+
     def test_api_blocks_anonymous_workspace_access_when_auth_requires_user(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

@@ -16,6 +16,7 @@ Backend `FISORA_AUTH_MODE` ile calisir.
 | `mock_header_optional` | Local test | Header yoksa anonim gecis olabilir | Hayir |
 | `mock_header_required` | Local demo | `X-Fisora-User-Id` zorunlu | Hayir |
 | `trusted_header` | Production bootstrap | Gateway dogrulanmis user id header'i enjekte eder | Evet, gateway dogru kurulursa |
+| `session_required` | Kontrollu ofis kullanimi | Uygulama session cookie'si zorunlu; tarayici user header'i yok sayilir | Evet, TLS ile |
 
 Varsayilan test modu `mock_header_optional` kalir. Production env orneginde
 `trusted_header` kullanilir.
@@ -48,9 +49,9 @@ MVP icin iki pratik rota var:
    - Backend sadece dogrulanmis token veya trusted header alir.
    - Daha hizli guvenlik standardi, ancak ek maliyet/operasyon var.
 
-Baslangic icin teknik onerim: demo ve pilotta `mock_header_required`, canliya
-gecerken custom session veya provider kararini netlestirmek. Provider secilirse
-backend `trusted_header` veya token dogrulama katmanina tasinir.
+Baslangic icin teknik onerim: local/testte `mock_header_required`, kontrollu
+ofis kullaniminda `session_required`. Provider secilirse backend
+`trusted_header` veya token dogrulama katmanina tasinir.
 
 ## Eklenen MVP Session Akisi
 
@@ -70,7 +71,9 @@ Backend artik custom session icin ilk MVP endpointlerini tasir:
   yazar.
 
 Session token'in kendisi database'e yazilmaz; sadece SHA-256 hash'i saklanir.
-Parolalar PBKDF2-SHA256 ile salt'li hash olarak tutulur.
+Login cevabi geriye uyum icin token'i JSON'da dondurur, kontrollu canli
+kullanimda ayni token `HttpOnly` cookie olarak tasinir. Parolalar PBKDF2-SHA256
+ile salt'li hash olarak tutulur.
 
 `trusted_header` modunda parola bootstrap endpoint'i varsayilan olarak kapali
 kalir. Sadece kapali pilot ortaminda `FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED=true`

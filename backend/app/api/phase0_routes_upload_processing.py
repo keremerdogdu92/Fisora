@@ -6,11 +6,8 @@ from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, Upload
 
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
-    get_workflow_store,
-    record_operation_event,
+    get_document_service,
     request_user_id,
-    require_client_access,
-    save_uploaded_document_with_job,
 )
 from app.api.phase0_schemas import DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
 from app.domain.document_uploads import decode_base64_content
@@ -33,7 +30,7 @@ def store_document_upload(
             content = decode_base64_content(payload.content_base64)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return save_uploaded_document_with_job(
+    return get_document_service().store_document_upload(
         client_id=payload.client_id,
         document_type=payload.document_type,
         intake_category=payload.intake_category,
@@ -62,7 +59,7 @@ async def store_document_upload_multipart(
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     content = await file.read()
-    return save_uploaded_document_with_job(
+    return get_document_service().store_document_upload(
         client_id=client_id,
         document_type=document_type,
         intake_category=intake_category,
@@ -78,32 +75,12 @@ async def store_document_upload_multipart(
 
 @router.post("/store/document-retention/run")
 def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
-    store = get_workflow_store()
-    summary = store.apply_document_retention(delete_files=payload.delete_files)
-    record_operation_event(
-        store=store,
-        client_id="__system__",
-        event_type="document_retention_run",
-        status="warning" if summary["deleted_count"] else "ok",
-        message="90 gun belge retention job'u calisti.",
-        metadata=summary,
-    )
-    return summary
+    return get_document_service().store_document_retention_run(delete_files=payload.delete_files)
 
 
 @router.post("/store/processing/run")
 def store_processing_run(payload: ProcessingRunPayload) -> dict[str, object]:
-    store = get_workflow_store()
-    summary = process_queued_documents(store, max_jobs=payload.max_jobs)
-    record_operation_event(
-        store=store,
-        client_id="__system__",
-        event_type="processing_run",
-        status="error" if summary["failed_count"] else "ok",
-        message="Worker kuyrugu manuel/API tetiklemesiyle calisti.",
-        metadata=summary,
-    )
-    return summary
+    return get_document_service().store_processing_run(max_jobs=payload.max_jobs)
 
 
 @router.get("/store/processing-jobs/{client_id}")
@@ -113,10 +90,7 @@ def store_processing_jobs(
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
-    if not client_id.strip():
-        raise HTTPException(status_code=400, detail="client_id is required")
-    require_client_access(
+    return get_document_service().store_processing_jobs(
         client_id=client_id,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
     )
-    return {"jobs": get_workflow_store().list_processing_jobs(client_id=client_id)}

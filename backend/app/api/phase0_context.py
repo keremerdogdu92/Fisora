@@ -17,6 +17,10 @@ from app.api.phase0_dependencies import (
 )
 from app.api.phase0_uploads import save_uploaded_document_with_job as _save_uploaded_document_with_job
 from app.persistence.store_factory import build_workflow_store
+from app.services.document_service import DocumentService
+from app.services.export_service import ExportService
+from app.services.review_service import ReviewService
+from app.services.workspace_service import WorkspaceService
 
 
 DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
@@ -49,6 +53,41 @@ def default_backup_path() -> Path:
 
 def get_workflow_store():
     return build_workflow_store(json_path=default_store_path())
+
+
+def get_workspace_service() -> WorkspaceService:
+    return WorkspaceService(
+        store=get_workflow_store(),
+        record_operation_event=record_operation_event,
+        require_client_access=require_client_access,
+        request_user_id=request_user_id,
+    )
+
+
+def get_document_service() -> DocumentService:
+    return DocumentService(
+        store=get_workflow_store(),
+        document_storage_path=default_document_storage_path(),
+        record_operation_event=record_operation_event,
+        require_client_access=require_client_access,
+    )
+
+
+def get_review_service() -> ReviewService:
+    return ReviewService(
+        store=get_workflow_store(),
+        record_operation_event=record_operation_event,
+        require_client_access=require_client_access,
+    )
+
+
+def get_export_service() -> ExportService:
+    return ExportService(
+        store=get_workflow_store(),
+        export_path=default_export_path(),
+        record_operation_event=record_operation_event,
+        require_client_access=require_client_access,
+    )
 
 
 def request_user_id(

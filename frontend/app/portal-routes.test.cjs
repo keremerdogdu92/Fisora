@@ -112,11 +112,19 @@ test("portal shell delegates session and review helpers to feature modules", () 
 
   assert.equal(existsSync(join(__dirname, "portal-session.ts")), true);
   assert.equal(existsSync(join(__dirname, "portal-review-actions.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-workspace-actions.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-client-actions.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-document-actions.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-export-actions.ts")), true);
   assert.equal(existsSync(join(__dirname, "portal-formatters.ts")), true);
-  assert.ok(lineCount <= 1250, `portal-app.tsx should stay below 1250 lines, found ${lineCount}`);
+  assert.ok(lineCount <= 700, `portal-app.tsx should stay below 700 lines, found ${lineCount}`);
   assert.doesNotMatch(portalApp, /function readStoredSession/);
   assert.doesNotMatch(portalApp, /function persistSession/);
   assert.doesNotMatch(portalApp, /function applyStatementLineDecision/);
+  assert.doesNotMatch(portalApp, /async function createNewClient/);
+  assert.doesNotMatch(portalApp, /async function addLocalUploads/);
+  assert.doesNotMatch(portalApp, /async function saveStatementLineDecision/);
+  assert.doesNotMatch(portalApp, /function requestCancellation/);
   assert.doesNotMatch(portalApp, /function reviewActionLabel/);
   assert.doesNotMatch(portalApp, /const statementTypeLabels/);
 });

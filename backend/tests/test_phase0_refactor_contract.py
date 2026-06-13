@@ -60,6 +60,59 @@ class Phase0RefactorContractTests(unittest.TestCase):
             "Demo-Mukellef-zirve_csv.csv",
         )
 
+    def test_phase0_route_groups_are_split_into_feature_routers(self) -> None:
+        from app.api import (
+            phase0,
+            phase0_routes_auth,
+            phase0_routes_operations,
+            phase0_routes_review_export,
+            phase0_routes_upload_processing,
+        )
+
+        direct_route_decorators = Path(phase0.__file__).read_text(encoding="utf-8").count("@router.")
+        self.assertLessEqual(direct_route_decorators, 24)
+
+        route_groups = [
+            (
+                phase0_routes_auth.router,
+                {
+                "/store/auth/status",
+                "/store/auth/login",
+                "/store/auth/session",
+                "/store/auth/logout",
+                },
+            ),
+            (
+                phase0_routes_operations.router,
+                {
+                "/store/system/readiness",
+                "/store/operation-log",
+                "/store/operation-health/{client_id}",
+                },
+            ),
+            (
+                phase0_routes_upload_processing.router,
+                {
+                "/store/document-upload",
+                "/store/document-upload-multipart",
+                "/store/processing/run",
+                },
+            ),
+            (
+                phase0_routes_review_export.router,
+                {
+                "/store/review-decision",
+                "/store/export-package/from-workspace",
+                "/store/export-package/download/{client_id}/{file_name}",
+                },
+            ),
+        ]
+
+        for route_router, expected_paths in route_groups:
+            with self.subTest(router=route_router):
+                route_paths = {route.path for route in route_router.routes}
+                self.assertTrue(expected_paths.issubset(route_paths))
+
 
 if __name__ == "__main__":
     unittest.main()

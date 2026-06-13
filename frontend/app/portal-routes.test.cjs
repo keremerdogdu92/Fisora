@@ -106,6 +106,21 @@ test("portal implementation is split into route view modules", () => {
   assert.equal(existsSync(join(__dirname, "portal-workspace-view.tsx")), true);
 });
 
+test("portal shell delegates session and review helpers to feature modules", () => {
+  const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+  const lineCount = portalApp.split(/\r?\n/).length;
+
+  assert.equal(existsSync(join(__dirname, "portal-session.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-review-actions.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-formatters.ts")), true);
+  assert.ok(lineCount <= 1250, `portal-app.tsx should stay below 1250 lines, found ${lineCount}`);
+  assert.doesNotMatch(portalApp, /function readStoredSession/);
+  assert.doesNotMatch(portalApp, /function persistSession/);
+  assert.doesNotMatch(portalApp, /function applyStatementLineDecision/);
+  assert.doesNotMatch(portalApp, /function reviewActionLabel/);
+  assert.doesNotMatch(portalApp, /const statementTypeLabels/);
+});
+
 test("locked portal links ignore stale sessions from the other role", () => {
   const clientConfig = portalConfigForRouteKey("mukellef");
   const accountantConfig = portalConfigForRouteKey("musavir");

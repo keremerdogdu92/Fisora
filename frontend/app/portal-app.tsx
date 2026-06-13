@@ -16,7 +16,6 @@ import { AccountantWorkspace } from "./portal-workspace-view";
 import {
   INTAKE_TABS,
   buildUploadIntakeMetadata,
-  normalizeIntakeCategory,
 } from "./upload-intake";
 import {
   ensureUploadWorkspace,
@@ -56,7 +55,6 @@ import type {
   CorrectionDraft,
   DashboardClientRow,
   DocumentSegment,
-  DraftLine,
   ExportBasketItem,
   ExportMode,
   IntakeCategory,
@@ -70,420 +68,32 @@ import type {
   PilotStatus,
   PortalNavItem,
   PortalRouteKey,
-  ReviewData,
   ReviewFilter,
   RulePromptView,
   StatementAiSuggestionView,
   StatementEntryReview,
-  StatementLineReview,
 } from "./portal-types";
 import {
   agentSourceLabel,
   normalizeRulePrompt,
   normalizeStatementAiSuggestions,
-  normalizeStatementEntries,
-  normalizeStatementLines,
   normalizeStatus,
-  periodFromDate,
-  safeList,
   safeNumber,
   safeRecord,
-  safeText,
 } from "./portal-normalization";
-
-const SESSION_STORAGE_KEY = "fisora.office.session.v1";
-
-const emptyPilotData: PilotData = {
-  generatedFrom: "Ã‡alÄ±ÅŸma alanÄ± yÃ¼kleniyor",
-  clients: [],
-  documents: [],
-  cancellationRequests: [],
-  exportBasket: [],
-};
-
-const roleLabels: Record<LocalSession["role"], string> = {
-  accountant: "MÃ¼ÅŸavir",
-  client_user: "MÃ¼kellef",
-};
-
-function toIntakeCategory(value: unknown): IntakeCategory {
-  return normalizeIntakeCategory(safeText(value)) as IntakeCategory;
-}
-
-function inferIntakeCategory(documentType: unknown, invoiceType?: unknown): IntakeCategory {
-  const explicitType = safeText(documentType);
-  if (explicitType === "bank" || explicitType === "bank_statement" || explicitType === "pos" || explicitType === "pos_statement") {
-    return "bank_statement";
-  }
-  if (explicitType === "special_document") {
-    return "special_document";
-  }
-  const explicitInvoiceType = safeText(invoiceType).toLocaleUpperCase("tr-TR");
-  if (explicitInvoiceType === "SATIS") {
-    return "sales_invoice";
-  }
-  return "purchase_invoice";
-}
-
-function readStoredSession(): LocalSession | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as LocalSession;
-    if (!parsed.userId || !parsed.role) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function persistSession(session: LocalSession | null) {
-  if (typeof window === "undefined") return;
-  if (!session) {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    return;
-  }
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-}
-
-function periodLabel(period: string) {
-  const [year, month] = period.split("-");
-  if (!year || !month) return period;
-  return `${month}.${year}`;
-}
-
-function isInProgress(status: PilotStatus) {
-  return status === "uploaded" || status === "queued" || status === "processing";
-}
-
-function isCancelStatus(status: PilotStatus) {
-  return status === "cancel_requested" || status === "post_export_correction_requested";
-}
-
-const statementTypeLabels: Record<string, string> = {
-  pos_collection: "POS tahsilat",
-  pos_blocked: "POS bloke",
-  tax: "Vergi",
-  sgk: "SGK",
-  bank_fee: "Banka masrafÄ±",
-  eft: "EFT/Havale",
-  credit_card: "Kredi/kart",
-  loan: "Kredi",
-  payroll: "MaaÅŸ",
-  transfer: "Transfer",
-  refund: "Ä°ade",
-  reversal: "Ters kayÄ±t",
-  unknown: "Bilinmeyen",
-};
-
-function statementDirectionLabel(direction: StatementLineReview["direction"]) {
-  if (direction === "in") return "GiriÅŸ";
-  if (direction === "out") return "Ã‡Ä±kÄ±ÅŸ";
-  return "-";
-}
-
-function statementReviewStatus(action: string) {
-  if (action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar") return "approved";
-  if (action === "exclude_export" || action === "exclude_from_export" || action === "out_of_scope") return "rejected";
-  return "review_required";
-}
-
-function statementStatusLabel(status?: string) {
-  if (status === "approved") return "OnaylÄ±";
-  if (status === "rejected") return "Red";
-  if (status === "review_required") return "Kontrol";
-  return "Bekliyor";
-}
-
-function reviewActionLabel(action: string) {
-  if (action === "approve") return "OnaylandÄ±";
-  if (action === "approve_with_changes") return "DÃ¼zeltilip onaylandÄ±";
-  if (action === "suggest_for_similar") return "Kural adayÄ± yapÄ±ldÄ±";
-  if (action === "exclude_export") return "Ã‡Ä±ktÄ± dÄ±ÅŸÄ± bÄ±rakÄ±ldÄ±";
-  return "Kontrolde tutuldu";
-}
-
-function reviewedStatementRiskFlags(flags: string[], status: string) {
-  if (status === "approved") {
-    const removable = new Set([
-      "ai_invalid_schema",
-      "counterparty_match_review_required",
-      "counterparty_not_found",
-      "learning_rule_review_required",
-      "statement_accountant_approval_required",
-      "statement_review_required",
-    ]);
-    return flags.filter((flag) => !removable.has(flag));
-  }
-  if (status === "rejected") return Array.from(new Set([...flags, "statement_line_rejected"]));
-  return Array.from(new Set([...flags, "statement_review_required"]));
-}
-
-function replaceStatementCounterpart(lines: DraftLine[], accountCode: string) {
-  if (!accountCode.trim()) return lines;
-  let replaced = false;
-  return lines.map((line) => {
-    if (replaced || line.account_code.startsWith("102")) return line;
-    replaced = true;
-    return { ...line, account_code: accountCode };
-  });
-}
-
-function applyStatementLineDecision(
-  document: PilotDocument,
-  lineNo: number,
-  action: string,
-  correctedAccountCode: string,
-  correctedCounterpartyCode: string,
-  reviewer: string,
-  reason: string,
-): PilotDocument {
-  const reviewStatus = statementReviewStatus(action);
-  const newAccount = correctedCounterpartyCode.trim() || correctedAccountCode.trim();
-  const reviewedAt = new Date().toLocaleString("tr-TR");
-  const statementLines = document.statementLines.map((line) => {
-    if (line.line_no !== lineNo) return line;
-    return {
-      ...line,
-      suggested_account_code: newAccount || line.suggested_account_code,
-      counterparty_match_code: newAccount || line.counterparty_match_code,
-      confidence: newAccount ? 100 : line.confidence,
-      accountant_review_status: reviewStatus,
-      risk_flags: reviewedStatementRiskFlags(line.risk_flags, reviewStatus),
-      review_reason: reason || line.review_reason,
-    };
-  });
-  const statementEntries = document.statementEntries.map((entry) => {
-    if (entry.statement_line_no !== lineNo) return entry;
-    return {
-      ...entry,
-      accountant_review_status: reviewStatus,
-      risk_flags: reviewedStatementRiskFlags(entry.risk_flags, reviewStatus),
-      lines: replaceStatementCounterpart(entry.lines, newAccount),
-    };
-  });
-  const allApproved = statementLines.length > 0 && statementLines.every((line) => line.accountant_review_status === "approved");
-  return {
-    ...document,
-    status: allApproved ? "export_ready" : "review_required",
-    exportGateReason: allApproved
-      ? "Banka satÄ±rlarÄ± mÃ¼ÅŸavir onayÄ±ndan geÃ§ti; Ã§Ä±ktÄ± listesine alÄ±nabilir."
-      : "Banka satÄ±rlarÄ±nda mÃ¼ÅŸavir kontrolÃ¼ sÃ¼rÃ¼yor.",
-    deterministicSummary: `${document.deterministicSummary}${document.deterministicSummary ? ", " : ""}statement_line_reviewed:${lineNo}`,
-    statementLines,
-    statementEntries,
-    statementAiSummary: `${statementStatusLabel(reviewStatus)} / ${reviewer} / ${reviewedAt}`,
-  };
-}
-
-function journalDraftLinesForDocument(document: PilotDocument, selectedStatementLineNo: number): DraftLine[] {
-  if (document.intakeCategory !== "bank_statement" && document.statementLines.length === 0) return document.draftLines;
-  const selectedEntry = document.statementEntries.find((entry) => entry.statement_line_no === selectedStatementLineNo);
-  return selectedEntry?.lines ?? [];
-}
-
-function normalizeReviewData(raw: ReviewData): PilotData {
-  const clientId = safeText(raw.clientId, "ofis-calisma-client");
-  const clientName = safeText(raw.clientName, "Ofis MÃ¼kellefi");
-  const clientUser = raw.portalUsers?.find((user) => user.role === "client_user") ?? raw.portalUsers?.[0];
-  const documentsFromRows = (raw.invoiceRows ?? []).map((row, index): PilotDocument => {
-    const fileName = safeText(row.documentRef || row.fileName, `ofis-belge-${index + 1}.pdf`);
-    const status = normalizeStatus(row.exportStatus || row.status);
-    return {
-      id: safeText(row.documentRef || row.fileName, `${clientId}-doc-${index + 1}`),
-      clientId,
-      clientName,
-      fileName,
-      documentType: safeText(row.invoiceType, "invoice"),
-      intakeCategory: toIntakeCategory(row.intakeCategory || inferIntakeCategory("invoice", row.invoiceType)),
-      period: periodFromDate(safeText(row.issueDate), "2026-04"),
-      uploadedAt: safeText(row.issueDate, "01.04.2026"),
-      uploadedBy: safeText(clientUser?.displayName, clientName),
-      status,
-      provider: safeText(row.providerHint, "TedarikÃ§i bilinmiyor"),
-      issueDate: safeText(row.issueDate, "-"),
-      amount: safeText(row.payableTotal, "-"),
-      vatRates: Array.isArray(row.vatRates) ? row.vatRates.map(String) : [],
-      productLine: safeText(row.productLineHint, "-"),
-      productCategory: safeText(row.productCategory, "-"),
-      businessRelation: safeText(row.businessRelevanceRelation, "-"),
-      accountTreatment: safeText(row.businessRelevanceAccountTreatment, "-"),
-      requiresAccountantReview: Boolean(row.businessRelevanceRequiresReview),
-      previewText: [
-        safeText(row.providerHint, "TedarikÃ§i bilinmiyor"),
-        safeText(row.productLineHint, "Belge kalemi okunuyor"),
-        safeText(row.payableTotal, "-"),
-      ].join(" / "),
-      aiReason:
-        safeText(row.aiClassificationReason) ||
-        safeText(row.businessRelevanceReason) ||
-        safeText(row.aiClassificationSkippedReason, "Ã–neri gerekÃ§esi yok"),
-      aiProvider: safeText(row.aiClassificationProvider, "-"),
-      aiSuggestedAccountCode: safeText(row.aiSuggestedAccountCode, ""),
-      aiSuggestedCounterpartyCode: safeText(row.aiSuggestedCounterpartyCode, ""),
-      aiRiskFlags: Array.isArray(row.aiRiskFlags) ? row.aiRiskFlags.map(String) : [],
-      aiAccountReason: safeText(row.aiAccountReason, ""),
-      deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolÃ¼ gerekli"),
-      exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Ã‡Ä±ktÄ± listesine alÄ±nabilir." : "MÃ¼ÅŸavir kontrolÃ¼ gerekiyor."),
-      selectedExpenseAccount: safeText(row.selectedExpenseAccount, "-"),
-      selectedVatAccount: safeText(row.selectedVatAccount, "-"),
-      selectedCounterpartyAccount: safeText(row.selectedSupplierAccount || row.counterpartyMatchCode, "-"),
-      counterpartyConfidence: Number(row.counterpartyMatchConfidence ?? 0),
-      reviewReasons: Array.isArray(row.reviewReasonCodes) ? row.reviewReasonCodes.map(String) : [],
-      riskFlags: Array.isArray(row.riskFlags) ? row.riskFlags.map(String) : [],
-      draftLines: Array.isArray(row.draftLines) ? row.draftLines : [],
-      statementLines: normalizeStatementLines(row.statementLines ?? row.statement_lines),
-      statementEntries: normalizeStatementEntries(row.statementEntries ?? row.statement_entries),
-      statementAiSuggestions: normalizeStatementAiSuggestions(row.statementAiSuggestions ?? row.statement_ai_suggestions),
-      statementAiSummary: safeText(row.statementAiSummary ?? row.statement_ai_summary),
-      accountingIntent: safeText(row.accountingIntent ?? row.accounting_intent),
-      accountingIntentConfidence: safeNumber(row.accountingIntentConfidence ?? row.accounting_intent_confidence),
-      learningRuleScope: safeText(row.learningRuleScope ?? row.learning_rule_scope),
-      learningRuleReason: safeText(row.learningRuleReason ?? row.learning_rule_reason),
-      learningRuleSourceSummary: safeText(row.learningRuleSourceSummary ?? row.learning_rule_source_summary),
-      rulePrompt: normalizeRulePrompt(row.rulePrompt ?? row.rule_prompt),
-    };
-  });
-
-  const rowFileNames = new Set(documentsFromRows.map((document) => document.fileName));
-  const uploadOnlyDocuments = (raw.uploadQueue ?? [])
-    .filter((item) => !rowFileNames.has(safeText(item.fileName)))
-    .map((item, index): PilotDocument => ({
-      id: safeText(item.id, `${clientId}-upload-${index + 1}`),
-      clientId,
-      clientName,
-      fileName: safeText(item.fileName, `yuklenen-belge-${index + 1}`),
-      documentType: safeText(item.kind, "invoice"),
-      intakeCategory: toIntakeCategory(item.intakeCategory || inferIntakeCategory(item.kind)),
-      period: periodFromDate(safeText(item.uploadedAt), "2026-06"),
-      uploadedAt: safeText(item.uploadedAt, "-"),
-      uploadedBy: safeText(item.uploadedBy, safeText(clientUser?.displayName, clientName)),
-      status: normalizeStatus(item.status),
-      provider: "Ä°ÅŸleme alÄ±nacak belge",
-      issueDate: "-",
-      amount: "-",
-      vatRates: [],
-      productLine: "Belge kuyrukta",
-      productCategory: "-",
-      businessRelation: "-",
-      accountTreatment: "-",
-      requiresAccountantReview: true,
-      previewText: "Belge yÃ¼klendi, otomatik kuyruÄŸa alÄ±nacak.",
-      aiReason: "HenÃ¼z yorum yok.",
-      aiProvider: "-",
-      aiSuggestedAccountCode: "",
-      aiSuggestedCounterpartyCode: "",
-      aiRiskFlags: [],
-      aiAccountReason: "",
-      deterministicSummary: "Ä°ÅŸleme sonucu hazÄ±rlanÄ±yor.",
-      exportGateReason: "Ä°ÅŸleme tamamlanmadan Ã§Ä±ktÄ±ya eklenemez.",
-      selectedExpenseAccount: "-",
-      selectedVatAccount: "-",
-      selectedCounterpartyAccount: "-",
-      counterpartyConfidence: 0,
-      reviewReasons: [],
-      riskFlags: [],
-      draftLines: [],
-      statementLines: [],
-      statementEntries: [],
-      statementAiSuggestions: [],
-      statementAiSummary: "",
-      accountingIntent: "",
-      accountingIntentConfidence: 0,
-      learningRuleScope: "",
-      learningRuleReason: "",
-      learningRuleSourceSummary: "",
-      rulePrompt: normalizeRulePrompt({}),
-    }));
-
-  const documents = [...documentsFromRows, ...uploadOnlyDocuments];
-  return {
-    generatedFrom: safeText(raw.generatedFrom, "Yerel Ã§alÄ±ÅŸma verisi"),
-    clients: [
-      {
-        clientId,
-        clientName,
-        taxId: "ofis-local",
-        portalUserId: safeText(clientUser?.userId, "ofis-mukellef-user"),
-        userLabel: safeText(clientUser?.displayName, "MÃ¼kellef kullanÄ±cÄ±sÄ±"),
-        onboardingStatus: "Hesap planÄ± ve mÃ¼kellef kartÄ± Ã§alÄ±ÅŸma alanÄ±nda hazÄ±r",
-      },
-    ],
-    documents,
-    cancellationRequests: documents.length > 1
-      ? [
-          {
-            id: `${documents[1].id}-cancel`,
-            documentId: documents[1].id,
-            clientId,
-            fileName: documents[1].fileName,
-            requestedBy: safeText(clientUser?.displayName, "MÃ¼kellef kullanÄ±cÄ±sÄ±"),
-            requestedAt: "04.06.2026 10:30",
-            reason: "MÃ¼kellef belge iÃ§in iptal veya dÃ¼zeltme kontrolÃ¼ istedi.",
-            stage: documents[1].status === "export_ready" ? "post_export" : "pre_export",
-            status: "open",
-          },
-        ]
-      : [],
-    exportBasket: documents.some((document) => document.status === "export_ready")
-      ? [
-          {
-            id: `${clientId}-basket`,
-            clientId,
-            clientName,
-            documentIds: documents.filter((document) => document.status === "export_ready").map((document) => document.id),
-            documentCount: documents.filter((document) => document.status === "export_ready").length,
-            period: documents.find((document) => document.status === "export_ready")?.period ?? "2026-06",
-            status: "ready",
-          },
-        ]
-      : [],
-  };
-}
-
-function normalizePilotData(raw: unknown): PilotData {
-  const maybePilot = raw as Partial<PilotData>;
-  if (Array.isArray(maybePilot.clients) && Array.isArray(maybePilot.documents)) {
-    return {
-      generatedFrom: safeText(maybePilot.generatedFrom, "Yerel Ã§alÄ±ÅŸma verisi"),
-      clients: (maybePilot.clients as PilotClient[]).map((client) => ({
-        ...client,
-        portalUserId: safeText(
-          client.portalUserId || (client as PilotClient & { userId?: string }).userId,
-          "ofis-mukellef-user",
-        ),
-      })),
-      documents: (maybePilot.documents as PilotDocument[]).map((document) => ({
-        ...document,
-        intakeCategory: toIntakeCategory(document.intakeCategory || inferIntakeCategory(document.documentType)),
-        status: normalizeStatus(document.status),
-        aiProvider: safeText(document.aiProvider, "-"),
-        aiSuggestedAccountCode: safeText(document.aiSuggestedAccountCode, ""),
-        aiSuggestedCounterpartyCode: safeText(document.aiSuggestedCounterpartyCode, ""),
-        aiRiskFlags: Array.isArray(document.aiRiskFlags) ? document.aiRiskFlags : [],
-        aiAccountReason: safeText(document.aiAccountReason, ""),
-        vatRates: Array.isArray(document.vatRates) ? document.vatRates : [],
-        reviewReasons: Array.isArray(document.reviewReasons) ? document.reviewReasons : [],
-        riskFlags: Array.isArray(document.riskFlags) ? document.riskFlags : [],
-        draftLines: Array.isArray(document.draftLines) ? document.draftLines : [],
-        statementLines: normalizeStatementLines(document.statementLines),
-        statementEntries: normalizeStatementEntries(document.statementEntries),
-        statementAiSuggestions: normalizeStatementAiSuggestions(document.statementAiSuggestions),
-        statementAiSummary: safeText(document.statementAiSummary),
-        accountingIntent: safeText(document.accountingIntent, ""),
-        accountingIntentConfidence: safeNumber(document.accountingIntentConfidence),
-        learningRuleScope: safeText(document.learningRuleScope, ""),
-        learningRuleReason: safeText(document.learningRuleReason, ""),
-        learningRuleSourceSummary: safeText(document.learningRuleSourceSummary, ""),
-        rulePrompt: normalizeRulePrompt(document.rulePrompt),
-      })),
-      cancellationRequests: Array.isArray(maybePilot.cancellationRequests) ? (maybePilot.cancellationRequests as CancellationRequest[]) : [],
-      exportBasket: Array.isArray(maybePilot.exportBasket) ? (maybePilot.exportBasket as ExportBasketItem[]) : [],
-    };
-  }
-  return normalizeReviewData(raw as ReviewData);
-}
+import { emptyPilotData, normalizePilotData } from "./portal-data-mappers";
+import {
+  isCancelStatus,
+  isInProgress,
+  periodLabel,
+  reviewActionLabel,
+  statementDirectionLabel,
+  statementReviewStatus,
+  statementStatusLabel,
+  statementTypeLabels,
+} from "./portal-formatters";
+import { applyStatementLineDecision, journalDraftLinesForDocument } from "./portal-review-actions";
+import { persistSession, readStoredSession, roleLabels } from "./portal-session";
 
 async function fetchJson(path: string) {
   const response = await fetch(path, { cache: "no-store" });
@@ -619,7 +229,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           // Try the next private/local source.
         }
       }
-      const fallback = normalizeReviewData(fallbackReviewData as ReviewData);
+      const fallback = normalizePilotData(fallbackReviewData);
       if (cancelled) return;
       applyPilotData(fallback, "Yerel Ã§alÄ±ÅŸma verisi");
     }

@@ -73,6 +73,39 @@ test("website entry paths have Next app route files", () => {
   assert.equal(existsSync(join(__dirname, "portal", "ayarlar", "page.tsx")), true);
 });
 
+test("portal implementation is split into route view modules", () => {
+  const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+  const workspaceView = require("node:fs").readFileSync(join(__dirname, "portal-workspace-view.tsx"), "utf8");
+
+  assert.match(portalApp, /portal-dashboard-view/);
+  assert.match(portalApp, /portal-client-view/);
+  assert.match(portalApp, /portal-clients-view/);
+  assert.match(portalApp, /portal-documents-view/);
+  assert.match(portalApp, /portal-exports-view/);
+  assert.match(portalApp, /portal-settings-view/);
+  assert.match(portalApp, /portal-workspace-view/);
+  assert.match(workspaceView, /portal-review-panels/);
+  assert.doesNotMatch(portalApp, /function AccountantDashboard/);
+  assert.doesNotMatch(portalApp, /function AccountantWorkspace/);
+  assert.doesNotMatch(portalApp, /function ClientPortal/);
+  assert.doesNotMatch(portalApp, /function ClientManagementView/);
+  assert.doesNotMatch(portalApp, /function DocumentProcessingWorkspace/);
+  assert.doesNotMatch(portalApp, /function DocumentPreview/);
+  assert.doesNotMatch(portalApp, /function JournalPanel/);
+  assert.doesNotMatch(portalApp, /function SettingsView/);
+  assert.doesNotMatch(portalApp, /function SessionPanel/);
+  assert.equal(existsSync(join(__dirname, "portal-types.ts")), true);
+  assert.equal(existsSync(join(__dirname, "portal-dashboard-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-client-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-clients-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-documents-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-exports-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-review-panels.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-settings-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-shared.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-workspace-view.tsx")), true);
+});
+
 test("locked portal links ignore stale sessions from the other role", () => {
   const clientConfig = portalConfigForRouteKey("mukellef");
   const accountantConfig = portalConfigForRouteKey("musavir");

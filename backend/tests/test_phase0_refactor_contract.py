@@ -48,6 +48,18 @@ class Phase0RefactorContractTests(unittest.TestCase):
             }.issubset(route_paths)
         )
 
+    def test_phase0_helper_modules_keep_router_thin_boundaries(self) -> None:
+        from app.api import phase0_dependencies, phase0_review_export, phase0_uploads
+
+        self.assertTrue(callable(phase0_dependencies.require_mock_client_access))
+        self.assertTrue(callable(phase0_dependencies.record_operation_event))
+        self.assertTrue(callable(phase0_uploads.save_uploaded_document_with_job))
+        self.assertTrue(callable(phase0_review_export.export_package_payload))
+        self.assertEqual(
+            phase0_review_export.safe_export_file_name("Demo Mukellef", "zirve_csv"),
+            "Demo-Mukellef-zirve_csv.csv",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

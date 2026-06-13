@@ -11,6 +11,22 @@ import tempfile
 from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 
+from app.api.phase0_dependencies import (
+    clear_session_cookie,
+    client_id_from_record,
+    password_bootstrap_enabled,
+    record_operation_event as _record_operation_event,
+    request_user_id,
+    require_mock_client_access,
+    set_session_cookie,
+)
+from app.api.phase0_review_export import (
+    entry_payload as _entry_payload,
+    export_package_payload,
+    safe_export_file_name as _safe_export_file_name,
+    workspace_document as _workspace_document,
+    write_export_manifest as _write_export_manifest,
+)
 from app.api.phase0_schemas import (
     AccountSelectionPayload,
     AiBatchBenchmarkPayload,
@@ -54,6 +70,7 @@ from app.api.phase0_schemas import (
     StoredSimulationPayload,
     WorkspaceExportPackagePayload,
 )
+from app.api.phase0_uploads import save_uploaded_document_with_job
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, estimate_ai_cost_usd, summarize_ai_usage
 from app.domain.business_relevance import ClientProfile, assess_business_relevance, check_client_onboarding
@@ -128,40 +145,16 @@ def get_workflow_store():
     return build_workflow_store(json_path=DEFAULT_STORE_PATH)
 
 
-def _session_cookie_secure() -> bool:
-    return os.environ.get("FISORA_SESSION_COOKIE_SECURE", "true").strip().lower() not in {"0", "false", "no"}
-
-
-def _session_cookie_samesite() -> str:
-    value = os.environ.get("FISORA_SESSION_COOKIE_SAMESITE", "lax").strip().lower()
-    return value if value in {"lax", "strict", "none"} else "lax"
-
-
 def _set_session_cookie(response: Response, token: str, *, ttl_hours: int) -> None:
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        max_age=max(ttl_hours, 1) * 3600,
-        httponly=True,
-        secure=_session_cookie_secure(),
-        samesite=_session_cookie_samesite(),
-        path="/",
-    )
+    set_session_cookie(response, token, ttl_hours=ttl_hours, cookie_name=SESSION_COOKIE_NAME)
 
 
 def _clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(
-        key=SESSION_COOKIE_NAME,
-        httponly=True,
-        secure=_session_cookie_secure(),
-        samesite=_session_cookie_samesite(),
-        path="/",
-    )
+    clear_session_cookie(response, cookie_name=SESSION_COOKIE_NAME)
 
 
 def _client_id_from_record(record: dict[str, object]) -> str:
-    profile = record.get("profile") if isinstance(record.get("profile"), dict) else {}
-    return str(record.get("client_id") or profile.get("client_id") or "").strip()
+    return client_id_from_record(record)
 
 
 def _require_mock_client_access(
@@ -170,43 +163,12 @@ def _require_mock_client_access(
     user_id: str | None,
     allowed_roles: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    auth_config = build_auth_config()
-    if not user_id:
-        if auth_config.allows_anonymous_access:
-            return {
-                "allowed": True,
-                "reason": "mock_auth_optional_anonymous",
-                "role": "anonymous",
-                "client_id": client_id,
-                "auth_mode": auth_config.mode,
-            }
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "allowed": False,
-                "reason": "portal_user_required",
-                "auth_mode": auth_config.mode,
-                "user_header_name": auth_config.user_header_name,
-            },
-        )
-    access = get_workflow_store().verify_portal_access(client_id=client_id, user_id=user_id)
-    if not access.get("allowed"):
-        raise HTTPException(status_code=403, detail=access)
-    role = str(access.get("role") or "")
-    if allowed_roles and role not in allowed_roles and role != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail={
-                **access,
-                "reason": "role_not_allowed",
-                "allowed_roles": list(allowed_roles),
-            },
-        )
-    return access
-
-
-def _mock_user_header(value: str | None) -> str:
-    return resolve_user_id(value, build_auth_config())
+    return require_mock_client_access(
+        client_id=client_id,
+        user_id=user_id,
+        store_factory=get_workflow_store,
+        allowed_roles=allowed_roles,
+    )
 
 
 def _request_user_id(
@@ -214,88 +176,16 @@ def _request_user_id(
     session_header: str | None = None,
     session_cookie: str | None = None,
 ) -> str:
-    auth_config = build_auth_config()
-    if auth_config.accepts_user_header:
-        user_id = _mock_user_header(user_header)
-        if user_id:
-            return user_id
-    token = (session_header or session_cookie or "").strip()
-    if not token:
-        if auth_config.mode == "session_required":
-            raise HTTPException(status_code=401, detail={"valid": False, "reason": "session_required"})
-        return ""
-    session = get_workflow_store().resolve_auth_session(token_hash=hash_session_token(token))
-    if not session.get("valid"):
-        raise HTTPException(status_code=401, detail=session)
-    return str(session.get("user_id") or "")
+    return request_user_id(
+        user_header,
+        session_header,
+        session_cookie,
+        store_factory=get_workflow_store,
+    )
 
 
 def _password_bootstrap_enabled() -> bool:
-    return os.environ.get("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED", "").strip().lower() in {"1", "true", "yes"}
-
-
-def _safe_export_file_name(client_id: str, export_type: str, extension: str = ".csv") -> str:
-    safe_client = re.sub(r"[^A-Za-z0-9_.-]+", "-", client_id.strip()).strip(".-") or "client"
-    safe_type = re.sub(r"[^A-Za-z0-9_.-]+", "-", export_type.strip()).strip(".-") or "export"
-    safe_extension = extension if extension.startswith(".") else f".{extension}"
-    return f"{safe_client}-{safe_type}{safe_extension}"
-
-
-def _manifest_file_name(output_filename: str) -> str:
-    path = Path(output_filename)
-    return f"{path.stem}.manifest.json"
-
-
-def _write_export_manifest(
-    *,
-    client_id: str,
-    output_path: Path,
-    package_payload: dict[str, object],
-) -> dict[str, str]:
-    manifest_filename = _manifest_file_name(str(package_payload.get("output_filename") or output_path.name))
-    manifest_path = output_path.with_name(manifest_filename)
-    manifest_payload = {
-        "client_id": client_id,
-        "export_type": package_payload.get("export_type"),
-        "output_filename": package_payload.get("output_filename"),
-        "entry_count": package_payload.get("entry_count"),
-        "candidate_count": package_payload.get("candidate_count"),
-        "excluded_document_refs": package_payload.get("excluded_document_refs"),
-        "generated_entries": [
-            {
-                "entry_type": entry.get("entry_type"),
-                "entry_date": entry.get("entry_date"),
-                "description": entry.get("description"),
-                "line_count": len(entry.get("lines") or []),
-            }
-            for entry in package_payload.get("entries") or []
-            if isinstance(entry, dict)
-        ],
-    }
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"manifest_filename": manifest_filename, "manifest_path": str(manifest_path)}
-
-
-def _record_operation_event(
-    *,
-    store,
-    client_id: str,
-    event_type: str,
-    status: str = "info",
-    message: str = "",
-    metadata: dict[str, object] | None = None,
-) -> dict[str, object]:
-    event = operation_event_payload(
-        build_operation_event(
-            client_id=client_id,
-            event_type=event_type,
-            status=status,
-            message=message,
-            metadata=metadata,
-        )
-    )
-    return store.record_operation_event(client_id=str(event["client_id"]), event=event)
+    return password_bootstrap_enabled()
 
 
 def _save_uploaded_document_with_job(
@@ -312,71 +202,22 @@ def _save_uploaded_document_with_job(
     sha256: str = "",
     retention_policy_days: int = 90,
 ) -> dict[str, object]:
-    if not client_id.strip():
-        raise HTTPException(status_code=400, detail="client_id is required for document upload")
-    store = get_workflow_store()
-    effective_user_id = uploaded_by_user_id.strip() or uploaded_by.strip() or request_user_id.strip()
-    if request_user_id.strip() and effective_user_id and request_user_id.strip() != effective_user_id:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "allowed": False,
-                "reason": "mock_user_header_mismatch",
-                "user_id": request_user_id.strip(),
-                "payload_user_id": effective_user_id,
-            },
-        )
-    if not effective_user_id:
-        raise HTTPException(status_code=403, detail="portal user is required for document upload")
-    access = store.verify_portal_access(client_id=client_id, user_id=effective_user_id)
-    if not access.get("allowed"):
-        raise HTTPException(status_code=403, detail=access)
-    try:
-        document = store_document_content(
-            base_dir=DEFAULT_DOCUMENT_STORAGE_PATH,
-            client_id=client_id,
-            file_name=file_name,
-            document_type=document_type,
-            intake_category=intake_category,
-            uploaded_by=uploaded_by,
-            content=content,
-            declared_size_bytes=size_bytes,
-            declared_sha256=sha256,
-            retention_days=retention_policy_days,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    document_payload = asdict(document)
-    document_payload["uploaded_by_user_id"] = effective_user_id
-    document_payload["portal_access_reason"] = access.get("reason", "")
-    saved = store.save_uploaded_document(
+    return save_uploaded_document_with_job(
+        store=get_workflow_store(),
+        document_storage_path=DEFAULT_DOCUMENT_STORAGE_PATH,
+        record_operation_event=_record_operation_event,
         client_id=client_id,
-        document=document_payload,
-    )
-    job = store.create_processing_job(
-        client_id=client_id,
-        document_ref=str(saved["document_ref"]),
         document_type=document_type,
-        parser_kind=parser_kind_for_document_type(document_type),
-        intake_category=str(saved.get("intake_category") or ""),
+        intake_category=intake_category,
+        file_name=file_name,
+        uploaded_by=uploaded_by,
+        uploaded_by_user_id=uploaded_by_user_id,
+        request_user_id=request_user_id,
+        content=content,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        retention_policy_days=retention_policy_days,
     )
-    _record_operation_event(
-        store=store,
-        client_id=client_id,
-        event_type="document_uploaded",
-        status="ok",
-        message="Belge kaydedildi ve processing job kuyruga alindi.",
-        metadata={
-            "document_ref": saved["document_ref"],
-            "document_type": document_type,
-            "intake_category": saved.get("intake_category", ""),
-            "file_name": file_name,
-            "processing_job_id": job["id"],
-            "parser_kind": job["parser_kind"],
-            "uploaded_by_user_id": effective_user_id,
-        },
-    )
-    return {**saved, "processing_job": job}
 
 
 def _client_profile(payload: ClientProfilePayload) -> ClientProfile:
@@ -550,29 +391,6 @@ def _learned_rule(payload: LearnedPostingRulePayload) -> LearnedPostingRule:
         reason=payload.reason,
         automation_candidate=payload.automation_candidate,
     )
-
-
-def _journal_entry(payload: ExportCandidatePayload) -> JournalEntry:
-    return JournalEntry(
-        entry_type=payload.entry_type,
-        entry_date=payload.entry_date,
-        description=payload.description or f"Export candidate {payload.document_ref}",
-        lines=tuple(
-            JournalLine(
-                line.account_code,
-                line.description,
-                debit=money(line.debit),
-                credit=money(line.credit),
-                document_ref=line.document_ref or payload.document_ref,
-            )
-            for line in payload.lines
-        ),
-        risk_flags=tuple(payload.risk_flags),
-    )
-
-
-def _entry_payload(entry: JournalEntry) -> dict[str, object]:
-    return journal_entry_payload(entry)
 
 
 @router.post("/onboarding/check")
@@ -1358,15 +1176,6 @@ def review_learning_event(payload: ReviewDecisionPayload) -> dict[str, object]:
     }
 
 
-def _workspace_document(workspace: dict[str, object], document_ref: str) -> dict[str, object] | None:
-    for document in workspace.get("documents", []) or []:
-        if not isinstance(document, dict):
-            continue
-        if str(document.get("document_ref") or document.get("id") or "") == document_ref:
-            return document
-    return None
-
-
 @router.post("/store/review-decision")
 def store_review_decision(
     payload: StoredReviewDecisionPayload,
@@ -1414,22 +1223,7 @@ def store_review_decision(
 
 @router.post("/export/package")
 def export_package(payload: ExportPackagePayload) -> dict[str, object]:
-    candidates = [
-        ExportCandidate(
-            candidate.document_ref,
-            candidate.export_status,
-            _journal_entry(candidate),
-            risk_flags=tuple(candidate.risk_flags),
-        )
-        for candidate in payload.candidates
-    ]
-    package = build_export_package(candidates, export_type=payload.export_type)
-    return {
-        "export_type": package.export_type,
-        "entry_count": len(package.entries),
-        "excluded_document_refs": list(package.excluded_document_refs),
-        "entries": [_entry_payload(entry) for entry in package.entries],
-    }
+    return export_package_payload(payload)
 
 
 @router.post("/store/export-package")

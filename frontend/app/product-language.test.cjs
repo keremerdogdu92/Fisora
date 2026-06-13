@@ -12,6 +12,7 @@ test("portal visible copy presents AI agent automation without internal implemen
     source("layout.tsx"),
     source("page.tsx"),
     source("portal-app.tsx"),
+    source("portal-review-panels.tsx"),
     source("pilot-readiness.js"),
     source("demo-data.ts"),
   ].join("\n");

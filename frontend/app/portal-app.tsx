@@ -1,11 +1,21 @@
-"use client";
+﻿"use client";
 
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fallbackReviewData } from "./demo-data";
+import { AccountantDashboard } from "./portal-dashboard-view";
+import { ClientPortal } from "./portal-client-view";
+import { ClientManagementView } from "./portal-clients-view";
+import { DocumentProcessingWorkspace } from "./portal-documents-view";
+import {
+  ExportBasketView as ExportBasketRouteView,
+  OperationsView as OperationsRouteView,
+} from "./portal-exports-view";
+import { SettingsView } from "./portal-settings-view";
+import { Info } from "./portal-shared";
+import { AccountantWorkspace } from "./portal-workspace-view";
 import {
   INTAKE_TABS,
   buildUploadIntakeMetadata,
-  labelForIntakeCategory,
   normalizeIntakeCategory,
 } from "./upload-intake";
 import {
@@ -40,6 +50,33 @@ import {
   PORTAL_NAV_ITEMS,
   portalConfigForRouteKey,
 } from "./portal-routes";
+import type {
+  CancellationRequest,
+  ChartRow,
+  CorrectionDraft,
+  DashboardClientRow,
+  DocumentSegment,
+  DraftLine,
+  ExportBasketItem,
+  ExportMode,
+  IntakeCategory,
+  LocalSession,
+  NewClientDraft,
+  PilotClient,
+  PilotData,
+  PilotDocument,
+  PilotMode,
+  PilotReadinessView,
+  PilotStatus,
+  PortalNavItem,
+  PortalRouteKey,
+  ReviewData,
+  ReviewFilter,
+  RulePromptView,
+  StatementAiSuggestionView,
+  StatementEntryReview,
+  StatementLineReview,
+} from "./portal-types";
 import {
   agentSourceLabel,
   normalizeRulePrompt,
@@ -54,351 +91,19 @@ import {
   safeText,
 } from "./portal-normalization";
 
-type IntakeCategory = "sales_invoice" | "purchase_invoice" | "bank_statement" | "special_document";
-
-type DraftLine = {
-  account_code: string;
-  description: string;
-  debit: string;
-  credit: string;
-};
-
-type StatementLineReview = {
-  line_no: number;
-  transaction_date: string;
-  description: string;
-  amount: string;
-  direction: "in" | "out" | "";
-  balance_after: string;
-  counterparty_name: string;
-  tax_id: string;
-  iban: string;
-  suggested_account_code: string;
-  transaction_type: string;
-  confidence: number;
-  risk_flags: string[];
-  review_reason: string;
-  accountant_review_status?: string;
-  counterparty_match_code?: string;
-};
-
-type StatementEntryReview = {
-  statement_line_no: number;
-  statement_fingerprint: string;
-  source_document_ref: string;
-  accountant_review_status?: string;
-  risk_flags: string[];
-  lines: DraftLine[];
-};
-
-type StatementAiSuggestionView = {
-  line_no: number;
-  transaction_type: string;
-  suggested_account_code: string;
-  confidence: number;
-  reason: string;
-  evidence: string[];
-  risk_flags: string[];
-  ai_used?: boolean;
-  provider?: string;
-  skipped_reason?: string;
-  export_allowed: boolean;
-};
-
-type RulePromptView = {
-  show: boolean;
-  defaultScope: string;
-  message: string;
-  clientConsistentDecisionCount: number;
-  officeDistinctClientCount: number;
-  officeConsistentDecisionCount: number;
-};
-
-type PilotStatus =
-  | "uploaded"
-  | "queued"
-  | "processing"
-  | "review_required"
-  | "export_ready"
-  | "cancel_requested"
-  | "cancel_approved"
-  | "cancel_rejected"
-  | "export_added"
-  | "exported"
-  | "post_export_correction_requested";
-
-type PilotDocument = {
-  id: string;
-  clientId: string;
-  clientName: string;
-  fileName: string;
-  documentType: string;
-  intakeCategory: IntakeCategory;
-  period: string;
-  uploadedAt: string;
-  uploadedBy: string;
-  status: PilotStatus;
-  provider: string;
-  issueDate: string;
-  amount: string;
-  vatRates: string[];
-  productLine: string;
-  productCategory: string;
-  businessRelation: string;
-  accountTreatment: string;
-  requiresAccountantReview: boolean;
-  previewText: string;
-  aiReason: string;
-  aiProvider: string;
-  aiSuggestedAccountCode: string;
-  aiSuggestedCounterpartyCode: string;
-  aiRiskFlags: string[];
-  aiAccountReason: string;
-  deterministicSummary: string;
-  exportGateReason: string;
-  selectedExpenseAccount: string;
-  selectedVatAccount: string;
-  selectedCounterpartyAccount: string;
-  counterpartyConfidence: number;
-  reviewReasons: string[];
-  riskFlags: string[];
-  draftLines: DraftLine[];
-  statementLines: StatementLineReview[];
-  statementEntries: StatementEntryReview[];
-  statementAiSuggestions: StatementAiSuggestionView[];
-  statementAiSummary: string;
-  accountingIntent: string;
-  accountingIntentConfidence: number;
-  learningRuleScope: string;
-  learningRuleReason: string;
-  learningRuleSourceSummary: string;
-  rulePrompt: RulePromptView;
-};
-
-type PilotClient = {
-  clientId: string;
-  clientName: string;
-  taxId: string;
-  userLabel: string;
-  portalUserId: string;
-  onboardingStatus: string;
-};
-
-type CancellationRequest = {
-  id: string;
-  documentId: string;
-  clientId: string;
-  fileName: string;
-  requestedBy: string;
-  requestedAt: string;
-  reason: string;
-  stage: "pre_export" | "post_export";
-  status: "open" | "approved" | "rejected";
-};
-
-type ExportBasketItem = {
-  id: string;
-  clientId: string;
-  clientName: string;
-  documentIds: string[];
-  documentCount: number;
-  period: string;
-  status: "ready" | "packaged";
-};
-
-type PilotData = {
-  generatedFrom: string;
-  clients: PilotClient[];
-  documents: PilotDocument[];
-  cancellationRequests: CancellationRequest[];
-  exportBasket: ExportBasketItem[];
-};
-
-type PilotReadinessView = {
-  status: string;
-  statusLabel: string;
-  productionLabel: string;
-  offerLabel: string;
-  exportLabel: string;
-  zirveLabel: string;
-  authLabel: string;
-  storeLabel: string;
-  aiLabel: string;
-  blocking: string[];
-  warnings: string[];
-};
-
-type ReviewData = {
-  generatedFrom?: string;
-  clientId?: string;
-  clientName?: string;
-  uploadQueue?: {
-    id?: string;
-    fileName?: string;
-    kind?: string;
-    intakeCategory?: string;
-    uploadedBy?: string;
-    status?: string;
-    uploadedAt?: string;
-  }[];
-  portalUsers?: {
-    userId?: string;
-    displayName?: string;
-    role?: string;
-  }[];
-  invoiceRows?: {
-    documentRef?: string;
-    fileName?: string;
-    providerHint?: string;
-    invoiceType?: string;
-    intakeCategory?: string;
-    issueDate?: string;
-    payableTotal?: string;
-    vatRates?: string[];
-    status?: string;
-    draftQuality?: string;
-    isBalanced?: boolean;
-    riskFlags?: string[];
-    parseNotes?: string[];
-    reviewReasonCodes?: string[];
-    productLineHint?: string;
-    productCategory?: string;
-    productConfidence?: number;
-    businessRelevanceReason?: string;
-    businessRelevanceRelation?: string;
-    businessRelevanceAccountTreatment?: string;
-    businessRelevanceRequiresReview?: boolean;
-    aiClassificationReason?: string;
-    aiClassificationProvider?: string;
-    aiClassificationSkippedReason?: string;
-    aiSuggestedAccountCode?: string;
-    aiSuggestedCounterpartyCode?: string;
-    aiRiskFlags?: string[];
-    aiAccountReason?: string;
-    exportStatus?: string;
-    selectedExpenseAccount?: string;
-    selectedVatAccount?: string;
-    selectedSupplierAccount?: string;
-    counterpartyMatchCode?: string;
-    counterpartyMatchConfidence?: number;
-    processingMode?: string;
-    deterministicChecks?: string[];
-    exportGateReason?: string;
-    draftLines?: DraftLine[];
-    statementLines?: unknown[];
-    statement_lines?: unknown[];
-    statementEntries?: unknown[];
-    statement_entries?: unknown[];
-    statementAiSuggestions?: unknown[];
-    statement_ai_suggestions?: unknown[];
-    statementAiSummary?: string;
-    statement_ai_summary?: string;
-    accountingIntent?: string;
-    accounting_intent?: string;
-    accountingIntentConfidence?: number;
-    accounting_intent_confidence?: number;
-    learningRuleScope?: string;
-    learning_rule_scope?: string;
-    learningRuleReason?: string;
-    learning_rule_reason?: string;
-    learningRuleSourceSummary?: string;
-    learning_rule_source_summary?: string;
-    rulePrompt?: unknown;
-    rule_prompt?: unknown;
-  }[];
-};
-
-type PilotMode = "client" | "accountant" | "documents" | "clients" | "settings" | "exports" | "operations";
-type PortalRouteKey = "home" | "mukellef" | "musavir" | "belgeler" | "mukellefler" | "ayarlar" | "cikti" | "operasyon";
-type DocumentSegment = "invoices" | "bank_statements" | "other_documents";
-type PortalNavItem = { mode: PilotMode; label: string; href: string };
-type ReviewFilter = "all" | "review_required" | "export_ready" | "cancel_requested";
-type ExportMode = "bulk" | "by_client";
-
-type CorrectionDraft = {
-  accountCode: string;
-  counterpartyCode: string;
-  reason: string;
-};
-
-type NewClientDraft = {
-  clientId: string;
-  title: string;
-  taxId: string;
-  activityDescription: string;
-  naceCode: string;
-  activityTags: string[];
-  activityProfile: Record<string, unknown>;
-  workplaceAddresses: string[];
-  portalUserId: string;
-  portalDisplayName: string;
-};
-
-type DashboardClientRow = {
-  clientId: string;
-  clientName: string;
-  taxId: string;
-  documentCount: number;
-  pendingReviewCount: number;
-  exportReadyCount: number;
-  inProgressCount: number;
-  cancellationCount: number;
-  lastUploadedAt: string;
-  status: string;
-};
-
-type ChartRow = {
-  key: string;
-  label: string;
-  count: number;
-};
-
-type LocalSession = {
-  userId: string;
-  role: "client_user" | "accountant";
-  sessionToken?: string;
-  expiresAt?: string;
-};
-
 const SESSION_STORAGE_KEY = "fisora.office.session.v1";
 
 const emptyPilotData: PilotData = {
-  generatedFrom: "Çalışma alanı yükleniyor",
+  generatedFrom: "Ã‡alÄ±ÅŸma alanÄ± yÃ¼kleniyor",
   clients: [],
   documents: [],
   cancellationRequests: [],
   exportBasket: [],
 };
 
-const statusLabels: Record<PilotStatus, string> = {
-  uploaded: "Yüklendi",
-  queued: "Kuyrukta",
-  processing: "İşleniyor",
-  review_required: "Kontrol gerekli",
-  export_ready: "Aktarıma hazır",
-  cancel_requested: "İptal talebi",
-  cancel_approved: "İptal kabul",
-  cancel_rejected: "İptal red",
-  export_added: "Çıktı listesinde",
-  exported: "Çıktı alındı",
-  post_export_correction_requested: "Aktarım sonrası düzeltme",
-};
-
-const documentTypeLabels: Record<string, string> = {
-  invoice: "Fatura",
-  xml: "E-Fatura XML/PDF",
-  bank: "Banka ekstresi",
-  bank_statement: "Banka ekstresi",
-  pos: "POS ekstresi",
-  pos_statement: "POS ekstresi",
-  special_document: "Özel belge",
-  ALIS: "Alış faturası",
-  SATIS: "Satış faturası",
-};
-
 const roleLabels: Record<LocalSession["role"], string> = {
-  accountant: "Müşavir",
-  client_user: "Mükellef",
+  accountant: "MÃ¼ÅŸavir",
+  client_user: "MÃ¼kellef",
 };
 
 function toIntakeCategory(value: unknown): IntakeCategory {
@@ -418,12 +123,6 @@ function inferIntakeCategory(documentType: unknown, invoiceType?: unknown): Inta
     return "sales_invoice";
   }
   return "purchase_invoice";
-}
-
-function documentPreviewTitle(document: PilotDocument) {
-  if (document.intakeCategory === "bank_statement") return "EKSTRE";
-  if (document.intakeCategory === "special_document") return "ÖZEL BELGE";
-  return "FATURA";
 }
 
 function readStoredSession(): LocalSession | null {
@@ -454,17 +153,6 @@ function periodLabel(period: string) {
   return `${month}.${year}`;
 }
 
-function formatDateText(value: string) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("tr-TR");
-}
-
-function formatStatus(status: PilotStatus) {
-  return statusLabels[status] ?? status;
-}
-
 function isInProgress(status: PilotStatus) {
   return status === "uploaded" || status === "queued" || status === "processing";
 }
@@ -478,20 +166,20 @@ const statementTypeLabels: Record<string, string> = {
   pos_blocked: "POS bloke",
   tax: "Vergi",
   sgk: "SGK",
-  bank_fee: "Banka masrafı",
+  bank_fee: "Banka masrafÄ±",
   eft: "EFT/Havale",
   credit_card: "Kredi/kart",
   loan: "Kredi",
-  payroll: "Maaş",
+  payroll: "MaaÅŸ",
   transfer: "Transfer",
-  refund: "İade",
-  reversal: "Ters kayıt",
+  refund: "Ä°ade",
+  reversal: "Ters kayÄ±t",
   unknown: "Bilinmeyen",
 };
 
 function statementDirectionLabel(direction: StatementLineReview["direction"]) {
-  if (direction === "in") return "Giriş";
-  if (direction === "out") return "Çıkış";
+  if (direction === "in") return "GiriÅŸ";
+  if (direction === "out") return "Ã‡Ä±kÄ±ÅŸ";
   return "-";
 }
 
@@ -502,17 +190,17 @@ function statementReviewStatus(action: string) {
 }
 
 function statementStatusLabel(status?: string) {
-  if (status === "approved") return "Onaylı";
+  if (status === "approved") return "OnaylÄ±";
   if (status === "rejected") return "Red";
   if (status === "review_required") return "Kontrol";
   return "Bekliyor";
 }
 
 function reviewActionLabel(action: string) {
-  if (action === "approve") return "Onaylandı";
-  if (action === "approve_with_changes") return "Düzeltilip onaylandı";
-  if (action === "suggest_for_similar") return "Kural adayı yapıldı";
-  if (action === "exclude_export") return "Çıktı dışı bırakıldı";
+  if (action === "approve") return "OnaylandÄ±";
+  if (action === "approve_with_changes") return "DÃ¼zeltilip onaylandÄ±";
+  if (action === "suggest_for_similar") return "Kural adayÄ± yapÄ±ldÄ±";
+  if (action === "exclude_export") return "Ã‡Ä±ktÄ± dÄ±ÅŸÄ± bÄ±rakÄ±ldÄ±";
   return "Kontrolde tutuldu";
 }
 
@@ -580,8 +268,8 @@ function applyStatementLineDecision(
     ...document,
     status: allApproved ? "export_ready" : "review_required",
     exportGateReason: allApproved
-      ? "Banka satırları müşavir onayından geçti; çıktı listesine alınabilir."
-      : "Banka satırlarında müşavir kontrolü sürüyor.",
+      ? "Banka satÄ±rlarÄ± mÃ¼ÅŸavir onayÄ±ndan geÃ§ti; Ã§Ä±ktÄ± listesine alÄ±nabilir."
+      : "Banka satÄ±rlarÄ±nda mÃ¼ÅŸavir kontrolÃ¼ sÃ¼rÃ¼yor.",
     deterministicSummary: `${document.deterministicSummary}${document.deterministicSummary ? ", " : ""}statement_line_reviewed:${lineNo}`,
     statementLines,
     statementEntries,
@@ -597,7 +285,7 @@ function journalDraftLinesForDocument(document: PilotDocument, selectedStatement
 
 function normalizeReviewData(raw: ReviewData): PilotData {
   const clientId = safeText(raw.clientId, "ofis-calisma-client");
-  const clientName = safeText(raw.clientName, "Ofis Mükellefi");
+  const clientName = safeText(raw.clientName, "Ofis MÃ¼kellefi");
   const clientUser = raw.portalUsers?.find((user) => user.role === "client_user") ?? raw.portalUsers?.[0];
   const documentsFromRows = (raw.invoiceRows ?? []).map((row, index): PilotDocument => {
     const fileName = safeText(row.documentRef || row.fileName, `ofis-belge-${index + 1}.pdf`);
@@ -613,7 +301,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       uploadedAt: safeText(row.issueDate, "01.04.2026"),
       uploadedBy: safeText(clientUser?.displayName, clientName),
       status,
-      provider: safeText(row.providerHint, "Tedarikçi bilinmiyor"),
+      provider: safeText(row.providerHint, "TedarikÃ§i bilinmiyor"),
       issueDate: safeText(row.issueDate, "-"),
       amount: safeText(row.payableTotal, "-"),
       vatRates: Array.isArray(row.vatRates) ? row.vatRates.map(String) : [],
@@ -623,21 +311,21 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       accountTreatment: safeText(row.businessRelevanceAccountTreatment, "-"),
       requiresAccountantReview: Boolean(row.businessRelevanceRequiresReview),
       previewText: [
-        safeText(row.providerHint, "Tedarikçi bilinmiyor"),
+        safeText(row.providerHint, "TedarikÃ§i bilinmiyor"),
         safeText(row.productLineHint, "Belge kalemi okunuyor"),
         safeText(row.payableTotal, "-"),
       ].join(" / "),
       aiReason:
         safeText(row.aiClassificationReason) ||
         safeText(row.businessRelevanceReason) ||
-        safeText(row.aiClassificationSkippedReason, "Öneri gerekçesi yok"),
+        safeText(row.aiClassificationSkippedReason, "Ã–neri gerekÃ§esi yok"),
       aiProvider: safeText(row.aiClassificationProvider, "-"),
       aiSuggestedAccountCode: safeText(row.aiSuggestedAccountCode, ""),
       aiSuggestedCounterpartyCode: safeText(row.aiSuggestedCounterpartyCode, ""),
       aiRiskFlags: Array.isArray(row.aiRiskFlags) ? row.aiRiskFlags.map(String) : [],
       aiAccountReason: safeText(row.aiAccountReason, ""),
-      deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolü gerekli"),
-      exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Çıktı listesine alınabilir." : "Müşavir kontrolü gerekiyor."),
+      deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolÃ¼ gerekli"),
+      exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Ã‡Ä±ktÄ± listesine alÄ±nabilir." : "MÃ¼ÅŸavir kontrolÃ¼ gerekiyor."),
       selectedExpenseAccount: safeText(row.selectedExpenseAccount, "-"),
       selectedVatAccount: safeText(row.selectedVatAccount, "-"),
       selectedCounterpartyAccount: safeText(row.selectedSupplierAccount || row.counterpartyMatchCode, "-"),
@@ -672,7 +360,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       uploadedAt: safeText(item.uploadedAt, "-"),
       uploadedBy: safeText(item.uploadedBy, safeText(clientUser?.displayName, clientName)),
       status: normalizeStatus(item.status),
-      provider: "İşleme alınacak belge",
+      provider: "Ä°ÅŸleme alÄ±nacak belge",
       issueDate: "-",
       amount: "-",
       vatRates: [],
@@ -681,15 +369,15 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       businessRelation: "-",
       accountTreatment: "-",
       requiresAccountantReview: true,
-      previewText: "Belge yüklendi, otomatik kuyruğa alınacak.",
-      aiReason: "Henüz yorum yok.",
+      previewText: "Belge yÃ¼klendi, otomatik kuyruÄŸa alÄ±nacak.",
+      aiReason: "HenÃ¼z yorum yok.",
       aiProvider: "-",
       aiSuggestedAccountCode: "",
       aiSuggestedCounterpartyCode: "",
       aiRiskFlags: [],
       aiAccountReason: "",
-      deterministicSummary: "İşleme sonucu hazırlanıyor.",
-      exportGateReason: "İşleme tamamlanmadan çıktıya eklenemez.",
+      deterministicSummary: "Ä°ÅŸleme sonucu hazÄ±rlanÄ±yor.",
+      exportGateReason: "Ä°ÅŸleme tamamlanmadan Ã§Ä±ktÄ±ya eklenemez.",
       selectedExpenseAccount: "-",
       selectedVatAccount: "-",
       selectedCounterpartyAccount: "-",
@@ -711,15 +399,15 @@ function normalizeReviewData(raw: ReviewData): PilotData {
 
   const documents = [...documentsFromRows, ...uploadOnlyDocuments];
   return {
-    generatedFrom: safeText(raw.generatedFrom, "Yerel çalışma verisi"),
+    generatedFrom: safeText(raw.generatedFrom, "Yerel Ã§alÄ±ÅŸma verisi"),
     clients: [
       {
         clientId,
         clientName,
         taxId: "ofis-local",
         portalUserId: safeText(clientUser?.userId, "ofis-mukellef-user"),
-        userLabel: safeText(clientUser?.displayName, "Mükellef kullanıcısı"),
-        onboardingStatus: "Hesap planı ve mükellef kartı çalışma alanında hazır",
+        userLabel: safeText(clientUser?.displayName, "MÃ¼kellef kullanÄ±cÄ±sÄ±"),
+        onboardingStatus: "Hesap planÄ± ve mÃ¼kellef kartÄ± Ã§alÄ±ÅŸma alanÄ±nda hazÄ±r",
       },
     ],
     documents,
@@ -730,9 +418,9 @@ function normalizeReviewData(raw: ReviewData): PilotData {
             documentId: documents[1].id,
             clientId,
             fileName: documents[1].fileName,
-            requestedBy: safeText(clientUser?.displayName, "Mükellef kullanıcısı"),
+            requestedBy: safeText(clientUser?.displayName, "MÃ¼kellef kullanÄ±cÄ±sÄ±"),
             requestedAt: "04.06.2026 10:30",
-            reason: "Mükellef belge için iptal veya düzeltme kontrolü istedi.",
+            reason: "MÃ¼kellef belge iÃ§in iptal veya dÃ¼zeltme kontrolÃ¼ istedi.",
             stage: documents[1].status === "export_ready" ? "post_export" : "pre_export",
             status: "open",
           },
@@ -758,7 +446,7 @@ function normalizePilotData(raw: unknown): PilotData {
   const maybePilot = raw as Partial<PilotData>;
   if (Array.isArray(maybePilot.clients) && Array.isArray(maybePilot.documents)) {
     return {
-      generatedFrom: safeText(maybePilot.generatedFrom, "Yerel çalışma verisi"),
+      generatedFrom: safeText(maybePilot.generatedFrom, "Yerel Ã§alÄ±ÅŸma verisi"),
       clients: (maybePilot.clients as PilotClient[]).map((client) => ({
         ...client,
         portalUserId: safeText(
@@ -810,7 +498,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     portalConfig.visibleModes.includes(item.mode),
   );
   const [data, setData] = useState<PilotData>(emptyPilotData);
-  const [source, setSource] = useState("Çalışma alanı yükleniyor");
+  const [source, setSource] = useState("Ã‡alÄ±ÅŸma alanÄ± yÃ¼kleniyor");
   const [readinessPayload, setReadinessPayload] = useState<Record<string, unknown> | null>(null);
   const [localFallbackAllowed, setLocalFallbackAllowed] = useState(false);
   const [mode, setModeState] = useState<PilotMode>(portalConfig.initialMode as PilotMode);
@@ -883,7 +571,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       const payload = normalizePilotData(backendPayload as PilotData);
       if (!payload.clients.length) return false;
       if (shouldCancel()) return true;
-      applyPilotData(payload, payload.generatedFrom || "Çalışma alanı");
+      applyPilotData(payload, payload.generatedFrom || "Ã‡alÄ±ÅŸma alanÄ±");
       return true;
     } catch {
       return false;
@@ -916,7 +604,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       if (await refreshBackendPilotData(() => cancelled)) return;
       if (!allowLocalFallback) {
         if (!cancelled) {
-          applyPilotData(emptyPilotData, "Çalışma alanına erişilemedi");
+          applyPilotData(emptyPilotData, "Ã‡alÄ±ÅŸma alanÄ±na eriÅŸilemedi");
         }
         return;
       }
@@ -925,7 +613,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         try {
           const payload = normalizePilotData(await fetchJson(path));
           if (cancelled) return;
-          applyPilotData(payload, "Yerel çalışma verisi");
+          applyPilotData(payload, "Yerel Ã§alÄ±ÅŸma verisi");
           return;
         } catch {
           // Try the next private/local source.
@@ -933,7 +621,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       }
       const fallback = normalizeReviewData(fallbackReviewData as ReviewData);
       if (cancelled) return;
-      applyPilotData(fallback, "Yerel çalışma verisi");
+      applyPilotData(fallback, "Yerel Ã§alÄ±ÅŸma verisi");
     }
     void loadPilotData();
     return () => {
@@ -1012,7 +700,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     const password = loginPassword.trim();
     const effectiveRole = (lockedRole ?? loginRole) as "client_user" | "accountant";
     if (password) {
-      setLoginStatus("Oturum açılıyor.");
+      setLoginStatus("Oturum aÃ§Ä±lÄ±yor.");
       try {
         const backendSession = await loginWithPassword({
           apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -1028,30 +716,30 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         persistSession(nextSession);
         setSession(nextSession);
         setLoginPassword("");
-        setLoginStatus(`${nextSession.userId} için oturum açıldı.`);
+        setLoginStatus(`${nextSession.userId} iÃ§in oturum aÃ§Ä±ldÄ±.`);
         setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setLoginStatus(`Oturum açılamadı. ${message}`);
+        setLoginStatus(`Oturum aÃ§Ä±lamadÄ±. ${message}`);
         return;
       }
     }
     if (!localFallbackAllowed) {
-      setLoginStatus("Bu ortamda şifresiz ofis oturumu kapalı. Kullanıcı şifresiyle girin.");
+      setLoginStatus("Bu ortamda ÅŸifresiz ofis oturumu kapalÄ±. KullanÄ±cÄ± ÅŸifresiyle girin.");
       return;
     }
     const nextSession: LocalSession = { userId, role: effectiveRole };
     persistSession(nextSession);
     setSession(nextSession);
-    setLoginStatus(`${nextSession.userId} için lokal ofis oturumu açıldı.`);
+    setLoginStatus(`${nextSession.userId} iÃ§in lokal ofis oturumu aÃ§Ä±ldÄ±.`);
     setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
   }
 
   function logout() {
     persistSession(null);
     setSession(null);
-    setLoginStatus("Oturum kapatıldı.");
+    setLoginStatus("Oturum kapatÄ±ldÄ±.");
   }
 
   function exitPortal() {
@@ -1088,14 +776,14 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
 
   async function createNewClient() {
     if (!newClientDraft.title.trim()) {
-      setNewClientStatus("Mükellef adı gerekli.");
+      setNewClientStatus("MÃ¼kellef adÄ± gerekli.");
       return;
     }
     const payload = buildClientOnboardingPackagePayload(newClientDraft);
     const taxCertificateFile = newClientTaxCertificateFile;
     const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
     const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-    setNewClientStatus(taxCertificateFile ? "Mükellef kaydediliyor, vergi levhası yüklenecek." : "Mükellef kaydediliyor.");
+    setNewClientStatus(taxCertificateFile ? "MÃ¼kellef kaydediliyor, vergi levhasÄ± yÃ¼klenecek." : "MÃ¼kellef kaydediliyor.");
     try {
       await createClientOnboardingPackage({
         apiBaseUrl,
@@ -1106,7 +794,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       setSelectedClientId(payload.client.client_id);
       let certificateStatus = "";
       if (taxCertificateFile) {
-        setNewClientStatus("Mükellef kaydedildi. Vergi levhası yükleniyor.");
+        setNewClientStatus("MÃ¼kellef kaydedildi. Vergi levhasÄ± yÃ¼kleniyor.");
         try {
           await uploadTaxCertificateToBackend({
             apiBaseUrl,
@@ -1116,10 +804,10 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
             sessionToken: session?.sessionToken,
             file: taxCertificateFile,
           });
-          certificateStatus = " Vergi levhası yüklendi.";
+          certificateStatus = " Vergi levhasÄ± yÃ¼klendi.";
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
+          certificateStatus = ` Vergi levhasÄ± yÃ¼klenemedi: ${message}`;
         }
       }
       setNewClientDraft({
@@ -1140,7 +828,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setNewClientStatus(`Mükellef kaydedilemedi. ${message}`);
+      setNewClientStatus(`MÃ¼kellef kaydedilemedi. ${message}`);
     }
   }
 
@@ -1149,7 +837,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     if (!file) return;
     const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
     const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-    setNewClientStatus(`${file.name} vergi levhası okunuyor.`);
+    setNewClientStatus(`${file.name} vergi levhasÄ± okunuyor.`);
     try {
       const extraction = await parseTaxCertificateFromBackend({
         apiBaseUrl,
@@ -1193,12 +881,12 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       const profileConfidence = Number(activityProfile.confidence || 0);
       const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
       const note = filledFields.length
-        ? `Vergi levhası okundu: ${filledFields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
-        : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
+        ? `Vergi levhasÄ± okundu: ${filledFields.join(", ")}${confidence ? ` / gÃ¼ven ${confidence}` : ""}.`
+        : "Vergi levhasÄ±ndan alan okunamadÄ±; elle kayÄ±t yapabilirsiniz.";
       setNewClientStatus(profileSummary ? `${note} ${profileSummary}` : note);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
+      setNewClientStatus(`Vergi levhasÄ± okunamadÄ±. Elle devam edebilirsiniz. ${message}`);
     }
   }
 
@@ -1321,7 +1009,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       setData((current) => ({ ...current, documents: [...nextDocuments, ...current.documents] }));
       setSelectedPeriod(period);
     }
-    setUploadStatus(`${selectedFiles.length} belge backend kuyruğuna gönderiliyor.`);
+    setUploadStatus(`${selectedFiles.length} belge backend kuyruÄŸuna gÃ¶nderiliyor.`);
 
     const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
     const uploadUserId = pickUploadUser({ session, selectedClient });
@@ -1348,14 +1036,14 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
           }),
         ),
       );
-      setUploadStatus(`${selectedFiles.length} belge backend kuyruğuna alındı.`);
+      setUploadStatus(`${selectedFiles.length} belge backend kuyruÄŸuna alÄ±ndÄ±.`);
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setUploadStatus(
         localFallbackAllowed
-          ? `Backend yükleme tamamlanamadı; belge lokal listede tutuldu. ${message}`
-          : `Backend yükleme tamamlanamadı; serverda belge kaydedilmedi. ${message}`,
+          ? `Backend yÃ¼kleme tamamlanamadÄ±; belge lokal listede tutuldu. ${message}`
+          : `Backend yÃ¼kleme tamamlanamadÄ±; serverda belge kaydedilmedi. ${message}`,
       );
     }
   }
@@ -1366,9 +1054,9 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       documentId: document.id,
       clientId: document.clientId,
       fileName: document.fileName,
-      requestedBy: selectedClient?.userLabel ?? "Mükellef kullanıcısı",
+      requestedBy: selectedClient?.userLabel ?? "MÃ¼kellef kullanÄ±cÄ±sÄ±",
       requestedAt: new Date().toLocaleString("tr-TR"),
-      reason: cancelReason.trim() || "Mükellef iptal veya düzeltme talebi gönderdi.",
+      reason: cancelReason.trim() || "MÃ¼kellef iptal veya dÃ¼zeltme talebi gÃ¶nderdi.",
       stage: document.status === "exported" || document.status === "export_added" ? "post_export" : "pre_export",
       status: "open",
     };
@@ -1404,7 +1092,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     if (!selectedClient) return;
     const readyDocuments = clientDocuments.filter((document) => document.status === "export_ready" || document.status === "export_added");
     if (!readyDocuments.length) {
-      setExportStatus("Bu mükellefte çıktıya uygun belge yok.");
+      setExportStatus("Bu mÃ¼kellefte Ã§Ä±ktÄ±ya uygun belge yok.");
       return;
     }
     const item: ExportBasketItem = {
@@ -1423,7 +1111,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         item.documentIds.includes(document.id) ? { ...document, status: "export_added" } : document,
       ),
     }));
-    setExportStatus(`${selectedClient.clientName} çıktı listesine eklendi.`);
+    setExportStatus(`${selectedClient.clientName} Ã§Ä±ktÄ± listesine eklendi.`);
   }
 
   function markBasketPackaged() {
@@ -1434,15 +1122,15 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         current.exportBasket.some((item) => item.documentIds.includes(document.id)) ? { ...document, status: "exported" } : document,
       ),
     }));
-    setExportStatus(exportMode === "bulk" ? "Seçili mükellefler için toplu paket hazır görünüyor." : "Mükellef bazlı paketler hazır görünüyor.");
+    setExportStatus(exportMode === "bulk" ? "SeÃ§ili mÃ¼kellefler iÃ§in toplu paket hazÄ±r gÃ¶rÃ¼nÃ¼yor." : "MÃ¼kellef bazlÄ± paketler hazÄ±r gÃ¶rÃ¼nÃ¼yor.");
   }
 
   async function requestStatementAiForSelectedDocument() {
     if (!selectedDocument || !selectedDocument.statementLines.length) {
-      setStatementAiStatus("Seçili belgede banka satırı yok.");
+      setStatementAiStatus("SeÃ§ili belgede banka satÄ±rÄ± yok.");
       return;
     }
-    setStatementAiStatus("AI ajan önerisi isteniyor.");
+    setStatementAiStatus("AI ajan Ã¶nerisi isteniyor.");
     try {
       const payload = await requestStatementAiSuggestions({
         apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -1464,15 +1152,15 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
             ? {
                 ...document,
                 statementAiSuggestions: suggestions.length ? suggestions : document.statementAiSuggestions,
-                statementAiSummary: `${aiUsedCount} AI ajan önerisi / ${skippedCount} satır atlandı`,
+                statementAiSummary: `${aiUsedCount} AI ajan Ã¶nerisi / ${skippedCount} satÄ±r atlandÄ±`,
               }
             : document,
         ),
       }));
-      setStatementAiStatus(suggestions.length ? `${suggestions.length} AI ajan önerisi alındı.` : "Öneri motoru sonuç döndürmedi; mevcut öneriler korundu.");
+      setStatementAiStatus(suggestions.length ? `${suggestions.length} AI ajan Ã¶nerisi alÄ±ndÄ±.` : "Ã–neri motoru sonuÃ§ dÃ¶ndÃ¼rmedi; mevcut Ã¶neriler korundu.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatementAiStatus(`AI ajan önerisi alınamadı. ${message}`);
+      setStatementAiStatus(`AI ajan Ã¶nerisi alÄ±namadÄ±. ${message}`);
     }
   }
 
@@ -1481,7 +1169,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     const lineNo = selectedStatementLineNo || selectedDocument.statementLines[0]?.line_no || 0;
     const selectedLine = selectedDocument.statementLines.find((line) => line.line_no === lineNo);
     if (!lineNo || !selectedLine) {
-      setDecisionStatus("Banka satırı seçili değil.");
+      setDecisionStatus("Banka satÄ±rÄ± seÃ§ili deÄŸil.");
       return;
     }
     const correctedAccountCode = correctionDraft.accountCode.trim();
@@ -1497,7 +1185,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       ),
     }));
     const label = statementStatusLabel(statementReviewStatus(action));
-    setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satır: ${label} arayüzde uygulandı.`);
+    setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satÄ±r: ${label} arayÃ¼zde uygulandÄ±.`);
     try {
       await storeReviewDecision({
         apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -1514,14 +1202,14 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         reason,
         sessionToken: session?.sessionToken,
       });
-      setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satır: ${label} backend'e kaydedildi.`);
+      setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satÄ±r: ${label} backend'e kaydedildi.`);
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setDecisionStatus(
         localFallbackAllowed
-          ? `${selectedDocument.fileName} / ${lineNo}. satır lokal uygulandı; backend kaydı tamamlanamadı. ${message}`
-          : `${selectedDocument.fileName} / ${lineNo}. satır backend'e kaydedilemedi; serverda kalıcı karar oluşmadı. ${message}`,
+          ? `${selectedDocument.fileName} / ${lineNo}. satÄ±r lokal uygulandÄ±; backend kaydÄ± tamamlanamadÄ±. ${message}`
+          : `${selectedDocument.fileName} / ${lineNo}. satÄ±r backend'e kaydedilemedi; serverda kalÄ±cÄ± karar oluÅŸmadÄ±. ${message}`,
       );
     }
   }
@@ -1545,13 +1233,13 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
               selectedCounterpartyAccount: correctedCounterpartyCode || document.selectedCounterpartyAccount,
               exportGateReason:
                 nextStatus === "export_ready"
-                  ? "Müşavir onayı verildi; çıktı listesine alınabilir."
-                  : "Müşavir kararı çıktıya almadı veya kontrolü sürdürdü.",
+                  ? "MÃ¼ÅŸavir onayÄ± verildi; Ã§Ä±ktÄ± listesine alÄ±nabilir."
+                  : "MÃ¼ÅŸavir kararÄ± Ã§Ä±ktÄ±ya almadÄ± veya kontrolÃ¼ sÃ¼rdÃ¼rdÃ¼.",
             }
           : document,
       ),
     }));
-    setDecisionStatus(`${selectedDocument.fileName}: ${label} arayüzde uygulandı.`);
+    setDecisionStatus(`${selectedDocument.fileName}: ${label} arayÃ¼zde uygulandÄ±.`);
     try {
       await storeReviewDecision({
         apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -1573,8 +1261,8 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       const message = error instanceof Error ? error.message : String(error);
       setDecisionStatus(
         localFallbackAllowed
-          ? `${selectedDocument.fileName}: ${label} lokal uygulandı; backend kaydı tamamlanamadı. ${message}`
-          : `${selectedDocument.fileName}: ${label} backend'e kaydedilemedi; serverda kalıcı karar oluşmadı. ${message}`,
+          ? `${selectedDocument.fileName}: ${label} lokal uygulandÄ±; backend kaydÄ± tamamlanamadÄ±. ${message}`
+          : `${selectedDocument.fileName}: ${label} backend'e kaydedilemedi; serverda kalÄ±cÄ± karar oluÅŸmadÄ±. ${message}`,
       );
     }
   }
@@ -1586,7 +1274,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       <header className="private-topbar">
         <div>
           <p className="eyebrow">Fisero</p>
-          <h1>{mode === "client" ? "Mükellef portalı" : activeNavItem?.label || "Müşavir çalışma alanı"}</h1>
+          <h1>{mode === "client" ? "MÃ¼kellef portalÄ±" : activeNavItem?.label || "MÃ¼ÅŸavir Ã§alÄ±ÅŸma alanÄ±"}</h1>
         </div>
         <PortalTopbarStatus
           localFallbackAllowed={localFallbackAllowed}
@@ -1597,7 +1285,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       </header>
 
       {visibleNavItems.length > 1 ? (
-        <nav className="portal-nav" aria-label="Portal ekranları">
+        <nav className="portal-nav" aria-label="Portal ekranlarÄ±">
           {visibleNavItems.map((item: { mode: PilotMode; label: string; href: string }) => (
             <ModeButton active={mode === item.mode} href={item.href} key={item.mode} label={item.label} />
           ))}
@@ -1759,17 +1447,18 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       ) : null}
 
       {mode === "exports" ? (
-        <ExportBasketView
+        <ExportBasketRouteView
           exportBasket={data.exportBasket}
           exportMode={exportMode}
           exportStatus={exportStatus}
           onMarkPackaged={markBasketPackaged}
+          periodLabel={periodLabel}
           setExportMode={setExportMode}
         />
       ) : null}
 
       {mode === "operations" ? (
-        <OperationsView
+        <OperationsRouteView
           data={data}
           localFallbackAllowed={localFallbackAllowed}
           readinessView={readinessView}
@@ -1784,71 +1473,6 @@ export default function Home() {
   return <FisoraPortalApp routeKey="home" />;
 }
 
-function SessionPanel({
-  loginPassword,
-  loginRole,
-  loginStatus,
-  loginUserId,
-  lockedRole,
-  localFallbackAllowed,
-  onLogin,
-  onLogout,
-  session,
-  setLoginPassword,
-  setLoginRole,
-  setLoginUserId,
-}: {
-  loginPassword: string;
-  loginRole: "client_user" | "accountant";
-  loginStatus: string;
-  loginUserId: string;
-  lockedRole?: "client_user" | "accountant";
-  localFallbackAllowed: boolean;
-  onLogin: () => void | Promise<void>;
-  onLogout: () => void;
-  session: LocalSession | null;
-  setLoginPassword: (value: string) => void;
-  setLoginRole: (value: "client_user" | "accountant") => void;
-  setLoginUserId: (value: string) => void;
-}) {
-  return (
-    <section className="session-panel" aria-label="Giriş ve çıkış">
-      <div>
-        <span>Ofis erişimi</span>
-        <strong>{session ? `${session.userId} / ${roleLabels[session.role]}` : "Oturum yok"}</strong>
-        <p>
-          {loginStatus ||
-            (session?.sessionToken
-              ? `Oturum aktif${session.expiresAt ? ` / ${formatDateText(session.expiresAt)}` : ""}.`
-              : localFallbackAllowed
-                ? "Lokal geliştirme için şifresiz ofis oturumu açılabilir."
-                : "Kullanıcı şifresiyle giriş zorunlu.")}
-        </p>
-      </div>
-      <div className="session-controls">
-        <input aria-label="Kullanıcı" onChange={(event) => setLoginUserId(event.target.value)} value={loginUserId} />
-        <input
-          aria-label="Şifre"
-          onChange={(event) => setLoginPassword(event.target.value)}
-          placeholder="Kullanıcı şifresi"
-          type="password"
-          value={loginPassword}
-        />
-        <select
-          aria-label="Rol"
-          disabled={Boolean(lockedRole)}
-          onChange={(event) => setLoginRole(event.target.value as "client_user" | "accountant")}
-          value={lockedRole ?? loginRole}
-        >
-          <option value="accountant">Müşavir</option>
-          <option value="client_user">Mükellef</option>
-        </select>
-        <button onClick={onLogin} type="button">Giriş</button>
-        <button className="secondary" onClick={onLogout} type="button">Çıkış</button>
-      </div>
-    </section>
-  );
-}
 
 function ModeButton({ active, href, label }: { active: boolean; href: string; label: string }) {
   return (
@@ -1872,15 +1496,15 @@ function PortalTopbarStatus({
   return (
     <div className="portal-statusbar" aria-label="Portal oturum durumu">
       <div className="topbar-user">
-        <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalı"}</span>
+        <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalÄ±"}</span>
         <strong>{session?.userId || "Oturum yok"}</strong>
       </div>
       <div className="pilot-source compact">
-        <span>Veri kaynağı</span>
+        <span>Veri kaynaÄŸÄ±</span>
         <strong>{source}</strong>
       </div>
       <button className="secondary compact-exit" onClick={onExit} type="button">
-        Çıkış
+        Ã‡Ä±kÄ±ÅŸ
       </button>
     </div>
   );
@@ -1898,1362 +1522,13 @@ function SelectedClientStrip({
   const readyCount = documents.filter((document) => document.status === "export_ready" || document.status === "export_added").length;
   const reviewCount = documents.filter((document) => document.status === "review_required").length;
   return (
-    <section className="selected-client-strip" aria-label="Seçili mükellef">
-      <Info label="Seçili mükellef" value={client?.clientName ?? "-"} />
+    <section className="selected-client-strip" aria-label="SeÃ§ili mÃ¼kellef">
+      <Info label="SeÃ§ili mÃ¼kellef" value={client?.clientName ?? "-"} />
       <Info label="VKN" value={client?.taxId ?? "-"} />
       <Info label="Belge" value={String(documents.length)} />
       <Info label="Kontrol" value={String(reviewCount)} />
-      <Info label="Çıktı hazır" value={String(readyCount)} />
-      <Info label="İptal talebi" value={String(openCancellationCount)} />
+      <Info label="Ã‡Ä±ktÄ± hazÄ±r" value={String(readyCount)} />
+      <Info label="Ä°ptal talebi" value={String(openCancellationCount)} />
     </section>
-  );
-}
-
-function ClientPortal({
-  cancelReason,
-  cancellationDocumentId,
-  documents,
-  onCancelReasonChange,
-  onFilesSelected,
-  onOpenCancellationRequest,
-  onRequestCancellation,
-  onSelectDocument,
-  periods,
-  selectedClient,
-  selectedDocument,
-  selectedIntakeCategory,
-  selectedPeriod,
-  setSelectedIntakeCategory,
-  setSelectedPeriod,
-  uploadStatus,
-}: {
-  cancelReason: string;
-  cancellationDocumentId: string;
-  documents: PilotDocument[];
-  onCancelReasonChange: (value: string) => void;
-  onFilesSelected: (files: FileList | null) => void | Promise<void>;
-  onOpenCancellationRequest: (document: PilotDocument) => void;
-  onRequestCancellation: (document: PilotDocument) => void;
-  onSelectDocument: (document: PilotDocument) => void;
-  periods: string[];
-  selectedClient?: PilotClient;
-  selectedDocument?: PilotDocument;
-  selectedIntakeCategory: IntakeCategory;
-  selectedPeriod: string;
-  setSelectedIntakeCategory: (value: IntakeCategory) => void;
-  setSelectedPeriod: (value: string) => void;
-  uploadStatus: string;
-}) {
-  const activeDocuments = documents.filter((document) => document.intakeCategory === selectedIntakeCategory);
-  const selectedIntake = buildUploadIntakeMetadata(selectedIntakeCategory);
-  const uploadedCount = activeDocuments.length;
-  const processingCount = activeDocuments.filter((document) => isInProgress(document.status)).length;
-  const handledCount = activeDocuments.filter((document) => document.status === "review_required" || document.status === "export_ready" || document.status === "export_added" || document.status === "exported").length;
-  const cancelCount = activeDocuments.filter((document) => isCancelStatus(document.status)).length;
-  const cancellationView = buildClientCancellationViewModel({
-    documents: activeDocuments,
-    selectedDocumentId: selectedDocument?.id ?? "",
-    requestDocumentId: cancellationDocumentId,
-    cancellationReason: cancelReason,
-  });
-  return (
-    <section className="client-portal">
-      <div className="panel upload-panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Mükellef portalı</h2>
-            <span>{selectedClient?.clientName ?? "-"}</span>
-          </div>
-          <select aria-label="Ay seçimi" onChange={(event) => setSelectedPeriod(event.target.value)} value={selectedPeriod}>
-            {periods.map((period) => (
-              <option key={period} value={period}>{periodLabel(period)}</option>
-            ))}
-          </select>
-        </div>
-        <div className="intake-tabs" role="tablist" aria-label="Belge yükleme türü">
-          {INTAKE_TABS.map((tab) => {
-            const tabId = tab.id as IntakeCategory;
-            const tabCount = documents.filter((document) => document.intakeCategory === tabId).length;
-            return (
-              <button
-                aria-selected={selectedIntakeCategory === tabId}
-                className={selectedIntakeCategory === tabId ? "intake-tab active" : "intake-tab"}
-                key={tab.id}
-                onClick={() => setSelectedIntakeCategory(tabId)}
-                role="tab"
-                type="button"
-              >
-                <span>{tab.label}</span>
-                <strong>{tabCount}</strong>
-              </button>
-            );
-          })}
-        </div>
-        <div className="summary-grid">
-          <Metric label="Yüklenen" value={uploadedCount} />
-          <Metric label="İşlemde" value={processingCount} />
-          <Metric label="İşleme alındı" value={handledCount} />
-          <Metric label="İptal talebi" value={cancelCount} />
-        </div>
-        <label className="upload-dropzone">
-          <span>{selectedIntake.label}</span>
-          <strong>Dosya seç</strong>
-          <small>{selectedIntake.documentType === "special_document" ? "Müşavir kontrol kuyruğu" : "Otomatik işleme kuyruğu"}</small>
-          <input
-            multiple
-            onChange={(event) => {
-              void onFilesSelected(event.currentTarget.files);
-              event.currentTarget.value = "";
-            }}
-            type="file"
-            accept={selectedIntake.accept}
-          />
-        </label>
-        {uploadStatus ? <p className="decision-status">{uploadStatus}</p> : null}
-      </div>
-
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Ay bazlı belge listesi</h2>
-            <span>{selectedPeriod ? periodLabel(selectedPeriod) : "Dönem seçilmedi"}</span>
-          </div>
-        </div>
-        <div className="document-list">
-          {activeDocuments.length ? null : <p className="empty">{selectedIntake.label} için bu ay yüklenen belge yok.</p>}
-          {activeDocuments.map((document) => (
-            <div className={selectedDocument?.id === document.id ? "client-document-row active" : "client-document-row"} key={document.id}>
-              <button className="document-row-main" onClick={() => onSelectDocument(document)} type="button">
-                <strong>{document.fileName}</strong>
-                <span>{labelForIntakeCategory(document.intakeCategory)} / {documentTypeLabels[document.documentType] ?? document.documentType} / {document.uploadedAt}</span>
-              </button>
-              <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
-              <button onClick={() => onOpenCancellationRequest(document)} type="button">İptal/Düzeltme</button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <ClientDocumentDetailPanel
-        cancelReason={cancelReason}
-        cancellationView={cancellationView}
-        onCancelReasonChange={onCancelReasonChange}
-        onOpenCancellationRequest={onOpenCancellationRequest}
-        onRequestCancellation={onRequestCancellation}
-        selectedDocument={selectedDocument}
-      />
-    </section>
-  );
-}
-
-function ClientDocumentDetailPanel({
-  cancelReason,
-  cancellationView,
-  onCancelReasonChange,
-  onOpenCancellationRequest,
-  onRequestCancellation,
-  selectedDocument,
-}: {
-  cancelReason: string;
-  cancellationView: {
-    requestDocument: PilotDocument | null;
-    canSubmitCancellation: boolean;
-    emptyActionText: string;
-  };
-  onCancelReasonChange: (value: string) => void;
-  onOpenCancellationRequest: (document: PilotDocument) => void;
-  onRequestCancellation: (document: PilotDocument) => void;
-  selectedDocument?: PilotDocument;
-}) {
-  if (!selectedDocument) {
-    return (
-      <section className="panel client-document-detail empty-detail">
-        <h2>Belge önizleme</h2>
-        <p className="empty">{cancellationView.emptyActionText}</p>
-        <button disabled type="button">İptal/Düzeltme talebi</button>
-      </section>
-    );
-  }
-
-  const requestDocument = cancellationView.requestDocument;
-  return (
-    <section className="panel client-document-detail">
-      <div className="panel-heading">
-        <div>
-          <h2>Belge önizleme</h2>
-          <span>{selectedDocument.fileName}</span>
-        </div>
-        <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
-      </div>
-      <article className="client-preview-paper" aria-label="Seçili belge önizlemesi">
-        <span>{documentPreviewTitle(selectedDocument)}</span>
-        <strong>{selectedDocument.fileName}</strong>
-        <p>{selectedDocument.previewText}</p>
-        <div className="preview-meta-grid">
-          <Info label="Dönem" value={periodLabel(selectedDocument.period)} />
-          <Info label="Belge türü" value={labelForIntakeCategory(selectedDocument.intakeCategory)} />
-          <Info label="Tutar" value={selectedDocument.amount} />
-        </div>
-      </article>
-      <button className="primary" onClick={() => onOpenCancellationRequest(selectedDocument)} type="button">
-        İptal/Düzeltme talebi aç
-      </button>
-      {requestDocument ? (
-        <div className="cancellation-request-panel">
-          <div>
-            <span>Talep açılacak belge</span>
-            <strong>{requestDocument.fileName}</strong>
-            <small>{labelForIntakeCategory(requestDocument.intakeCategory)} / {formatStatus(requestDocument.status)}</small>
-          </div>
-          <textarea
-            className="cancel-reason"
-            onChange={(event) => onCancelReasonChange(event.target.value)}
-            placeholder="Opsiyonel açıklama"
-            rows={3}
-            value={cancelReason}
-          />
-          <button
-            className="primary"
-            disabled={!cancellationView.canSubmitCancellation}
-            onClick={() => onRequestCancellation(requestDocument)}
-            type="button"
-          >
-            Talep gönder
-          </button>
-        </div>
-      ) : (
-        <p className="decision-status">{cancellationView.emptyActionText}</p>
-      )}
-    </section>
-  );
-}
-
-function AccountantDashboard({
-  clientRows,
-  dashboardMetrics,
-  funnelRows,
-  intakeDistribution,
-  onClientSelect,
-  selectedClientId,
-  uploadTrackingRows,
-}: {
-  clientRows: DashboardClientRow[];
-  dashboardMetrics: {
-    totalClients: number;
-    uploadedClients: number;
-    notUploadedClients: number;
-    pendingReviewDocuments: number;
-    exportReadyDocuments: number;
-    openCancellationRequests: number;
-  };
-  funnelRows: ChartRow[];
-  intakeDistribution: ChartRow[];
-  onClientSelect: (clientId: string) => void;
-  selectedClientId: string;
-  uploadTrackingRows: ChartRow[];
-}) {
-  return (
-    <section className="accountant-dashboard-page">
-      <section className="office-dashboard" aria-label="Ofis durumu">
-        <Metric label="Mukellef" value={dashboardMetrics.totalClients} />
-        <Metric label="Yukleyen" value={dashboardMetrics.uploadedClients} />
-        <Metric label="Yuklemeyen" value={dashboardMetrics.notUploadedClients} />
-        <Metric label="Kontrol" value={dashboardMetrics.pendingReviewDocuments} />
-        <Metric label="Cikti hazir" value={dashboardMetrics.exportReadyDocuments} />
-        <Metric label="Talep" value={dashboardMetrics.openCancellationRequests} />
-      </section>
-      <section className="dashboard-visual-grid">
-        <ChartBars title="Belge turu" rows={intakeDistribution} />
-        <ChartBars title="Durum hunisi" rows={funnelRows} />
-        <ChartBars title="Yukleme takibi" rows={uploadTrackingRows} />
-      </section>
-      <section className="panel">
-        <div className="section-heading">
-          <span>Mukellef takibi</span>
-          <strong>Yukleme ve kontrol sirasi</strong>
-        </div>
-        <div className="client-list dashboard-client-list">
-          {clientRows.map((row) => (
-            <button
-              className={selectedClientId === row.clientId ? "client-row active" : "client-row"}
-              key={row.clientId}
-              onClick={() => onClientSelect(row.clientId)}
-              type="button"
-            >
-              <strong>{row.clientName}</strong>
-              <span>{row.status}</span>
-              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazir</em>
-            </button>
-          ))}
-        </div>
-      </section>
-    </section>
-  );
-}
-
-function ChartBars({ rows, title }: { rows: ChartRow[]; title: string }) {
-  const max = Math.max(...rows.map((row) => row.count), 1);
-  return (
-    <section className="panel chart-panel">
-      <div className="section-heading">
-        <span>{title}</span>
-        <strong>{rows.reduce((sum, row) => sum + row.count, 0)}</strong>
-      </div>
-      <div className="bar-list">
-        {rows.map((row) => (
-          <div className="bar-row" key={row.key}>
-            <span>{row.label}</span>
-            <div className="bar-track">
-              <div className="bar-fill" style={{ width: `${Math.max((row.count / max) * 100, row.count ? 8 : 0)}%` }} />
-            </div>
-            <strong>{row.count}</strong>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function DocumentProcessingWorkspace({
-  children,
-  selectedDocumentSegment,
-  setSelectedDocumentSegment,
-}: {
-  children: ReactNode;
-  selectedDocumentSegment: DocumentSegment;
-  setSelectedDocumentSegment: (segment: DocumentSegment) => void;
-}) {
-  const tabs: { id: DocumentSegment; label: string }[] = [
-    { id: "invoices", label: "Faturalar" },
-    { id: "bank_statements", label: "Banka ekstreleri" },
-    { id: "other_documents", label: "Diger belgeler" },
-  ];
-  return (
-    <section className="document-processing-page">
-      <div className="segment-tabs" role="tablist" aria-label="Belge segmentleri">
-        {tabs.map((tab) => (
-          <button
-            aria-selected={selectedDocumentSegment === tab.id}
-            className={selectedDocumentSegment === tab.id ? "active" : ""}
-            key={tab.id}
-            onClick={() => setSelectedDocumentSegment(tab.id)}
-            role="tab"
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function ClientManagementView({
-  cancellationRequests,
-  chartUploadStatus,
-  clientRows,
-  clients,
-  clientSearch,
-  inviteStatus,
-  newClientDraft,
-  newClientStatus,
-  newClientTaxCertificateFile,
-  newClientTaxCertificateInputKey,
-  onChartFileSelected,
-  onClientSearchChange,
-  onCreateInvite,
-  onCreateNewClient,
-  onResolveCancellation,
-  onSetPassword,
-  onTaxCertificateFileChange,
-  portalPassword,
-  portalPasswordStatus,
-  selectedClient,
-  setNewClientDraft,
-  setPortalPassword,
-  setSelectedClientId,
-}: {
-  cancellationRequests: CancellationRequest[];
-  chartUploadStatus: string;
-  clientRows: DashboardClientRow[];
-  clients: PilotClient[];
-  clientSearch: string;
-  inviteStatus: string;
-  newClientDraft: NewClientDraft;
-  newClientStatus: string;
-  newClientTaxCertificateFile: File | null;
-  newClientTaxCertificateInputKey: number;
-  onChartFileSelected: (files: FileList | null) => void | Promise<void>;
-  onClientSearchChange: (value: string) => void;
-  onCreateInvite: () => void | Promise<void>;
-  onCreateNewClient: () => void | Promise<void>;
-  onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
-  onSetPassword: () => void | Promise<void>;
-  onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
-  portalPassword: string;
-  portalPasswordStatus: string;
-  selectedClient?: PilotClient;
-  setNewClientDraft: (value: NewClientDraft) => void;
-  setPortalPassword: (value: string) => void;
-  setSelectedClientId: (value: string) => void;
-}) {
-  return (
-    <section className="client-management-page">
-      <section className="panel">
-        <div className="section-heading">
-          <span>Mukellef listesi</span>
-          <strong>{clients.length}</strong>
-        </div>
-        <input
-          className="search-input"
-          onChange={(event) => onClientSearchChange(event.target.value)}
-          placeholder="Mukellef ara"
-          value={clientSearch}
-        />
-        <div className="client-list dashboard-client-list">
-          {clientRows.map((row) => (
-            <button
-              className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
-              key={row.clientId}
-              onClick={() => setSelectedClientId(row.clientId)}
-              type="button"
-            >
-              <strong>{row.clientName}</strong>
-              <span>{row.status}</span>
-              <em>{row.documentCount} belge / {row.cancellationCount} talep</em>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="panel onboarding-panel">
-        <NewClientCard
-          draft={newClientDraft}
-          onCreate={onCreateNewClient}
-          onTaxCertificateFileChange={onTaxCertificateFileChange}
-          setDraft={setNewClientDraft}
-          status={newClientStatus}
-          taxCertificateFile={newClientTaxCertificateFile}
-          taxCertificateInputKey={newClientTaxCertificateInputKey}
-        />
-        <div className="settings-card">
-          <span>Hesap plani import</span>
-          <strong>{selectedClient?.clientName ?? "-"}</strong>
-          <label className="upload-dropzone compact-upload">
-            <input
-              accept=".csv,.xlsx,.xlsm"
-              onChange={(event) => onChartFileSelected(event.target.files)}
-              type="file"
-            />
-            CSV/XLSX hesap plani sec
-          </label>
-          {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
-        </div>
-        <div className="settings-card">
-          <span>Portal erisimi</span>
-          <strong>{selectedClient?.portalUserId ?? "-"}</strong>
-          <div className="inline-actions">
-            <button onClick={onCreateInvite} type="button">Davet tokeni olustur</button>
-            <input
-              aria-label="Portal sifresi"
-              onChange={(event) => setPortalPassword(event.target.value)}
-              placeholder="Gecici sifre"
-              type="password"
-              value={portalPassword}
-            />
-            <button className="primary" onClick={onSetPassword} type="button">Sifre kur</button>
-          </div>
-          {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
-          {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
-        </div>
-      </section>
-      <section className="panel">
-        <div className="section-heading">
-          <span>Iptal / duzeltme talepleri</span>
-          <strong>{cancellationRequests.length}</strong>
-        </div>
-        <div className="request-list">
-          {cancellationRequests.length ? cancellationRequests.map((request) => (
-            <div className="request-compact" key={request.id}>
-              <span>{request.clientId}</span>
-              <strong>{request.fileName}</strong>
-              <p>{request.reason}</p>
-              <small>Karar için Belge işleme ekranında ilgili belgeyi seçin.</small>
-            </div>
-          )) : <p className="empty">Acik talep yok.</p>}
-        </div>
-      </section>
-    </section>
-  );
-}
-
-function SettingsView({
-  dashboardMetrics,
-  loginPassword,
-  loginRole,
-  loginStatus,
-  loginUserId,
-  lockedRole,
-  localFallbackAllowed,
-  onLogin,
-  onLogout,
-  readinessView,
-  session,
-  setLoginPassword,
-  setLoginRole,
-  setLoginUserId,
-  source,
-}: {
-  dashboardMetrics: {
-    totalClients: number;
-    uploadedClients: number;
-    notUploadedClients: number;
-    pendingReviewDocuments: number;
-    exportReadyDocuments: number;
-    openCancellationRequests: number;
-  };
-  loginPassword: string;
-  loginRole: "client_user" | "accountant";
-  loginStatus: string;
-  loginUserId: string;
-  lockedRole?: "client_user" | "accountant";
-  localFallbackAllowed: boolean;
-  onLogin: () => void | Promise<void>;
-  onLogout: () => void;
-  readinessView: PilotReadinessView;
-  session: LocalSession | null;
-  setLoginPassword: (value: string) => void;
-  setLoginRole: (value: "client_user" | "accountant") => void;
-  setLoginUserId: (value: string) => void;
-  source: string;
-}) {
-  return (
-    <section className="settings-page">
-      <SessionPanel
-        loginPassword={loginPassword}
-        loginRole={loginRole}
-        loginStatus={loginStatus}
-        loginUserId={loginUserId}
-        lockedRole={lockedRole}
-        localFallbackAllowed={localFallbackAllowed}
-        onLogin={onLogin}
-        onLogout={onLogout}
-        session={session}
-        setLoginPassword={setLoginPassword}
-        setLoginRole={setLoginRole}
-        setLoginUserId={setLoginUserId}
-      />
-      <section className="panel settings-grid">
-        <Info label="Veri kaynağı" value={source} />
-        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Oturum kapalı"} />
-        <Info label="Saha kullanımı" value={readinessView.statusLabel} />
-        <Info label="Production" value={readinessView.productionLabel} />
-        <Info label="Auth" value={readinessView.authLabel} />
-        <Info label="Store" value={readinessView.storeLabel} />
-        <Info label="AI" value={readinessView.aiLabel} />
-        <Info label="Çıktı" value={readinessView.exportLabel} />
-        <Info label="Lokal veri" value={localFallbackAllowed ? "Geliştirme ortamı" : "Kapalı"} />
-        <Info label="Mukellef" value={String(dashboardMetrics.totalClients)} />
-        <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
-      </section>
-    </section>
-  );
-}
-
-function AccountantWorkspace({
-  cancellationRequests,
-  statementAiStatus,
-  clientSearch,
-  clientRows,
-  clients,
-  correctionDraft,
-  dashboardMetrics,
-  decisionStatus,
-  documents,
-  allClientDocuments,
-  newClientDraft,
-  newClientStatus,
-  newClientTaxCertificateFile,
-  newClientTaxCertificateInputKey,
-  onAddToBasket,
-  onApproveAndNext,
-  onClientSearchChange,
-  onCreateNewClient,
-  onRequestStatementAi,
-  onResolveCancellation,
-  onSaveDecision,
-  onSaveStatementDecision,
-  onTaxCertificateFileChange,
-  reviewFilter,
-  selectedClient,
-  selectedDocument,
-  selectedStatementLineNo,
-  setCorrectionDraft,
-  setNewClientDraft,
-  setReviewFilter,
-  setSelectedClientId,
-  setSelectedDocumentId,
-  setSelectedStatementLineNo,
-}: {
-  cancellationRequests: CancellationRequest[];
-  statementAiStatus: string;
-  clientSearch: string;
-  clientRows: DashboardClientRow[];
-  clients: PilotClient[];
-  correctionDraft: CorrectionDraft;
-  dashboardMetrics: {
-    totalClients: number;
-    uploadedClients: number;
-    notUploadedClients: number;
-    pendingReviewDocuments: number;
-    exportReadyDocuments: number;
-    openCancellationRequests: number;
-  };
-  decisionStatus: string;
-  documents: PilotDocument[];
-  allClientDocuments: PilotDocument[];
-  newClientDraft: NewClientDraft;
-  newClientStatus: string;
-  newClientTaxCertificateFile: File | null;
-  newClientTaxCertificateInputKey: number;
-  onAddToBasket: () => void;
-  onApproveAndNext: () => void | Promise<void>;
-  onClientSearchChange: (value: string) => void;
-  onCreateNewClient: () => void | Promise<void>;
-  onRequestStatementAi: () => void | Promise<void>;
-  onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
-  onSaveDecision: (action: string) => void | Promise<void>;
-  onSaveStatementDecision: (action: string) => void | Promise<void>;
-  onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
-  reviewFilter: ReviewFilter;
-  selectedClient?: PilotClient;
-  selectedDocument?: PilotDocument;
-  selectedStatementLineNo: number;
-  setCorrectionDraft: (value: CorrectionDraft) => void;
-  setNewClientDraft: (value: NewClientDraft) => void;
-  setReviewFilter: (value: ReviewFilter) => void;
-  setSelectedClientId: (value: string) => void;
-  setSelectedDocumentId: (value: string) => void;
-  setSelectedStatementLineNo: (value: number) => void;
-}) {
-  const selectedRequest = selectedDocument
-    ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
-    : undefined;
-  const navigationDocuments = selectedDocument && !documents.some((document) => document.id === selectedDocument.id)
-    ? allClientDocuments
-    : documents;
-  const selectedDocumentPosition = selectedDocument
-    ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
-    : 0;
-
-  return (
-    <section className="accountant-workspace">
-      <section className="office-dashboard" aria-label="Ofis durumu">
-        <Metric label="Mükellef" value={dashboardMetrics.totalClients} />
-        <Metric label="Belge yükleyen" value={dashboardMetrics.uploadedClients} />
-        <Metric label="Yüklemeyen" value={dashboardMetrics.notUploadedClients} />
-        <Metric label="Kontrol" value={dashboardMetrics.pendingReviewDocuments} />
-        <Metric label="Çıktı hazır" value={dashboardMetrics.exportReadyDocuments} />
-        <Metric label="Talep" value={dashboardMetrics.openCancellationRequests} />
-      </section>
-      <aside className="client-context-rail" aria-label="Seçili mükellef">
-        <div className="client-emblem">
-          <span>Mükellef</span>
-          <strong>{selectedClient?.clientName ?? "-"}</strong>
-          <small>{selectedClient?.taxId ?? "-"}</small>
-        </div>
-        <input
-          className="search-input"
-          onChange={(event) => onClientSearchChange(event.target.value)}
-          placeholder="Mükellef ara"
-          value={clientSearch}
-        />
-        <div className="client-list dashboard-client-list">
-          {clientRows.map((row) => (
-            <button
-              className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
-              key={row.clientId}
-              onClick={() => {
-                setSelectedClientId(row.clientId);
-                setSelectedDocumentId("");
-              }}
-              type="button"
-            >
-              <strong>{row.clientName}</strong>
-              <span>{row.status}</span>
-              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazır</em>
-            </button>
-          ))}
-        </div>
-        <label className="compact-field">
-          <span>Mükellef seç</span>
-          <select
-            onChange={(event) => setSelectedClientId(event.target.value)}
-            value={selectedClient?.clientId ?? ""}
-          >
-            {clients.map((client) => (
-              <option key={client.clientId} value={client.clientId}>
-                {client.clientName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="rail-stats">
-          <Info label="Belge" value={String(documents.length)} />
-          <Info label="Kontrol" value={String(documents.filter((document) => document.status === "review_required").length)} />
-          <Info label="İptal" value={String(cancellationRequests.length)} />
-        </div>
-        {selectedDocument ? (
-          <div className="selected-document-summary">
-            <span>Açık belge</span>
-            <strong>{selectedDocument.fileName}</strong>
-            <small>{labelForIntakeCategory(selectedDocument.intakeCategory)} / {selectedDocument.provider} / {selectedDocument.amount}</small>
-            <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
-          </div>
-        ) : null}
-        <button className="primary full" onClick={onAddToBasket} type="button">Çıktı listesine ekle</button>
-        {selectedRequest ? (
-          <div className="request-compact">
-            <span>İptal/düzeltme talebi</span>
-            <p>{selectedRequest.reason}</p>
-            <div className="inline-actions">
-              <button onClick={() => onResolveCancellation(selectedRequest.id, "approved")} type="button">Kabul</button>
-              <button onClick={() => onResolveCancellation(selectedRequest.id, "rejected")} type="button">Red</button>
-            </div>
-          </div>
-        ) : null}
-        <NewClientCard
-          draft={newClientDraft}
-          onCreate={onCreateNewClient}
-          onTaxCertificateFileChange={onTaxCertificateFileChange}
-          setDraft={setNewClientDraft}
-          status={newClientStatus}
-          taxCertificateFile={newClientTaxCertificateFile}
-          taxCertificateInputKey={newClientTaxCertificateInputKey}
-        />
-      </aside>
-
-      <section className="review-focus">
-        <div className="workbench-toolbar">
-          <div>
-            <span>Belge kontrolü</span>
-            <strong>{selectedDocument ? `${selectedDocumentPosition}/${navigationDocuments.length} ${selectedDocument.fileName}` : "Önce belge seçin."}</strong>
-          </div>
-          <div className="toolbar-controls">
-            <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
-              <option value="review_required">Kontrol gerekli</option>
-              <option value="export_ready">Aktarıma hazır</option>
-              <option value="cancel_requested">İptal talepleri</option>
-              <option value="all">Tüm belgeler</option>
-            </select>
-            <select
-              aria-label="Belge seç"
-              onChange={(event) => setSelectedDocumentId(event.target.value)}
-              value={selectedDocument?.id ?? ""}
-            >
-              <option value="">{documents.length ? "Belge seçin" : "Belge yok"}</option>
-              {documents.map((document) => (
-                <option key={document.id} value={document.id}>
-                  {document.fileName}
-                </option>
-              ))}
-            </select>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[selectedDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
-            <button className="primary" disabled={!selectedDocument} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
-          </div>
-        </div>
-
-        <div className="document-queue" aria-label="Mükellef evrakları">
-          {allClientDocuments.map((document) => (
-            <button
-              className={selectedDocument?.id === document.id ? "document-row active" : "document-row"}
-              key={document.id}
-              onClick={() => setSelectedDocumentId(document.id)}
-              type="button"
-            >
-              <strong>{document.fileName}</strong>
-              <span>{labelForIntakeCategory(document.intakeCategory)} / {document.amount}</span>
-              <em>{formatStatus(document.status)}</em>
-            </button>
-          ))}
-        </div>
-
-        {cancellationRequests.length && !selectedRequest ? (
-          <div className="request-strip">
-            <span>Açık talepler</span>
-            {cancellationRequests.map((request) => (
-              <button key={request.id} onClick={() => setSelectedDocumentId(request.documentId)} type="button">
-                {request.fileName}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        <section className="review-split">
-          <DocumentPreview document={selectedDocument} />
-          <JournalPanel
-            correctionDraft={correctionDraft}
-            decisionStatus={decisionStatus}
-            document={selectedDocument}
-            onApproveAndNext={onApproveAndNext}
-            onRequestStatementAi={onRequestStatementAi}
-            onSaveDecision={onSaveDecision}
-            onSaveStatementDecision={onSaveStatementDecision}
-            selectedStatementLineNo={selectedStatementLineNo}
-            setCorrectionDraft={setCorrectionDraft}
-            setSelectedStatementLineNo={setSelectedStatementLineNo}
-            statementAiStatus={statementAiStatus}
-          />
-        </section>
-      </section>
-    </section>
-  );
-}
-
-function NewClientCard({
-  draft,
-  onCreate,
-  onTaxCertificateFileChange,
-  setDraft,
-  status,
-  taxCertificateFile,
-  taxCertificateInputKey,
-}: {
-  draft: NewClientDraft;
-  onCreate: () => void | Promise<void>;
-  onTaxCertificateFileChange: (file: File | null) => void;
-  setDraft: (value: NewClientDraft) => void;
-  status: string;
-  taxCertificateFile: File | null;
-  taxCertificateInputKey: number;
-}) {
-  return (
-    <section className="new-client-card">
-      <div>
-        <span>Yeni mükellef</span>
-        <strong>Hızlı kayıt</strong>
-      </div>
-      <input
-        aria-label="Mükellef adı"
-        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-        placeholder="Mükellef adı"
-        value={draft.title}
-      />
-      <input
-        aria-label="VKN"
-        inputMode="numeric"
-        maxLength={10}
-        onChange={(event) => setDraft({ ...draft, taxId: event.target.value })}
-        pattern="[0-9]*"
-        placeholder="VKN"
-        value={draft.taxId}
-      />
-      <input
-        aria-label="Faaliyet"
-        onChange={(event) => setDraft({ ...draft, activityDescription: event.target.value })}
-        placeholder="Faaliyet"
-        value={draft.activityDescription}
-      />
-      <div className="new-client-inline">
-        <input
-          aria-label="NACE"
-          onChange={(event) => setDraft({ ...draft, naceCode: event.target.value })}
-          placeholder="NACE"
-          value={draft.naceCode}
-        />
-        <input
-          aria-label="Portal kullanıcısı"
-          onChange={(event) => setDraft({ ...draft, portalUserId: event.target.value })}
-          placeholder="Portal kullanıcı"
-          value={draft.portalUserId}
-        />
-      </div>
-      {draft.activityTags.length ? (
-        <div className="activity-tag-strip" aria-label="Faaliyet etiketleri">
-          {draft.activityTags.slice(0, 4).map((tag) => (
-            <span key={tag}>{tag.replace(/_/g, " ")}</span>
-          ))}
-        </div>
-      ) : null}
-      <label className="tax-certificate-upload">
-        <span>Vergi levhası</span>
-        <input
-          accept=".pdf,.jpg,.jpeg,.png"
-          aria-label="Vergi levhası"
-          key={taxCertificateInputKey}
-          onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
-          type="file"
-        />
-        <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
-      </label>
-      <button className="primary full" onClick={onCreate} type="button">Mükellef ekle</button>
-      {status ? <p className="decision-status">{status}</p> : null}
-    </section>
-  );
-}
-
-function DocumentPreview({ document }: { document?: PilotDocument }) {
-  if (!document) {
-    return (
-      <section className="panel review-panel">
-        <h2>Orijinal belge</h2>
-        <p className="empty">Belge seçimi yok.</p>
-      </section>
-    );
-  }
-  return (
-    <section className="review-panel document-panel">
-      <div className="panel-heading">
-        <div>
-          <h2>Orijinal belge</h2>
-          <span>{document.fileName}</span>
-        </div>
-        <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
-      </div>
-      <div className="document-canvas">
-        <article className="paper-document" aria-label="Belge orijinal görünümü">
-          <header className="paper-header">
-            <div>
-              <span>{labelForIntakeCategory(document.intakeCategory)} / {documentTypeLabels[document.documentType] ?? document.documentType}</span>
-              <strong>{document.provider}</strong>
-            </div>
-            <small>{document.issueDate}</small>
-          </header>
-          <div className="paper-title">
-            <span>{documentPreviewTitle(document)}</span>
-            <strong>{document.fileName}</strong>
-          </div>
-          <div className="paper-row">
-            <span>Açıklama</span>
-            <strong>{document.previewText}</strong>
-          </div>
-          <div className="paper-line-item">
-            <span>Kalem</span>
-            <strong>{document.productLine}</strong>
-            <small>{document.productCategory}</small>
-          </div>
-          <div className="paper-totals">
-            <div>
-              <span>KDV</span>
-              <strong>{document.vatRates.length ? `%${document.vatRates.join(", %")}` : "-"}</strong>
-            </div>
-            <div>
-              <span>Toplam</span>
-              <strong>{document.amount}</strong>
-            </div>
-          </div>
-          <footer className="paper-footer">
-            <span>Belge referansı</span>
-            <strong>{document.id}</strong>
-          </footer>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function JournalPanel({
-  correctionDraft,
-  decisionStatus,
-  document,
-  onApproveAndNext,
-  onRequestStatementAi,
-  onSaveDecision,
-  onSaveStatementDecision,
-  selectedStatementLineNo,
-  setCorrectionDraft,
-  setSelectedStatementLineNo,
-  statementAiStatus,
-}: {
-  correctionDraft: CorrectionDraft;
-  decisionStatus: string;
-  document?: PilotDocument;
-  onApproveAndNext: () => void | Promise<void>;
-  onRequestStatementAi: () => void | Promise<void>;
-  onSaveDecision: (action: string) => void | Promise<void>;
-  onSaveStatementDecision: (action: string) => void | Promise<void>;
-  selectedStatementLineNo: number;
-  setCorrectionDraft: (value: CorrectionDraft) => void;
-  setSelectedStatementLineNo: (value: number) => void;
-  statementAiStatus: string;
-}) {
-  if (!document) {
-    return (
-      <section className="panel review-panel">
-        <h2>Muhasebe fişi</h2>
-        <p className="empty">Belge seçimi yok.</p>
-      </section>
-    );
-  }
-  return (
-    <section className={`review-panel journal-panel ${document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "statement-mode" : ""}`}>
-      <div className="panel-heading">
-        <div>
-          <h2>AI ajan destekli fiş taslağı</h2>
-          <span>{document.clientName}</span>
-        </div>
-      </div>
-      <div className="ai-guidance">
-        <ReasonCard label="Öneri gerekçesi" value={document.aiReason} />
-        <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
-        <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
-        <ReasonCard label="Kullanılan sinyaller" value={document.aiAccountReason || "Hesap planı, faaliyet alanı ve önceki karar sinyali bekleniyor."} />
-        <ReasonCard label="Deterministik kontrol" value={document.deterministicSummary} />
-        <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason} />
-      </div>
-      <div className="journal-meta ai-meta">
-        <Info label="Öneri kaynağı" value={agentSourceLabel(document.aiProvider)} />
-        <Info label="Önerilen hesap" value={document.aiSuggestedAccountCode || document.selectedExpenseAccount || "-"} />
-        <Info label="Önerilen cari" value={document.aiSuggestedCounterpartyCode || document.selectedCounterpartyAccount || "-"} />
-        <Info label="Güven düzeyi" value={document.aiRiskFlags.length ? document.aiRiskFlags.join(", ") : "Risk yok"} />
-      </div>
-      <LearningRuleCard document={document} />
-      <div className="journal-meta">
-        <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Banka hesabı" : "Gider hesabı"} value={document.selectedExpenseAccount} />
-        <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Fiş KDV" : "KDV hesabı"} value={document.selectedVatAccount} />
-        <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Karşı hesap" : "Cari"} value={`${document.selectedCounterpartyAccount} (${document.counterpartyConfidence})`} />
-      </div>
-      {document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? (
-        <StatementReviewPanel
-          correctionDraft={correctionDraft}
-          document={document}
-          onRequestStatementAi={onRequestStatementAi}
-          onSaveStatementDecision={onSaveStatementDecision}
-          selectedStatementLineNo={selectedStatementLineNo}
-          setCorrectionDraft={setCorrectionDraft}
-          setSelectedStatementLineNo={setSelectedStatementLineNo}
-          statementAiStatus={statementAiStatus}
-        />
-      ) : null}
-      <div className="correction-form">
-        <label>
-          <span>{document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Yeni işlem hesabı" : "Yeni gider hesabı"}</span>
-          <input
-            onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
-            placeholder={document.selectedExpenseAccount}
-            value={correctionDraft.accountCode}
-          />
-        </label>
-        <label>
-          <span>{document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Yeni karşı hesap" : "Yeni cari"}</span>
-          <input
-            onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
-            placeholder={document.selectedCounterpartyAccount}
-            value={correctionDraft.counterpartyCode}
-          />
-        </label>
-        <label className="wide">
-          <span>Müşavir açıklaması</span>
-          <textarea
-            onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
-            placeholder="Neden değiştirdiniz? Bu açıklama sonraki benzer belgelerde öğrenme sinyali olur."
-            rows={3}
-            value={correctionDraft.reason}
-          />
-        </label>
-      </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Hesap</th>
-              <th>Açıklama</th>
-              <th>Borç</th>
-              <th>Alacak</th>
-            </tr>
-          </thead>
-          <tbody>
-            {journalDraftLinesForDocument(document, selectedStatementLineNo).length ? (
-              journalDraftLinesForDocument(document, selectedStatementLineNo).map((line, index) => (
-                <tr key={`${line.account_code}-${index}`}>
-                  <td>{line.account_code}</td>
-                  <td>{line.description}</td>
-                  <td>{line.debit}</td>
-                  <td>{line.credit}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={4}>Fiş taslağı henüz yok.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="decision-actions">
-        <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
-        <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
-        <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
-        <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı dışı</button>
-        <button onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
-      </div>
-      <p className="decision-status">{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</p>
-    </section>
-  );
-}
-
-function LearningRuleCard({ document }: { document: PilotDocument }) {
-  const hasLearningSignal = Boolean(
-    document.accountingIntent ||
-    document.learningRuleReason ||
-    document.learningRuleSourceSummary ||
-    document.rulePrompt.show,
-  );
-  if (!hasLearningSignal) return null;
-  return (
-    <section className="learning-rule-card">
-      <div>
-        <span>Öğrenme kaynağı</span>
-        <strong>{document.rulePrompt.message || document.learningRuleSourceSummary || document.learningRuleReason}</strong>
-      </div>
-      <div className="learning-rule-meta">
-        <Info label="Muhasebe niyeti" value={document.accountingIntent || "-"} />
-        <Info label="Güven düzeyi" value={document.accountingIntentConfidence ? `%${document.accountingIntentConfidence}` : "-"} />
-        <Info label="Mükellef kararı" value={String(document.rulePrompt.clientConsistentDecisionCount || 0)} />
-        <Info label="Otomasyon adayı" value={`${document.rulePrompt.officeDistinctClientCount || 0} / ${document.rulePrompt.officeConsistentDecisionCount || 0}`} />
-      </div>
-    </section>
-  );
-}
-
-function StatementReviewPanel({
-  correctionDraft,
-  document,
-  onRequestStatementAi,
-  onSaveStatementDecision,
-  selectedStatementLineNo,
-  setCorrectionDraft,
-  setSelectedStatementLineNo,
-  statementAiStatus,
-}: {
-  correctionDraft: CorrectionDraft;
-  document: PilotDocument;
-  onRequestStatementAi: () => void | Promise<void>;
-  onSaveStatementDecision: (action: string) => void | Promise<void>;
-  selectedStatementLineNo: number;
-  setCorrectionDraft: (value: CorrectionDraft) => void;
-  setSelectedStatementLineNo: (value: number) => void;
-  statementAiStatus: string;
-}) {
-  if (!document.statementLines.length) return null;
-  const selectedLine = document.statementLines.find((line) => line.line_no === selectedStatementLineNo) ?? document.statementLines[0];
-  const selectedEntry = document.statementEntries.find((entry) => entry.statement_line_no === selectedLine.line_no);
-  const selectedSuggestion = document.statementAiSuggestions.find((suggestion) => suggestion.line_no === selectedLine.line_no);
-  const approvedCount = document.statementLines.filter((line) => line.accountant_review_status === "approved").length;
-  const riskCount = document.statementLines.filter((line) => line.risk_flags.length > 0 && line.accountant_review_status !== "approved").length;
-
-  function applyAiSuggestion() {
-    if (!selectedSuggestion) return;
-    setCorrectionDraft({
-      ...correctionDraft,
-      counterpartyCode: selectedSuggestion.suggested_account_code || correctionDraft.counterpartyCode,
-      reason: selectedSuggestion.reason || correctionDraft.reason,
-    });
-  }
-
-  return (
-    <section className="statement-review-panel">
-      <div className="statement-review-heading">
-        <div>
-          <h3>Banka satırları</h3>
-          <span>{approvedCount}/{document.statementLines.length} onaylı / {riskCount} riskli</span>
-        </div>
-        <button onClick={onRequestStatementAi} type="button">AI önerisi al</button>
-      </div>
-
-      <div className="statement-grid">
-        <div className="statement-lines-list">
-          <table>
-            <thead>
-              <tr>
-                <th>No</th>
-                <th>Tarih</th>
-                <th>Açıklama</th>
-                <th>Yön</th>
-                <th>Tutar</th>
-                <th>Durum</th>
-              </tr>
-            </thead>
-            <tbody>
-              {document.statementLines.map((line) => (
-                <tr className={line.line_no === selectedLine.line_no ? "selected-row" : ""} key={line.line_no}>
-                  <td>
-                    <button className="line-select" onClick={() => setSelectedStatementLineNo(line.line_no)} type="button">
-                      {line.line_no}
-                    </button>
-                  </td>
-                  <td>{line.transaction_date || "-"}</td>
-                  <td>{line.description || "-"}</td>
-                  <td>{statementDirectionLabel(line.direction)}</td>
-                  <td>{line.amount}</td>
-                  <td>{statementStatusLabel(line.accountant_review_status)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="statement-line-detail">
-          <div className="statement-detail-meta">
-            <Info label="İşlem tipi" value={statementTypeLabels[selectedLine.transaction_type] ?? selectedLine.transaction_type} />
-            <Info label="Karşı hesap" value={selectedLine.suggested_account_code || selectedLine.counterparty_match_code || "-"} />
-            <Info label="Güven" value={String(selectedLine.confidence)} />
-          </div>
-          <div className="statement-risk-tags">
-            {selectedLine.risk_flags.length ? selectedLine.risk_flags.map((flag) => <span key={flag}>{flag}</span>) : <span>risk_yok</span>}
-          </div>
-          <div className="statement-ai-box">
-            <div>
-              <span>AI önerisi</span>
-              <strong>{selectedSuggestion ? `${statementTypeLabels[selectedSuggestion.transaction_type] ?? selectedSuggestion.transaction_type} / ${selectedSuggestion.suggested_account_code || "-"}` : "Yok"}</strong>
-              <small>{selectedSuggestion?.reason || document.statementAiSummary || statementAiStatus || "-"}</small>
-            </div>
-            <button disabled={!selectedSuggestion} onClick={applyAiSuggestion} type="button">Uygula</button>
-          </div>
-          <div className="statement-entry-ref">
-            <Info label="Fiş referansı" value={selectedEntry?.statement_fingerprint || selectedEntry?.source_document_ref || "-"} />
-            <Info label="Fiş durumu" value={statementStatusLabel(selectedEntry?.accountant_review_status)} />
-          </div>
-          <div className="statement-actions">
-            <button onClick={() => onSaveStatementDecision("approve")} type="button">Satırı onayla</button>
-            <button onClick={() => onSaveStatementDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
-            <button onClick={() => onSaveStatementDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
-            <button onClick={() => onSaveStatementDecision("exclude_from_export")} type="button">Çıktı dışı</button>
-            <button onClick={() => onSaveStatementDecision("wrong_account")} type="button">Kontrolde tut</button>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function ExportBasketView({
-  exportBasket,
-  exportMode,
-  exportStatus,
-  onMarkPackaged,
-  setExportMode,
-}: {
-  exportBasket: ExportBasketItem[];
-  exportMode: ExportMode;
-  exportStatus: string;
-  onMarkPackaged: () => void;
-  setExportMode: (value: ExportMode) => void;
-}) {
-  const totalDocuments = exportBasket.reduce((sum, item) => sum + item.documentCount, 0);
-  return (
-    <section className="panel export-workspace">
-      <div className="panel-heading">
-        <div>
-          <h2>Çıktı listesi</h2>
-          <span>Mükellefler tamamlandıkça buraya eklenir.</span>
-        </div>
-        <div className="inline-actions">
-          <button className={exportMode === "bulk" ? "active-action" : ""} onClick={() => setExportMode("bulk")} type="button">Toplu paket</button>
-          <button className={exportMode === "by_client" ? "active-action" : ""} onClick={() => setExportMode("by_client")} type="button">Mükellef bazlı</button>
-        </div>
-      </div>
-      <div className="summary-grid compact">
-        <Metric label="Mükellef" value={exportBasket.length} />
-        <Metric label="Belge/fiş" value={totalDocuments} />
-      </div>
-      <div className="basket-list">
-        {exportBasket.map((item) => (
-          <div className="basket-row" key={item.id}>
-            <div>
-              <strong>{item.clientName}</strong>
-              <span>{periodLabel(item.period)} / {item.documentCount} kayıt</span>
-            </div>
-            <span className={`status ${item.status === "packaged" ? "exported" : "export_added"}`}>
-              {item.status === "packaged" ? "Paketlendi" : "Hazır"}
-            </span>
-          </div>
-        ))}
-      </div>
-      <button className="primary" onClick={onMarkPackaged} type="button">Çıktı seçimini hazırla</button>
-      <p className="decision-status">{exportStatus || "Ay kapanışı tek tık hedefi için çıktı sepeti şimdiden ayrı tutuldu."}</p>
-    </section>
-  );
-}
-
-function OperationsView({
-  data,
-  localFallbackAllowed,
-  readinessView,
-  source,
-}: {
-  data: PilotData;
-  localFallbackAllowed: boolean;
-  readinessView: PilotReadinessView;
-  source: string;
-}) {
-  return (
-    <section className="operations-grid">
-      <div className="panel">
-        <h2>Kapalı kullanım durumu</h2>
-        <Info label="Saha kullanımı" value={readinessView.statusLabel} />
-        <Info label="Production" value={readinessView.productionLabel} />
-        <Info label="Teklif" value={readinessView.offerLabel} />
-        <Info label="Çıktı" value={readinessView.exportLabel} />
-        <Info label="Zirve" value={readinessView.zirveLabel} />
-      </div>
-      <div className="panel">
-        <h2>Okunan kaynak</h2>
-        <Info label="Kaynak" value={source} />
-        <Info label="Mükellef" value={String(data.clients.length)} />
-        <Info label="Belge" value={String(data.documents.length)} />
-        <Info label="İptal talebi" value={String(data.cancellationRequests.length)} />
-      </div>
-      <div className="panel">
-        <h2>Operasyon kapilari</h2>
-        <Info label="Auth" value={readinessView.authLabel} />
-        <Info label="Store" value={readinessView.storeLabel} />
-        <Info label="AI" value={readinessView.aiLabel} />
-        <Info label="Blokaj" value={readinessView.blocking.length ? readinessView.blocking.join(", ") : "Yok"} />
-        <Info label="Uyari" value={readinessView.warnings.length ? readinessView.warnings.join(", ") : "Yok"} />
-        {localFallbackAllowed ? (
-          <p className="decision-status">Lokal çalışma verisi açık.</p>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="info">
-      <span>{label}</span>
-      <strong>{value || "-"}</strong>
-    </div>
-  );
-}
-
-function ReasonCard({ label, value }: { label: string; value: string }) {
-  const parts = label === "Deterministik kontrol"
-    ? value.split(",").map((item) => item.trim()).filter(Boolean)
-    : [];
-  return (
-    <div className="reason-card">
-      <span>{label}</span>
-      {parts.length > 1 ? (
-        <div className="reason-tags">
-          {parts.map((part) => (
-            <em key={part}>{part}</em>
-          ))}
-        </div>
-      ) : (
-        <p>{value || "-"}</p>
-      )}
-    </div>
   );
 }

@@ -7,7 +7,7 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `codex/bank-statement-review-engine`
-- Son pushlanan commit: `deb3930`
+- Son runtime deploy commit: `7be7055`
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
@@ -151,10 +151,10 @@ docker compose --env-file deploy/production.env -f docker-compose.production.yml
 
 ## Kaldigimiz Pratik Sira
 
-1. Serverda `git pull --ff-only` ile `deb3930` veya daha yeni commit'i cek.
+1. Serverda `git pull --ff-only` ile `7be7055` veya daha yeni commit'i cek.
 2. `sh deploy/scripts/fisora-prod.sh deploy` calistir.
 3. Auth status `mock_header_required` donuyor mu kontrol et.
-4. Readiness icinde `ai_groq_key_present=true` ve `ai_provider_configured=true`
+4. Readiness icinde `pilot_sellable=true`, `ai_groq_key_present=true` ve `ai_provider_configured=true`
    mi kontrol et.
 5. Tarayicida `http://<SERVER_IP>/` ac.
 6. Fatura ve banka upload akisini Groq AI acik halde dene.

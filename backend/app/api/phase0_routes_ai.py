@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 import os
 
-from fastapi import APIRouter, Cookie, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 
 from app.api.phase0_context import SESSION_COOKIE_NAME, get_workflow_store, request_user_id, require_client_access
 from app.api.phase0_mappers import (
@@ -16,6 +16,7 @@ from app.api.phase0_mappers import (
     statement_ai_policy_from_payload,
     statement_line_from_payload,
 )
+from app.api.rate_limit import enforce_rate_limit
 from app.api.phase0_schemas import (
     AiBatchBenchmarkPayload,
     AiModelComparisonPayload,
@@ -38,7 +39,8 @@ router = APIRouter()
 
 
 @router.post("/classification/product")
-def product_classification(payload: ProductClassificationPayload) -> dict[str, object]:
+def product_classification(payload: ProductClassificationPayload, request: Request) -> dict[str, object]:
+    enforce_rate_limit(scope="ai", key=payload.client_id.strip(), request=request)
     result = static_first_classifier_from_payload(payload.ai_policy).classify(
         payload.raw_line,
         supplier_hint=payload.supplier_hint,
@@ -75,10 +77,12 @@ def product_classification(payload: ProductClassificationPayload) -> dict[str, o
 @router.post("/statement/ai-suggestions")
 def statement_ai_suggestions(
     payload: StatementAiSuggestionsPayload,
+    request: Request,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
+    enforce_rate_limit(scope="ai", key=payload.client_id.strip(), request=request)
     if payload.client_id.strip():
         require_client_access(
             client_id=payload.client_id.strip(),
@@ -145,7 +149,8 @@ def store_ai_usage_summary(payload: AiUsageSummaryPayload) -> dict[str, object]:
 
 
 @router.post("/classification/batch-benchmark")
-def classification_batch_benchmark(payload: AiBatchBenchmarkPayload) -> dict[str, object]:
+def classification_batch_benchmark(payload: AiBatchBenchmarkPayload, request: Request) -> dict[str, object]:
+    enforce_rate_limit(scope="ai", request=request)
     provider = None
     if payload.provider_name.strip().lower() in {"openai", "groq"} and not payload.provider_payloads:
         provider = ai_provider_from_env(model=payload.model.strip())
@@ -165,7 +170,8 @@ def classification_batch_benchmark(payload: AiBatchBenchmarkPayload) -> dict[str
 
 
 @router.post("/classification/model-comparison")
-def classification_model_comparison(payload: AiModelComparisonPayload) -> dict[str, object]:
+def classification_model_comparison(payload: AiModelComparisonPayload, request: Request) -> dict[str, object]:
+    enforce_rate_limit(scope="ai", request=request)
     provider_name = (payload.provider_name or os.environ.get("FISORA_AI_PROVIDER", "disabled")).strip().lower()
     if provider_name not in {"openai", "groq"}:
         raise HTTPException(status_code=400, detail="Model comparison requires FISORA_AI_PROVIDER=openai or groq")

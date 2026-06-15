@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Cookie, Header, HTTPException
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from app.api.phase0_context import (
@@ -11,6 +11,7 @@ from app.api.phase0_context import (
     get_review_service,
     request_user_id,
 )
+from app.api.rate_limit import enforce_rate_limit
 from app.api.phase0_schemas import (
     ExportPackagePayload,
     ReviewDecisionPayload,
@@ -42,22 +43,26 @@ def store_review_decision(
 
 
 @router.post("/export/package")
-def export_package(payload: ExportPackagePayload) -> dict[str, object]:
+def export_package(payload: ExportPackagePayload, request: Request) -> dict[str, object]:
+    enforce_rate_limit(scope="export", request=request)
     return get_export_service().export_package(payload)
 
 
 @router.post("/store/export-package")
-def store_export_package(payload: StoredExportPackagePayload) -> dict[str, object]:
+def store_export_package(payload: StoredExportPackagePayload, request: Request) -> dict[str, object]:
+    enforce_rate_limit(scope="export", key=payload.client_id.strip(), request=request)
     return get_export_service().store_export_package(payload)
 
 
 @router.post("/store/export-package/from-workspace")
 def store_export_package_from_workspace(
     payload: WorkspaceExportPackagePayload,
+    request: Request,
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
+    enforce_rate_limit(scope="export", key=payload.client_id.strip(), request=request)
     return get_export_service().store_export_package_from_workspace(
         payload=payload,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),

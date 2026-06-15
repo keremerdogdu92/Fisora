@@ -383,6 +383,52 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(summary.json()["summary"]["event_count"], 1)
         self.assertEqual(summary.json()["summary"]["ai_skipped_count"], 1)
 
+    def test_ai_endpoint_rate_limit_returns_429_after_configured_budget(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.api.rate_limit import reset_rate_limit_state
+
+        previous_enabled = os.environ.get("FISORA_RATE_LIMIT_ENABLED")
+        previous_ai_limit = os.environ.get("FISORA_RATE_LIMIT_AI_MAX_REQUESTS")
+        previous_window = os.environ.get("FISORA_RATE_LIMIT_WINDOW_SECONDS")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_RATE_LIMIT_ENABLED"] = "true"
+        os.environ["FISORA_RATE_LIMIT_AI_MAX_REQUESTS"] = "1"
+        os.environ["FISORA_RATE_LIMIT_WINDOW_SECONDS"] = "60"
+        reset_rate_limit_state()
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                payload = {
+                    "client_id": "rate-limit-client",
+                    "raw_line": "Urban Care sac bakim seti",
+                    "supplier_hint": "Market",
+                }
+
+                first = client.post("/phase0/classification/product", json=payload)
+                second = client.post("/phase0/classification/product", json=payload)
+        finally:
+            reset_rate_limit_state()
+            if previous_enabled is None:
+                os.environ.pop("FISORA_RATE_LIMIT_ENABLED", None)
+            else:
+                os.environ["FISORA_RATE_LIMIT_ENABLED"] = previous_enabled
+            if previous_ai_limit is None:
+                os.environ.pop("FISORA_RATE_LIMIT_AI_MAX_REQUESTS", None)
+            else:
+                os.environ["FISORA_RATE_LIMIT_AI_MAX_REQUESTS"] = previous_ai_limit
+            if previous_window is None:
+                os.environ.pop("FISORA_RATE_LIMIT_WINDOW_SECONDS", None)
+            else:
+                os.environ["FISORA_RATE_LIMIT_WINDOW_SECONDS"] = previous_window
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 429)
+        self.assertEqual(second.json()["detail"]["reason"], "rate_limit_exceeded")
+        self.assertEqual(second.headers.get("Retry-After"), "60")
+
 
 if __name__ == "__main__":
     unittest.main()

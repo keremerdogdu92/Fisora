@@ -218,6 +218,36 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("zirve_verified_adapter_missing", payload["warnings"])
         self.assertNotIn("zirve_verified_adapter_available", payload["pilot_blocking"])
 
+    def test_production_readiness_reports_mapping_adapter_and_security_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://fisora:test@localhost:5432/fisora",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "GROQ_API_KEY": "gsk-test",
+                    "FISORA_RATE_LIMIT_ENABLED": "false",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["zirve_mapping_adapter_available"])
+        self.assertFalse(payload["checks"]["session_required_active"])
+        self.assertFalse(payload["checks"]["rate_limit_configured"])
+        self.assertTrue(payload["pilot_sellable"])
+        self.assertFalse(payload["production_ready"])
+        self.assertIn("session_required_missing", payload["warnings"])
+        self.assertIn("rate_limit_missing", payload["warnings"])
+        self.assertIn("zirve_field_test_pending", payload["warnings"])
+
     def test_pilot_sellable_blocks_anonymous_or_json_store_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -1505,6 +1535,35 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("fis_tarihi;fis_turu;fis_aciklama", text)
         self.assertIn("2026-05-03;BANKA", text)
         self.assertIn("360;Cari odeme;500.00;0.00;BNK-0001;1111111111", text)
+
+    def test_zirve_mapping_csv_adapter_writes_minimum_manual_mapping_fields(self) -> None:
+        entry = build_bank_payment_entry(
+            entry_date="2026-05-03",
+            amount=money("500.00"),
+            bank_account="102.01",
+            counterparty_account="360",
+            counterparty_tax_id="1111111111",
+            document_ref="BNK-0001",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = get_export_adapter("zirve_mapping_csv")
+            output = write_export_file(
+                adapter=adapter,
+                entries=(entry,),
+                output_path=Path(temp_dir) / "zirve-mapping.csv",
+                client_id="client-1",
+            )
+            raw = output.read_bytes()
+            text = output.read_text(encoding="utf-8-sig")
+
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(adapter.validation_status, "field_test_pending")
+        self.assertFalse(adapter.verified_in_zirve)
+        self.assertIn(
+            "hesap_kodu;evrak_tarihi;evrak_no;belge_turu;aciklama;borc;alacak;vkn_tckn;odeme_sekli;fis_turu;satir_no;kaynak_belge",
+            text,
+        )
+        self.assertIn("360;2026-05-03;BNK-0001;BANKA;Cari odeme;500.00;0.00;1111111111;;BANKA;1;BNK-0001", text)
 
     def test_workspace_export_package_includes_only_ready_balanced_entries(self) -> None:
         workspace = {

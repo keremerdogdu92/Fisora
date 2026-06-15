@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sys
 import unittest
 
@@ -12,10 +13,11 @@ if str(BACKEND) not in sys.path:
 try:
     from fastapi.testclient import TestClient
 
-    from app.main import app
+    from app.main import app, cors_allow_origins
 except ModuleNotFoundError:
     TestClient = None
     app = None
+    cors_allow_origins = None
 
 
 class CorsConfigTests(unittest.TestCase):
@@ -23,10 +25,34 @@ class CorsConfigTests(unittest.TestCase):
         compose_file = ROOT / "docker-compose.production.yml"
         compose_text = compose_file.read_text(encoding="utf-8")
 
-        self.assertIn("FISORA_AUTH_MODE: ${FISORA_AUTH_MODE:-mock_header_required}", compose_text)
+        self.assertIn("FISORA_AUTH_MODE: ${FISORA_AUTH_MODE:-session_required}", compose_text)
         self.assertIn("FISORA_AUTH_HEADER: ${FISORA_AUTH_HEADER:-X-Fisora-User-Id}", compose_text)
+        self.assertIn("FISORA_RATE_LIMIT_ENABLED: ${FISORA_RATE_LIMIT_ENABLED:-true}", compose_text)
         self.assertGreaterEqual(compose_text.count("FISORA_AUTH_MODE:"), 2)
         self.assertGreaterEqual(compose_text.count("FISORA_AUTH_HEADER:"), 2)
+
+    def test_cors_origins_are_configurable_from_environment(self) -> None:
+        main_file = ROOT / "backend" / "app" / "main.py"
+        main_text = main_file.read_text(encoding="utf-8")
+
+        self.assertIn("FISORA_CORS_ALLOW_ORIGINS", main_text)
+        self.assertNotIn('"http://192.168.1.101:3000"', main_text)
+
+    def test_empty_cors_environment_uses_safe_local_defaults(self) -> None:
+        if cors_allow_origins is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous = os.environ.get("FISORA_CORS_ALLOW_ORIGINS")
+        os.environ["FISORA_CORS_ALLOW_ORIGINS"] = ""
+        try:
+            origins = cors_allow_origins()
+        finally:
+            if previous is None:
+                os.environ.pop("FISORA_CORS_ALLOW_ORIGINS", None)
+            else:
+                os.environ["FISORA_CORS_ALLOW_ORIGINS"] = previous
+
+        self.assertIn("http://localhost:3000", origins)
+        self.assertIn("http://192.168.1.101:3000", origins)
 
     def test_nginx_keeps_http_pilot_auth_and_tls_template_strips_spoofable_headers(self) -> None:
         nginx_file = ROOT / "deploy" / "nginx" / "default.conf"

@@ -7,9 +7,10 @@ bilerek birakilmistir.
 |---|---|---|---|---|---|---|
 | ZRV-001 | Universal Journal CSV | exports/universal_journal.csv | TBD | TBD | TBD | Ilk aday format |
 | ZRV-002 | Zirve Trial Voucher CSV | exports/generated/{client}-zirve_trial_csv.csv | TBD | TBD | fis_tarihi, fis_turu, hesap_kodu, borc, alacak | Yeni saha eslestirme adayi; dogrulanmadi |
-| ZRV-003 | Fis listesi Excel | TBD | TBD | TBD | TBD | Alternatif rota |
-| ZRV-004 | Fatura Excel | TBD | TBD | TBD | TBD | Fis seviyesi yeterli olmazsa |
-| ZRV-005 | Banka Excel | TBD | TBD | TBD | TBD | Banka hareketleri icin |
+| ZRV-003 | Zirve Manual Mapping CSV | exports/generated/{client}-zirve_mapping_csv.csv | field mapping test pending | TBD | hesap_kodu, evrak_tarihi, evrak_no, belge_turu, aciklama, borc, alacak | Zirve kolon sirasini sabitlemiyor; kullanici import ekraninda kolonlari elle eslestiriyor |
+| ZRV-004 | Fis listesi Excel | TBD | TBD | TBD | TBD | Alternatif rota |
+| ZRV-005 | Fatura Excel | TBD | TBD | TBD | TBD | Fis seviyesi yeterli olmazsa |
+| ZRV-006 | Banka Excel | TBD | TBD | TBD | TBD | Banka hareketleri icin |
 
 ## Testte Kaydedilecek Bilgiler
 
@@ -47,3 +48,36 @@ kaynak_belge
 Dosya `;` ayiraci ve UTF-8 BOM ile yazilir. Zirve testinde ayirac, tarih
 formati, tutar formati ve zorunlu fis alanlari dogrulanmadan `verified_in_zirve`
 degeri `false` kalir.
+
+## Manual Mapping CSV Adayi
+
+`zirve_mapping_csv` adapter'i Zirve'nin sabit kolon sirasindan cok import
+ekraninda elle kolon eslestirme yaptirdigi varsayimina gore uretilir. Bu nedenle
+kolon sirasi urun kontrati degildir; kontrat, asgari alanlarin dosyada bulunmasi
+ve mustavirin bunlari Zirve import ekraninda eslestirebilmesidir.
+
+Asgari alanlar:
+
+```text
+hesap_kodu
+evrak_tarihi
+evrak_no
+belge_turu
+aciklama
+borc
+alacak
+```
+
+Opsiyonel alanlar:
+
+```text
+vkn_tckn
+odeme_sekli
+fis_turu
+satir_no
+kaynak_belge
+```
+
+Dosya `;` ayiraci ve UTF-8 BOM ile yazilir. Gercek Zirve import ekraninda
+kolonlar eslestirilip basarili fis olusumu gorulmeden sonuc
+`field mapping test pending`, `verified_in_zirve=false` olarak kalir.

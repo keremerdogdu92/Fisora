@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from app.domain.exporters import export_universal_journal_csv, export_zirve_trial_csv
+from app.domain.exporters import export_universal_journal_csv, export_zirve_mapping_csv, export_zirve_trial_csv
 from app.domain.journal_entries import JournalEntry
 
 
-ExportAdapterType = Literal["zirve_universal_csv", "zirve_trial_csv", "json_manifest"]
+ExportAdapterType = Literal["zirve_universal_csv", "zirve_trial_csv", "zirve_mapping_csv", "json_manifest"]
 ValidationStatus = Literal["field_test_pending", "verified", "audit_only"]
 
 
@@ -43,6 +43,19 @@ SUPPORTED_EXPORT_ADAPTERS: dict[str, ExportAdapter] = {
         field_mapping_notes=(
             "Unverified semicolon CSV for Zirve field mapping tests.",
             "Columns: fis_tarihi, fis_turu, fis_aciklama, satir_no, hesap_kodu, satir_aciklama, borc, alacak, belge_no, vergi_no, kaynak_belge.",
+        ),
+    ),
+    "zirve_mapping_csv": ExportAdapter(
+        export_type="zirve_mapping_csv",
+        file_extension=".csv",
+        mime_type="text/csv; charset=utf-8",
+        display_name="Zirve Manual Mapping CSV",
+        verified_in_zirve=False,
+        validation_status="field_test_pending",
+        field_mapping_notes=(
+            "Semicolon CSV for Zirve manual column mapping; column order is not a product contract.",
+            "Minimum fields: hesap_kodu, evrak_tarihi, evrak_no, belge_turu, aciklama, borc, alacak.",
+            "Optional fields: vkn_tckn, odeme_sekli, fis_turu, satir_no, kaynak_belge.",
         ),
     ),
     "json_manifest": ExportAdapter(
@@ -100,6 +113,8 @@ def write_export_file(
         return export_universal_journal_csv(list(entries), path)
     if adapter.export_type == "zirve_trial_csv":
         return export_zirve_trial_csv(list(entries), path)
+    if adapter.export_type == "zirve_mapping_csv":
+        return export_zirve_mapping_csv(list(entries), path)
     if adapter.export_type == "json_manifest":
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {

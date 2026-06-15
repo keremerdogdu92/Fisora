@@ -7,6 +7,7 @@ from typing import Mapping
 from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
 from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL
+from app.domain.rate_limits import rate_limit_config
 from app.domain.storage_adapters import storage_readiness
 from app.domain.system_health import backup_health, storage_usage_health
 
@@ -38,6 +39,7 @@ def production_readiness_payload(
     else:
         ai_provider_configured = False
     auth = auth_status_payload(build_auth_config(source))
+    rate_limit = rate_limit_config(source)
     document_storage = storage_readiness(
         base_dir=document_storage_path,
         backend=source.get("FISORA_DOCUMENT_STORAGE_BACKEND", "local"),
@@ -63,6 +65,17 @@ def production_readiness_payload(
         }
         for adapter in SUPPORTED_EXPORT_ADAPTERS.values()
     ]
+    zirve_mapping_adapter_available = "zirve_mapping_csv" in SUPPORTED_EXPORT_ADAPTERS
+    zirve_field_test_pending = any(
+        adapter.validation_status == "field_test_pending" for adapter in SUPPORTED_EXPORT_ADAPTERS.values()
+    )
+    session_required_active = auth["auth_mode"] == "session_required"
+    session_cookie_secure = source.get("FISORA_SESSION_COOKIE_SECURE", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
     checks = {
         "auth_not_anonymous": not bool(auth["allows_anonymous_access"]),
         "document_storage_writable": bool(document_storage["ok"]),
@@ -70,15 +83,34 @@ def production_readiness_payload(
         "postgres_configured": (store_backend != "postgres") or database_configured,
         "ai_provider_configured": ai_provider_configured,
         "zirve_verified_adapter_available": any(adapter.verified_in_zirve for adapter in SUPPORTED_EXPORT_ADAPTERS.values()),
+        "zirve_mapping_adapter_available": zirve_mapping_adapter_available,
+        "session_required_active": session_required_active,
+        "session_cookie_secure": session_cookie_secure,
+        "rate_limit_configured": rate_limit.configured,
     }
     blocking = [
         key
         for key, passed in checks.items()
-        if not passed and key != "zirve_verified_adapter_available"
+        if not passed
+        and key
+        not in {
+            "zirve_verified_adapter_available",
+            "session_required_active",
+            "session_cookie_secure",
+            "rate_limit_configured",
+        }
     ]
     warnings = []
     if not checks["zirve_verified_adapter_available"]:
         warnings.append("zirve_verified_adapter_missing")
+    if zirve_field_test_pending:
+        warnings.append("zirve_field_test_pending")
+    if not session_required_active:
+        warnings.append("session_required_missing")
+    if not session_cookie_secure:
+        warnings.append("session_cookie_secure_missing")
+    if not rate_limit.configured:
+        warnings.append("rate_limit_missing")
     if ai_provider == "disabled":
         warnings.append("ai_provider_disabled")
     elif ai_provider == "openai" and not openai_key_present:
@@ -97,6 +129,7 @@ def production_readiness_payload(
         warnings.append("disk_usage_high")
     controlled_export_available = {
         "zirve_universal_csv",
+        "zirve_mapping_csv",
         "json_manifest",
     }.issubset(SUPPORTED_EXPORT_ADAPTERS)
     pilot_checks = {
@@ -115,6 +148,9 @@ def production_readiness_payload(
     production_ready = (
         not blocking
         and bool(auth["production_ready"])
+        and session_required_active
+        and session_cookie_secure
+        and rate_limit.configured
         and bool(checks["zirve_verified_adapter_available"])
     )
     commercial_readiness = {
@@ -146,5 +182,11 @@ def production_readiness_payload(
         "ai_model": ai_model,
         "ai_openai_key_present": openai_key_present,
         "ai_groq_key_present": groq_key_present,
+        "rate_limit": {
+            "enabled": rate_limit.enabled,
+            "window_seconds": rate_limit.window_seconds,
+            "ai_max_requests": rate_limit.ai_max_requests,
+            "export_max_requests": rate_limit.export_max_requests,
+        },
         "export_adapters": adapters,
     }

@@ -7,7 +7,7 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy commit: `f3e9498`
+- Son dogrulanan runtime deploy commit: `a7dc639`
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq

@@ -263,7 +263,7 @@ export function JournalPanel({
         <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
         <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
         <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
-        <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı dışı</button>
+        <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
         <button onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
       </div>
       <p className="decision-status">{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</p>
@@ -397,7 +397,7 @@ function StatementReviewPanel({
             <button onClick={() => onSaveStatementDecision("approve")} type="button">Satırı onayla</button>
             <button onClick={() => onSaveStatementDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
             <button onClick={() => onSaveStatementDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
-            <button onClick={() => onSaveStatementDecision("exclude_from_export")} type="button">Çıktı dışı</button>
+            <button onClick={() => onSaveStatementDecision("exclude_from_export")} type="button">Çıktı listesine ekleme</button>
             <button onClick={() => onSaveStatementDecision("wrong_account")} type="button">Kontrolde tut</button>
           </div>
         </div>

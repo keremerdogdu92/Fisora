@@ -1776,6 +1776,38 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(candidate.export_status, "review_required")
         self.assertIn("bank_account_missing", candidate.risk_flags)
 
+    def test_workspace_export_package_marks_rejected_statement_entry_as_export_excluded(self) -> None:
+        workspace = {
+            "documents": [
+                {
+                    "document_ref": "statement.csv",
+                    "result": {
+                        "statement_entries": [
+                            {
+                                "entry_type": "bank_payment",
+                                "entry_date": "2026-05-02",
+                                "description": "Export disi banka satiri",
+                                "accountant_review_status": "rejected",
+                                "statement_fingerprint": "2026-05-02|out|50.00|rejected",
+                                "risk_flags": [],
+                                "lines": [
+                                    {"account_code": "320.01", "description": "Cari", "debit": "50.00", "credit": "0.00"},
+                                    {"account_code": "102.01", "description": "Banka cikisi", "debit": "0.00", "credit": "50.00"},
+                                ],
+                            },
+                        ]
+                    },
+                },
+            ]
+        }
+
+        candidates = export_candidates_from_workspace(workspace)
+        build = build_workspace_export_package(workspace)
+
+        self.assertEqual(candidates[0].export_status, "rejected")
+        self.assertEqual(len(build.package.entries), 0)
+        self.assertEqual(build.package.excluded_document_refs, ("statement.csv#statement-1",))
+
     def test_ai_batch_benchmark_scores_static_and_replay_provider_results(self) -> None:
         static_summary = run_ai_batch_benchmark(
             (

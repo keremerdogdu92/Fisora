@@ -27,3 +27,15 @@ test("portal visible copy presents AI agent automation without internal implemen
     /Private Pilot|private pilot|Private pilot demo verisi|Kapali pilot|Kapalı pilot|Pilot satis|Pilot satış|sifresiz pilot|şifresiz pilot|lokal private|Backend session|Backend oturumu yok|Local gelistirme|Lokal fallback|AI provider|AI\/kural yorumu|AI hesap önerisi|AI cari önerisi|AI risk|Export hazır|Export dışı|export kapalı|export'a|Zirve import dogrulanmadi|Zirve import doğrulanmadı|Worker sonucu bekleniyor|Onaya gitmeme nedeni|Codex|Claude|ChatGPT|Prompt verdik|promptla yazılım/i,
   );
 });
+
+test("review actions clearly name the export exclusion decision", () => {
+  const reviewSource = source("portal-review-panels.tsx");
+
+  assert.match(reviewSource, /Çıktı listesine ekleme/);
+});
+
+test("client onboarding labels portal user as the client email login", () => {
+  const clientsSource = source("portal-clients-view.tsx");
+
+  assert.match(clientsSource, /Mükellef e-posta \/ giriş kullanıcı adı/);
+});

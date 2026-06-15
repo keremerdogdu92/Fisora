@@ -122,9 +122,13 @@ def export_candidates_from_workspace(workspace: dict[str, Any]) -> list[ExportCa
                 candidates.append(
                     ExportCandidate(
                         document_ref=f"{document_ref}#statement-{index}",
-                        export_status="export_ready"
-                        if entry_approved and not entry_rejected and entry.is_balanced and not risk_flags
-                        else "review_required",
+                        export_status=(
+                            "rejected"
+                            if entry_rejected
+                            else "export_ready"
+                            if entry_approved and entry.is_balanced and not risk_flags
+                            else "review_required"
+                        ),
                         journal_entry=entry,
                         risk_flags=risk_flags,
                     )

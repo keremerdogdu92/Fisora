@@ -192,9 +192,9 @@ export function NewClientCard({
           value={draft.naceCode}
         />
         <input
-          aria-label="Portal kullanÄ±cÄ±sÄ±"
+          aria-label="Mükellef e-posta / giriş kullanıcı adı"
           onChange={(event) => setDraft({ ...draft, portalUserId: event.target.value })}
-          placeholder="Portal kullanÄ±cÄ±"
+          placeholder="Mükellef e-posta / giriş kullanıcı adı"
           value={draft.portalUserId}
         />
       </div>

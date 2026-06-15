@@ -7,7 +7,7 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy commit: `dd85816`
+- Son dogrulanan runtime deploy commit: `f3e9498`
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
@@ -116,13 +116,20 @@ Beklenen kritik degerler:
 ```text
 health: 200 OK
 auth_mode: mock_header_required
+ready: true
+pilot_sellable: true
+production_ready: false
 ai_provider: groq
 ai_model: openai/gpt-oss-20b
 ai_groq_key_present: true
+zirve_mapping_adapter_available: true
+rate_limit_configured: true
 ```
 
-`zirve_verified_adapter_missing` warning'i normaldir. Zirve export sahada
-mustavirle test edilmeden adapter verified sayilmaz.
+`zirve_verified_adapter_missing`, `zirve_field_test_pending` ve
+`session_required_missing` warning'leri kapali demo modunda normaldir. Zirve
+export sahada mustavirle test edilmeden adapter verified sayilmaz; canlı demo
+`mock_header_required` modunda kaldigi surece `production_ready=false` kalir.
 
 ## Smoke Durumu
 
@@ -152,10 +159,11 @@ docker compose --env-file deploy/production.env -f docker-compose.production.yml
 ## Kaldigimiz Pratik Sira
 
 1. Serverda `git checkout main && git pull --ff-only origin main` ile son commit'i cek.
-2. `sh deploy/scripts/fisora-prod.sh deploy` calistir.
+2. `sh deploy/scripts/fisora-prod.sh check && sh deploy/scripts/fisora-prod.sh deploy && sh deploy/scripts/fisora-prod.sh smoke` calistir.
 3. Auth status `mock_header_required` donuyor mu kontrol et.
-4. Readiness icinde `pilot_sellable=true`, `ai_groq_key_present=true` ve `ai_provider_configured=true`
-   mi kontrol et.
+4. Readiness icinde `pilot_sellable=true`, `production_ready=false`,
+   `zirve_mapping_adapter_available=true`, `rate_limit_configured=true`,
+   `ai_groq_key_present=true` ve `ai_provider_configured=true` mi kontrol et.
 5. Tarayicida `http://<SERVER_IP>/` ac.
 6. Fatura ve banka upload akisini Groq AI acik halde dene.
 7. Smoke failed kalirsa yukaridaki SQL komutuyla job error detayini al.

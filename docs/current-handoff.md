@@ -6,8 +6,8 @@ oturumdan devam etmek icin son durumu ozetler.
 ## Son Durum
 
 - Repo: `keremerdogdu92/Fisora`
-- Aktif branch: `codex/bank-statement-review-engine`
-- Son runtime deploy commit: `7be7055`
+- Aktif branch: `main`
+- Son dogrulanan runtime deploy commit: `dd85816`
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
@@ -18,10 +18,10 @@ sadece serverdaki bu dosyada tutulur.
 
 ## Yeni Bilgisayarda Devam Etme
 
-GitHub hesabi private repoya yetkili olmalidir. Son branch'i almak icin:
+GitHub hesabi private repoya yetkili olmalidir. Ana branch'i almak icin:
 
 ```bash
-git clone -b codex/bank-statement-review-engine https://github.com/keremerdogdu92/Fisora.git
+git clone -b main https://github.com/keremerdogdu92/Fisora.git
 cd Fisora
 ```
 
@@ -29,7 +29,7 @@ Zaten clone varsa:
 
 ```bash
 git fetch origin
-git checkout codex/bank-statement-review-engine
+git checkout main
 git pull --ff-only
 ```
 
@@ -60,8 +60,8 @@ Serverda son commit'i almak icin:
 ```bash
 cd /opt/fisora/app
 git fetch origin
-git checkout codex/bank-statement-review-engine
-git pull --ff-only
+git checkout main
+git pull --ff-only origin main
 ```
 
 Config kontrolu ve deploy:
@@ -151,7 +151,7 @@ docker compose --env-file deploy/production.env -f docker-compose.production.yml
 
 ## Kaldigimiz Pratik Sira
 
-1. Serverda `git pull --ff-only` ile `7be7055` veya daha yeni commit'i cek.
+1. Serverda `git checkout main && git pull --ff-only origin main` ile son commit'i cek.
 2. `sh deploy/scripts/fisora-prod.sh deploy` calistir.
 3. Auth status `mock_header_required` donuyor mu kontrol et.
 4. Readiness icinde `pilot_sellable=true`, `ai_groq_key_present=true` ve `ai_provider_configured=true`

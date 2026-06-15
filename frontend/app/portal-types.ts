@@ -162,6 +162,9 @@ export type PilotReadinessView = {
   status: string;
   statusLabel: string;
   productionLabel: string;
+  realDataLabel: string;
+  realDataAccessLabel: string;
+  realDataBlocking: string[];
   offerLabel: string;
   exportLabel: string;
   zirveLabel: string;

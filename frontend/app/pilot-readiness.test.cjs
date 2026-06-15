@@ -23,6 +23,11 @@ test("buildPilotReadinessView presents controlled office readiness separately fr
   const view = buildPilotReadinessView({
     pilot_sellable: true,
     production_ready: false,
+    real_data_pilot: {
+      allowed: false,
+      status: "blocked",
+      blocking: ["session_required_active"],
+    },
     pilot_blocking: [],
     warnings: ["zirve_verified_adapter_missing"],
     auth: { auth_mode: "mock_header_required" },
@@ -40,14 +45,42 @@ test("buildPilotReadinessView presents controlled office readiness separately fr
   assert.equal(view.productionLabel, "Canlı kullanım için kontrol gerekli");
   assert.equal(view.exportLabel, "Kontrollü çıktı paketi");
   assert.equal(view.zirveLabel, "Format doğrulaması gerekli");
+  assert.equal(view.realDataLabel, "Gerçek veri için kapalı");
+  assert.deepEqual(view.realDataBlocking, ["session_required_active"]);
   assert.deepEqual(view.blocking, []);
   assert.deepEqual(view.warnings, ["zirve_verified_adapter_missing"]);
+});
+
+test("buildPilotReadinessView marks restricted live real-data pilot as ready", () => {
+  const view = buildPilotReadinessView({
+    pilot_sellable: true,
+    production_ready: false,
+    real_data_pilot: {
+      allowed: true,
+      status: "ready_for_restricted_live_pilot",
+      access_mode: "restricted_network",
+      blocking: [],
+    },
+    pilot_blocking: [],
+    warnings: ["zirve_field_test_pending"],
+    auth: { auth_mode: "session_required" },
+    store_backend: "postgres",
+    ai_provider: "groq",
+  });
+
+  assert.equal(view.realDataLabel, "Kısıtlı canlı pilot hazır");
+  assert.equal(view.realDataAccessLabel, "restricted_network");
+  assert.deepEqual(view.realDataBlocking, []);
 });
 
 test("buildPilotReadinessView surfaces controlled-use gaps", () => {
   const view = buildPilotReadinessView({
     pilot_sellable: false,
     production_ready: false,
+    real_data_pilot: {
+      allowed: false,
+      blocking: ["pilot_sellable", "postgres_store_active"],
+    },
     pilot_blocking: ["auth_requires_user", "postgres_store_active"],
     warnings: ["backup_missing"],
     auth: { auth_mode: "mock_header_optional" },
@@ -59,6 +92,8 @@ test("buildPilotReadinessView surfaces controlled-use gaps", () => {
   assert.equal(view.statusLabel, "Kurulum kontrolü gerekli");
   assert.equal(view.authLabel, "mock_header_optional");
   assert.equal(view.storeLabel, "json");
+  assert.equal(view.realDataLabel, "Gerçek veri için kapalı");
+  assert.deepEqual(view.realDataBlocking, ["pilot_sellable", "postgres_store_active"]);
   assert.deepEqual(view.blocking, ["auth_requires_user", "postgres_store_active"]);
   assert.deepEqual(view.warnings, ["backup_missing"]);
 });

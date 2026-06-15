@@ -6,6 +6,11 @@ function safeList(value) {
   return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
 }
 
+function realDataLabel(value) {
+  if (value?.allowed) return "Kısıtlı canlı pilot hazır";
+  return "Gerçek veri için kapalı";
+}
+
 function hostForUrl(pageUrl) {
   try {
     return new URL(pageUrl || "http://localhost").hostname.toLowerCase();
@@ -47,6 +52,9 @@ function buildPilotReadinessView(payload = null) {
   const commercial = readiness.commercial_readiness && typeof readiness.commercial_readiness === "object"
     ? readiness.commercial_readiness
     : {};
+  const realDataPilot = readiness.real_data_pilot && typeof readiness.real_data_pilot === "object"
+    ? readiness.real_data_pilot
+    : {};
   const pilotSellable = Boolean(readiness.pilot_sellable);
   const productionReady = Boolean(readiness.production_ready);
   const status = pilotSellable ? "pilot_sellable" : "blocked";
@@ -55,6 +63,9 @@ function buildPilotReadinessView(payload = null) {
     status,
     statusLabel: pilotSellable ? "Kontrollü kullanıma hazır" : "Kurulum kontrolü gerekli",
     productionLabel: productionReady ? "Canlı kullanım hazır" : "Canlı kullanım için kontrol gerekli",
+    realDataLabel: realDataLabel(realDataPilot),
+    realDataAccessLabel: safeText(realDataPilot.access_mode, "-"),
+    realDataBlocking: safeList(realDataPilot.blocking),
     offerLabel: offerLabel(commercial.primary_offer),
     exportLabel: exportLabel(commercial.export_positioning),
     zirveLabel: zirveLabel(commercial.zirve_import_claim),

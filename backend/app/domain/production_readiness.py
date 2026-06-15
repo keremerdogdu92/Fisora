@@ -12,6 +12,12 @@ from app.domain.storage_adapters import storage_readiness
 from app.domain.system_health import backup_health, storage_usage_health
 
 
+def _env_bool(value: str, *, default: bool = False) -> bool:
+    if not value.strip():
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 def production_readiness_payload(
     *,
     document_storage_path: Path | str,
@@ -76,6 +82,9 @@ def production_readiness_payload(
         "no",
         "off",
     }
+    real_data_pilot_enabled = _env_bool(source.get("FISORA_REAL_DATA_PILOT_ENABLED", ""), default=False)
+    real_data_access_mode = source.get("FISORA_REAL_DATA_ACCESS_MODE", "").strip().lower()
+    restricted_live_access = real_data_access_mode in {"tls", "restricted_network", "vpn", "ip_allowlist"}
     checks = {
         "auth_not_anonymous": not bool(auth["allows_anonymous_access"]),
         "document_storage_writable": bool(document_storage["ok"]),
@@ -145,6 +154,22 @@ def production_readiness_payload(
     }
     pilot_blocking = [key for key, passed in pilot_checks.items() if not passed]
     pilot_sellable = not pilot_blocking
+    real_data_pilot_checks = {
+        "explicit_real_data_enable": real_data_pilot_enabled,
+        "pilot_sellable": pilot_sellable,
+        "restricted_live_access": restricted_live_access,
+        "session_required_active": session_required_active,
+        "session_cookie_secure": session_cookie_secure,
+        "rate_limit_configured": rate_limit.configured,
+        "postgres_store_active": bool(pilot_checks["postgres_store_active"]),
+        "document_storage_writable": bool(document_storage["ok"]),
+        "export_storage_writable": bool(export_storage["ok"]),
+        "backup_available": bool(backup["ok"]),
+        "ai_provider_configured": ai_provider_configured,
+        "controlled_export_available": controlled_export_available,
+    }
+    real_data_pilot_blocking = [key for key, passed in real_data_pilot_checks.items() if not passed]
+    real_data_pilot_allowed = not real_data_pilot_blocking
     production_ready = (
         not blocking
         and bool(auth["production_ready"])
@@ -162,6 +187,13 @@ def production_readiness_payload(
         "export_positioning": "controlled_csv_and_manifest_candidate",
         "zirve_import_claim": "unverified_until_field_test",
     }
+    real_data_pilot = {
+        "status": "ready_for_restricted_live_pilot" if real_data_pilot_allowed else "blocked",
+        "allowed": real_data_pilot_allowed,
+        "access_mode": real_data_access_mode or "unset",
+        "blocking": real_data_pilot_blocking,
+        "checks": real_data_pilot_checks,
+    }
     return {
         "ready": not blocking,
         "pilot_sellable": pilot_sellable,
@@ -172,6 +204,7 @@ def production_readiness_payload(
         "pilot_checks": pilot_checks,
         "pilot_blocking": pilot_blocking,
         "commercial_readiness": commercial_readiness,
+        "real_data_pilot": real_data_pilot,
         "auth": auth,
         "document_storage": document_storage,
         "export_storage": export_storage,

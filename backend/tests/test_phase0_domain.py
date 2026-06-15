@@ -218,6 +218,59 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("zirve_verified_adapter_missing", payload["warnings"])
         self.assertNotIn("zirve_verified_adapter_available", payload["pilot_blocking"])
 
+    def test_real_data_pilot_blocks_mock_auth_even_when_pilot_sellable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://fisora:test@localhost:5432/fisora",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "GROQ_API_KEY": "gsk-test",
+                    "FISORA_REAL_DATA_PILOT_ENABLED": "true",
+                    "FISORA_REAL_DATA_ACCESS_MODE": "restricted_network",
+                },
+            )
+
+        self.assertTrue(payload["pilot_sellable"])
+        self.assertFalse(payload["real_data_pilot"]["allowed"])
+        self.assertIn("session_required_active", payload["real_data_pilot"]["blocking"])
+
+    def test_real_data_pilot_allows_restricted_session_backed_live_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "session_required",
+                    "FISORA_SESSION_COOKIE_SECURE": "true",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://fisora:test@localhost:5432/fisora",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "GROQ_API_KEY": "gsk-test",
+                    "FISORA_REAL_DATA_PILOT_ENABLED": "true",
+                    "FISORA_REAL_DATA_ACCESS_MODE": "restricted_network",
+                },
+            )
+
+        self.assertTrue(payload["real_data_pilot"]["allowed"])
+        self.assertEqual(payload["real_data_pilot"]["status"], "ready_for_restricted_live_pilot")
+        self.assertEqual(payload["real_data_pilot"]["blocking"], [])
+
     def test_production_readiness_reports_mapping_adapter_and_security_gates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

@@ -10,13 +10,21 @@ import {
   OperationsView as OperationsRouteView,
 } from "./portal-exports-view";
 import { SettingsView } from "./portal-settings-view";
-import { ModeButton, PortalTopbarStatus, SelectedClientStrip } from "./portal-shell-components";
+import { ModeButton, PortalTopbarStatus, SelectedClientStrip } from "./shared/components";
 import { AccountantWorkspace } from "./portal-workspace-view";
 import {
   loginWithPassword,
+  persistSession,
+  readStoredSession,
   resolveApiBaseUrl,
-} from "./upload-api";
-import { buildPilotReadinessView, loadInitialPilotData, refreshBackendPilotData as refreshBackendPilotDataAction } from "./portal-workspace-actions";
+} from "./features/session";
+import {
+  PilotQueryProvider,
+  buildPilotReadinessView,
+  loadInitialPilotData,
+  refreshBackendPilotData as refreshBackendPilotDataAction,
+  usePilotReadinessQuery,
+} from "./features/workspace";
 import {
   createInviteForSelectedClientAction,
   createNewClientAction,
@@ -24,26 +32,18 @@ import {
   selectNewClientTaxCertificateAction,
   setPasswordForSelectedClientAction,
   uploadChartAccountsAction,
-} from "./portal-client-actions";
+} from "./features/clients";
 import {
   addLocalUploadsAction,
-  requestStatementAiForSelectedDocumentAction,
-  saveDecisionAction,
-  saveStatementLineDecisionAction,
-} from "./portal-document-actions";
-import {
-  addSelectedClientToBasketAction,
-  markBasketPackagedAction,
-  requestCancellationAction,
-  resolveCancellationAction,
-} from "./portal-export-actions";
+  useDocumentWorkflow,
+} from "./features/documents";
+import { useExportCommands } from "./features/export";
 import {
   buildClientCancellationViewModel,
   buildPortalDashboard,
   clientDashboardRows,
   clientUploadTracking,
   documentIntakeDistribution,
-  documentsForProcessing,
   statusFunnel,
 } from "./portal-dashboard";
 import {
@@ -54,46 +54,44 @@ import {
 import type {
   CancellationRequest,
   CorrectionDraft,
-  DocumentSegment,
   ExportMode,
   IntakeCategory,
   LocalSession,
   NewClientDraft,
   PilotClient,
   PilotData,
-  PilotDocument,
   PilotMode,
   PilotReadinessView,
   PilotStatus,
   PortalNavItem,
   PortalRouteKey,
-  ReviewFilter,
 } from "./portal-types";
 import { emptyPilotData } from "./portal-data-mappers";
-import {
-  isCancelStatus,
-  periodLabel,
-} from "./portal-formatters";
-import { journalDraftLinesForDocument } from "./portal-review-actions";
-import { persistSession, readStoredSession } from "./portal-session";
+import { periodLabel } from "./portal-formatters";
+import { journalDraftLinesForDocument, useReviewCommands } from "./features/review";
 
 export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
+  return (
+    <PilotQueryProvider>
+      <FisoraPortalContent routeKey={routeKey} />
+    </PilotQueryProvider>
+  );
+}
+
+function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
   const portalConfig = portalConfigForRouteKey(routeKey);
   const lockedRole = portalConfig.lockedRole as LocalSession["role"] | undefined;
   const visibleNavItems = (PORTAL_NAV_ITEMS as PortalNavItem[]).filter((item) =>
     portalConfig.visibleModes.includes(item.mode),
   );
   const [data, setData] = useState<PilotData>(emptyPilotData);
-  const [source, setSource] = useState("Ã‡alÄ±ÅŸma alanÄ± yÃ¼kleniyor");
+  const [source, setSource] = useState("Çalışma alanı yükleniyor");
   const [readinessPayload, setReadinessPayload] = useState<Record<string, unknown> | null>(null);
   const [localFallbackAllowed, setLocalFallbackAllowed] = useState(false);
   const [mode, setModeState] = useState<PilotMode>(portalConfig.initialMode as PilotMode);
   const [selectedClientId, setSelectedClientId] = useState("");
-  const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
-  const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("invoices");
-  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("review_required");
   const [clientSearch, setClientSearch] = useState("");
   const [session, setSession] = useState<LocalSession | null>(() =>
     normalizeSessionForPortalConfig(readStoredSession(), portalConfig),
@@ -106,7 +104,6 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
   const [clientCancellationDocumentId, setClientCancellationDocumentId] = useState("");
   const [decisionStatus, setDecisionStatus] = useState("");
   const [statementAiStatus, setStatementAiStatus] = useState("");
-  const [selectedStatementLineNo, setSelectedStatementLineNo] = useState(0);
   const [uploadStatus, setUploadStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
   const [exportMode, setExportMode] = useState<ExportMode>("bulk");
@@ -123,6 +120,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
   const [inviteStatus, setInviteStatus] = useState("");
   const [portalPassword, setPortalPasswordDraft] = useState("");
   const [portalPasswordStatus, setPortalPasswordStatus] = useState("");
+  const readinessQuery = usePilotReadinessQuery();
 
   function applyPilotData(payload: PilotData, nextSource: string) {
     setData(payload);
@@ -160,6 +158,16 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     };
   }, [routeKey, session?.sessionToken, session?.userId]);
 
+  useEffect(() => {
+    if (readinessQuery.data) {
+      setReadinessPayload(readinessQuery.data);
+      return;
+    }
+    if (readinessQuery.isError) {
+      setReadinessPayload(null);
+    }
+  }, [readinessQuery.data, readinessQuery.isError]);
+
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
   const allPeriods = useMemo(() => {
@@ -171,37 +179,25 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
   const periodDocuments = useMemo(() => {
     return clientDocuments.filter((document) => !selectedPeriod || document.period === selectedPeriod);
   }, [clientDocuments, selectedPeriod]);
-  const visibleReviewDocuments = useMemo(() => {
-    if (reviewFilter === "all") return clientDocuments;
-    if (reviewFilter === "cancel_requested") return clientDocuments.filter((document) => isCancelStatus(document.status));
-    return clientDocuments.filter((document) => document.status === reviewFilter);
-  }, [clientDocuments, reviewFilter]);
-  const segmentedClientDocuments = useMemo(() => {
-    return documentsForProcessing({
-      documents: data.documents,
-      clientId: selectedClient?.clientId,
-      segment: selectedDocumentSegment,
-    }) as PilotDocument[];
-  }, [data.documents, selectedClient?.clientId, selectedDocumentSegment]);
-  const visibleProcessingDocuments = useMemo(() => {
-    if (reviewFilter === "all") return segmentedClientDocuments;
-    if (reviewFilter === "cancel_requested") return segmentedClientDocuments.filter((document) => isCancelStatus(document.status));
-    return segmentedClientDocuments.filter((document) => document.status === reviewFilter);
-  }, [reviewFilter, segmentedClientDocuments]);
-  const activeReviewDocuments = mode === "documents" ? visibleProcessingDocuments : visibleReviewDocuments;
-  const selectedDocumentSource = mode === "documents" ? segmentedClientDocuments : activeReviewDocuments;
-  const selectedDocument = selectedDocumentSource.find((document) => document.id === selectedDocumentId);
+  const {
+    activeReviewDocuments,
+    reviewFilter,
+    segmentedClientDocuments,
+    selectedDocument,
+    selectedDocumentId,
+    selectedDocumentSegment,
+    selectedStatementLineNo,
+    setReviewFilter,
+    setSelectedDocumentId,
+    setSelectedDocumentSegment,
+    setSelectedStatementLineNo,
+  } = useDocumentWorkflow({
+    allDocuments: data.documents,
+    clientDocuments,
+    mode,
+    selectedClientId: selectedClient?.clientId,
+  });
   const clientSelectedDocument = periodDocuments.find((document) => document.id === selectedDocumentId);
-  const selectedStatementLineKey = selectedDocument?.statementLines.map((line) => line.line_no).join("|") ?? "";
-  useEffect(() => {
-    const firstLineNo = selectedDocument?.statementLines[0]?.line_no ?? 0;
-    if (!firstLineNo) {
-      setSelectedStatementLineNo(0);
-      return;
-    }
-    const hasSelectedLine = selectedDocument?.statementLines.some((line) => line.line_no === selectedStatementLineNo);
-    if (!hasSelectedLine) setSelectedStatementLineNo(firstLineNo);
-  }, [selectedDocument?.id, selectedStatementLineKey, selectedStatementLineNo]);
   const filteredClients = useMemo(() => {
     const query = clientSearch.trim().toLocaleLowerCase("tr-TR");
     if (!query) return clients;
@@ -231,7 +227,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     const password = loginPassword.trim();
     const effectiveRole = (lockedRole ?? loginRole) as "client_user" | "accountant";
     if (password) {
-      setLoginStatus("Oturum aÃ§Ä±lÄ±yor.");
+      setLoginStatus("Oturum açılıyor.");
       try {
         const backendSession = await loginWithPassword({
           apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -247,62 +243,35 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
         persistSession(nextSession);
         setSession(nextSession);
         setLoginPassword("");
-        setLoginStatus(`${nextSession.userId} iÃ§in oturum aÃ§Ä±ldÄ±.`);
+        setLoginStatus(`${nextSession.userId} için oturum açıldı.`);
         setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setLoginStatus(`Oturum aÃ§Ä±lamadÄ±. ${message}`);
+        setLoginStatus(`Oturum açılamadı. ${message}`);
         return;
       }
     }
     if (!localFallbackAllowed) {
-      setLoginStatus("Bu ortamda ÅŸifresiz ofis oturumu kapalÄ±. KullanÄ±cÄ± ÅŸifresiyle girin.");
+      setLoginStatus("Bu ortamda şifresiz ofis oturumu kapalı. Kullanıcı şifresiyle girin.");
       return;
     }
     const nextSession: LocalSession = { userId, role: effectiveRole };
     persistSession(nextSession);
     setSession(nextSession);
-    setLoginStatus(`${nextSession.userId} iÃ§in lokal ofis oturumu aÃ§Ä±ldÄ±.`);
+    setLoginStatus(`${nextSession.userId} için lokal ofis oturumu açıldı.`);
     setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
   }
 
   function logout() {
     persistSession(null);
     setSession(null);
-    setLoginStatus("Oturum kapatÄ±ldÄ±.");
+    setLoginStatus("Oturum kapatıldı.");
   }
 
   function exitPortal() {
     logout();
     if (typeof window !== "undefined") window.location.assign("/");
-  }
-
-  function selectAdjacentReviewDocument(direction: 1 | -1 = 1) {
-    if (!activeReviewDocuments.length || !selectedDocument) return;
-    const currentIndex = activeReviewDocuments.findIndex((document) => document.id === selectedDocument.id);
-    const nextDocument =
-      activeReviewDocuments[currentIndex + direction] ??
-      activeReviewDocuments[currentIndex - direction] ??
-      activeReviewDocuments[0];
-    if (nextDocument) setSelectedDocumentId(nextDocument.id);
-  }
-
-  async function approveSelectedAndMoveNext() {
-    if (!selectedDocument) return;
-    const selectedLineIndex = selectedDocument.statementLines.findIndex((line) => line.line_no === selectedStatementLineNo);
-    if (selectedDocument.statementLines.length && selectedLineIndex >= 0) {
-      await saveStatementLineDecision("approve");
-      const nextLine = selectedDocument.statementLines[selectedLineIndex + 1];
-      if (nextLine) {
-        setSelectedStatementLineNo(nextLine.line_no);
-        return;
-      }
-      selectAdjacentReviewDocument(1);
-      return;
-    }
-    await saveDecision("approve");
-    selectAdjacentReviewDocument(1);
   }
 
   const createNewClient = () => {
@@ -377,73 +346,43 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     });
   };
 
-  const requestCancellation = (document: PilotDocument) => {
-    requestCancellationAction({
-      cancelReason,
-      document,
-      selectedClient,
-      setCancelReason,
-      setClientCancellationDocumentId,
-      setData,
-      setSelectedDocumentId,
-    });
-  };
-
-  const resolveCancellation = (requestId: string, status: "approved" | "rejected") => {
-    resolveCancellationAction({ requestId, setData, status });
-  };
-
-  const addSelectedClientToBasket = () => {
-    addSelectedClientToBasketAction({
-      clientDocuments,
-      selectedClient,
-      selectedPeriod,
-      setData,
-      setExportStatus,
-    });
-  };
-
-  const markBasketPackaged = () => {
-    markBasketPackagedAction({ exportMode, setData, setExportStatus });
-  };
-
-  const requestStatementAiForSelectedDocument = () => {
-    void requestStatementAiForSelectedDocumentAction({
-      selectedDocument,
-      session,
-      setData,
-      setStatementAiStatus,
-    });
-  };
-
-  const saveStatementLineDecision = (action: string) => {
-    return saveStatementLineDecisionAction({
-      action,
-      correctionDraft,
-      localFallbackAllowed,
-      loginUserId,
-      refreshBackendPilotData: () => refreshBackendPilotData(),
-      selectedDocument,
-      selectedStatementLineNo,
-      session,
-      setData,
-      setDecisionStatus,
-    });
-  };
-
-  const saveDecision = (action: string) => {
-    return saveDecisionAction({
-      action,
-      correctionDraft,
-      localFallbackAllowed,
-      loginUserId,
-      refreshBackendPilotData: () => refreshBackendPilotData(),
-      selectedDocument,
-      session,
-      setData,
-      setDecisionStatus,
-    });
-  };
+  const {
+    addSelectedClientToBasket,
+    markBasketPackaged,
+    requestCancellation,
+    resolveCancellation,
+  } = useExportCommands({
+    cancelReason,
+    clientDocuments,
+    exportMode,
+    selectedClient,
+    selectedPeriod,
+    setCancelReason,
+    setClientCancellationDocumentId,
+    setData,
+    setExportStatus,
+    setSelectedDocumentId,
+  });
+  const {
+    approveSelectedAndMoveNext,
+    requestStatementAiForSelectedDocument,
+    saveDecision,
+    saveStatementLineDecision,
+  } = useReviewCommands({
+    activeReviewDocuments,
+    correctionDraft,
+    localFallbackAllowed,
+    loginUserId,
+    refreshBackendPilotData: () => refreshBackendPilotData(),
+    selectedDocument,
+    selectedStatementLineNo,
+    session,
+    setData,
+    setDecisionStatus,
+    setSelectedDocumentId,
+    setSelectedStatementLineNo,
+    setStatementAiStatus,
+  });
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
 
   return (
@@ -451,7 +390,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       <header className="private-topbar">
         <div>
           <p className="eyebrow">Fisero</p>
-          <h1>{mode === "client" ? "MÃ¼kellef portalÄ±" : activeNavItem?.label || "MÃ¼ÅŸavir Ã§alÄ±ÅŸma alanÄ±"}</h1>
+          <h1>{mode === "client" ? "Mükellef portalı" : activeNavItem?.label || "Müşavir çalışma alanı"}</h1>
         </div>
         <PortalTopbarStatus
           localFallbackAllowed={localFallbackAllowed}
@@ -462,7 +401,7 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
       </header>
 
       {visibleNavItems.length > 1 ? (
-        <nav className="portal-nav" aria-label="Portal ekranlarÄ±">
+        <nav className="portal-nav" aria-label="Portal ekranları">
           {visibleNavItems.map((item: { mode: PilotMode; label: string; href: string }) => (
             <ModeButton active={mode === item.mode} href={item.href} key={item.mode} label={item.label} />
           ))}

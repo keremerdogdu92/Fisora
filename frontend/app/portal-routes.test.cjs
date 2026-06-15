@@ -110,14 +110,20 @@ test("portal shell delegates session and review helpers to feature modules", () 
   const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
   const lineCount = portalApp.split(/\r?\n/).length;
 
-  assert.equal(existsSync(join(__dirname, "portal-session.ts")), true);
-  assert.equal(existsSync(join(__dirname, "portal-review-actions.ts")), true);
-  assert.equal(existsSync(join(__dirname, "portal-workspace-actions.ts")), true);
-  assert.equal(existsSync(join(__dirname, "portal-client-actions.ts")), true);
-  assert.equal(existsSync(join(__dirname, "portal-document-actions.ts")), true);
-  assert.equal(existsSync(join(__dirname, "portal-export-actions.ts")), true);
+  assert.equal(existsSync(join(__dirname, "features", "session", "index.ts")), true);
+  assert.equal(existsSync(join(__dirname, "features", "review", "index.ts")), true);
+  assert.equal(existsSync(join(__dirname, "features", "clients", "index.ts")), true);
+  assert.equal(existsSync(join(__dirname, "features", "documents", "index.ts")), true);
+  assert.equal(existsSync(join(__dirname, "features", "export", "index.ts")), true);
+  assert.equal(existsSync(join(__dirname, "features", "workspace", "index.ts")), true);
   assert.equal(existsSync(join(__dirname, "portal-formatters.ts")), true);
-  assert.ok(lineCount <= 700, `portal-app.tsx should stay below 700 lines, found ${lineCount}`);
+  assert.match(portalApp, /features\/session/);
+  assert.match(portalApp, /features\/review/);
+  assert.match(portalApp, /features\/clients/);
+  assert.match(portalApp, /features\/documents/);
+  assert.match(portalApp, /features\/export/);
+  assert.match(portalApp, /features\/workspace/);
+  assert.ok(lineCount <= 620, `portal-app.tsx should stay below 620 lines, found ${lineCount}`);
   assert.doesNotMatch(portalApp, /function readStoredSession/);
   assert.doesNotMatch(portalApp, /function persistSession/);
   assert.doesNotMatch(portalApp, /function applyStatementLineDecision/);

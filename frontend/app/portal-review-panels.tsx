@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { labelForIntakeCategory } from "./upload-intake";
 import { agentSourceLabel } from "./portal-normalization";

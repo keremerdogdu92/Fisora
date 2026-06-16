@@ -39,3 +39,23 @@ test("client onboarding labels portal user as the client email login", () => {
 
   assert.match(clientsSource, /Mükellef e-posta \/ giriş kullanıcı adı/);
 });
+
+test("portal visible source does not contain mojibake Turkish copy", () => {
+  const visibleSource = [
+    source("page.tsx"),
+    source("portal-app.tsx"),
+    source("portal-client-view.tsx"),
+    source("portal-clients-view.tsx"),
+    source("portal-data-mappers.ts"),
+    source("portal-formatters.ts"),
+    source("portal-review-actions.ts"),
+    source("portal-settings-view.tsx"),
+    source("portal-session.ts"),
+    source("portal-workspace-actions.ts"),
+    source("portal-workspace-view.tsx"),
+    source("workspace-api.js"),
+  ].join("\n");
+
+  assert.doesNotMatch(visibleSource, /(?:Ã.|Ä.|Å.|�)/);
+  assert.match(visibleSource, /Çalışma alanı boş/);
+});

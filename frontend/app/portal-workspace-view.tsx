@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { NewClientCard } from "./portal-clients-view";
 import { DocumentPreview, JournalPanel } from "./portal-review-panels";
@@ -122,23 +122,23 @@ export function AccountantWorkspace({
   return (
     <section className="accountant-workspace">
       <section className="office-dashboard" aria-label="Ofis durumu">
-        <Metric label="MÃ¼kellef" value={dashboardMetrics.totalClients} />
-        <Metric label="Belge yÃ¼kleyen" value={dashboardMetrics.uploadedClients} />
-        <Metric label="YÃ¼klemeyen" value={dashboardMetrics.notUploadedClients} />
+        <Metric label="Mükellef" value={dashboardMetrics.totalClients} />
+        <Metric label="Belge yükleyen" value={dashboardMetrics.uploadedClients} />
+        <Metric label="Yüklemeyen" value={dashboardMetrics.notUploadedClients} />
         <Metric label="Kontrol" value={dashboardMetrics.pendingReviewDocuments} />
-        <Metric label="Ã‡Ä±ktÄ± hazÄ±r" value={dashboardMetrics.exportReadyDocuments} />
+        <Metric label="Çıktı hazır" value={dashboardMetrics.exportReadyDocuments} />
         <Metric label="Talep" value={dashboardMetrics.openCancellationRequests} />
       </section>
-      <aside className="client-context-rail" aria-label="SeÃ§ili mÃ¼kellef">
+      <aside className="client-context-rail" aria-label="Seçili mükellef">
         <div className="client-emblem">
-          <span>MÃ¼kellef</span>
+          <span>Mükellef</span>
           <strong>{selectedClient?.clientName ?? "-"}</strong>
           <small>{selectedClient?.taxId ?? "-"}</small>
         </div>
         <input
           className="search-input"
           onChange={(event) => onClientSearchChange(event.target.value)}
-          placeholder="MÃ¼kellef ara"
+          placeholder="Mükellef ara"
           value={clientSearch}
         />
         <div className="client-list dashboard-client-list">
@@ -154,12 +154,12 @@ export function AccountantWorkspace({
             >
               <strong>{row.clientName}</strong>
               <span>{row.status}</span>
-              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazÄ±r</em>
+              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazır</em>
             </button>
           ))}
         </div>
         <label className="compact-field">
-          <span>MÃ¼kellef seÃ§</span>
+          <span>Mükellef seç</span>
           <select
             onChange={(event) => setSelectedClientId(event.target.value)}
             value={selectedClient?.clientId ?? ""}
@@ -174,20 +174,20 @@ export function AccountantWorkspace({
         <div className="rail-stats">
           <Info label="Belge" value={String(documents.length)} />
           <Info label="Kontrol" value={String(documents.filter((document) => document.status === "review_required").length)} />
-          <Info label="Ä°ptal" value={String(cancellationRequests.length)} />
+          <Info label="İptal" value={String(cancellationRequests.length)} />
         </div>
         {selectedDocument ? (
           <div className="selected-document-summary">
-            <span>AÃ§Ä±k belge</span>
+            <span>Açık belge</span>
             <strong>{selectedDocument.fileName}</strong>
             <small>{labelForIntakeCategory(selectedDocument.intakeCategory)} / {selectedDocument.provider} / {selectedDocument.amount}</small>
             <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
           </div>
         ) : null}
-        <button className="primary full" onClick={onAddToBasket} type="button">Ã‡Ä±ktÄ± listesine ekle</button>
+        <button className="primary full" onClick={onAddToBasket} type="button">Çıktı listesine ekle</button>
         {selectedRequest ? (
           <div className="request-compact">
-            <span>Ä°ptal/dÃ¼zeltme talebi</span>
+            <span>İptal/düzeltme talebi</span>
             <p>{selectedRequest.reason}</p>
             <div className="inline-actions">
               <button onClick={() => onResolveCancellation(selectedRequest.id, "approved")} type="button">Kabul</button>
@@ -209,35 +209,35 @@ export function AccountantWorkspace({
       <section className="review-focus">
         <div className="workbench-toolbar">
           <div>
-            <span>Belge kontrolÃ¼</span>
-            <strong>{selectedDocument ? `${selectedDocumentPosition}/${navigationDocuments.length} ${selectedDocument.fileName}` : "Ã–nce belge seÃ§in."}</strong>
+            <span>Belge kontrolü</span>
+            <strong>{selectedDocument ? `${selectedDocumentPosition}/${navigationDocuments.length} ${selectedDocument.fileName}` : "Önce belge seçin."}</strong>
           </div>
           <div className="toolbar-controls">
             <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
               <option value="review_required">Kontrol gerekli</option>
-              <option value="export_ready">AktarÄ±ma hazÄ±r</option>
-              <option value="cancel_requested">Ä°ptal talepleri</option>
-              <option value="all">TÃ¼m belgeler</option>
+              <option value="export_ready">Aktarıma hazır</option>
+              <option value="cancel_requested">İptal talepleri</option>
+              <option value="all">Tüm belgeler</option>
             </select>
             <select
-              aria-label="Belge seÃ§"
+              aria-label="Belge seç"
               onChange={(event) => setSelectedDocumentId(event.target.value)}
               value={selectedDocument?.id ?? ""}
             >
-              <option value="">{documents.length ? "Belge seÃ§in" : "Belge yok"}</option>
+              <option value="">{documents.length ? "Belge seçin" : "Belge yok"}</option>
               {documents.map((document) => (
                 <option key={document.id} value={document.id}>
                   {document.fileName}
                 </option>
               ))}
             </select>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Ã–nceki</button>
+            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
             <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[selectedDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
-            <button className="primary" disabled={!selectedDocument} onClick={onApproveAndNext} type="button">Onayla ve geÃ§</button>
+            <button className="primary" disabled={!selectedDocument} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </div>
         </div>
 
-        <div className="document-queue" aria-label="MÃ¼kellef evraklarÄ±">
+        <div className="document-queue" aria-label="Mükellef evrakları">
           {allClientDocuments.map((document) => (
             <button
               className={selectedDocument?.id === document.id ? "document-row active" : "document-row"}
@@ -254,7 +254,7 @@ export function AccountantWorkspace({
 
         {cancellationRequests.length && !selectedRequest ? (
           <div className="request-strip">
-            <span>AÃ§Ä±k talepler</span>
+            <span>Açık talepler</span>
             {cancellationRequests.map((request) => (
               <button key={request.id} onClick={() => setSelectedDocumentId(request.documentId)} type="button">
                 {request.fileName}

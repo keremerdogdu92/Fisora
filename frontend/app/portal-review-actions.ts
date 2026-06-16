@@ -65,8 +65,8 @@ export function applyStatementLineDecision(
     ...document,
     status: allApproved ? "export_ready" : "review_required",
     exportGateReason: allApproved
-      ? "Banka satÄ±rlarÄ± mÃ¼ÅŸavir onayÄ±ndan geÃ§ti; Ã§Ä±ktÄ± listesine alÄ±nabilir."
-      : "Banka satÄ±rlarÄ±nda mÃ¼ÅŸavir kontrolÃ¼ sÃ¼rÃ¼yor.",
+      ? "Banka satırları müşavir onayından geçti; çıktı listesine alınabilir."
+      : "Banka satırlarında müşavir kontrolü sürüyor.",
     deterministicSummary: `${document.deterministicSummary}${document.deterministicSummary ? ", " : ""}statement_line_reviewed:${lineNo}`,
     statementLines,
     statementEntries,

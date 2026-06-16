@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Info } from "./portal-shared";
 import type { LocalSession, PilotReadinessView } from "./portal-types";
@@ -43,25 +43,25 @@ function SessionPanel({
   setLoginUserId: (value: string) => void;
 }) {
   return (
-    <section className="session-panel" aria-label="GiriÅŸ ve Ã§Ä±kÄ±ÅŸ">
+    <section className="session-panel" aria-label="Giriş ve çıkış">
       <div>
-        <span>Ofis eriÅŸimi</span>
+        <span>Ofis erişimi</span>
         <strong>{session ? `${session.userId} / ${roleLabels[session.role]}` : "Oturum yok"}</strong>
         <p>
           {loginStatus ||
             (session?.sessionToken
               ? `Oturum aktif${session.expiresAt ? ` / ${formatDateText(session.expiresAt)}` : ""}.`
               : localFallbackAllowed
-                ? "Lokal geliÅŸtirme iÃ§in ÅŸifresiz ofis oturumu aÃ§Ä±labilir."
-                : "KullanÄ±cÄ± ÅŸifresiyle giriÅŸ zorunlu.")}
+                ? "Lokal geliştirme için şifresiz ofis oturumu açılabilir."
+                : "Kullanıcı şifresiyle giriş zorunlu.")}
         </p>
       </div>
       <div className="session-controls">
-        <input aria-label="KullanÄ±cÄ±" onChange={(event) => setLoginUserId(event.target.value)} value={loginUserId} />
+        <input aria-label="Kullanıcı" onChange={(event) => setLoginUserId(event.target.value)} value={loginUserId} />
         <input
-          aria-label="Åifre"
+          aria-label="Şifre"
           onChange={(event) => setLoginPassword(event.target.value)}
-          placeholder="KullanÄ±cÄ± ÅŸifresi"
+          placeholder="Kullanıcı şifresi"
           type="password"
           value={loginPassword}
         />
@@ -71,11 +71,11 @@ function SessionPanel({
           onChange={(event) => setLoginRole(event.target.value as "client_user" | "accountant")}
           value={lockedRole ?? loginRole}
         >
-          <option value="accountant">MÃ¼ÅŸavir</option>
-          <option value="client_user">MÃ¼kellef</option>
+          <option value="accountant">Müşavir</option>
+          <option value="client_user">Mükellef</option>
         </select>
-        <button onClick={onLogin} type="button">GiriÅŸ</button>
-        <button className="secondary" onClick={onLogout} type="button">Ã‡Ä±kÄ±ÅŸ</button>
+        <button onClick={onLogin} type="button">Giriş</button>
+        <button className="secondary" onClick={onLogout} type="button">Çıkış</button>
       </div>
     </section>
   );
@@ -138,15 +138,15 @@ export function SettingsView({
         setLoginUserId={setLoginUserId}
       />
       <section className="panel settings-grid">
-        <Info label="Veri kaynaÄŸÄ±" value={source} />
-        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Oturum kapalÄ±"} />
-        <Info label="Saha kullanÄ±mÄ±" value={readinessView.statusLabel} />
+        <Info label="Veri kaynağı" value={source} />
+        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Oturum kapalı"} />
+        <Info label="Saha kullanımı" value={readinessView.statusLabel} />
         <Info label="Production" value={readinessView.productionLabel} />
         <Info label="Auth" value={readinessView.authLabel} />
         <Info label="Store" value={readinessView.storeLabel} />
         <Info label="AI" value={readinessView.aiLabel} />
-        <Info label="Ã‡Ä±ktÄ±" value={readinessView.exportLabel} />
-        <Info label="Lokal veri" value={localFallbackAllowed ? "GeliÅŸtirme ortamÄ±" : "KapalÄ±"} />
+        <Info label="Çıktı" value={readinessView.exportLabel} />
+        <Info label="Lokal veri" value={localFallbackAllowed ? "Geliştirme ortamı" : "Kapalı"} />
         <Info label="Mukellef" value={String(dashboardMetrics.totalClients)} />
         <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
       </section>

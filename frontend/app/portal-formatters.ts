@@ -40,20 +40,20 @@ export const statementTypeLabels: Record<string, string> = {
   pos_blocked: "POS bloke",
   tax: "Vergi",
   sgk: "SGK",
-  bank_fee: "Banka masrafÄ±",
+  bank_fee: "Banka masrafı",
   eft: "EFT/Havale",
   credit_card: "Kredi/kart",
   loan: "Kredi",
-  payroll: "MaaÅŸ",
+  payroll: "Maaş",
   transfer: "Transfer",
-  refund: "Ä°ade",
-  reversal: "Ters kayÄ±t",
+  refund: "İade",
+  reversal: "Ters kayıt",
   unknown: "Bilinmeyen",
 };
 
 export function statementDirectionLabel(direction: StatementLineReview["direction"]) {
-  if (direction === "in") return "GiriÅŸ";
-  if (direction === "out") return "Ã‡Ä±kÄ±ÅŸ";
+  if (direction === "in") return "Giriş";
+  if (direction === "out") return "Çıkış";
   return "-";
 }
 
@@ -64,16 +64,16 @@ export function statementReviewStatus(action: string) {
 }
 
 export function statementStatusLabel(status?: string) {
-  if (status === "approved") return "OnaylÄ±";
+  if (status === "approved") return "Onaylı";
   if (status === "rejected") return "Red";
   if (status === "review_required") return "Kontrol";
   return "Bekliyor";
 }
 
 export function reviewActionLabel(action: string) {
-  if (action === "approve") return "OnaylandÄ±";
-  if (action === "approve_with_changes") return "DÃ¼zeltilip onaylandÄ±";
-  if (action === "suggest_for_similar") return "Kural adayÄ± yapÄ±ldÄ±";
-  if (action === "exclude_export") return "Ã‡Ä±ktÄ± dÄ±ÅŸÄ± bÄ±rakÄ±ldÄ±";
+  if (action === "approve") return "Onaylandı";
+  if (action === "approve_with_changes") return "Düzeltilip onaylandı";
+  if (action === "suggest_for_similar") return "Kural adayı yapıldı";
+  if (action === "exclude_export") return "Çıktı dışı bırakıldı";
   return "Kontrolde tutuldu";
 }

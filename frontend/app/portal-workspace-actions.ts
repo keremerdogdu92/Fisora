@@ -33,9 +33,8 @@ export async function refreshBackendPilotData({
       userId: session?.userId || defaultUserId,
     });
     const payload = normalizePilotData(backendPayload as PilotData);
-    if (!payload.clients.length) return false;
     if (shouldCancel()) return true;
-    applyPilotData(payload, payload.generatedFrom || "Calisma alani");
+    applyPilotData(payload, payload.clients.length ? payload.generatedFrom || "Çalışma alanı" : "Çalışma alanı boş");
     return true;
   } catch {
     return false;
@@ -85,7 +84,7 @@ export async function loadInitialPilotData({
   await refreshBackendReadiness({ setReadinessPayload, shouldCancel });
   if (await refreshBackendPilotData({ applyPilotData, defaultUserId, session, shouldCancel })) return;
   if (!allowLocalFallback) {
-    if (!shouldCancel()) applyPilotData(emptyPilotData, "Calisma alanina erisilemedi");
+    if (!shouldCancel()) applyPilotData(emptyPilotData, "Çalışma alanı boş");
     return;
   }
   const paths = ["/local-pilot-data.json", "/local-workspace-data.json", "/local-review-data.json"];
@@ -93,14 +92,14 @@ export async function loadInitialPilotData({
     try {
       const payload = normalizePilotData(await fetchJson(path));
       if (shouldCancel()) return;
-      applyPilotData(payload, "Yerel calisma verisi");
+      applyPilotData(payload, "Yerel çalışma verisi");
       return;
     } catch {
       // Try the next private/local source.
     }
   }
   const fallback = normalizePilotData(fallbackReviewData);
-  if (!shouldCancel()) applyPilotData(fallback, "Yerel calisma verisi");
+  if (!shouldCancel()) applyPilotData(fallback, "Yerel çalışma verisi");
 }
 
 export { buildPilotReadinessView };

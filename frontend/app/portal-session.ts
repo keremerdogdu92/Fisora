@@ -3,8 +3,8 @@ import type { LocalSession } from "./portal-types";
 const SESSION_STORAGE_KEY = "fisora.office.session.v1";
 
 export const roleLabels: Record<LocalSession["role"], string> = {
-  accountant: "MÃ¼ÅŸavir",
-  client_user: "MÃ¼kellef",
+  accountant: "Müşavir",
+  client_user: "Mükellef",
 };
 
 export function readStoredSession(): LocalSession | null {

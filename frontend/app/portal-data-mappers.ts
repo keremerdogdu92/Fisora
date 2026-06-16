@@ -19,7 +19,7 @@ import {
 } from "./portal-normalization";
 
 export const emptyPilotData: PilotData = {
-  generatedFrom: "Ã‡alÄ±ÅŸma alanÄ± yÃ¼kleniyor",
+  generatedFrom: "Çalışma alanı yükleniyor",
   clients: [],
   documents: [],
   cancellationRequests: [],
@@ -28,7 +28,7 @@ export const emptyPilotData: PilotData = {
 
 function normalizeReviewData(raw: ReviewData): PilotData {
   const clientId = safeText(raw.clientId, "ofis-calisma-client");
-  const clientName = safeText(raw.clientName, "Ofis MÃ¼kellefi");
+  const clientName = safeText(raw.clientName, "Ofis Mükellefi");
   const clientUser = raw.portalUsers?.find((user) => user.role === "client_user") ?? raw.portalUsers?.[0];
   const documentsFromRows = (raw.invoiceRows ?? []).map((row, index): PilotDocument => {
     const fileName = safeText(row.documentRef || row.fileName, `ofis-belge-${index + 1}.pdf`);
@@ -44,7 +44,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       uploadedAt: safeText(row.issueDate, "01.04.2026"),
       uploadedBy: safeText(clientUser?.displayName, clientName),
       status,
-      provider: safeText(row.providerHint, "TedarikÃ§i bilinmiyor"),
+      provider: safeText(row.providerHint, "Tedarikçi bilinmiyor"),
       issueDate: safeText(row.issueDate, "-"),
       amount: safeText(row.payableTotal, "-"),
       vatRates: Array.isArray(row.vatRates) ? row.vatRates.map(String) : [],
@@ -54,21 +54,21 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       accountTreatment: safeText(row.businessRelevanceAccountTreatment, "-"),
       requiresAccountantReview: Boolean(row.businessRelevanceRequiresReview),
       previewText: [
-        safeText(row.providerHint, "TedarikÃ§i bilinmiyor"),
+        safeText(row.providerHint, "Tedarikçi bilinmiyor"),
         safeText(row.productLineHint, "Belge kalemi okunuyor"),
         safeText(row.payableTotal, "-"),
       ].join(" / "),
       aiReason:
         safeText(row.aiClassificationReason) ||
         safeText(row.businessRelevanceReason) ||
-        safeText(row.aiClassificationSkippedReason, "Ã–neri gerekÃ§esi yok"),
+        safeText(row.aiClassificationSkippedReason, "Öneri gerekçesi yok"),
       aiProvider: safeText(row.aiClassificationProvider, "-"),
       aiSuggestedAccountCode: safeText(row.aiSuggestedAccountCode, ""),
       aiSuggestedCounterpartyCode: safeText(row.aiSuggestedCounterpartyCode, ""),
       aiRiskFlags: Array.isArray(row.aiRiskFlags) ? row.aiRiskFlags.map(String) : [],
       aiAccountReason: safeText(row.aiAccountReason, ""),
-      deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolÃ¼ gerekli"),
-      exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Ã‡Ä±ktÄ± listesine alÄ±nabilir." : "MÃ¼ÅŸavir kontrolÃ¼ gerekiyor."),
+      deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolü gerekli"),
+      exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Çıktı listesine alınabilir." : "Müşavir kontrolü gerekiyor."),
       selectedExpenseAccount: safeText(row.selectedExpenseAccount, "-"),
       selectedVatAccount: safeText(row.selectedVatAccount, "-"),
       selectedCounterpartyAccount: safeText(row.selectedSupplierAccount || row.counterpartyMatchCode, "-"),
@@ -103,7 +103,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       uploadedAt: safeText(item.uploadedAt, "-"),
       uploadedBy: safeText(item.uploadedBy, safeText(clientUser?.displayName, clientName)),
       status: normalizeStatus(item.status),
-      provider: "Ä°ÅŸleme alÄ±nacak belge",
+      provider: "İşleme alınacak belge",
       issueDate: "-",
       amount: "-",
       vatRates: [],
@@ -112,15 +112,15 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       businessRelation: "-",
       accountTreatment: "-",
       requiresAccountantReview: true,
-      previewText: "Belge yÃ¼klendi, otomatik kuyruÄŸa alÄ±nacak.",
-      aiReason: "HenÃ¼z yorum yok.",
+      previewText: "Belge yüklendi, otomatik kuyruğa alınacak.",
+      aiReason: "Henüz yorum yok.",
       aiProvider: "-",
       aiSuggestedAccountCode: "",
       aiSuggestedCounterpartyCode: "",
       aiRiskFlags: [],
       aiAccountReason: "",
-      deterministicSummary: "Ä°ÅŸleme sonucu hazÄ±rlanÄ±yor.",
-      exportGateReason: "Ä°ÅŸleme tamamlanmadan Ã§Ä±ktÄ±ya eklenemez.",
+      deterministicSummary: "İşleme sonucu hazırlanıyor.",
+      exportGateReason: "İşleme tamamlanmadan çıktıya eklenemez.",
       selectedExpenseAccount: "-",
       selectedVatAccount: "-",
       selectedCounterpartyAccount: "-",
@@ -142,15 +142,15 @@ function normalizeReviewData(raw: ReviewData): PilotData {
 
   const documents = [...documentsFromRows, ...uploadOnlyDocuments];
   return {
-    generatedFrom: safeText(raw.generatedFrom, "Yerel Ã§alÄ±ÅŸma verisi"),
+    generatedFrom: safeText(raw.generatedFrom, "Yerel çalışma verisi"),
     clients: [
       {
         clientId,
         clientName,
         taxId: "ofis-local",
         portalUserId: safeText(clientUser?.userId, "ofis-mukellef-user"),
-        userLabel: safeText(clientUser?.displayName, "MÃ¼kellef kullanÄ±cÄ±sÄ±"),
-        onboardingStatus: "Hesap planÄ± ve mÃ¼kellef kartÄ± Ã§alÄ±ÅŸma alanÄ±nda hazÄ±r",
+        userLabel: safeText(clientUser?.displayName, "Mükellef kullanıcısı"),
+        onboardingStatus: "Hesap planı ve mükellef kartı çalışma alanında hazır",
       },
     ],
     documents,
@@ -161,9 +161,9 @@ function normalizeReviewData(raw: ReviewData): PilotData {
             documentId: documents[1].id,
             clientId,
             fileName: documents[1].fileName,
-            requestedBy: safeText(clientUser?.displayName, "MÃ¼kellef kullanÄ±cÄ±sÄ±"),
+            requestedBy: safeText(clientUser?.displayName, "Mükellef kullanıcısı"),
             requestedAt: "04.06.2026 10:30",
-            reason: "MÃ¼kellef belge iÃ§in iptal veya dÃ¼zeltme kontrolÃ¼ istedi.",
+            reason: "Mükellef belge için iptal veya düzeltme kontrolü istedi.",
             stage: documents[1].status === "export_ready" ? "post_export" : "pre_export",
             status: "open",
           },
@@ -189,7 +189,7 @@ export function normalizePilotData(raw: unknown): PilotData {
   const maybePilot = raw as Partial<PilotData>;
   if (Array.isArray(maybePilot.clients) && Array.isArray(maybePilot.documents)) {
     return {
-      generatedFrom: safeText(maybePilot.generatedFrom, "Yerel Ã§alÄ±ÅŸma verisi"),
+      generatedFrom: safeText(maybePilot.generatedFrom, "Yerel çalışma verisi"),
       clients: (maybePilot.clients as PilotClient[]).map((client) => ({
         ...client,
         portalUserId: safeText(

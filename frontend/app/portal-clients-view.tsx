@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import type { CancellationRequest, DashboardClientRow, NewClientDraft, PilotClient } from "./portal-types";
 
@@ -131,7 +131,7 @@ export function ClientManagementView({
               <span>{request.clientId}</span>
               <strong>{request.fileName}</strong>
               <p>{request.reason}</p>
-              <small>Karar iÃ§in Belge iÅŸleme ekranÄ±nda ilgili belgeyi seÃ§in.</small>
+              <small>Karar için Belge işleme ekranında ilgili belgeyi seçin.</small>
             </div>
           )) : <p className="empty">Acik talep yok.</p>}
         </div>
@@ -160,13 +160,13 @@ export function NewClientCard({
   return (
     <section className="new-client-card">
       <div>
-        <span>Yeni mÃ¼kellef</span>
-        <strong>HÄ±zlÄ± kayÄ±t</strong>
+        <span>Yeni mükellef</span>
+        <strong>Hızlı kayıt</strong>
       </div>
       <input
-        aria-label="MÃ¼kellef adÄ±"
+        aria-label="Mükellef adı"
         onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-        placeholder="MÃ¼kellef adÄ±"
+        placeholder="Mükellef adı"
         value={draft.title}
       />
       <input
@@ -206,17 +206,17 @@ export function NewClientCard({
         </div>
       ) : null}
       <label className="tax-certificate-upload">
-        <span>Vergi levhasÄ±</span>
+        <span>Vergi levhası</span>
         <input
           accept=".pdf,.jpg,.jpeg,.png"
-          aria-label="Vergi levhasÄ±"
+          aria-label="Vergi levhası"
           key={taxCertificateInputKey}
           onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
           type="file"
         />
-        <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seÃ§"}</small>
+        <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
       </label>
-      <button className="primary full" onClick={onCreate} type="button">MÃ¼kellef ekle</button>
+      <button className="primary full" onClick={onCreate} type="button">Mükellef ekle</button>
       {status ? <p className="decision-status">{status}</p> : null}
     </section>
   );

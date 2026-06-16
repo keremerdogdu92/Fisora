@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { buildClientCancellationViewModel } from "./portal-dashboard";
 import { Info, Metric } from "./portal-shared";
@@ -107,16 +107,16 @@ export function ClientPortal({
       <div className="panel upload-panel">
         <div className="panel-heading">
           <div>
-            <h2>MÃ¼kellef portalÄ±</h2>
+            <h2>Mükellef portalı</h2>
             <span>{selectedClient?.clientName ?? "-"}</span>
           </div>
-          <select aria-label="Ay seÃ§imi" onChange={(event) => setSelectedPeriod(event.target.value)} value={selectedPeriod}>
+          <select aria-label="Ay seçimi" onChange={(event) => setSelectedPeriod(event.target.value)} value={selectedPeriod}>
             {periods.map((period) => (
               <option key={period} value={period}>{periodLabel(period)}</option>
             ))}
           </select>
         </div>
-        <div className="intake-tabs" role="tablist" aria-label="Belge yÃ¼kleme tÃ¼rÃ¼">
+        <div className="intake-tabs" role="tablist" aria-label="Belge yükleme türü">
           {INTAKE_TABS.map((tab) => {
             const tabId = tab.id as IntakeCategory;
             const tabCount = documents.filter((document) => document.intakeCategory === tabId).length;
@@ -136,15 +136,15 @@ export function ClientPortal({
           })}
         </div>
         <div className="summary-grid">
-          <Metric label="YÃ¼klenen" value={uploadedCount} />
-          <Metric label="Ä°ÅŸlemde" value={processingCount} />
-          <Metric label="Ä°ÅŸleme alÄ±ndÄ±" value={handledCount} />
-          <Metric label="Ä°ptal talebi" value={cancelCount} />
+          <Metric label="Yüklenen" value={uploadedCount} />
+          <Metric label="İşlemde" value={processingCount} />
+          <Metric label="İşleme alındı" value={handledCount} />
+          <Metric label="İptal talebi" value={cancelCount} />
         </div>
         <label className="upload-dropzone">
           <span>{selectedIntake.label}</span>
-          <strong>Dosya seÃ§</strong>
-          <small>{selectedIntake.documentType === "special_document" ? "MÃ¼ÅŸavir kontrol kuyruÄŸu" : "Otomatik iÅŸleme kuyruÄŸu"}</small>
+          <strong>Dosya seç</strong>
+          <small>{selectedIntake.documentType === "special_document" ? "Müşavir kontrol kuyruğu" : "Otomatik işleme kuyruğu"}</small>
           <input
             multiple
             onChange={(event) => {
@@ -161,12 +161,12 @@ export function ClientPortal({
       <div className="panel">
         <div className="panel-heading">
           <div>
-            <h2>Ay bazlÄ± belge listesi</h2>
-            <span>{selectedPeriod ? periodLabel(selectedPeriod) : "DÃ¶nem seÃ§ilmedi"}</span>
+            <h2>Ay bazlı belge listesi</h2>
+            <span>{selectedPeriod ? periodLabel(selectedPeriod) : "Dönem seçilmedi"}</span>
           </div>
         </div>
         <div className="document-list">
-          {activeDocuments.length ? null : <p className="empty">{selectedIntake.label} iÃ§in bu ay yÃ¼klenen belge yok.</p>}
+          {activeDocuments.length ? null : <p className="empty">{selectedIntake.label} için bu ay yüklenen belge yok.</p>}
           {activeDocuments.map((document) => (
             <div className={selectedDocument?.id === document.id ? "client-document-row active" : "client-document-row"} key={document.id}>
               <button className="document-row-main" onClick={() => onSelectDocument(document)} type="button">
@@ -174,7 +174,7 @@ export function ClientPortal({
                 <span>{labelForIntakeCategory(document.intakeCategory)} / {documentTypeLabels[document.documentType] ?? document.documentType} / {document.uploadedAt}</span>
               </button>
               <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
-              <button onClick={() => onOpenCancellationRequest(document)} type="button">Ä°ptal/DÃ¼zeltme</button>
+              <button onClick={() => onOpenCancellationRequest(document)} type="button">İptal/Düzeltme</button>
             </div>
           ))}
         </div>
@@ -214,9 +214,9 @@ function ClientDocumentDetailPanel({
   if (!selectedDocument) {
     return (
       <section className="panel client-document-detail empty-detail">
-        <h2>Belge Ã¶nizleme</h2>
+        <h2>Belge önizleme</h2>
         <p className="empty">{cancellationView.emptyActionText}</p>
-        <button disabled type="button">Ä°ptal/DÃ¼zeltme talebi</button>
+        <button disabled type="button">İptal/Düzeltme talebi</button>
       </section>
     );
   }
@@ -226,35 +226,35 @@ function ClientDocumentDetailPanel({
     <section className="panel client-document-detail">
       <div className="panel-heading">
         <div>
-          <h2>Belge Ã¶nizleme</h2>
+          <h2>Belge önizleme</h2>
           <span>{selectedDocument.fileName}</span>
         </div>
         <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
       </div>
-      <article className="client-preview-paper" aria-label="SeÃ§ili belge Ã¶nizlemesi">
+      <article className="client-preview-paper" aria-label="Seçili belge önizlemesi">
         <span>{documentPreviewTitle(selectedDocument)}</span>
         <strong>{selectedDocument.fileName}</strong>
         <p>{selectedDocument.previewText}</p>
         <div className="preview-meta-grid">
-          <Info label="DÃ¶nem" value={periodLabel(selectedDocument.period)} />
-          <Info label="Belge tÃ¼rÃ¼" value={labelForIntakeCategory(selectedDocument.intakeCategory)} />
+          <Info label="Dönem" value={periodLabel(selectedDocument.period)} />
+          <Info label="Belge türü" value={labelForIntakeCategory(selectedDocument.intakeCategory)} />
           <Info label="Tutar" value={selectedDocument.amount} />
         </div>
       </article>
       <button className="primary" onClick={() => onOpenCancellationRequest(selectedDocument)} type="button">
-        Ä°ptal/DÃ¼zeltme talebi aÃ§
+        İptal/Düzeltme talebi aç
       </button>
       {requestDocument ? (
         <div className="cancellation-request-panel">
           <div>
-            <span>Talep aÃ§Ä±lacak belge</span>
+            <span>Talep açılacak belge</span>
             <strong>{requestDocument.fileName}</strong>
             <small>{labelForIntakeCategory(requestDocument.intakeCategory)} / {formatStatus(requestDocument.status)}</small>
           </div>
           <textarea
             className="cancel-reason"
             onChange={(event) => onCancelReasonChange(event.target.value)}
-            placeholder="Opsiyonel aÃ§Ä±klama"
+            placeholder="Opsiyonel açıklama"
             rows={3}
             value={cancelReason}
           />
@@ -264,7 +264,7 @@ function ClientDocumentDetailPanel({
             onClick={() => onRequestCancellation(requestDocument)}
             type="button"
           >
-            Talep gÃ¶nder
+            Talep gönder
           </button>
         </div>
       ) : (

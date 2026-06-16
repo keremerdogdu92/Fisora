@@ -224,7 +224,7 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
     title = value_after_label(lines, "title", max_lines=1) or inline_title_value(lines)
     tax_id = first_tax_id(value_after_label(lines, "tax_id", max_lines=1)) or first_tax_id(joined_text)
     tax_office = value_after_label(lines, "tax_office", max_lines=1)
-    activity_value = value_after_label(lines, "activity", max_lines=3) or activity_value_from_nace_line(lines) or inline_activity_value(lines)
+    activity_value = activity_value_from_nace_line(lines) or value_after_label(lines, "activity", max_lines=3) or inline_activity_value(lines)
     nace_code, activity_description = parse_activity(activity_value)
     activity_profile = build_activity_profile(
         activity_description=activity_description,

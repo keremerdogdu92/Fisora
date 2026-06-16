@@ -147,3 +147,13 @@ test("locked portal links ignore stale sessions from the other role", () => {
   assert.deepEqual(normalizeSessionForPortalConfig(accountantSession, accountantConfig), accountantSession);
   assert.deepEqual(normalizeSessionForPortalConfig(clientSession, homeConfig), clientSession);
 });
+
+test("portal shell hydrates stored sessions after the first client render", () => {
+  const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+
+  assert.doesNotMatch(portalApp, /useState<LocalSession \| null>\(\(\) =>/);
+  assert.match(portalApp, /const \[session, setSession\] = useState<LocalSession \| null>\(null\);/);
+  assert.match(portalApp, /const \[sessionHydrated, setSessionHydrated\] = useState\(false\);/);
+  assert.match(portalApp, /useEffect\(\(\) => \{\s*setSession\(normalizeSessionForPortalConfig\(readStoredSession\(\), portalConfig\)\);/);
+  assert.match(portalApp, /if \(!sessionHydrated\) return;/);
+});

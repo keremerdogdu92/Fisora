@@ -93,9 +93,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
   const [clientSearch, setClientSearch] = useState("");
-  const [session, setSession] = useState<LocalSession | null>(() =>
-    normalizeSessionForPortalConfig(readStoredSession(), portalConfig),
-  );
+  const [session, setSession] = useState<LocalSession | null>(null);
+  const [sessionHydrated, setSessionHydrated] = useState(false);
   const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
   const [loginPassword, setLoginPassword] = useState("");
   const [loginRole, setLoginRole] = useState<"client_user" | "accountant">(portalConfig.defaultRole as "client_user" | "accountant");
@@ -143,6 +142,12 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   }
 
   useEffect(() => {
+    setSession(normalizeSessionForPortalConfig(readStoredSession(), portalConfig));
+    setSessionHydrated(true);
+  }, [routeKey]);
+
+  useEffect(() => {
+    if (!sessionHydrated) return;
     let cancelled = false;
     void loadInitialPilotData({
       applyPilotData,
@@ -156,7 +161,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     return () => {
       cancelled = true;
     };
-  }, [routeKey, session?.sessionToken, session?.userId]);
+  }, [routeKey, session?.sessionToken, session?.userId, sessionHydrated]);
 
   useEffect(() => {
     if (readinessQuery.data) {

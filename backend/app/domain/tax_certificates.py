@@ -39,6 +39,7 @@ class TaxCertificateExtraction:
 LABEL_ALIASES = {
     "title": (
         "adisoyadiunvani",
+        "adisoyadi",
         "adsoyadunvan",
         "unvani",
         "mukellefinunvani",
@@ -46,6 +47,8 @@ LABEL_ALIASES = {
     "tax_id": (
         "vergikimliknumarasi",
         "vergikimlikno",
+        "tckimliknumarasi",
+        "tckimlikno",
         "vergino",
         "vkn",
     ),
@@ -56,6 +59,7 @@ LABEL_ALIASES = {
     ),
     "activity": (
         "anafaaliyetkoduveadi",
+        "anafaaliyet",
         "faaliyetkoduveadi",
         "faaliyetkoduadi",
         "faaliyet",
@@ -157,6 +161,13 @@ def inline_activity_value(lines: list[str]) -> str:
     return ""
 
 
+def activity_value_from_nace_line(lines: list[str]) -> str:
+    for line in lines:
+        if re.search(r"\b\d{6}\s*[-:]", line):
+            return normalize_spaces(line)
+    return ""
+
+
 def clean_address(value: str) -> str:
     return normalize_spaces(re.sub(r"\b\d{10,11}\b", " ", value))
 
@@ -213,7 +224,7 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
     title = value_after_label(lines, "title", max_lines=1) or inline_title_value(lines)
     tax_id = first_tax_id(value_after_label(lines, "tax_id", max_lines=1)) or first_tax_id(joined_text)
     tax_office = value_after_label(lines, "tax_office", max_lines=1)
-    activity_value = value_after_label(lines, "activity", max_lines=3) or inline_activity_value(lines)
+    activity_value = value_after_label(lines, "activity", max_lines=3) or activity_value_from_nace_line(lines) or inline_activity_value(lines)
     nace_code, activity_description = parse_activity(activity_value)
     activity_profile = build_activity_profile(
         activity_description=activity_description,

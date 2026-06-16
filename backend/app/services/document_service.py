@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
+import mimetypes
 from pathlib import Path
 from typing import Any
 
@@ -139,4 +140,36 @@ class DocumentService:
             raise HTTPException(status_code=400, detail="client_id is required")
         self.require_client_access(client_id=client_id, user_id=user_id)
         return {"jobs": self.store.list_processing_jobs(client_id=client_id)}
+
+    def original_document_file(self, *, client_id: str, document_ref: str, user_id: str | None) -> dict[str, object]:
+        normalized_client_id = client_id.strip()
+        normalized_ref = document_ref.strip()
+        if not normalized_client_id or not normalized_ref:
+            raise HTTPException(status_code=400, detail="client_id and document_ref are required")
+        self.require_client_access(client_id=normalized_client_id, user_id=user_id)
+        workspace = self.store.get_workspace(normalized_client_id)
+        document = next(
+            (
+                item
+                for item in workspace.get("uploaded_documents", [])
+                if str(item.get("document_ref") or item.get("document_id") or item.get("original_file_name")) == normalized_ref
+            ),
+            None,
+        )
+        if not document:
+            raise HTTPException(status_code=404, detail="document not found")
+        path = Path(str(document.get("storage_path") or ""))
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=404, detail="document file not found")
+        try:
+            path.resolve().relative_to(self.document_storage_path.resolve())
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="document storage path is outside allowed storage") from exc
+        file_name = Path(str(document.get("original_file_name") or path.name)).name
+        media_type = str(document.get("content_type") or "") or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        return {
+            "path": path,
+            "file_name": file_name,
+            "media_type": media_type,
+        }
 

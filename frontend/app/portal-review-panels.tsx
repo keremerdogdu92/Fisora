@@ -1,7 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { labelForIntakeCategory } from "./upload-intake";
-import { agentSourceLabel } from "./portal-normalization";
 import { Info, ReasonCard } from "./portal-shared";
 import type { CorrectionDraft, DraftLine, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
 
@@ -71,7 +71,76 @@ function journalDraftLinesForDocument(document: PilotDocument, selectedStatement
   return document.draftLines;
 }
 
+function resolvePreviewApiBaseUrl() {
+  if (typeof window === "undefined") return "";
+  const configured = process.env.NEXT_PUBLIC_FISORA_API_BASE_URL?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+  return `${window.location.protocol}//${window.location.hostname}:8000`;
+}
+
+function formatDraftStatus(status: string) {
+  const labels: Record<string, string> = {
+    draft_ready: "Fiş taslağı hazır",
+    manual_draft_completed: "Manuel fiş girildi",
+    manual_draft_required: "Manuel fiş gerekli",
+    manual_draft_unbalanced: "Fiş dengesi kontrol edilmeli",
+    processing: "İşleniyor",
+    provider_failed: "AI taslak alınamadı",
+  };
+  return labels[status] ?? (status || "-");
+}
+
+function parseAmount(value: string) {
+  const normalized = String(value || "0").replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function draftTotals(lines: DraftLine[]) {
+  const debit = lines.reduce((total, line) => total + parseAmount(line.debit), 0);
+  const credit = lines.reduce((total, line) => total + parseAmount(line.credit), 0);
+  return { debit, credit, balanced: Math.abs(debit - credit) < 0.005 };
+}
+
+function blankDraftLine(): DraftLine {
+  return { account_code: "", description: "", debit: "0.00", credit: "0.00" };
+}
+
+function isImageMime(value: string) {
+  return String(value || "").toLowerCase().startsWith("image/");
+}
+
 export function DocumentPreview({ document }: { document?: PilotDocument }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  useEffect(() => {
+    if (!document?.originalDocumentRef) {
+      setPreviewUrl("");
+      return;
+    }
+    let active = true;
+    let objectUrl = "";
+    const fetchPreview = async () => {
+      try {
+        const response = await fetch(
+          `${resolvePreviewApiBaseUrl()}/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) throw new Error("preview unavailable");
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (active) setPreviewUrl(objectUrl);
+      } catch {
+        if (active) setPreviewUrl("");
+      }
+    };
+    void fetchPreview();
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [document?.clientId, document?.originalDocumentRef]);
+
   if (!document) {
     return (
       <section className="panel review-panel">
@@ -90,6 +159,13 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
         <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
       </div>
       <div className="document-canvas">
+        {previewUrl ? (
+          isImageMime(document.originalDocumentMimeType) ? (
+            <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
+          ) : (
+            <iframe className="original-document-frame" src={previewUrl} title={`${document.fileName} orijinal belge`} />
+          )
+        ) : (
         <article className="paper-document" aria-label="Belge orijinal görünümü">
           <header className="paper-header">
             <div>
@@ -126,6 +202,7 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
             <strong>{document.id}</strong>
           </footer>
         </article>
+        )}
       </div>
     </section>
   );
@@ -164,28 +241,50 @@ export function JournalPanel({
       </section>
     );
   }
+  const generatedDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
+  const activeDraftLines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines;
+  const totals = draftTotals(activeDraftLines);
+  const needsManualDraft = !generatedDraftLines.length || document.draftStatus === "manual_draft_required";
+
+  function setManualDraftLine(index: number, patch: Partial<DraftLine>) {
+    const lines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : (generatedDraftLines.length ? generatedDraftLines : [blankDraftLine(), blankDraftLine()]);
+    setCorrectionDraft({
+      ...correctionDraft,
+      manualDraftLines: lines.map((line, lineIndex) => (lineIndex === index ? { ...line, ...patch } : line)),
+    });
+  }
+
+  function addManualDraftLine() {
+    setCorrectionDraft({
+      ...correctionDraft,
+      manualDraftLines: [...activeDraftLines, blankDraftLine()],
+    });
+  }
+
+  function removeManualDraftLine(index: number) {
+    setCorrectionDraft({
+      ...correctionDraft,
+      manualDraftLines: activeDraftLines.filter((_, lineIndex) => lineIndex !== index),
+    });
+  }
+
   return (
     <section className={`review-panel journal-panel ${document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "statement-mode" : ""}`}>
       <div className="panel-heading">
         <div>
-          <h2>AI ajan destekli fiş taslağı</h2>
+          <h2>Muhasebe fişi</h2>
           <span>{document.clientName}</span>
         </div>
       </div>
-      <div className="ai-guidance">
-        <ReasonCard label="Öneri gerekçesi" value={document.aiReason} />
-        <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
-        <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
-        <ReasonCard label="Kullanılan sinyaller" value={document.aiAccountReason || "Hesap planı, faaliyet alanı ve önceki karar sinyali bekleniyor."} />
-        <ReasonCard label="Deterministik kontrol" value={document.deterministicSummary} />
-        <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason} />
+      <div className="draft-summary">
+        <Info label="Fiş durumu" value={formatDraftStatus(document.draftStatus)} />
+        <Info label="Borç toplamı" value={totals.debit.toFixed(2)} />
+        <Info label="Alacak toplamı" value={totals.credit.toFixed(2)} />
+        <Info label="Denge" value={activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"} />
       </div>
-      <div className="journal-meta ai-meta">
-        <Info label="Öneri kaynağı" value={agentSourceLabel(document.aiProvider)} />
-        <Info label="Önerilen hesap" value={document.aiSuggestedAccountCode || document.selectedExpenseAccount || "-"} />
-        <Info label="Önerilen cari" value={document.aiSuggestedCounterpartyCode || document.selectedCounterpartyAccount || "-"} />
-        <Info label="Güven düzeyi" value={document.aiRiskFlags.length ? document.aiRiskFlags.join(", ") : "Risk yok"} />
-      </div>
+      <p className="accountant-summary">
+        {document.accountantSummary || (needsManualDraft ? "Fiş taslağı çıkarılamadı; manuel satır girerek belgeyi tamamlayın." : "Fiş taslağı kontrol için hazır.")}
+      </p>
       <LearningRuleCard document={document} />
       <div className="journal-meta">
         <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Banka hesabı" : "Gider hesabı"} value={document.selectedExpenseAccount} />
@@ -204,6 +303,14 @@ export function JournalPanel({
           statementAiStatus={statementAiStatus}
         />
       ) : null}
+      <ManualDraftEditor
+        activeDraftLines={activeDraftLines}
+        generatedDraftLines={generatedDraftLines}
+        needsManualDraft={needsManualDraft}
+        onAddLine={addManualDraftLine}
+        onRemoveLine={removeManualDraftLine}
+        onUpdateLine={setManualDraftLine}
+      />
       <div className="correction-form">
         <label>
           <span>{document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Yeni işlem hesabı" : "Yeni gider hesabı"}</span>
@@ -231,33 +338,20 @@ export function JournalPanel({
           />
         </label>
       </div>
-      <div className="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Hesap</th>
-              <th>Açıklama</th>
-              <th>Borç</th>
-              <th>Alacak</th>
-            </tr>
-          </thead>
-          <tbody>
-            {journalDraftLinesForDocument(document, selectedStatementLineNo).length ? (
-              journalDraftLinesForDocument(document, selectedStatementLineNo).map((line, index) => (
-                <tr key={`${line.account_code}-${index}`}>
-                  <td>{line.account_code}</td>
-                  <td>{line.description}</td>
-                  <td>{line.debit}</td>
-                  <td>{line.credit}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={4}>Fiş taslağı henüz yok.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="accountant-guidance">
+        <details>
+          <summary>Kararı etkileyen açıklamalar</summary>
+          <div className="ai-guidance compact">
+            <ReasonCard label="Öneri gerekçesi" value={document.aiReason || document.accountantSummary || "-"} />
+            <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
+            <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
+            <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
+          </div>
+        </details>
+        <details>
+          <summary>Teknik detay</summary>
+          <pre>{JSON.stringify(document.technicalDetails || {}, null, 2)}</pre>
+        </details>
       </div>
       <div className="decision-actions">
         <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
@@ -267,6 +361,60 @@ export function JournalPanel({
         <button onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
       </div>
       <p className="decision-status">{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</p>
+    </section>
+  );
+}
+
+function ManualDraftEditor({
+  activeDraftLines,
+  generatedDraftLines,
+  needsManualDraft,
+  onAddLine,
+  onRemoveLine,
+  onUpdateLine,
+}: {
+  activeDraftLines: DraftLine[];
+  generatedDraftLines: DraftLine[];
+  needsManualDraft: boolean;
+  onAddLine: () => void;
+  onRemoveLine: (index: number) => void;
+  onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
+}) {
+  if (!needsManualDraft && !activeDraftLines.length) return null;
+  const rows = activeDraftLines.length ? activeDraftLines : [blankDraftLine(), blankDraftLine()];
+  return (
+    <section className="manual-draft-panel">
+      <div className="statement-review-heading">
+        <div>
+          <h3>{generatedDraftLines.length ? "Fiş satırları" : "Manuel fiş satırları"}</h3>
+          <span>{generatedDraftLines.length ? "Taslağı düzeltip onaylayabilirsiniz." : "Taslak oluşmadı; satırları girerek belgeyi tamamlayın."}</span>
+        </div>
+        <button onClick={onAddLine} type="button">Satır ekle</button>
+      </div>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Hesap</th>
+              <th>Açıklama</th>
+              <th>Borç</th>
+              <th>Alacak</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((line, index) => (
+              <tr key={`${line.account_code}-${index}`}>
+                <td><input onChange={(event) => onUpdateLine(index, { account_code: event.target.value })} value={line.account_code} /></td>
+                <td><input onChange={(event) => onUpdateLine(index, { description: event.target.value })} value={line.description} /></td>
+                <td><input inputMode="decimal" onChange={(event) => onUpdateLine(index, { debit: event.target.value })} value={line.debit} /></td>
+                <td><input inputMode="decimal" onChange={(event) => onUpdateLine(index, { credit: event.target.value })} value={line.credit} /></td>
+                <td><button onClick={() => onRemoveLine(index)} type="button">Sil</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

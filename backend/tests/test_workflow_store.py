@@ -343,6 +343,56 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["export_status"], "export_ready")
         self.assertEqual(len(export_build.package.entries), 1)
 
+    def test_json_store_applies_manual_draft_lines_from_review_decision(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="manual-required.pdf",
+                result={
+                    "file_name": "manual-required.pdf",
+                    "simulated_status": "review_required",
+                    "export_status": "review_required",
+                    "review_reason_codes": ["manual_draft_required"],
+                    "risk_flags": ["manual_draft_required"],
+                    "is_balanced": False,
+                    "draft_status": "manual_draft_required",
+                    "draft_lines": [],
+                },
+            )
+
+            store.save_review_decision(
+                client_id="client-1",
+                decision={
+                    "document_ref": "manual-required.pdf",
+                    "action": "approve_with_changes",
+                    "reviewer": "mali-musavir",
+                    "reason": "Fis satirlari elle tamamlandi.",
+                    "draft_lines": [
+                        {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "191.01", "description": "KDV", "debit": "20.00", "credit": "0.00"},
+                        {"account_code": "320.01", "description": "Satici", "debit": "0.00", "credit": "120.00"},
+                    ],
+                },
+                learning_event={
+                    "document_ref": "manual-required.pdf",
+                    "scope": "client_rule",
+                    "action": "approve_with_changes",
+                    "category": "manuel_fis",
+                    "reason": "Fis satirlari elle tamamlandi.",
+                    "automation_candidate": False,
+                },
+            )
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(result["draft_status"], "manual_draft_completed")
+        self.assertEqual(result["draft_lines"][0]["account_code"], "770.01")
+        self.assertEqual(result["total_debit"], "120.00")
+        self.assertEqual(result["total_credit"], "120.00")
+        self.assertTrue(result["is_balanced"])
+        self.assertEqual(result["export_status"], "export_ready")
+
     def test_json_store_exports_statement_entry_after_accountant_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

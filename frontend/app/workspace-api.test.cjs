@@ -31,6 +31,7 @@ const workspaceRecord = {
       client_id: "client-1",
       document_ref: "upload-1",
       original_file_name: "alis-faturasi.pdf",
+      content_type: "application/pdf",
       document_type: "invoice",
       intake_category: "purchase_invoice",
       status: "stored",
@@ -78,6 +79,13 @@ const workspaceRecord = {
         risk_flags: [],
         deterministic_checks: ["balanced_entry"],
         export_gate_reason: "Export hazir.",
+        document_validation_status: "expected_document",
+        draft_status: "draft_ready",
+        accountant_summary: "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir.",
+        technical_details: {
+          parse_notes: [],
+          review_reason_codes: [],
+        },
         draft_lines: [
           { account_code: "120.01", description: "Alici", debit: "120.00", credit: "0.00" },
           { account_code: "600.01", description: "Satis", debit: "0.00", credit: "100.00" },
@@ -151,8 +159,17 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
     officeConsistentDecisionCount: 3,
   });
   assert.equal(data.documents[0].learningRuleSourceSummary, "Bu oneride 3 onceki musavir karari kullanildi.");
+  assert.equal(data.documents[0].originalDocumentRef, "processed-1");
+  assert.equal(data.documents[0].draftStatus, "draft_ready");
+  assert.equal(data.documents[0].accountantSummary, "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir.");
+  assert.deepEqual(data.documents[0].technicalDetails, {
+    parse_notes: [],
+    review_reason_codes: [],
+  });
   assert.equal(data.documents[1].id, "upload-1");
   assert.equal(data.documents[1].status, "queued");
+  assert.equal(data.documents[1].originalDocumentRef, "upload-1");
+  assert.equal(data.documents[1].originalDocumentMimeType, "application/pdf");
   assert.equal(data.documents[1].previewText, "Belge alındı; işleme sonucu hazırlanıyor.");
   assert.deepEqual(data.exportBasket[0], {
     id: "package-1",

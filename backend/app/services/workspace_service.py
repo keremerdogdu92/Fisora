@@ -115,6 +115,21 @@ class WorkspaceService:
         )
         return {**stored, "file_name": original_name}
 
+    def parse_chart_accounts_upload(self, *, original_name: str, file_path: Path) -> dict[str, object]:
+        suffix = Path(original_name).suffix.lower()
+        if suffix not in {".csv", ".xlsx", ".xlsm"}:
+            raise HTTPException(status_code=400, detail=f"Unsupported chart account format: {suffix or 'unknown'}")
+        try:
+            parsed_accounts = self.chart_account_parser(file_path)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        accounts = [asdict(account) for account in parsed_accounts]
+        return {
+            "file_name": original_name,
+            "account_count": len(accounts),
+            "accounts": accounts,
+        }
+
     def store_client_onboarding_package(
         self,
         payload: ClientOnboardingPackagePayload,

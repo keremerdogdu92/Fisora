@@ -10,7 +10,7 @@ import {
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
   storeReviewDecision,
-  uploadDocumentToBackend,
+  uploadDocumentsToBackend,
 } from "./upload-api";
 
 function pageUrl() {
@@ -54,6 +54,8 @@ export async function addLocalUploadsAction({
     uploadedAt: now.toLocaleString("tr-TR"),
     uploadedBy: selectedClient.userLabel,
     status: normalizeStatus(intakeMetadata.status),
+    originalDocumentRef: `local-upload-${now.getTime()}-${index}`,
+    originalDocumentMimeType: file.type || "application/octet-stream",
     provider: intakeMetadata.provider,
     issueDate: "-",
     amount: "-",
@@ -72,6 +74,9 @@ export async function addLocalUploadsAction({
     aiAccountReason: "",
     deterministicSummary: intakeMetadata.deterministicSummary,
     exportGateReason: intakeMetadata.exportGateReason,
+    draftStatus: "processing",
+    accountantSummary: "Belge alÄ±ndÄ±; fiÅŸ taslaÄŸÄ± iÅŸleme kuyruÄŸunda hazÄ±rlanacak.",
+    technicalDetails: {},
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",
@@ -107,21 +112,22 @@ export async function addLocalUploadsAction({
       displayName: uploadDisplayName,
       sessionToken: session?.sessionToken,
     });
-    await Promise.all(
-      selectedFiles.map((file) =>
-        uploadDocumentToBackend({
-          apiBaseUrl,
-          clientId: selectedClient.clientId,
-          userId: uploadUserId,
-          uploadedBy: uploadDisplayName,
-          documentType: intakeMetadata.documentType,
-          intakeCategory: intakeMetadata.intakeCategory,
-          sessionToken: session?.sessionToken,
-          file,
-        }),
-      ),
+    const uploadResults = await uploadDocumentsToBackend({
+      apiBaseUrl,
+      clientId: selectedClient.clientId,
+      userId: uploadUserId,
+      uploadedBy: uploadDisplayName,
+      documentType: intakeMetadata.documentType,
+      intakeCategory: intakeMetadata.intakeCategory,
+      sessionToken: session?.sessionToken,
+      files: selectedFiles,
+    });
+    const failedUploads = uploadResults.filter((result) => !result.ok);
+    setUploadStatus(
+      failedUploads.length
+        ? `${uploadResults.length - failedUploads.length}/${selectedFiles.length} belge yuklendi. Basarisiz: ${failedUploads.map((result) => result.fileName).join(", ")}`
+        : `${selectedFiles.length} belge backend kuyruguna alindi.`,
     );
-    setUploadStatus(`${selectedFiles.length} belge backend kuyruguna alindi.`);
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -280,6 +286,9 @@ export async function saveDecisionAction({
   const correctedAccountCode = correctionDraft.accountCode.trim();
   const correctedCounterpartyCode = correctionDraft.counterpartyCode.trim();
   const reason = correctionDraft.reason.trim();
+  const manualDraftLines = correctionDraft.manualDraftLines.filter(
+    (line) => line.account_code.trim() || line.description.trim() || line.debit.trim() || line.credit.trim(),
+  );
   const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar" ? "export_ready" : "review_required";
   const label = reviewActionLabel(action);
   setData((current) => ({
@@ -291,6 +300,8 @@ export async function saveDecisionAction({
             status: nextStatus,
             selectedExpenseAccount: correctedAccountCode || document.selectedExpenseAccount,
             selectedCounterpartyAccount: correctedCounterpartyCode || document.selectedCounterpartyAccount,
+            draftLines: manualDraftLines.length ? manualDraftLines : document.draftLines,
+            draftStatus: manualDraftLines.length ? "manual_draft_completed" : document.draftStatus,
             exportGateReason:
               nextStatus === "export_ready"
                 ? "Musavir onayi verildi; cikti listesine alinabilir."
@@ -313,6 +324,7 @@ export async function saveDecisionAction({
       correctedCounterpartyCode,
       category: selectedDocument.productCategory,
       reason,
+      draftLines: manualDraftLines,
       sessionToken: session?.sessionToken,
     });
     setDecisionStatus(`${selectedDocument.fileName}: ${label} backend'e kaydedildi.`);

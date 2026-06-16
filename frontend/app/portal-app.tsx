@@ -29,6 +29,7 @@ import {
   createInviteForSelectedClientAction,
   createNewClientAction,
   emptyNewClientDraft,
+  parseNewClientChartAccountsAction,
   selectNewClientTaxCertificateAction,
   setPasswordForSelectedClientAction,
   uploadChartAccountsAction,
@@ -109,6 +110,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [correctionDraft, setCorrectionDraft] = useState<CorrectionDraft>({
     accountCode: "",
     counterpartyCode: "",
+    manualDraftLines: [],
     reason: "",
   });
   const [newClientDraft, setNewClientDraft] = useState<NewClientDraft>(() => emptyNewClientDraft());
@@ -284,12 +286,14 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       loginUserId,
       newClientDraft,
       newClientTaxCertificateFile,
+      portalPassword,
       refreshBackendPilotData: () => refreshBackendPilotData(),
       session,
       setNewClientDraft,
       setNewClientStatus,
       setNewClientTaxCertificateFile,
       setNewClientTaxCertificateInputKey,
+      setPortalPasswordDraft,
       setSelectedClientId,
     });
   };
@@ -313,6 +317,16 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       selectedClient,
       session,
       setChartUploadStatus,
+    });
+  };
+
+  const parseNewClientChartAccounts = (files: FileList | null) => {
+    void parseNewClientChartAccountsAction({
+      files,
+      loginUserId,
+      session,
+      setNewClientDraft,
+      setNewClientStatus,
     });
   };
 
@@ -528,7 +542,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           newClientStatus={newClientStatus}
           newClientTaxCertificateFile={newClientTaxCertificateFile}
           newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
-          onChartFileSelected={uploadChartAccounts}
+          onChartFileSelected={parseNewClientChartAccounts}
           onClientSearchChange={setClientSearch}
           onCreateInvite={createInviteForSelectedClient}
           onCreateNewClient={createNewClient}

@@ -65,6 +65,61 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(len(workspace["processing_jobs"]), 1)
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "fatura.pdf")
 
+    def test_store_document_file_endpoint_returns_original_file_for_authorized_user(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "other-user",
+                    "display_name": "Baska Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-2"],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by_user_id": "mukellef-user",
+                    "content_base64": "ZmF0dXJhLW9yaWppbmFs",
+                },
+            )
+            document_ref = upload.json()["document_ref"]
+
+            authorized = client.get(
+                f"/phase0/store/document-file/client-1/{document_ref}",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+            )
+            denied = client.get(
+                f"/phase0/store/document-file/client-1/{document_ref}",
+                headers={"X-Fisora-User-Id": "other-user"},
+            )
+
+        self.assertEqual(authorized.status_code, 200)
+        self.assertEqual(authorized.content, b"fatura-orijinal")
+        self.assertIn("application/pdf", authorized.headers["content-type"])
+        self.assertEqual(denied.status_code, 403)
+
     def test_store_document_upload_rejects_invalid_base64(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -412,6 +467,32 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(response.json()["account_count"], 2)
         self.assertEqual(workspace["chart_accounts"]["account_count"], 2)
         self.assertEqual(workspace["chart_accounts"]["accounts"][0]["normalized_account_code"], "320.01")
+
+    def test_chart_accounts_parse_endpoint_returns_accounts_without_creating_client(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+
+            response = client.post(
+                "/phase0/chart-accounts/parse",
+                files={
+                    "file": (
+                        "hesap-plani.csv",
+                        b"hesap_kodu,hesap_adi\n320.01,Rexton Medikal\n191.01,Indirilecek KDV\n",
+                        "text/csv",
+                    )
+                },
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            )
+            clients = client.get("/phase0/store/clients")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["account_count"], 2)
+        self.assertEqual(response.json()["accounts"][0]["normalized_account_code"], "320.01")
+        self.assertEqual(clients.json()["clients"], [])
 
     def test_store_document_upload_rejects_unassigned_portal_user(self) -> None:
         if TestClient is None or phase0 is None or app is None:

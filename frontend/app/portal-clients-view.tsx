@@ -80,11 +80,14 @@ export function ClientManagementView({
         </div>
       </section>
       <section className="panel onboarding-panel">
-        <NewClientCard
+        <NewClientStepper
           draft={newClientDraft}
+          onChartFileSelected={onChartFileSelected}
           onCreate={onCreateNewClient}
           onTaxCertificateFileChange={onTaxCertificateFileChange}
+          portalPassword={portalPassword}
           setDraft={setNewClientDraft}
+          setPortalPassword={setPortalPassword}
           status={newClientStatus}
           taxCertificateFile={newClientTaxCertificateFile}
           taxCertificateInputKey={newClientTaxCertificateInputKey}
@@ -217,6 +220,154 @@ export function NewClientCard({
         <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
       </label>
       <button className="primary full" onClick={onCreate} type="button">Mükellef ekle</button>
+      {status ? <p className="decision-status">{status}</p> : null}
+    </section>
+  );
+}
+
+function NewClientStepper({
+  draft,
+  onChartFileSelected,
+  onCreate,
+  onTaxCertificateFileChange,
+  portalPassword,
+  setDraft,
+  setPortalPassword,
+  status,
+  taxCertificateFile,
+  taxCertificateInputKey,
+}: {
+  draft: NewClientDraft;
+  onChartFileSelected: (files: FileList | null) => void | Promise<void>;
+  onCreate: () => void | Promise<void>;
+  onTaxCertificateFileChange: (file: File | null) => void;
+  portalPassword: string;
+  setDraft: (value: NewClientDraft) => void;
+  setPortalPassword: (value: string) => void;
+  status: string;
+  taxCertificateFile: File | null;
+  taxCertificateInputKey: number;
+}) {
+  const identityReady = Boolean(draft.title.trim() && draft.taxId.trim() && draft.activityDescription.trim());
+  const chartReady = draft.chartAccounts.length > 0;
+  const accessReady = Boolean(draft.portalUserId.trim() && portalPassword.trim());
+  const canComplete = identityReady && chartReady && accessReady;
+  const showManualFields = Boolean(taxCertificateFile || draft.title || draft.taxId || draft.activityDescription);
+
+  return (
+    <section className="new-client-card onboarding-stepper">
+      <div className="stepper-heading">
+        <div>
+          <span>Yeni mükellef</span>
+          <strong>İlerlemeli kayıt</strong>
+        </div>
+        <small>{canComplete ? "Tamamlanmaya hazır" : "Vergi levhası, hesap planı ve portal erişimi gerekli"}</small>
+      </div>
+
+      <div className="onboarding-steps" aria-label="Yeni mükellef adımları">
+        <span className={identityReady ? "done" : "active"}>1 Vergi levhası</span>
+        <span className={chartReady ? "done" : identityReady ? "active" : ""}>2 Hesap planı</span>
+        <span className={accessReady ? "done" : chartReady ? "active" : ""}>3 Portal erişimi</span>
+      </div>
+
+      <section className={identityReady ? "onboarding-step done" : "onboarding-step active"}>
+        <div>
+          <span>1. Vergi levhası</span>
+          <strong>Önce belgeyi yükleyin, alanları otomatik dolduralım</strong>
+        </div>
+        <label className="tax-certificate-upload">
+          <span>Vergi levhası</span>
+          <input
+            accept=".pdf,.jpg,.jpeg,.png"
+            aria-label="Vergi levhası"
+            key={taxCertificateInputKey}
+            onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
+            type="file"
+          />
+          <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
+        </label>
+        {showManualFields ? (
+          <div className="onboarding-fields">
+            <input
+              aria-label="Unvan"
+              onChange={(event) => setDraft({ ...draft, title: event.target.value })}
+              placeholder="Unvan"
+              value={draft.title}
+            />
+            <input
+              aria-label="VKN"
+              inputMode="numeric"
+              maxLength={11}
+              onChange={(event) => setDraft({ ...draft, taxId: event.target.value })}
+              pattern="[0-9]*"
+              placeholder="VKN / TCKN"
+              value={draft.taxId}
+            />
+            <input
+              aria-label="Faaliyet"
+              onChange={(event) => setDraft({ ...draft, activityDescription: event.target.value })}
+              placeholder="Faaliyet"
+              value={draft.activityDescription}
+            />
+            <input
+              aria-label="NACE"
+              onChange={(event) => setDraft({ ...draft, naceCode: event.target.value })}
+              placeholder="NACE"
+              value={draft.naceCode}
+            />
+          </div>
+        ) : null}
+        {draft.activityTags.length ? (
+          <div className="activity-tag-strip" aria-label="Faaliyet etiketleri">
+            {draft.activityTags.slice(0, 4).map((tag) => (
+              <span key={tag}>{tag.replace(/_/g, " ")}</span>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className={chartReady ? "onboarding-step done" : identityReady ? "onboarding-step active" : "onboarding-step locked"}>
+        <div>
+          <span>2. Hesap planı</span>
+          <strong>{chartReady ? `${draft.chartAccountFileName} yüklendi` : "Hesap planı zorunlu"}</strong>
+        </div>
+        <label className="tax-certificate-upload">
+          <span>CSV/XLSX hesap planı</span>
+          <input
+            accept=".csv,.xlsx,.xlsm"
+            disabled={!identityReady}
+            onChange={(event) => onChartFileSelected(event.target.files)}
+            type="file"
+          />
+          <small>{chartReady ? `${draft.chartAccounts.length} hesap okundu` : "Hesap planı yüklenmeden devam edilmez"}</small>
+        </label>
+      </section>
+
+      <section className={accessReady ? "onboarding-step done" : chartReady ? "onboarding-step active" : "onboarding-step locked"}>
+        <div>
+          <span>3. Portal erişimi</span>
+          <strong>Mükellef kullanıcı adı ve geçici şifre</strong>
+        </div>
+        <div className="onboarding-fields">
+          <input
+            aria-label="Mükellef e-posta / giriş kullanıcı adı"
+            disabled={!chartReady}
+            onChange={(event) => setDraft({ ...draft, portalUserId: event.target.value })}
+            placeholder="E-posta / kullanıcı adı"
+            value={draft.portalUserId}
+          />
+          <input
+            aria-label="Geçici şifre"
+            disabled={!chartReady}
+            onChange={(event) => setPortalPassword(event.target.value)}
+            placeholder="Geçici şifre"
+            type="password"
+            value={portalPassword}
+          />
+        </div>
+      </section>
+
+      <button className="primary full" disabled={!canComplete} onClick={onCreate} type="button">Mükellefi oluştur</button>
       {status ? <p className="decision-status">{status}</p> : null}
     </section>
   );

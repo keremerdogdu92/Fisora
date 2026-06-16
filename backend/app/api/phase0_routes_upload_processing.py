@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
@@ -93,4 +94,24 @@ def store_processing_jobs(
     return get_document_service().store_processing_jobs(
         client_id=client_id,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+
+
+@router.get("/store/document-file/{client_id}/{document_ref}")
+def store_document_file(
+    client_id: str,
+    document_ref: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> FileResponse:
+    file_info = get_document_service().original_document_file(
+        client_id=client_id,
+        document_ref=document_ref,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+    return FileResponse(
+        file_info["path"],
+        filename=str(file_info["file_name"]),
+        media_type=str(file_info["media_type"]),
     )

@@ -82,6 +82,8 @@ export type PilotDocument = {
   uploadedAt: string;
   uploadedBy: string;
   status: PilotStatus;
+  originalDocumentRef: string;
+  originalDocumentMimeType: string;
   provider: string;
   issueDate: string;
   amount: string;
@@ -100,6 +102,9 @@ export type PilotDocument = {
   aiAccountReason: string;
   deterministicSummary: string;
   exportGateReason: string;
+  draftStatus: string;
+  accountantSummary: string;
+  technicalDetails: Record<string, unknown>;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedCounterpartyAccount: string;
@@ -265,6 +270,7 @@ export type ExportMode = "bulk" | "by_client";
 export type CorrectionDraft = {
   accountCode: string;
   counterpartyCode: string;
+  manualDraftLines: DraftLine[];
   reason: string;
 };
 
@@ -277,6 +283,8 @@ export type NewClientDraft = {
   activityTags: string[];
   activityProfile: Record<string, unknown>;
   workplaceAddresses: string[];
+  chartAccounts: Record<string, unknown>[];
+  chartAccountFileName: string;
   portalUserId: string;
   portalDisplayName: string;
 };

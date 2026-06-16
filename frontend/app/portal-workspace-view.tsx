@@ -1,6 +1,5 @@
 "use client";
 
-import { NewClientCard } from "./portal-clients-view";
 import { DocumentPreview, JournalPanel } from "./portal-review-panels";
 import { Info, Metric } from "./portal-shared";
 import type {
@@ -195,15 +194,6 @@ export function AccountantWorkspace({
             </div>
           </div>
         ) : null}
-        <NewClientCard
-          draft={newClientDraft}
-          onCreate={onCreateNewClient}
-          onTaxCertificateFileChange={onTaxCertificateFileChange}
-          setDraft={setNewClientDraft}
-          status={newClientStatus}
-          taxCertificateFile={newClientTaxCertificateFile}
-          taxCertificateInputKey={newClientTaxCertificateInputKey}
-        />
       </aside>
 
       <section className="review-focus">

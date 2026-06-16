@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
@@ -34,8 +35,23 @@ def apply_review_decision_to_document(
     reviewer = str(decision.get("reviewer") or "").strip()
     reason = str(decision.get("reason") or learning_event.get("reason") or "").strip()
     statement_line_no = _positive_int(decision.get("statement_line_no") or learning_event.get("statement_line_no"))
+    manual_draft_lines = _manual_draft_lines(decision.get("draft_lines"))
 
-    if statement_line_no:
+    if manual_draft_lines:
+        result["draft_lines"] = manual_draft_lines
+        total_debit, total_credit = _draft_totals(manual_draft_lines)
+        is_balanced = total_debit == total_credit and total_debit > Decimal("0")
+        result["total_debit"] = f"{total_debit:.2f}"
+        result["total_credit"] = f"{total_credit:.2f}"
+        result["is_balanced"] = is_balanced
+        result["draft_status"] = "manual_draft_completed" if is_balanced else "manual_draft_unbalanced"
+        result["draft_decision_source"] = "accountant_manual_draft"
+        result["accountant_summary"] = (
+            "Fiş taslağı müşavir tarafından elle tamamlandı."
+            if is_balanced
+            else "Elle girilen fiş satırlarında borç/alacak dengesi kurulmalı."
+        )
+    elif statement_line_no:
         _apply_statement_line_review(
             result,
             line_no=statement_line_no,
@@ -85,10 +101,14 @@ def apply_review_decision_to_document(
 
     if statement_line_no:
         _roll_up_statement_review_status(updated, result)
-    elif action in APPROVED_EXPORT_ACTIONS:
+    elif action in APPROVED_EXPORT_ACTIONS and bool(result.get("is_balanced", False)):
         result["accountant_export_override"] = True
         result["export_status"] = "export_ready"
         updated["export_status"] = "export_ready"
+    elif action in APPROVED_EXPORT_ACTIONS:
+        result["accountant_export_override"] = False
+        result["export_status"] = "review_required"
+        updated["export_status"] = "review_required"
     elif action in REJECTED_EXPORT_ACTIONS:
         result["accountant_export_override"] = False
         result["export_status"] = "rejected"
@@ -109,6 +129,45 @@ def _positive_int(value: object) -> int:
     except (TypeError, ValueError):
         return 0
     return parsed if parsed > 0 else 0
+
+
+def _money(value: object) -> Decimal:
+    try:
+        return Decimal(str(value or "0").replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return Decimal("0")
+
+
+def _manual_draft_lines(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    lines: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        account_code = str(item.get("account_code") or "").strip()
+        if not account_code:
+            continue
+        debit = _money(item.get("debit"))
+        credit = _money(item.get("credit"))
+        lines.append(
+            {
+                "account_code": account_code,
+                "description": str(item.get("description") or "").strip(),
+                "debit": f"{debit:.2f}",
+                "credit": f"{credit:.2f}",
+            }
+        )
+    return lines
+
+
+def _draft_totals(lines: list[dict[str, Any]]) -> tuple[Decimal, Decimal]:
+    total_debit = Decimal("0")
+    total_credit = Decimal("0")
+    for line in lines:
+        total_debit += _money(line.get("debit"))
+        total_credit += _money(line.get("credit"))
+    return total_debit, total_credit
 
 
 def _apply_statement_line_review(

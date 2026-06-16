@@ -199,6 +199,14 @@ class OperationEventPayload(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class JournalLinePayload(BaseModel):
+    account_code: str
+    description: str = ""
+    debit: str = "0.00"
+    credit: str = "0.00"
+    document_ref: str | None = None
+
+
 class ReviewDecisionPayload(BaseModel):
     document_ref: str
     action: ReviewAction
@@ -210,14 +218,7 @@ class ReviewDecisionPayload(BaseModel):
     apply_to_similar: bool = False
     prior_consistent_approval_count: int = 0
     statement_line_no: int = 0
-
-
-class JournalLinePayload(BaseModel):
-    account_code: str
-    description: str = ""
-    debit: str = "0.00"
-    credit: str = "0.00"
-    document_ref: str | None = None
+    draft_lines: list[JournalLinePayload] = Field(default_factory=list)
 
 
 class ExportCandidatePayload(BaseModel):

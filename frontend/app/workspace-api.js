@@ -168,6 +168,7 @@ function backendDocumentsForWorkspace(workspace, client) {
 function processedBackendDocument(document, workspace, client) {
   const result = document?.result || {};
   const documentRef = safeText(document?.document_ref || result.file_name || document?.id);
+  const uploadedDocument = safeList(workspace?.uploaded_documents).find((item) => safeText(item?.document_ref) === documentRef) || {};
   return {
     id: documentRef,
     clientId: client.clientId,
@@ -179,6 +180,8 @@ function processedBackendDocument(document, workspace, client) {
     uploadedAt: safeText(document?.created_at || document?.updated_at),
     uploadedBy: client.userLabel,
     status: statusForBackendDocument(document?.export_status || result.export_status || result.status),
+    originalDocumentRef: safeText(uploadedDocument?.document_ref || documentRef),
+    originalDocumentMimeType: safeText(uploadedDocument?.content_type || result.content_type || mimeTypeForFile(safeText(result.file_name || document?.document_ref))),
     provider: safeText(result.provider_hint, "Çalışma alanı"),
     issueDate: safeText(result.issue_date, "-"),
     amount: safeText(result.payable_total, "0.00"),
@@ -197,6 +200,9 @@ function processedBackendDocument(document, workspace, client) {
     aiAccountReason: safeText(result.counterparty_match_reason || result.learning_rule_reason),
     deterministicSummary: safeList(result.deterministic_checks).join(", "),
     exportGateReason: safeText(result.export_gate_reason),
+    draftStatus: safeText(result.draft_status, safeList(result.draft_lines).length ? "draft_ready" : "manual_draft_required"),
+    accountantSummary: safeText(result.accountant_summary, accountantSummaryForResult(result)),
+    technicalDetails: result.technical_details && typeof result.technical_details === "object" ? result.technical_details : {},
     selectedExpenseAccount: safeText(result.selected_expense_account, "-"),
     selectedVatAccount: safeText(result.selected_vat_account, "-"),
     selectedCounterpartyAccount: safeText(result.selected_supplier_account || result.counterparty_match_code, "-"),
@@ -232,6 +238,8 @@ function pendingBackendDocument(document, workspace, client) {
     uploadedAt: safeText(document?.created_at || document?.updated_at || job.created_at),
     uploadedBy: safeText(document?.uploaded_by, client.userLabel),
     status: statusForBackendJob(job.status || document?.status),
+    originalDocumentRef: documentRef,
+    originalDocumentMimeType: safeText(document?.content_type || mimeTypeForFile(safeText(document?.original_file_name || document?.stored_file_name))),
     provider: "Belge yükleme",
     issueDate: "-",
     amount: "-",
@@ -247,6 +255,9 @@ function pendingBackendDocument(document, workspace, client) {
     aiAccountReason: "",
     deterministicSummary: safeText(job.parser_kind, "queued"),
     exportGateReason: "İşleme ve müşavir kontrolü tamamlanmadan çıktıya alınmaz.",
+    draftStatus: "processing",
+    accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
+    technicalDetails: {},
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",
@@ -265,6 +276,26 @@ function pendingBackendDocument(document, workspace, client) {
     learningRuleSourceSummary: "",
     rulePrompt: normalizeRulePrompt({}),
   };
+}
+
+function mimeTypeForFile(fileName) {
+  const lower = safeText(fileName).toLocaleLowerCase("tr-TR");
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".xml")) return "application/xml";
+  if (lower.endsWith(".csv")) return "text/csv";
+  return "";
+}
+
+function accountantSummaryForResult(result) {
+  if (safeList(result?.draft_lines).length) {
+    return "Fiş taslağı hazır. Müşavir kontrolünden sonra çıktı listesine alınabilir.";
+  }
+  if (safeText(result?.document_validation_status) === "unexpected_document") {
+    return "Bu dosya beklenen fatura/ekstre yapısında görünmüyor. Doğru belge yeniden istenmeli.";
+  }
+  return "Bu belge için otomatik fiş taslağı üretilemedi. Müşavir manuel fiş satırlarını girmeli.";
 }
 
 function backendExportBasketForWorkspace(workspace, client) {

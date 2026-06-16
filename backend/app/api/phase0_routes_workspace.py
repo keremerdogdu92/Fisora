@@ -78,6 +78,19 @@ async def store_chart_accounts_upload(
         )
 
 
+@router.post("/chart-accounts/parse")
+async def parse_chart_accounts_upload(file: UploadFile = File(...)) -> dict[str, object]:
+    original_name = Path(file.filename or "chart_accounts.csv").name
+    content = await file.read()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / original_name
+        temp_path.write_bytes(content)
+        return get_workspace_service().parse_chart_accounts_upload(
+            original_name=original_name,
+            file_path=temp_path,
+        )
+
+
 @router.post("/store/client-onboarding-package")
 def store_client_onboarding_package(
     payload: ClientOnboardingPackagePayload,

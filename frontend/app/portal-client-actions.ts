@@ -3,6 +3,7 @@ import {
   buildClientOnboardingPackagePayload,
   createClientOnboardingPackage,
   createPortalInvite,
+  parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   resolveApiBaseUrl,
   setPortalPassword as setBackendPortalPassword,
@@ -25,6 +26,8 @@ export function emptyNewClientDraft(): NewClientDraft {
     activityTags: [],
     activityProfile: {},
     workplaceAddresses: [],
+    chartAccounts: [],
+    chartAccountFileName: "",
     portalUserId: "",
     portalDisplayName: "",
   };
@@ -34,27 +37,39 @@ export async function createNewClientAction({
   loginUserId,
   newClientDraft,
   newClientTaxCertificateFile,
+  portalPassword,
   refreshBackendPilotData,
   session,
   setNewClientDraft,
   setNewClientStatus,
   setNewClientTaxCertificateFile,
   setNewClientTaxCertificateInputKey,
+  setPortalPasswordDraft,
   setSelectedClientId,
 }: {
   loginUserId: string;
   newClientDraft: NewClientDraft;
   newClientTaxCertificateFile: File | null;
+  portalPassword: string;
   refreshBackendPilotData: () => Promise<boolean>;
   session: LocalSession | null;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
   setNewClientStatus: (status: string) => void;
   setNewClientTaxCertificateFile: (file: File | null) => void;
   setNewClientTaxCertificateInputKey: Dispatch<SetStateAction<number>>;
+  setPortalPasswordDraft: (password: string) => void;
   setSelectedClientId: (clientId: string) => void;
 }) {
   if (!newClientDraft.title.trim()) {
     setNewClientStatus("Mükellef adı gerekli.");
+    return;
+  }
+  if (!newClientDraft.chartAccounts.length) {
+    setNewClientStatus("Devam etmek iÃ§in hesap planÄ± yÃ¼kleyin.");
+    return;
+  }
+  if (!newClientDraft.portalUserId.trim() || !portalPassword.trim()) {
+    setNewClientStatus("Portal kullanÄ±cÄ± adÄ± ve geÃ§ici ÅŸifre gerekli.");
     return;
   }
   const payload = buildClientOnboardingPackagePayload(newClientDraft);
@@ -88,7 +103,15 @@ export async function createNewClientAction({
         certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
       }
     }
+    await setBackendPortalPassword({
+      apiBaseUrl,
+      userId: payload.portal_users[0]?.user_id || newClientDraft.portalUserId,
+      password: portalPassword,
+      sessionToken: session?.sessionToken,
+      userHeader: actingUserId,
+    });
     setNewClientDraft(emptyNewClientDraft());
+    setPortalPasswordDraft("");
     setNewClientTaxCertificateFile(null);
     setNewClientTaxCertificateInputKey((current) => current + 1);
     setNewClientStatus(`${payload.client.title} eklendi.${certificateStatus}`);
@@ -168,6 +191,44 @@ export async function selectNewClientTaxCertificateAction({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
+  }
+}
+
+export async function parseNewClientChartAccountsAction({
+  files,
+  loginUserId,
+  session,
+  setNewClientDraft,
+  setNewClientStatus,
+}: {
+  files: FileList | null;
+  loginUserId: string;
+  session: LocalSession | null;
+  setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
+  setNewClientStatus: (status: string) => void;
+}) {
+  const file = files?.[0];
+  if (!file) return;
+  const apiBaseUrl = resolveApiBaseUrl(pageUrl());
+  const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+  setNewClientStatus(`${file.name} hesap planÄ± okunuyor.`);
+  try {
+    const result = await parseChartAccountsFromBackend({
+      apiBaseUrl,
+      userId: actingUserId,
+      sessionToken: session?.sessionToken,
+      file,
+    });
+    const accounts = Array.isArray(result?.accounts) ? (result.accounts as Record<string, unknown>[]) : [];
+    setNewClientDraft((current) => ({
+      ...current,
+      chartAccounts: accounts,
+      chartAccountFileName: file.name,
+    }));
+    setNewClientStatus(`${file.name}: ${Number(result?.account_count || accounts.length)} hesap okundu.`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setNewClientStatus(`Hesap planÄ± okunamadÄ±. ${message}`);
   }
 }
 

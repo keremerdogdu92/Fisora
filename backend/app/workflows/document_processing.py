@@ -129,7 +129,7 @@ def _serializable_simulation(
         "draft_lines",
     ):
         data[key] = list(data[key])
-    return data
+    return _with_review_summary(data)
 
 
 def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, object]:
@@ -155,7 +155,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         enabled=True,
         static_confidence_threshold=int(source.get("FISORA_AI_STATIC_CONFIDENCE_THRESHOLD", "101")),
         max_input_chars=int(source.get("FISORA_AI_MAX_INPUT_CHARS", "420")),
-        max_provider_calls=int(source.get("FISORA_AI_MAX_PROVIDER_CALLS", "1")),
+        max_provider_calls=int(source.get("FISORA_AI_MAX_PROVIDER_CALLS", "3")),
     )
     statement_policy = StatementAiSuggestionPolicy(
         enabled=True,
@@ -178,10 +178,104 @@ def _stored_path(document: dict[str, Any]) -> Path | None:
     return path if path.exists() and path.is_file() else None
 
 
+def _invoice_has_expected_shape(invoice: ParsedInvoice) -> bool:
+    return bool(invoice.invoice_no or invoice.ettn or invoice.issue_date or invoice.payable_total or invoice.tax_ids)
+
+
+def _draft_status(result: dict[str, Any]) -> str:
+    if result.get("document_validation_status") == "unexpected_document":
+        return "wrong_document_type"
+    if result.get("draft_lines"):
+        return "draft_ready"
+    return "manual_draft_required"
+
+
+def _accountant_summary(result: dict[str, Any]) -> str:
+    if result.get("document_validation_status") == "unexpected_document":
+        return "Bu dosya beklenen fatura/ekstre yapisinda gorunmuyor. Dogru belge yeniden istenmeli."
+    if result.get("draft_lines"):
+        if result.get("is_balanced"):
+            return "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir."
+        return "Fis taslagi var ancak borc/alacak dengesi musavir kontrolu istiyor."
+    if "ai_provider_error" in set(result.get("ai_risk_flags") or []):
+        return "AI onerisi alinamadi; belge manuel fis girisine hazirlandi."
+    return "Bu belge icin otomatik fis taslagi uretilemedi. Musavir manuel fis satirlarini girmeli."
+
+
+def _technical_details(result: dict[str, Any]) -> dict[str, object]:
+    return {
+        "parse_notes": list(result.get("parse_notes") or []),
+        "review_reason_codes": list(result.get("review_reason_codes") or []),
+        "risk_flags": list(result.get("risk_flags") or []),
+        "ai_provider": str(result.get("ai_classification_provider") or ""),
+        "ai_skipped_reason": str(result.get("ai_classification_skipped_reason") or ""),
+        "ai_reason": str(result.get("ai_classification_reason") or ""),
+    }
+
+
+def _with_review_summary(result: dict[str, Any], *, document_validation_status: str = "expected_document") -> dict[str, Any]:
+    updated = dict(result)
+    updated.setdefault("document_validation_status", document_validation_status)
+    updated.setdefault("draft_status", _draft_status(updated))
+    updated.setdefault("accountant_summary", _accountant_summary(updated))
+    updated.setdefault("technical_details", _technical_details(updated))
+    return updated
+
+
 def _parse_invoice_document(path: Path, document_type: str) -> ParsedInvoice:
     if document_type == "einvoice_xml" or path.suffix.lower() == ".xml":
         return parse_xml_invoice(path)
     return parse_pdf_invoice(path)
+
+
+def _unexpected_document_result(document: dict[str, Any], job: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    file_name = str(document.get("original_file_name") or document.get("document_ref") or job.get("document_ref") or "")
+    return _with_review_summary(
+        {
+            "chart_file_name": "workspace-store",
+            "file_name": file_name,
+            "provider_hint": "",
+            "invoice_type": str(document.get("document_type") or job.get("document_type") or "invoice"),
+            "issue_date": "",
+            "payable_total": "0.00",
+            "vat_rates": [],
+            "simulated_status": "review_required",
+            "status": "review_required",
+            "draft_quality": "manual_draft_required",
+            "is_balanced": False,
+            "risk_flags": ["unexpected_document_type"],
+            "parse_notes": [reason],
+            "review_reason_codes": ["unexpected_document_type"],
+            "processing_mode": "controlled_automation",
+            "draft_decision_source": "document_validation",
+            "deterministic_checks": ["expected_document_shape_missing"],
+            "export_gate_reason": "Dosya beklenen belge turunde olmadigi icin ciktiya alinamaz.",
+            "product_line_hint": "",
+            "product_category": "",
+            "product_confidence": 0,
+            "business_relevance_status": "supheli",
+            "business_relevance_confidence": 0,
+            "business_relevance_reason": "Dosya beklenen belge turunde gorunmuyor.",
+            "business_relevance_evidence": [],
+            "ai_classification_used": False,
+            "ai_classification_provider": "",
+            "ai_classification_skipped_reason": "unexpected_document_type",
+            "ai_classification_reason": "",
+            "ai_estimated_input_chars": 0,
+            "learning_rule_applied": False,
+            "learning_rule_scope": "",
+            "learning_rule_reason": "",
+            "export_status": "review_required",
+            "selected_expense_account": "",
+            "selected_vat_account": "",
+            "selected_supplier_account": "",
+            "counterparty_match_code": "",
+            "counterparty_match_confidence": 0,
+            "counterparty_match_reason": "not_found",
+            "draft_lines": [],
+        },
+        document_validation_status="unexpected_document",
+    )
 
 
 def _statement_total(lines: tuple[Any, ...]) -> str:
@@ -232,7 +326,7 @@ def build_statement_processing_result(
     )
     ai_batch_data = statement_ai_batch_payload(ai_batch)
     ai_used = ai_batch.ai_used_count > 0
-    return {
+    return _with_review_summary({
         "chart_file_name": "workspace-store",
         "file_name": str(document.get("original_file_name") or path.name),
         "provider_hint": "Banka/POS ekstresi",
@@ -300,7 +394,7 @@ def build_statement_processing_result(
         "statement_ai_summary": {
             key: value for key, value in ai_batch_data.items() if key != "suggestions"
         },
-    }
+    })
 
 
 def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
@@ -312,7 +406,7 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
         review_code = "statement_parser_required"
     if parser_kind == "manual_review":
         review_code = "manual_review_required"
-    return {
+    return _with_review_summary({
         "chart_file_name": "workspace-store",
         "file_name": file_name,
         "provider_hint": "",
@@ -356,7 +450,7 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
         "counterparty_match_confidence": 0,
         "counterparty_match_reason": "not_found",
         "draft_lines": [],
-    }
+    }, document_validation_status="manual_review" if parser_kind == "manual_review" else "parse_pending")
 
 
 def build_processing_result(
@@ -382,6 +476,12 @@ def build_processing_result(
             statement_ai_policy=statement_ai_policy,
         )
     invoice = _parse_invoice_document(path, document_type)
+    if not _invoice_has_expected_shape(invoice):
+        return _unexpected_document_result(
+            document,
+            job,
+            reason="Fatura numarasi, tarih, tutar veya vergi kimligi okunamadi.",
+        )
     return _serializable_simulation(invoice, workspace, product_classifier=product_classifier)
 
 

@@ -10,6 +10,7 @@ const {
   ensureUploadWorkspace,
   loginWithPassword,
   pickUploadUser,
+  parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   requestStatementAiSuggestions,
   resolveApiBaseUrl,
@@ -17,6 +18,7 @@ const {
   storeReviewDecision,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
+  uploadDocumentsToBackend,
   uploadTaxCertificateToBackend,
 } = require("./upload-api.js");
 
@@ -172,6 +174,56 @@ test("buildClientOnboardingPackagePayload preserves extracted workplace addresse
   assert.deepEqual(payload.client.workplace_addresses, ["Meclis Mah. Ataturk Cad. No: 10"]);
 });
 
+test("buildClientOnboardingPackagePayload includes parsed chart accounts for final onboarding", () => {
+  const payload = buildClientOnboardingPackagePayload({
+    title: "Yeni Isitme Merkezi",
+    chartAccounts: [
+      {
+        raw_account_code: "320.01",
+        normalized_account_code: "320.01",
+        account_name: "Rexton Medikal",
+        is_detail_account: true,
+      },
+    ],
+  });
+
+  assert.equal(payload.client.has_chart_accounts, true);
+  assert.deepEqual(payload.chart_accounts, [
+    {
+      raw_account_code: "320.01",
+      normalized_account_code: "320.01",
+      account_name: "Rexton Medikal",
+      is_detail_account: true,
+    },
+  ]);
+});
+
+test("parseChartAccountsFromBackend posts a chart file without requiring an existing client", async () => {
+  let request;
+  const file = { name: "hesap-plani.csv" };
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ account_count: 1, accounts: [{ normalized_account_code: "320.01" }] }) };
+  };
+
+  const result = await parseChartAccountsFromBackend({
+    apiBaseUrl: "http://localhost:8000",
+    userId: "mali-musavir",
+    file,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+
+  assert.deepEqual(result, { account_count: 1, accounts: [{ normalized_account_code: "320.01" }] });
+  assert.equal(request.url, "http://localhost:8000/phase0/chart-accounts/parse");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, { "X-Fisora-User-Id": "mali-musavir" });
+  assert.deepEqual(
+    request.init.body.fields.map(([key, value]) => [key, value && value.name ? value.name : value]),
+    [["file", "hesap-plani.csv"]],
+  );
+});
+
 test("createClientOnboardingPackage posts to the backend package endpoint", async () => {
   let request;
   const fetchImpl = async (url, init) => {
@@ -303,6 +355,40 @@ test("uploadTaxCertificateToBackend stores the certificate as a special document
       ["retention_policy_days", "365"],
       ["file", "vergi-levhasi.pdf"],
     ],
+  );
+});
+
+test("uploadDocumentsToBackend uploads multiple files sequentially with the same intake metadata", async () => {
+  const requests = [];
+  const files = [{ name: "fatura-1.pdf" }, { name: "fatura-2.pdf" }];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ document_ref: `doc-${requests.length}` }) };
+  };
+
+  const results = await uploadDocumentsToBackend({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "client-user",
+    uploadedBy: "Client User",
+    documentType: "invoice",
+    intakeCategory: "purchase_invoice",
+    files,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+
+  assert.deepEqual(results, [
+    { fileName: "fatura-1.pdf", ok: true, payload: { document_ref: "doc-1" } },
+    { fileName: "fatura-2.pdf", ok: true, payload: { document_ref: "doc-2" } },
+  ]);
+  assert.deepEqual(
+    requests.map((request) => request.init.body.fields.find(([key]) => key === "file")[1].name),
+    ["fatura-1.pdf", "fatura-2.pdf"],
+  );
+  assert.deepEqual(
+    requests.map((request) => request.init.body.fields.find(([key]) => key === "intake_category")[1]),
+    ["purchase_invoice", "purchase_invoice"],
   );
 });
 
@@ -546,6 +632,33 @@ test("storeReviewDecision posts statement line accountant decisions", async () =
     },
   });
   assert.deepEqual(result, { updated_at: "2026-06-06T10:00:00" });
+});
+
+test("storeReviewDecision includes manual journal draft lines when provided", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ updated_at: "2026-06-06T10:00:00" }) };
+  };
+
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "fatura.pdf",
+    action: "approve_with_changes",
+    reviewer: "mali-musavir",
+    draftLines: [
+      { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00" },
+      { account_code: "320.01.001", description: "Cari", debit: "0.00", credit: "100.00" },
+    ],
+    fetchImpl,
+  });
+
+  assert.deepEqual(JSON.parse(request.init.body).decision.draft_lines, [
+    { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00" },
+    { account_code: "320.01.001", description: "Cari", debit: "0.00", credit: "100.00" },
+  ]);
 });
 
 test("storeReviewDecision marks one-click rule requests as apply-to-similar", async () => {

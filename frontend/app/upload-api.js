@@ -71,12 +71,14 @@ function buildClientOnboardingPackagePayload({
   activityTags,
   activityProfile,
   workplaceAddresses,
+  chartAccounts,
   portalUserId = "",
   portalDisplayName = "",
 } = {}) {
   const normalizedTitle = String(title || "").trim();
   const normalizedClientId = String(clientId || slugifyClientId(normalizedTitle) || "yeni-mukellef").trim();
   const normalizedPortalUserId = String(portalUserId || `${normalizedClientId}-user`).trim();
+  const normalizedChartAccounts = Array.isArray(chartAccounts) ? chartAccounts : [];
   return {
     client: {
       client_id: normalizedClientId,
@@ -87,9 +89,9 @@ function buildClientOnboardingPackagePayload({
       activity_tags: Array.isArray(activityTags) ? activityTags.map(String).map((value) => value.trim()).filter(Boolean) : [],
       activity_profile: activityProfile && typeof activityProfile === "object" ? activityProfile : {},
       workplace_addresses: Array.isArray(workplaceAddresses) ? workplaceAddresses.map(String).map((value) => value.trim()).filter(Boolean) : [],
-      has_chart_accounts: false,
+      has_chart_accounts: normalizedChartAccounts.length > 0,
     },
-    chart_accounts: [],
+    chart_accounts: normalizedChartAccounts,
     portal_users: [
       {
         user_id: normalizedPortalUserId,
@@ -194,6 +196,32 @@ async function parseTaxCertificateFromBackend({
   });
   if (!response.ok) {
     throw new Error(await responseErrorMessage(response, `tax certificate parse failed with ${response.status}`));
+  }
+  return response.json();
+}
+
+async function parseChartAccountsFromBackend({
+  apiBaseUrl,
+  userId = "",
+  sessionToken = "",
+  file,
+  fetchImpl = fetch,
+  FormDataCtor = FormData,
+}) {
+  const formData = new FormDataCtor();
+  formData.append("file", file);
+  const headers = sessionToken
+    ? { "X-Fisora-Session": String(sessionToken) }
+    : userId
+      ? { "X-Fisora-User-Id": String(userId) }
+      : {};
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/chart-accounts/parse`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `chart accounts parse failed with ${response.status}`));
   }
   return response.json();
 }
@@ -360,6 +388,44 @@ function uploadTaxCertificateToBackend({
   });
 }
 
+async function uploadDocumentsToBackend({
+  apiBaseUrl,
+  clientId,
+  userId,
+  uploadedBy,
+  documentType,
+  intakeCategory,
+  files,
+  retentionPolicyDays = 90,
+  sessionToken = "",
+  fetchImpl = fetch,
+  FormDataCtor = FormData,
+}) {
+  const uploads = Array.from(files || []);
+  const results = [];
+  for (const file of uploads) {
+    try {
+      const payload = await uploadDocumentToBackend({
+        apiBaseUrl,
+        clientId,
+        userId,
+        uploadedBy,
+        documentType,
+        intakeCategory,
+        file,
+        retentionPolicyDays,
+        sessionToken,
+        fetchImpl,
+        FormDataCtor,
+      });
+      results.push({ fileName: String(file?.name || ""), ok: true, payload });
+    } catch (error) {
+      results.push({ fileName: String(file?.name || ""), ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return results;
+}
+
 function normalizeStatementLinePayload(line) {
   return {
     line_no: Number(line?.line_no || line?.lineNo || 0),
@@ -424,10 +490,21 @@ async function storeReviewDecision({
   applyToSimilar = false,
   priorConsistentApprovalCount = 0,
   statementLineNo = 0,
+  draftLines = /** @type {Array<Record<string, unknown>> | null} */ (null),
   sessionToken = "",
   fetchImpl = fetch,
 }) {
   const normalizedUserId = String(userId || reviewer || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID;
+  const normalizedDraftLines = Array.isArray(draftLines)
+    ? draftLines
+        .map((line) => ({
+          account_code: String(line?.account_code || line?.accountCode || ""),
+          description: String(line?.description || ""),
+          debit: String(line?.debit || "0.00"),
+          credit: String(line?.credit || "0.00"),
+        }))
+        .filter((line) => line.account_code || line.description || line.debit !== "0.00" || line.credit !== "0.00")
+    : [];
   const payload = {
     client_id: String(clientId || ""),
     decision: {
@@ -443,6 +520,9 @@ async function storeReviewDecision({
       statement_line_no: Number(statementLineNo || 0),
     },
   };
+  if (normalizedDraftLines.length) {
+    payload.decision.draft_lines = normalizedDraftLines;
+  }
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/review-decision`, {
     method: "POST",
     headers: {
@@ -466,6 +546,7 @@ module.exports = {
   createPortalInvite,
   ensureUploadWorkspace,
   loginWithPassword,
+  parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   pickUploadUser,
   requestStatementAiSuggestions,
@@ -474,5 +555,6 @@ module.exports = {
   storeReviewDecision,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
+  uploadDocumentsToBackend,
   uploadTaxCertificateToBackend,
 };

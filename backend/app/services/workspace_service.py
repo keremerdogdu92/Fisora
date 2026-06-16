@@ -115,7 +115,14 @@ class WorkspaceService:
         )
         return {**stored, "file_name": original_name}
 
-    def store_client_onboarding_package(self, payload: ClientOnboardingPackagePayload) -> dict[str, object]:
+    def store_client_onboarding_package(
+        self,
+        payload: ClientOnboardingPackagePayload,
+        *,
+        x_fisora_user_id: str | None = None,
+        x_fisora_session: str | None = None,
+        fisora_session: str | None = None,
+    ) -> dict[str, object]:
         if not payload.client.client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required for onboarding package")
         client = self.store.upsert_client(
@@ -139,12 +146,39 @@ class WorkspaceService:
                     allowed_client_ids=user.allowed_client_ids or [payload.client.client_id],
                 )
             )
+        actor_user = self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+        actor_grant = self._grant_actor_access_to_new_client(
+            actor_user_id=actor_user,
+            client_id=payload.client.client_id,
+        )
+        if actor_grant:
+            portal_users.append(actor_grant)
         return {
             "client": client,
             "chart_accounts": chart_accounts,
             "portal_users": portal_users,
             "workspace": self.store.get_workspace(payload.client.client_id),
         }
+
+    def _grant_actor_access_to_new_client(self, *, actor_user_id: str, client_id: str) -> dict[str, object] | None:
+        actor_user_id = actor_user_id.strip()
+        if not actor_user_id:
+            return None
+        access = self.store.verify_portal_access(client_id=client_id, user_id=actor_user_id)
+        if access.get("allowed"):
+            return None
+        if access.get("role") not in {"accountant", "admin"}:
+            return None
+        existing = self.store.get_portal_user(actor_user_id) if hasattr(self.store, "get_portal_user") else None
+        if not existing:
+            return None
+        allowed_client_ids = list(dict.fromkeys([*(existing.get("allowed_client_ids") or []), client_id]))
+        return self.store.upsert_portal_user(
+            user_id=actor_user_id,
+            display_name=str(existing.get("display_name") or actor_user_id),
+            role=str(existing.get("role") or access.get("role") or "accountant"),
+            allowed_client_ids=allowed_client_ids,
+        )
 
     def store_workspace(
         self,

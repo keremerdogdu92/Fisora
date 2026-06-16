@@ -113,6 +113,11 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def get_portal_user(self, user_id: str) -> dict[str, Any] | None:
+        data = self._read()
+        record = data["portal_users"].get(user_id)
+        return deepcopy(record) if record else None
+
     def verify_portal_access(self, *, client_id: str, user_id: str) -> dict[str, Any]:
         data = self._read()
         decision = decide_portal_access(

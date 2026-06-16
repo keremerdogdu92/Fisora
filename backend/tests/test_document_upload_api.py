@@ -316,6 +316,61 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(clients.json()["clients"][0]["client_id"], "client-1")
         self.assertEqual(package.json()["workspace"]["portal_users"][0]["user_id"], "mukellef-user")
 
+    def test_accountant_onboarding_package_grants_upload_access_to_new_client(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": [],
+                },
+            )
+
+            package = client.post(
+                "/phase0/store/client-onboarding-package",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client": {
+                        "client_id": "ibrahim-degerli",
+                        "title": "Ibrahim Degerli",
+                        "tax_id": "38119521000",
+                        "activity_description": "Tibbi ve ortopedik urunlerin perakende ticareti",
+                        "has_chart_accounts": False,
+                    },
+                    "portal_users": [
+                        {
+                            "user_id": "ibrahim-degerli-user",
+                            "display_name": "Ibrahim Degerli",
+                            "role": "client_user",
+                            "allowed_client_ids": ["ibrahim-degerli"],
+                        }
+                    ],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "ibrahim-degerli",
+                    "document_type": "special_document",
+                    "intake_category": "special_document",
+                    "file_name": "vergi-levhasi.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "dmVyZ2ktbGV2aGFzaQ==",
+                    "retention_policy_days": 365,
+                },
+            )
+
+        self.assertEqual(package.status_code, 200)
+        self.assertEqual(upload.status_code, 200)
+
     def test_chart_accounts_multipart_upload_parses_and_replaces_workspace_accounts(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

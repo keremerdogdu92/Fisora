@@ -21,7 +21,13 @@ except ModuleNotFoundError:
     app = None
 
 from app.domain.business_relevance import ActivityProfile
-from app.domain.tax_certificates import TaxCertificateExtraction, parse_tax_certificate_text
+from app.domain.tax_certificates import TaxCertificateExtraction, ocr_image, parse_tax_certificate_text
+
+
+class FakeCompletedProcess:
+    def __init__(self, stdout: str, returncode: int = 0) -> None:
+        self.stdout = stdout
+        self.returncode = returncode
 
 
 class TaxCertificateParserTests(unittest.TestCase):
@@ -57,6 +63,57 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertIn("medical_retail", extraction.activity_tags)
         self.assertEqual(extraction.activity_profile.primary_activity, "hearing_aid_sales_service")
         self.assertFalse(extraction.activity_profile.needs_review)
+
+    def test_ocr_image_prefers_page_segmentation_that_extracts_tax_certificate_fields(self) -> None:
+        bad_rotated_output = "—— I | = I | — I | TT —— I | —— = — I"
+        readable_output = """
+        MÜKELLEFİN VERGİ LEVHASI
+        ADI SOYADI İBRAHİM DEĞERLİ
+        VERGİ KİMLİK NO 38119521000
+        VERGİ DAİRESİ ESENYURT
+        İŞ YERİ ADRESİ BAĞLARÇEŞME MAH. ONDOKUZ MAYIS BLV. MG PLAZA NO: 20/10 ESENYURT/ İSTANBUL
+        İŞE BAŞLAMA TARİHİ 12.06.2024
+        ANA FAALİYET KODU VE ADI 477401-TIBBİ VE ORTOPEDİK ÜRÜNLERİN PERAKENDE TİCARETİ
+        """
+
+        def fake_run(command, **_kwargs):
+            psm = command[command.index("--psm") + 1]
+            return FakeCompletedProcess(readable_output if psm == "1" else bad_rotated_output)
+
+        with patch("app.domain.tax_certificates.shutil.which", return_value="/usr/bin/tesseract"):
+            with patch("app.domain.tax_certificates.subprocess.run", side_effect=fake_run):
+                text, notes = ocr_image(Path("rotated-tax-certificate.png"))
+
+        self.assertIn("İBRAHİM DEĞERLİ", text)
+        self.assertIn("ocr_tesseract_psm_1", notes)
+
+    def test_parse_tax_certificate_text_handles_compact_gib_ocr_layout(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            MÜKELLEFİN VERGİ LEVHASI
+            ADI SOYADI İBRAHİM DEĞERLİ ESENYURT
+            VERGİ DAİRESİ
+            TİCARET ÜNVANI VERGİ KİMLİK
+            NO
+            TC KİMLİK NO 38119521000
+            İŞ YERİ ADRESİ
+            BAĞLARÇEŞME MAH. ONDOKUZ MAYIS BLV. MG PLAZA NO:
+            38119521000
+            20/10 ESENYURT/ İSTANBUL
+            İŞE BAŞLAMA TARİHİ 12.06.2024
+            ANA FAALİYET
+            KODU VE ADI
+            477401-TIBBİ VE ORTOPEDİK ÜRÜNLERİN PERAKENDE TİCARETİ
+            """
+        )
+
+        self.assertIn("İBRAHİM DEĞERLİ", extraction.title)
+        self.assertEqual(extraction.tax_id, "38119521000")
+        self.assertEqual(extraction.nace_code, "477401")
+        self.assertIn("ORTOPEDİK ÜRÜNLERİN PERAKENDE TİCARETİ", extraction.activity_description)
+        self.assertIn("BAĞLARÇEŞME MAH.", extraction.workplace_addresses[0])
+        self.assertEqual(extraction.start_date, "12.06.2024")
+        self.assertGreaterEqual(extraction.confidence, 75)
 
     def test_tax_certificate_parse_endpoint_returns_fields_without_storing_file(self) -> None:
         if TestClient is None or phase0 is None or app is None:

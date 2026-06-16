@@ -124,6 +124,43 @@ def value_after_label(lines: list[str], field: str, *, max_lines: int = 2) -> st
     return ""
 
 
+def inline_title_value(lines: list[str]) -> str:
+    patterns = (
+        r"^\s*ad[ıi]\s+soyad[ıi](?:\s*/\s*[uü]nvan[ıi]|\s+[uü]nvan[ıi])?\s+(.+)$",
+        r"^\s*m[uü]kellefin\s+[uü]nvan[ıi]\s+(.+)$",
+    )
+    for line in lines:
+        normalized = normalize_spaces(line)
+        for pattern in patterns:
+            match = re.match(pattern, normalized, flags=re.IGNORECASE)
+            if match:
+                return normalize_spaces(match.group(1))
+    return ""
+
+
+def inline_activity_value(lines: list[str]) -> str:
+    for index, line in enumerate(lines):
+        key = normalize_key(line)
+        if key in {"anafaaliyet", "faaliyet"}:
+            for next_line in lines[index + 1 : index + 5]:
+                next_key = normalize_key(next_line)
+                if next_key in {"koduveadi", "adi"}:
+                    continue
+                if is_label_line(next_line):
+                    break
+                return normalize_spaces(next_line)
+        if key.startswith("anafaaliyet") or key.startswith("faaliyet"):
+            inline = re.sub(r"^\s*(ana\s+faaliyet|faaliyet)(?:\s+kodu\s+ve\s+ad[ıi])?\s*", "", line, flags=re.IGNORECASE)
+            inline = normalize_spaces(inline)
+            if inline and normalize_key(inline) != key:
+                return inline
+    return ""
+
+
+def clean_address(value: str) -> str:
+    return normalize_spaces(re.sub(r"\b\d{10,11}\b", " ", value))
+
+
 def parse_activity(value: str) -> tuple[str, str]:
     match = re.search(r"\b(\d{2}[.\s]?\d{2}[.\s]?\d{2}|\d{6})\b\s*[-:–]?\s*(.*)", value)
     if not match:
@@ -134,13 +171,21 @@ def parse_activity(value: str) -> tuple[str, str]:
 
 
 def first_tax_id(text: str) -> str:
-    match = re.search(r"\b(\d{10})\b", text)
-    return match.group(1) if match else ""
+    matches = re.findall(r"\b(\d{10,11})\b", text)
+    if not matches:
+        return ""
+    return next((value for value in matches if len(value) == 11), matches[0])
 
 
 def first_date(text: str) -> str:
     match = re.search(r"\b(\d{2}[./-]\d{2}[./-]\d{4})\b", text)
     return match.group(1) if match else ""
+
+
+def ocr_psm_candidates() -> tuple[str, ...]:
+    configured = os.environ.get("FISORA_TAX_CERTIFICATE_OCR_PSM", "")
+    values = tuple(value.strip() for value in configured.split(",") if value.strip())
+    return values or ("6", "1", "12")
 
 
 def score_confidence(*, title: str, tax_id: str, tax_office: str, activity_description: str, nace_code: str, addresses: tuple[str, ...], start_date: str) -> int:
@@ -165,16 +210,16 @@ def score_confidence(*, title: str, tax_id: str, tax_office: str, activity_descr
 def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] = ()) -> TaxCertificateExtraction:
     lines = normalized_lines(text)
     joined_text = "\n".join(lines)
-    title = value_after_label(lines, "title", max_lines=1)
+    title = value_after_label(lines, "title", max_lines=1) or inline_title_value(lines)
     tax_id = first_tax_id(value_after_label(lines, "tax_id", max_lines=1)) or first_tax_id(joined_text)
     tax_office = value_after_label(lines, "tax_office", max_lines=1)
-    activity_value = value_after_label(lines, "activity", max_lines=3)
+    activity_value = value_after_label(lines, "activity", max_lines=3) or inline_activity_value(lines)
     nace_code, activity_description = parse_activity(activity_value)
     activity_profile = build_activity_profile(
         activity_description=activity_description,
         nace_code=nace_code,
     )
-    address = value_after_label(lines, "address", max_lines=4)
+    address = clean_address(value_after_label(lines, "address", max_lines=4))
     start_date = first_date(value_after_label(lines, "start_date", max_lines=1)) or first_date(joined_text)
     addresses = (address,) if address else ()
     confidence = score_confidence(
@@ -207,21 +252,36 @@ def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
     if not tesseract:
         return "", ("ocr_tesseract_missing",)
     language = os.environ.get("FISORA_TAX_CERTIFICATE_OCR_LANG", "tur+eng")
-    try:
-        completed = subprocess.run(
-            [tesseract, str(path), "stdout", "-l", language, "--psm", "6"],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=90,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return "", (f"ocr_error:{type(exc).__name__}",)
-    if completed.returncode != 0:
-        return "", (f"ocr_failed:{completed.returncode}",)
-    return completed.stdout, ("ocr_tesseract",)
+    best_text = ""
+    best_notes: tuple[str, ...] = ("ocr_tesseract",)
+    best_score = -1
+    failures: list[str] = []
+    for psm in ocr_psm_candidates():
+        try:
+            completed = subprocess.run(
+                [tesseract, str(path), "stdout", "-l", language, "--psm", psm],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=90,
+            )
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"ocr_error_psm_{psm}:{type(exc).__name__}")
+            continue
+        if completed.returncode != 0:
+            failures.append(f"ocr_failed_psm_{psm}:{completed.returncode}")
+            continue
+        candidate_text = completed.stdout
+        candidate_score = parse_tax_certificate_text(candidate_text).confidence
+        if candidate_score > best_score:
+            best_text = candidate_text
+            best_score = candidate_score
+            best_notes = ("ocr_tesseract", f"ocr_tesseract_psm_{psm}")
+    if best_score >= 0:
+        return best_text, best_notes
+    return "", tuple(failures or ("ocr_failed",))
 
 
 def ocr_pdf(path: Path) -> tuple[str, tuple[str, ...]]:

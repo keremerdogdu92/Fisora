@@ -115,6 +115,9 @@ class PostgresWorkflowStore:
         record.setdefault("created_at", timestamp)
         return self._upsert_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id, record)
 
+    def get_portal_user(self, user_id: str) -> dict[str, Any] | None:
+        return self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id)
+
     def verify_portal_access(self, *, client_id: str, user_id: str) -> dict[str, Any]:
         decision = decide_portal_access(
             portal_user=self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id),

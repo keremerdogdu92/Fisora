@@ -148,7 +148,7 @@ test("buildClientOnboardingPackagePayload builds a backend onboarding package", 
           needs_review: false,
         },
         workplace_addresses: [],
-        has_chart_accounts: true,
+        has_chart_accounts: false,
       },
       chart_accounts: [],
       portal_users: [

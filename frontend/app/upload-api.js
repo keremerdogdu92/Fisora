@@ -87,7 +87,7 @@ function buildClientOnboardingPackagePayload({
       activity_tags: Array.isArray(activityTags) ? activityTags.map(String).map((value) => value.trim()).filter(Boolean) : [],
       activity_profile: activityProfile && typeof activityProfile === "object" ? activityProfile : {},
       workplace_addresses: Array.isArray(workplaceAddresses) ? workplaceAddresses.map(String).map((value) => value.trim()).filter(Boolean) : [],
-      has_chart_accounts: true,
+      has_chart_accounts: false,
     },
     chart_accounts: [],
     portal_users: [

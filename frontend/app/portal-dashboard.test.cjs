@@ -47,22 +47,22 @@ test("documentIntakeDistribution groups invoices, bank statements, and other doc
   assert.deepEqual(documentIntakeDistribution(documents), [
     { key: "invoices", label: "Faturalar", count: 2 },
     { key: "bank_statements", label: "Banka ekstreleri", count: 1 },
-    { key: "other_documents", label: "Diger belgeler", count: 1 },
+    { key: "other_documents", label: "Diğer belgeler", count: 1 },
   ]);
 });
 
 test("statusFunnel derives operation status buckets", () => {
   assert.deepEqual(statusFunnel(documents), [
-    { key: "uploaded", label: "Yuklendi", count: 2 },
+    { key: "uploaded", label: "Yüklendi", count: 2 },
     { key: "review", label: "Kontrol bekliyor", count: 1 },
-    { key: "export", label: "Cikti hazir", count: 1 },
+    { key: "export", label: "Çıktı hazır", count: 1 },
   ]);
 });
 
 test("clientUploadTracking separates uploaded and missing clients", () => {
   assert.deepEqual(clientUploadTracking({ clients, documents }), [
-    { key: "uploaded", label: "Yukleyen", count: 2 },
-    { key: "missing", label: "Yuklemeyen", count: 1 },
+    { key: "uploaded", label: "Yükleyen", count: 2 },
+    { key: "missing", label: "Yüklemeyen", count: 1 },
   ]);
 });
 

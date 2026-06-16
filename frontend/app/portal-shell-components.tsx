@@ -24,15 +24,15 @@ export function PortalTopbarStatus({
   return (
     <div className="portal-statusbar" aria-label="Portal oturum durumu">
       <div className="topbar-user">
-        <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapali"}</span>
+        <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalı"}</span>
         <strong>{session?.userId || "Oturum yok"}</strong>
       </div>
       <div className="pilot-source compact">
-        <span>Veri kaynagi</span>
+        <span>Veri kaynağı</span>
         <strong>{source}</strong>
       </div>
       <button className="secondary compact-exit" onClick={onExit} type="button">
-        Cikis
+        Çıkış
       </button>
     </div>
   );
@@ -50,13 +50,13 @@ export function SelectedClientStrip({
   const readyCount = documents.filter((document) => document.status === "export_ready" || document.status === "export_added").length;
   const reviewCount = documents.filter((document) => document.status === "review_required").length;
   return (
-    <section className="selected-client-strip" aria-label="Secili mukellef">
-      <Info label="Secili mukellef" value={client?.clientName ?? "-"} />
+    <section className="selected-client-strip" aria-label="Seçili mükellef">
+      <Info label="Seçili mükellef" value={client?.clientName ?? "-"} />
       <Info label="VKN" value={client?.taxId ?? "-"} />
       <Info label="Belge" value={String(documents.length)} />
       <Info label="Kontrol" value={String(reviewCount)} />
-      <Info label="Cikti hazir" value={String(readyCount)} />
-      <Info label="Iptal talebi" value={String(openCancellationCount)} />
+      <Info label="Çıktı hazır" value={String(readyCount)} />
+      <Info label="İptal talebi" value={String(openCancellationCount)} />
     </section>
   );
 }

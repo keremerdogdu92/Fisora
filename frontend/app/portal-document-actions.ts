@@ -145,7 +145,7 @@ export async function requestStatementAiForSelectedDocumentAction({
   setStatementAiStatus: (status: string) => void;
 }) {
   if (!selectedDocument || !selectedDocument.statementLines.length) {
-    setStatementAiStatus("Secili belgede banka satiri yok.");
+    setStatementAiStatus("Seçili belgede banka satırı yok.");
     return;
   }
   setStatementAiStatus("AI ajan onerisi isteniyor.");
@@ -209,7 +209,7 @@ export async function saveStatementLineDecisionAction({
   const lineNo = selectedStatementLineNo || selectedDocument.statementLines[0]?.line_no || 0;
   const selectedLine = selectedDocument.statementLines.find((line) => line.line_no === lineNo);
   if (!lineNo || !selectedLine) {
-    setDecisionStatus("Banka satiri secili degil.");
+    setDecisionStatus("Banka satırı seçili değil.");
     return;
   }
   const correctedAccountCode = correctionDraft.accountCode.trim();

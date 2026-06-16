@@ -147,7 +147,7 @@ export function SettingsView({
         <Info label="AI" value={readinessView.aiLabel} />
         <Info label="Çıktı" value={readinessView.exportLabel} />
         <Info label="Lokal veri" value={localFallbackAllowed ? "Geliştirme ortamı" : "Kapalı"} />
-        <Info label="Mukellef" value={String(dashboardMetrics.totalClients)} />
+        <Info label="Mükellef" value={String(dashboardMetrics.totalClients)} />
         <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
       </section>
     </section>

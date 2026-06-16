@@ -99,16 +99,16 @@ function documentIntakeDistribution(documents = []) {
   return [
     { key: "invoices", label: "Faturalar", count: counts.invoices },
     { key: "bank_statements", label: "Banka ekstreleri", count: counts.bank_statements },
-    { key: "other_documents", label: "Diger belgeler", count: counts.other_documents },
+    { key: "other_documents", label: "Diğer belgeler", count: counts.other_documents },
   ];
 }
 
 function statusFunnel(documents = []) {
   const rows = safeList(documents);
   return [
-    { key: "uploaded", label: "Yuklendi", count: rows.filter((document) => IN_PROGRESS_STATUSES.has(document?.status)).length },
+    { key: "uploaded", label: "Yüklendi", count: rows.filter((document) => IN_PROGRESS_STATUSES.has(document?.status)).length },
     { key: "review", label: "Kontrol bekliyor", count: rows.filter((document) => REVIEW_STATUSES.has(document?.status)).length },
-    { key: "export", label: "Cikti hazir", count: rows.filter((document) => EXPORT_READY_STATUSES.has(document?.status)).length },
+    { key: "export", label: "Çıktı hazır", count: rows.filter((document) => EXPORT_READY_STATUSES.has(document?.status)).length },
   ];
 }
 
@@ -117,8 +117,8 @@ function clientUploadTracking({ clients = [], documents = [] } = {}) {
   const uploadedClientIds = new Set(safeList(documents).map((document) => String(document?.clientId || "")).filter(Boolean));
   const uploadedCount = normalizedClients.filter((client) => uploadedClientIds.has(String(client?.clientId || ""))).length;
   return [
-    { key: "uploaded", label: "Yukleyen", count: uploadedCount },
-    { key: "missing", label: "Yuklemeyen", count: Math.max(normalizedClients.length - uploadedCount, 0) },
+    { key: "uploaded", label: "Yükleyen", count: uploadedCount },
+    { key: "missing", label: "Yüklemeyen", count: Math.max(normalizedClients.length - uploadedCount, 0) },
   ];
 }
 

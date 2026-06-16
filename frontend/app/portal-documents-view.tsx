@@ -13,7 +13,7 @@ export function DocumentProcessingWorkspace({
   const tabs: { id: DocumentSegment; label: string }[] = [
     { id: "invoices", label: "Faturalar" },
     { id: "bank_statements", label: "Banka ekstreleri" },
-    { id: "other_documents", label: "Diger belgeler" },
+    { id: "other_documents", label: "Diğer belgeler" },
   ];
   return (
     <section className="document-processing-page">

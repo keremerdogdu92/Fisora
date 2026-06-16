@@ -23,9 +23,9 @@ export function requestCancellationAction({
     documentId: document.id,
     clientId: document.clientId,
     fileName: document.fileName,
-    requestedBy: selectedClient?.userLabel ?? "Mukellef kullanicisi",
+    requestedBy: selectedClient?.userLabel ?? "Mükellef kullanıcısı",
     requestedAt: new Date().toLocaleString("tr-TR"),
-    reason: cancelReason.trim() || "Mukellef iptal veya duzeltme talebi gonderdi.",
+    reason: cancelReason.trim() || "Mükellef iptal veya düzeltme talebi gönderdi.",
     stage: document.status === "exported" || document.status === "export_added" ? "post_export" : "pre_export",
     status: "open",
   };
@@ -119,5 +119,5 @@ export function markBasketPackagedAction({
       current.exportBasket.some((item) => item.documentIds.includes(document.id)) ? { ...document, status: "exported" } : document,
     ),
   }));
-  setExportStatus(exportMode === "bulk" ? "Secili mukellefler icin toplu paket hazir gorunuyor." : "Mukellef bazli paketler hazir gorunuyor.");
+  setExportStatus(exportMode === "bulk" ? "Seçili mükellefler için toplu paket hazır görünüyor." : "Mükellef bazlı paketler hazır görünüyor.");
 }

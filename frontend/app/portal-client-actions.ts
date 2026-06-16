@@ -54,14 +54,14 @@ export async function createNewClientAction({
   setSelectedClientId: (clientId: string) => void;
 }) {
   if (!newClientDraft.title.trim()) {
-    setNewClientStatus("Mukellef adi gerekli.");
+    setNewClientStatus("Mükellef adı gerekli.");
     return;
   }
   const payload = buildClientOnboardingPackagePayload(newClientDraft);
   const taxCertificateFile = newClientTaxCertificateFile;
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-  setNewClientStatus(taxCertificateFile ? "Mukellef kaydediliyor, vergi levhasi yuklenecek." : "Mukellef kaydediliyor.");
+  setNewClientStatus(taxCertificateFile ? "Mükellef kaydediliyor, vergi levhası yüklenecek." : "Mükellef kaydediliyor.");
   try {
     await createClientOnboardingPackage({
       apiBaseUrl,
@@ -72,7 +72,7 @@ export async function createNewClientAction({
     setSelectedClientId(payload.client.client_id);
     let certificateStatus = "";
     if (taxCertificateFile) {
-      setNewClientStatus("Mukellef kaydedildi. Vergi levhasi yukleniyor.");
+      setNewClientStatus("Mükellef kaydedildi. Vergi levhası yükleniyor.");
       try {
         await uploadTaxCertificateToBackend({
           apiBaseUrl,
@@ -82,10 +82,10 @@ export async function createNewClientAction({
           sessionToken: session?.sessionToken,
           file: taxCertificateFile,
         });
-        certificateStatus = " Vergi levhasi yuklendi.";
+        certificateStatus = " Vergi levhası yüklendi.";
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        certificateStatus = ` Vergi levhasi yuklenemedi: ${message}`;
+        certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
       }
     }
     setNewClientDraft(emptyNewClientDraft());
@@ -95,7 +95,7 @@ export async function createNewClientAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Mukellef kaydedilemedi. ${message}`);
+    setNewClientStatus(`Mükellef kaydedilemedi. ${message}`);
   }
 }
 
@@ -118,7 +118,7 @@ export async function selectNewClientTaxCertificateAction({
   if (!file) return;
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-  setNewClientStatus(`${file.name} vergi levhasi okunuyor.`);
+  setNewClientStatus(`${file.name} vergi levhası okunuyor.`);
   try {
     const extraction = await parseTaxCertificateFromBackend({
       apiBaseUrl,
@@ -162,12 +162,12 @@ export async function selectNewClientTaxCertificateAction({
     const profileConfidence = Number(activityProfile.confidence || 0);
     const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
     const note = filledFields.length
-      ? `Vergi levhasi okundu: ${filledFields.join(", ")}${confidence ? ` / guven ${confidence}` : ""}.`
-      : "Vergi levhasindan alan okunamadi; elle kayit yapabilirsiniz.";
+      ? `Vergi levhası okundu: ${filledFields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
+      : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
     setNewClientStatus(profileSummary ? `${note} ${profileSummary}` : note);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Vergi levhasi okunamadi. Elle devam edebilirsiniz. ${message}`);
+    setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
   }
 }
 
@@ -188,7 +188,7 @@ export async function uploadChartAccountsAction({
 }) {
   const file = files?.[0];
   if (!file || !selectedClient) return;
-  setChartUploadStatus(`${file.name} hesap plani import ediliyor...`);
+  setChartUploadStatus(`${file.name} hesap planı import ediliyor...`);
   try {
     const result = await uploadChartAccountsToBackend({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
@@ -201,7 +201,7 @@ export async function uploadChartAccountsAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setChartUploadStatus(`Hesap plani importu tamamlanamadi. ${message}`);
+    setChartUploadStatus(`Hesap planı importu tamamlanamadı. ${message}`);
   }
 }
 
@@ -220,7 +220,7 @@ export async function createInviteForSelectedClientAction({
 }) {
   if (!selectedClient) return;
   const userId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
-  setInviteStatus(`${userId} icin davet tokeni hazirlaniyor...`);
+  setInviteStatus(`${userId} için davet tokeni hazırlanıyor...`);
   try {
     const result = await createPortalInvite({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
@@ -256,7 +256,7 @@ export async function setPasswordForSelectedClientAction({
 }) {
   if (!selectedClient) return;
   const userId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
-  setPortalPasswordStatus(`${userId} icin sifre kuruluyor...`);
+  setPortalPasswordStatus(`${userId} için şifre kuruluyor...`);
   try {
     const result = await setBackendPortalPassword({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
@@ -265,7 +265,7 @@ export async function setPasswordForSelectedClientAction({
       sessionToken: session?.sessionToken,
       userHeader: session?.userId || loginUserId.trim(),
     });
-    setPortalPasswordStatus(result.has_password ? `${userId} icin sifre hazir.` : `${userId} icin sifre sonucu alindi.`);
+    setPortalPasswordStatus(result.has_password ? `${userId} için şifre hazır.` : `${userId} için şifre sonucu alındı.`);
     setPortalPasswordDraft("");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -46,10 +46,13 @@ test("portal visible source does not contain mojibake Turkish copy", () => {
     source("portal-app.tsx"),
     source("portal-client-view.tsx"),
     source("portal-clients-view.tsx"),
+    source("portal-dashboard.js"),
+    source("portal-dashboard-view.tsx"),
     source("portal-data-mappers.ts"),
     source("portal-formatters.ts"),
     source("portal-review-actions.ts"),
     source("portal-settings-view.tsx"),
+    source("portal-shell-components.tsx"),
     source("portal-session.ts"),
     source("portal-workspace-actions.ts"),
     source("portal-workspace-view.tsx"),
@@ -58,4 +61,8 @@ test("portal visible source does not contain mojibake Turkish copy", () => {
 
   assert.doesNotMatch(visibleSource, /(?:Ã.|Ä.|Å.|�)/);
   assert.match(visibleSource, /Çalışma alanı boş/);
+  assert.match(visibleSource, /Veri kaynağı/);
+  assert.match(visibleSource, /Çıkış/);
+  assert.match(visibleSource, /Mükellef takibi/);
+  assert.match(visibleSource, /Yükleme ve kontrol sırası/);
 });

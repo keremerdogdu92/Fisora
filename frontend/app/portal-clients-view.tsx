@@ -55,13 +55,13 @@ export function ClientManagementView({
     <section className="client-management-page">
       <section className="panel">
         <div className="section-heading">
-          <span>Mukellef listesi</span>
+          <span>Mükellef listesi</span>
           <strong>{clients.length}</strong>
         </div>
         <input
           className="search-input"
           onChange={(event) => onClientSearchChange(event.target.value)}
-          placeholder="Mukellef ara"
+          placeholder="Mükellef ara"
           value={clientSearch}
         />
         <div className="client-list dashboard-client-list">
@@ -90,7 +90,7 @@ export function ClientManagementView({
           taxCertificateInputKey={newClientTaxCertificateInputKey}
         />
         <div className="settings-card">
-          <span>Hesap plani import</span>
+          <span>Hesap planı import</span>
           <strong>{selectedClient?.clientName ?? "-"}</strong>
           <label className="upload-dropzone compact-upload">
             <input
@@ -98,23 +98,23 @@ export function ClientManagementView({
               onChange={(event) => onChartFileSelected(event.target.files)}
               type="file"
             />
-            CSV/XLSX hesap plani sec
+            CSV/XLSX hesap planı seç
           </label>
           {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
         </div>
         <div className="settings-card">
-          <span>Portal erisimi</span>
+          <span>Portal erişimi</span>
           <strong>{selectedClient?.portalUserId ?? "-"}</strong>
           <div className="inline-actions">
-            <button onClick={onCreateInvite} type="button">Davet tokeni olustur</button>
+            <button onClick={onCreateInvite} type="button">Davet tokeni oluştur</button>
             <input
-              aria-label="Portal sifresi"
+              aria-label="Portal şifresi"
               onChange={(event) => setPortalPassword(event.target.value)}
-              placeholder="Gecici sifre"
+              placeholder="Geçici şifre"
               type="password"
               value={portalPassword}
             />
-            <button className="primary" onClick={onSetPassword} type="button">Sifre kur</button>
+            <button className="primary" onClick={onSetPassword} type="button">Şifre kur</button>
           </div>
           {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
           {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
@@ -122,7 +122,7 @@ export function ClientManagementView({
       </section>
       <section className="panel">
         <div className="section-heading">
-          <span>Iptal / duzeltme talepleri</span>
+          <span>İptal / düzeltme talepleri</span>
           <strong>{cancellationRequests.length}</strong>
         </div>
         <div className="request-list">

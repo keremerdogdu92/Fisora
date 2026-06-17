@@ -58,6 +58,16 @@ export type RulePromptView = {
   officeConsistentDecisionCount: number;
 };
 
+export type DocumentPipelineEvent = {
+  eventId: string;
+  step: string;
+  status: string;
+  messageTr: string;
+  debugCode: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+};
+
 export type PilotStatus =
   | "uploaded"
   | "queued"
@@ -105,6 +115,7 @@ export type PilotDocument = {
   draftStatus: string;
   accountantSummary: string;
   technicalDetails: Record<string, unknown>;
+  pipelineEvents: DocumentPipelineEvent[];
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedCounterpartyAccount: string;

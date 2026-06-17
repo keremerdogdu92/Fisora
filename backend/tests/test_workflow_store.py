@@ -12,6 +12,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.persistence.workflow_store import JsonWorkflowStore
+from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.store_factory import build_workflow_store
@@ -31,6 +32,25 @@ class FakeStatementSuggestionProvider:
         return self.response
 
 
+class FakeProductProvider:
+    provider_name = "fake_llm"
+
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.requests: list[object] = []
+
+    def classify_product(self, request: object) -> dict[str, object]:
+        self.requests.append(request)
+        return self.response
+
+
+class RaisingProductProvider:
+    provider_name = "raising_llm"
+
+    def classify_product(self, request: object) -> dict[str, object]:
+        raise RuntimeError("401 Unauthorized")
+
+
 class WorkflowStoreTests(unittest.TestCase):
     def test_ai_runtime_from_env_builds_groq_provider_for_worker(self) -> None:
         runtime = build_ai_runtime_from_env(
@@ -45,6 +65,23 @@ class WorkflowStoreTests(unittest.TestCase):
 
         self.assertEqual(provider.provider_name, "groq")
         self.assertEqual(provider.model, "openai/gpt-oss-20b")
+
+    def test_ai_runtime_from_env_builds_provider_chain_for_fallback(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER_CHAIN": "groq,openai",
+                "GROQ_API_KEY": "gsk-test",
+                "OPENAI_API_KEY": "sk-test",
+                "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                "FISORA_OPENAI_MODEL": "gpt-5.4-mini",
+            }
+        )
+
+        product_provider = runtime["product_classifier"].provider
+        statement_provider = runtime["statement_ai_provider"]
+
+        self.assertEqual(product_provider.provider_name, "groq>openai")
+        self.assertEqual(statement_provider.provider_name, "groq>openai")
 
     def test_json_store_persists_client_documents_reviews_and_export_packages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -282,6 +319,97 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(event["event_type"], "processing_run")
         self.assertEqual(events[0]["metadata"]["completed_count"], 1)
         self.assertEqual(workspace["operation_events"][0]["event_id"], "event-1")
+
+    def test_json_store_tracks_document_pipeline_events_by_document_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            first = store.record_document_pipeline_event(
+                client_id="client-1",
+                document_ref="doc-1",
+                step="uploaded",
+                status="ok",
+                message_tr="Belge yüklendi.",
+                debug_code="uploaded",
+                details={"size_bytes": 6},
+            )
+            store.record_document_pipeline_event(
+                client_id="client-1",
+                document_ref="doc-1",
+                step="file_preview_ready",
+                status="ok",
+                message_tr="Belge önizlenebiliyor.",
+                debug_code="file_preview_ready",
+                details={"media_type": "application/pdf"},
+            )
+            store.record_document_pipeline_event(
+                client_id="client-1",
+                document_ref="other-doc",
+                step="uploaded",
+                status="ok",
+                message_tr="Başka belge yüklendi.",
+                debug_code="uploaded",
+                details={},
+            )
+
+            events = store.list_document_pipeline_events(client_id="client-1", document_ref="doc-1")
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(first["event_type"], "document_pipeline_event")
+        self.assertEqual([event["step"] for event in events], ["uploaded", "file_preview_ready"])
+        self.assertEqual(events[0]["message_tr"], "Belge yüklendi.")
+        self.assertEqual(events[0]["details"]["size_bytes"], 6)
+        self.assertEqual(len(workspace["document_pipeline_events"]), 3)
+
+    def test_json_store_caches_nace_research_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            profile = store.save_nace_research_profile(
+                nace_code="47.74.01",
+                profile={
+                    "activity_title": "Tıbbi ürünlerin perakende ticareti",
+                    "scope_summary": "İşitme cihazı satış faaliyetini kapsar.",
+                    "included_goods_services": ["işitme cihazı", "pil"],
+                    "likely_business_expenses": ["medikal sarf", "kargo"],
+                    "unlikely_or_personal_items": ["kişisel bakım"],
+                    "bank_statement_hints": ["tedarikçi ödemesi"],
+                    "activity_tags": ["hearing_aid", "medical_retail"],
+                    "source_urls": ["https://example.test/nace"],
+                },
+            )
+            cached = store.get_nace_research_profile("477401")
+
+        self.assertEqual(profile["nace_code"], "477401")
+        self.assertEqual(cached["scope_summary"], "İşitme cihazı satış faaliyetini kapsar.")
+        self.assertEqual(cached["activity_tags"], ["hearing_aid", "medical_retail"])
+
+    def test_nace_research_cache_hit_reuses_profile_without_research(self) -> None:
+        from app.domain.nace_research import resolve_nace_research_profile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_nace_research_profile(
+                nace_code="99.99.99",
+                profile={
+                    "activity_title": "Özel pilot faaliyet",
+                    "scope_summary": "Cache edilmiş faaliyet kapsamı.",
+                    "included_goods_services": ["pilot hizmet"],
+                    "likely_business_expenses": ["gider"],
+                    "unlikely_or_personal_items": [],
+                    "bank_statement_hints": [],
+                    "activity_tags": ["food_service"],
+                    "source_urls": ["https://example.test/cached"],
+                },
+            )
+            calls: list[str] = []
+
+            profile = resolve_nace_research_profile(
+                store=store,
+                nace_code="999999",
+                researcher=lambda code: calls.append(code) or {},
+            )
+
+        self.assertEqual(profile["scope_summary"], "Cache edilmiş faaliyet kapsamı.")
+        self.assertEqual(calls, [])
 
     def test_json_store_applies_review_correction_to_stored_document(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -687,6 +815,236 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["selected_supplier_account"], "320.01.015")
         self.assertEqual(result["export_status"], "export_ready")
         self.assertTrue(result["draft_lines"])
+        pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
+        self.assertEqual(
+            pipeline_steps,
+            ["parse_started", "parse_succeeded", "journal_draft_ready", "export_ready"],
+        )
+        self.assertEqual(workspace["document_pipeline_events"][1]["message_tr"], "Belge parse edildi.")
+        self.assertEqual(workspace["document_pipeline_events"][2]["message_tr"], "Belge muhasebe fişi olarak doldu.")
+
+    def test_processing_worker_records_ai_decision_events_and_turkish_explanation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "rexton.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>ABC202600000001</cbc:ID>
+  <cbc:IssueDate>2026-05-03</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Rexton Medikal</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>ZX Sonic Pro 9 receiver</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>1200.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1200.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>
+""",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Isitme Merkezi",
+                    "tax_id": "1111111111",
+                    "activity_description": "isitme cihazi satis ve servis",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "xml-doc",
+                    "document_ref": "xml-doc",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "rexton.xml",
+                    "storage_path": str(xml_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="einvoice_xml",
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+            )
+            classifier = StaticFirstClassifier(
+                provider=FakeProductProvider(
+                    {
+                        "category": "isitme_cihazi",
+                        "confidence": 84,
+                        "reason": "Model işitme cihazı ürün ailesine benziyor.",
+                        "evidence": ["ai:model_family"],
+                        "suggested_account_code": "770.01",
+                        "suggested_counterparty_code": "320.01",
+                        "risk_flags": ["accountant_review_required"],
+                        "account_reason": "Mevcut hesap adayları içinden gider ve cari önerildi.",
+                    }
+                ),
+                policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+            )
+
+            process_queued_documents(store, product_classifier=classifier)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
+
+        self.assertIn("ai_provider_selected", pipeline_steps)
+        self.assertIn("ai_decision_ready", pipeline_steps)
+        self.assertIn("accountant_ai_explanation_ready", pipeline_steps)
+        self.assertIn("AI kararı", result["ai_explanation_tr"])
+        self.assertIn("fake_llm", result["ai_explanation_tr"])
+
+    def test_processing_worker_uses_cached_nace_activity_tags_as_match_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "gida.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>GID202600000001</cbc:ID>
+  <cbc:IssueDate>2026-05-04</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyLegalEntity><cbc:RegistrationName>Hal Tedarik</cbc:RegistrationName></cac:PartyLegalEntity>
+      <cac:PartyTaxScheme><cbc:CompanyID>2222222222</cbc:CompanyID></cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:InvoiceLine><cbc:InvoicedQuantity>10</cbc:InvoicedQuantity><cac:Item><cbc:Name>Domates gida alimi</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>10</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>200.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>220.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>220.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>
+""",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Lokanta",
+                    "tax_id": "1111111111",
+                    "nace_code": "99.99.99",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.save_nace_research_profile(
+                nace_code="999999",
+                profile={
+                    "activity_title": "Yiyecek hizmeti pilot cache",
+                    "scope_summary": "Gida alimlari faaliyet icinde kabul edilir.",
+                    "included_goods_services": ["gida alimi"],
+                    "likely_business_expenses": ["sebze", "ambalaj"],
+                    "unlikely_or_personal_items": [],
+                    "bank_statement_hints": [],
+                    "activity_tags": ["food_service"],
+                    "source_urls": ["https://example.test/nace-food"],
+                },
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Gider", "is_detail_account": True},
+                    {"raw_account_code": "191.01", "normalized_account_code": "191.01", "account_name": "KDV", "is_detail_account": True},
+                    {"raw_account_code": "320.01.020", "normalized_account_code": "320.01.020", "account_name": "Hal Tedarik", "is_detail_account": True, "tax_id": "2222222222"},
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "gida-doc",
+                    "document_ref": "gida-doc",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "gida.xml",
+                    "storage_path": str(xml_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="einvoice_xml",
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+            )
+
+            process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
+
+        self.assertEqual(result["product_category"], "gida_alimi")
+        self.assertEqual(result["business_relevance_relation"], "core_business")
+        self.assertIn("activity_tag:food_service", result["business_relevance_evidence"])
+        self.assertNotIn("weak_match", pipeline_steps)
+
+    def test_processing_worker_records_ai_provider_failure_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "unknown.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>UNK202600000001</cbc:ID>
+  <cbc:IssueDate>2026-05-04</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Bilinmeyen Tedarik</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>ZX Pilot Kalem</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>120.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>120.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>
+""",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Sirket",
+                    "tax_id": "1111111111",
+                    "activity_description": "pilot faaliyet",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "unknown-doc",
+                    "document_ref": "unknown-doc",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "unknown.xml",
+                    "storage_path": str(xml_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="einvoice_xml",
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+            )
+            classifier = StaticFirstClassifier(
+                provider=RaisingProductProvider(),
+                policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+            )
+
+            process_queued_documents(store, product_classifier=classifier)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            failed_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "ai_provider_failed")
+
+        self.assertEqual(failed_event["status"], "error")
+        self.assertEqual(failed_event["details"]["provider"], "raising_llm")
+        self.assertIn("Provider raising_llm hata verdi", result["ai_explanation_tr"])
+        self.assertIn("ai_provider_error", result["ai_explanation_tr"])
 
     def test_processing_worker_parses_bank_statement_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

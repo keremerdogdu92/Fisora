@@ -128,6 +128,34 @@ class GroqAccountingProvider(OpenAiAccountingProvider):
         )
 
 
+class FallbackAccountingProvider:
+    """Try multiple accounting providers before reporting a provider failure."""
+
+    def __init__(self, providers: list[OpenAiAccountingProvider]) -> None:
+        if not providers:
+            raise ValueError("FallbackAccountingProvider requires at least one provider")
+        self.providers = providers
+        self.provider_name = ">".join(provider.provider_name for provider in providers)
+        self.last_provider_name = ""
+
+    def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
+        return self._call("classify_product", request)
+
+    def suggest_statement_line(self, request: StatementAiSuggestionRequest) -> dict[str, Any]:
+        return self._call("suggest_statement_line", request)
+
+    def _call(self, method_name: str, request: AiClassificationRequest | StatementAiSuggestionRequest) -> dict[str, Any]:
+        errors: list[str] = []
+        for provider in self.providers:
+            try:
+                result = getattr(provider, method_name)(request)
+                self.last_provider_name = provider.provider_name
+                return result
+            except Exception as exc:  # noqa: BLE001 - fallback boundary keeps the pipeline alive
+                errors.append(f"{provider.provider_name}: {type(exc).__name__}: {str(exc)[:160]}")
+        raise RuntimeError("; ".join(errors))
+
+
 def _extract_json_response(payload: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(payload.get("output_parsed"), dict):
         return dict(payload["output_parsed"])

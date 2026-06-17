@@ -3,6 +3,7 @@ import { statementStatusLabel, statementReviewStatus, reviewActionLabel } from "
 import { normalizeRulePrompt, normalizeStatementAiSuggestions, normalizeStatus, safeNumber, safeRecord } from "./portal-normalization";
 import { applyStatementLineDecision } from "./portal-review-actions";
 import type { CorrectionDraft, IntakeCategory, LocalSession, PilotClient, PilotData, PilotDocument, PilotStatus } from "./portal-types";
+import { previousCompletedPeriod } from "./portal-periods";
 import { buildUploadIntakeMetadata } from "./upload-intake";
 import {
   ensureUploadWorkspace,
@@ -41,7 +42,8 @@ export async function addLocalUploadsAction({
   const selectedFiles = Array.from(files ?? []);
   if (!selectedFiles.length || !selectedClient) return;
   const now = new Date();
-  const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  // TODO: Bulunulan ay yüklemelerini açma.
+  const period = previousCompletedPeriod(now);
   const intakeMetadata = buildUploadIntakeMetadata(selectedIntakeCategory);
   const nextDocuments = selectedFiles.map((file, index): PilotDocument => ({
     id: `local-upload-${now.getTime()}-${index}`,
@@ -77,6 +79,7 @@ export async function addLocalUploadsAction({
     draftStatus: "processing",
     accountantSummary: "Belge alÄ±ndÄ±; fiÅŸ taslaÄŸÄ± iÅŸleme kuyruÄŸunda hazÄ±rlanacak.",
     technicalDetails: {},
+    pipelineEvents: [],
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",

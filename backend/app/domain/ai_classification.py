@@ -264,6 +264,7 @@ class StaticFirstClassifier:
                 risk_flags=("ai_provider_error",),
             )
         provider_result = _validate_provider_payload(provider_payload, request)
+        provider_name = str(getattr(self.provider, "last_provider_name", "") or self.provider.provider_name)
         if provider_result is None:
             return AiClassificationResult(
                 classification=ProductClassification(
@@ -273,7 +274,7 @@ class StaticFirstClassifier:
                     evidence=(*static.evidence, "ai_invalid_schema"),
                 ),
                 ai_used=True,
-                provider=self.provider.provider_name,
+                provider=provider_name,
                 skipped_reason="",
                 provider_reason="AI response schema validation failed.",
                 estimated_input_chars=estimated_chars,
@@ -287,7 +288,7 @@ class StaticFirstClassifier:
                 evidence=(*provider_result.evidence, "ai_schema_validated"),
             ),
             ai_used=True,
-            provider=self.provider.provider_name,
+            provider=provider_name,
             provider_reason=provider_result.reason,
             estimated_input_chars=estimated_chars,
             suggested_account_code=provider_result.suggested_account_code,

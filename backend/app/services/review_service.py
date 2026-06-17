@@ -77,6 +77,52 @@ class ReviewService:
             decision=payload.decision.model_dump(),
             learning_event=event,
         )
+        document_ref = payload.decision.document_ref
+        if (
+            payload.decision.corrected_account_code.strip()
+            or payload.decision.corrected_counterparty_code.strip()
+            or payload.decision.draft_lines
+            or payload.decision.statement_line_no
+        ):
+            self.store.record_document_pipeline_event(
+                client_id=payload.client_id,
+                document_ref=document_ref,
+                step="journal_edited",
+                status="ok",
+                message_tr="Müşavir muhasebe fişine müdahale etti.",
+                debug_code="journal_edited",
+                details={
+                    "action": payload.decision.action,
+                    "corrected_account_code": payload.decision.corrected_account_code,
+                    "corrected_counterparty_code": payload.decision.corrected_counterparty_code,
+                    "statement_line_no": payload.decision.statement_line_no,
+                    "draft_line_count": len(payload.decision.draft_lines),
+                },
+            )
+        corrected_document = saved.get("corrected_document") if isinstance(saved, dict) else None
+        corrected_result = corrected_document.get("result") if isinstance(corrected_document, dict) else {}
+        self.store.record_document_pipeline_event(
+            client_id=payload.client_id,
+            document_ref=document_ref,
+            step="journal_saved",
+            status="ok",
+            message_tr="Muhasebe fişi kaydedildi.",
+            debug_code="journal_saved",
+            details={
+                "action": payload.decision.action,
+                "export_status": str(corrected_result.get("export_status") or ""),
+            },
+        )
+        if isinstance(corrected_result, dict) and corrected_result.get("export_status") == "export_ready":
+            self.store.record_document_pipeline_event(
+                client_id=payload.client_id,
+                document_ref=document_ref,
+                step="export_ready",
+                status="ok",
+                message_tr="Muhasebe fişi kaydedildi; exporta gönderilebilir durumda.",
+                debug_code="export_ready",
+                details={"action": payload.decision.action},
+            )
         self.record_operation_event(
             store=self.store,
             client_id=payload.client_id,

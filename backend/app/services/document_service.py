@@ -86,6 +86,45 @@ class DocumentService:
             client_id=client_id,
             document=document_payload,
         )
+        self.store.record_document_pipeline_event(
+            client_id=client_id,
+            document_ref=str(saved["document_ref"]),
+            step="uploaded",
+            status="ok",
+            message_tr="Belge yüklendi.",
+            debug_code="uploaded",
+            details={
+                "file_name": file_name,
+                "document_type": document_type,
+                "intake_category": saved.get("intake_category", ""),
+                "size_bytes": saved.get("size_bytes", 0),
+                "uploaded_by_user_id": effective_user_id,
+            },
+        )
+        storage_path = Path(str(saved.get("storage_path") or ""))
+        if storage_path.exists() and storage_path.is_file():
+            self.store.record_document_pipeline_event(
+                client_id=client_id,
+                document_ref=str(saved["document_ref"]),
+                step="file_preview_ready",
+                status="ok",
+                message_tr="Belge önizlenebiliyor.",
+                debug_code="file_preview_ready",
+                details={
+                    "storage_backend": saved.get("storage_backend", ""),
+                    "media_type": mimetypes.guess_type(file_name)[0] or "application/octet-stream",
+                },
+            )
+        else:
+            self.store.record_document_pipeline_event(
+                client_id=client_id,
+                document_ref=str(saved["document_ref"]),
+                step="storage_missing",
+                status="error",
+                message_tr="Belge storage kaydı doğrulanamadı.",
+                debug_code="storage_missing",
+                details={"storage_path": str(storage_path)},
+            )
         job = self.store.create_processing_job(
             client_id=client_id,
             document_ref=str(saved["document_ref"]),
@@ -141,6 +180,21 @@ class DocumentService:
         self.require_client_access(client_id=client_id, user_id=user_id)
         return {"jobs": self.store.list_processing_jobs(client_id=client_id)}
 
+    def document_pipeline(self, *, client_id: str, document_ref: str, user_id: str | None) -> dict[str, object]:
+        normalized_client_id = client_id.strip()
+        normalized_ref = document_ref.strip()
+        if not normalized_client_id or not normalized_ref:
+            raise HTTPException(status_code=400, detail="client_id and document_ref are required")
+        self.require_client_access(client_id=normalized_client_id, user_id=user_id)
+        return {
+            "client_id": normalized_client_id,
+            "document_ref": normalized_ref,
+            "events": self.store.list_document_pipeline_events(
+                client_id=normalized_client_id,
+                document_ref=normalized_ref,
+            ),
+        }
+
     def original_document_file(self, *, client_id: str, document_ref: str, user_id: str | None) -> dict[str, object]:
         normalized_client_id = client_id.strip()
         normalized_ref = document_ref.strip()
@@ -157,13 +211,40 @@ class DocumentService:
             None,
         )
         if not document:
+            self.store.record_document_pipeline_event(
+                client_id=normalized_client_id,
+                document_ref=normalized_ref,
+                step="preview_fetch_failed",
+                status="error",
+                message_tr="Önizleme alınamadı: belge kaydı bulunamadı.",
+                debug_code="preview_document_not_found",
+                details={},
+            )
             raise HTTPException(status_code=404, detail="document not found")
         path = Path(str(document.get("storage_path") or ""))
         if not path.exists() or not path.is_file():
+            self.store.record_document_pipeline_event(
+                client_id=normalized_client_id,
+                document_ref=normalized_ref,
+                step="preview_fetch_failed",
+                status="error",
+                message_tr="Önizleme alınamadı: dosya storage'da bulunamadı.",
+                debug_code="preview_file_missing",
+                details={"storage_path": str(path)},
+            )
             raise HTTPException(status_code=404, detail="document file not found")
         try:
             path.resolve().relative_to(self.document_storage_path.resolve())
         except ValueError as exc:
+            self.store.record_document_pipeline_event(
+                client_id=normalized_client_id,
+                document_ref=normalized_ref,
+                step="preview_fetch_failed",
+                status="error",
+                message_tr="Önizleme alınamadı: dosya yolu izin verilen alanın dışında.",
+                debug_code="preview_path_outside_storage",
+                details={"storage_path": str(path)},
+            )
             raise HTTPException(status_code=403, detail="document storage path is outside allowed storage") from exc
         file_name = Path(str(document.get("original_file_name") or path.name)).name
         media_type = str(document.get("content_type") or "") or mimetypes.guess_type(file_name)[0] or "application/octet-stream"

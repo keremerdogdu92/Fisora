@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { labelForIntakeCategory } from "./upload-intake";
 import { Info, ReasonCard } from "./portal-shared";
-import type { CorrectionDraft, DraftLine, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
+import type { CorrectionDraft, DocumentPipelineEvent, DraftLine, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -19,18 +18,6 @@ const statusLabels: Record<PilotStatus, string> = {
   post_export_correction_requested: "Aktarım sonrası düzeltme",
 };
 
-const documentTypeLabels: Record<string, string> = {
-  invoice: "Fatura",
-  xml: "E-Fatura XML/PDF",
-  bank: "Banka ekstresi",
-  bank_statement: "Banka ekstresi",
-  pos: "POS ekstresi",
-  pos_statement: "POS ekstresi",
-  special_document: "Özel belge",
-  ALIS: "Alış faturası",
-  SATIS: "Satış faturası",
-};
-
 const statementTypeLabels: Record<string, string> = {
   tax_payment: "Vergi ödemesi",
   social_security: "SGK / prim",
@@ -39,12 +26,6 @@ const statementTypeLabels: Record<string, string> = {
   counterparty_payment: "Cari ödeme",
   unknown: "Belirsiz",
 };
-
-function documentPreviewTitle(document: PilotDocument) {
-  if (document.intakeCategory === "bank_statement") return "EKSTRE";
-  if (document.intakeCategory === "special_document") return "ÖZEL BELGE";
-  return "FATURA";
-}
 
 function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
@@ -110,12 +91,57 @@ function isImageMime(value: string) {
   return String(value || "").toLowerCase().startsWith("image/");
 }
 
+function isFramePreviewMime(value: string) {
+  const normalized = String(value || "").toLowerCase();
+  return normalized.includes("pdf")
+    || normalized.startsWith("text/")
+    || normalized.includes("xml")
+    || normalized.includes("csv");
+}
+
+function latestPipelineProblem(document: PilotDocument) {
+  return [...(document.pipelineEvents ?? [])].reverse().find((event) => event.status === "error" || event.status === "warning");
+}
+
+export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineEvent[] }) {
+  return (
+    <section className="pipeline-timeline" aria-label="İşlem geçmişi">
+      <div className="pipeline-heading">
+        <strong>İşlem geçmişi</strong>
+        <span>{events.length ? `${events.length} adım` : "Henüz kayıt yok"}</span>
+      </div>
+      {events.length ? (
+        <ol>
+          {events.map((event, index) => (
+            <li className={`pipeline-event ${event.status || "ok"}`} key={`${event.step}-${event.createdAt}-${index}`}>
+              <div>
+                <strong>{event.messageTr || event.step}</strong>
+                <span>{event.step} / {event.debugCode || "-"}</span>
+              </div>
+              {event.details && Object.keys(event.details).length ? (
+                <details>
+                  <summary>Teknik detay</summary>
+                  <pre>{JSON.stringify(event.details, null, 2)}</pre>
+                </details>
+              ) : null}
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="empty">Bu belge için pipeline kaydı yok.</p>
+      )}
+    </section>
+  );
+}
+
 export function DocumentPreview({ document }: { document?: PilotDocument }) {
   const [previewUrl, setPreviewUrl] = useState("");
+  const [previewError, setPreviewError] = useState("");
 
   useEffect(() => {
     if (!document?.originalDocumentRef) {
       setPreviewUrl("");
+      setPreviewError("Gerçek belge referansı yok.");
       return;
     }
     let active = true;
@@ -126,12 +152,18 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
           `${resolvePreviewApiBaseUrl()}/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`,
           { cache: "no-store" },
         );
-        if (!response.ok) throw new Error("preview unavailable");
+        if (!response.ok) throw new Error(`Önizleme alınamadı: ${response.status}`);
         const blob = await response.blob();
         objectUrl = URL.createObjectURL(blob);
-        if (active) setPreviewUrl(objectUrl);
-      } catch {
-        if (active) setPreviewUrl("");
+        if (active) {
+          setPreviewUrl(objectUrl);
+          setPreviewError("");
+        }
+      } catch (error) {
+        if (active) {
+          setPreviewUrl("");
+          setPreviewError(error instanceof Error ? error.message : "Gerçek belge önizlemesi alınamadı.");
+        }
       }
     };
     void fetchPreview();
@@ -149,6 +181,9 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
       </section>
     );
   }
+  const pipelineProblem = latestPipelineProblem(document);
+  const errorMessage = previewError || pipelineProblem?.messageTr || "Gerçek belge henüz önizlenemiyor.";
+  const canFramePreview = isFramePreviewMime(document.originalDocumentMimeType);
   return (
     <section className="review-panel document-panel">
       <div className="panel-heading">
@@ -162,48 +197,23 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
         {previewUrl ? (
           isImageMime(document.originalDocumentMimeType) ? (
             <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
-          ) : (
+          ) : canFramePreview ? (
             <iframe className="original-document-frame" src={previewUrl} title={`${document.fileName} orijinal belge`} />
+          ) : (
+            <div className="preview-error-panel">
+              <strong>Bu dosya tarayıcı içinde önizlenemiyor.</strong>
+              <p>Gerçek belge indirilebilir; mock belge gösterilmedi.</p>
+              <a href={previewUrl} download={document.fileName}>Belgeyi indir</a>
+            </div>
           )
         ) : (
-        <article className="paper-document" aria-label="Belge orijinal görünümü">
-          <header className="paper-header">
-            <div>
-              <span>{labelForIntakeCategory(document.intakeCategory)} / {documentTypeLabels[document.documentType] ?? document.documentType}</span>
-              <strong>{document.provider}</strong>
-            </div>
-            <small>{document.issueDate}</small>
-          </header>
-          <div className="paper-title">
-            <span>{documentPreviewTitle(document)}</span>
-            <strong>{document.fileName}</strong>
+          <div className="preview-error-panel">
+            <strong>{errorMessage}</strong>
+            <p>Mock belge çizimi kapalı. Hangi adımda kırıldığını işlem geçmişinden takip edin.</p>
           </div>
-          <div className="paper-row">
-            <span>Açıklama</span>
-            <strong>{document.previewText}</strong>
-          </div>
-          <div className="paper-line-item">
-            <span>Kalem</span>
-            <strong>{document.productLine}</strong>
-            <small>{document.productCategory}</small>
-          </div>
-          <div className="paper-totals">
-            <div>
-              <span>KDV</span>
-              <strong>{document.vatRates.length ? `%${document.vatRates.join(", %")}` : "-"}</strong>
-            </div>
-            <div>
-              <span>Toplam</span>
-              <strong>{document.amount}</strong>
-            </div>
-          </div>
-          <footer className="paper-footer">
-            <span>Belge referansı</span>
-            <strong>{document.id}</strong>
-          </footer>
-        </article>
         )}
       </div>
+      <DocumentPipelineTimeline events={document.pipelineEvents ?? []} />
     </section>
   );
 }

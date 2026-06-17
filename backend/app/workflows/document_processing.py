@@ -13,7 +13,8 @@ from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
-from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, GroqAccountingProvider, OpenAiAccountingProvider
+from app.domain.nace_research import resolve_nace_research_profile
+from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, FallbackAccountingProvider, GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
 from app.domain.statement_ai_suggestions import (
     StatementAiSuggestionPolicy,
@@ -92,6 +93,33 @@ def _client_profile(workspace: dict[str, Any]) -> ClientProfile | None:
     )
 
 
+def _workspace_with_nace_research(workspace: dict[str, Any], store: Any) -> dict[str, Any]:
+    client = workspace.get("client") or {}
+    profile = client.get("profile") or {}
+    nace_code = str(profile.get("nace_code") or "").strip()
+    if not nace_code or profile.get("activity_tags"):
+        return workspace
+    try:
+        research_profile = resolve_nace_research_profile(store=store, nace_code=nace_code)
+    except Exception:
+        return workspace
+    activity_tags = [str(tag).strip() for tag in research_profile.get("activity_tags") or [] if str(tag).strip()]
+    if not activity_tags:
+        return workspace
+    enriched_profile = {
+        **profile,
+        "activity_tags": activity_tags,
+        "nace_research_profile": research_profile,
+    }
+    return {
+        **workspace,
+        "client": {
+            **client,
+            "profile": enriched_profile,
+        },
+    }
+
+
 def _chart_accounts(workspace: dict[str, Any]) -> list[ChartAccount]:
     chart_accounts = workspace.get("chart_accounts") or {}
     return [_chart_account(account) for account in chart_accounts.get("accounts", [])]
@@ -132,25 +160,43 @@ def _serializable_simulation(
     return _with_review_summary(data)
 
 
+def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
+    if provider_name == "groq":
+        return GroqAccountingProvider(
+            api_key=source.get("GROQ_API_KEY", ""),
+            model=source.get("FISORA_GROQ_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_GROQ_MODEL)),
+        )
+    return OpenAiAccountingProvider(
+        api_key=source.get("OPENAI_API_KEY", ""),
+        model=source.get("FISORA_OPENAI_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL)),
+    )
+
+
+def _provider_chain_from_env(source: dict[str, str] | Any) -> OpenAiAccountingProvider | FallbackAccountingProvider | None:
+    chain = [
+        name.strip().lower()
+        for name in source.get("FISORA_AI_PROVIDER_CHAIN", "").split(",")
+        if name.strip()
+    ]
+    provider_name = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower()
+    if not chain and provider_name in {"openai", "groq"}:
+        chain = [provider_name]
+    chain = [name for name in chain if name in {"openai", "groq"}]
+    if not chain:
+        return None
+    providers = [_accounting_provider_from_env(name, source) for name in chain]
+    return providers[0] if len(providers) == 1 else FallbackAccountingProvider(providers)
+
+
 def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, object]:
     source = env or environ
-    provider_name = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower()
-    if provider_name not in {"openai", "groq"}:
+    provider = _provider_chain_from_env(source)
+    if provider is None:
         return {
             "product_classifier": None,
             "statement_ai_provider": None,
             "statement_ai_policy": StatementAiSuggestionPolicy(),
         }
-    if provider_name == "groq":
-        provider = GroqAccountingProvider(
-            api_key=source.get("GROQ_API_KEY", ""),
-            model=source.get("FISORA_AI_MODEL", DEFAULT_GROQ_MODEL),
-        )
-    else:
-        provider = OpenAiAccountingProvider(
-            api_key=source.get("OPENAI_API_KEY", ""),
-            model=source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL),
-        )
     product_policy = AiClassificationPolicy(
         enabled=True,
         static_confidence_threshold=int(source.get("FISORA_AI_STATIC_CONFIDENCE_THRESHOLD", "101")),
@@ -213,11 +259,30 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
     }
 
 
+def _ai_explanation_tr(result: dict[str, Any]) -> str:
+    provider = str(result.get("ai_classification_provider") or "statik kurallar")
+    skipped = str(result.get("ai_classification_skipped_reason") or "")
+    reason = str(result.get("ai_classification_reason") or result.get("business_relevance_reason") or "")
+    category = str(result.get("product_category") or "-")
+    confidence = int(result.get("product_confidence") or result.get("business_relevance_confidence") or 0)
+    account = str(result.get("ai_suggested_account_code") or result.get("selected_expense_account") or "-")
+    counterparty = str(result.get("ai_suggested_counterparty_code") or result.get("selected_supplier_account") or "-")
+    risks = ", ".join(str(flag) for flag in result.get("ai_risk_flags") or result.get("review_reason_codes") or []) or "risk yok"
+    if skipped == "ai_provider_error":
+        return f"AI kararı alınamadı. Provider {provider} hata verdi; statik kontrol sonucu korundu. Riskler: {risks}."
+    return (
+        f"AI kararı: {provider} belge kalemini {category} olarak değerlendirdi. "
+        f"Güven: %{confidence}. Gerekçe: {reason or 'Gerekçe üretilmedi.'} "
+        f"Hesap önerisi: {account}. Cari önerisi: {counterparty}. Riskler: {risks}."
+    )
+
+
 def _with_review_summary(result: dict[str, Any], *, document_validation_status: str = "expected_document") -> dict[str, Any]:
     updated = dict(result)
     updated.setdefault("document_validation_status", document_validation_status)
     updated.setdefault("draft_status", _draft_status(updated))
     updated.setdefault("accountant_summary", _accountant_summary(updated))
+    updated.setdefault("ai_explanation_tr", _ai_explanation_tr(updated))
     updated.setdefault("technical_details", _technical_details(updated))
     return updated
 
@@ -513,19 +578,42 @@ def process_next_job_once(
     job = store.claim_next_processing_job()
     if job is None:
         return {"processed_count": 0, "completed_count": 0, "failed_count": 0}
+    client_id = str(job["client_id"])
+    document_ref = str(job.get("document_ref") or "")
+
+    def pipeline_event(step: str, status: str, message_tr: str, debug_code: str, details: dict[str, Any] | None = None) -> None:
+        if not hasattr(store, "record_document_pipeline_event"):
+            return
+        store.record_document_pipeline_event(
+            client_id=client_id,
+            document_ref=document_ref,
+            step=step,
+            status=status,
+            message_tr=message_tr,
+            debug_code=debug_code,
+            details=details or {},
+        )
+
     try:
-        workspace = store.get_workspace(str(job["client_id"]))
+        pipeline_event(
+            "parse_started",
+            "ok",
+            "Belge parse edilmeye başladı.",
+            "parse_started",
+            {"parser_kind": str(job.get("parser_kind") or "")},
+        )
+        workspace = store.get_workspace(client_id)
         document = next(
             (
                 item
                 for item in workspace.get("uploaded_documents", [])
-                if str(item.get("document_ref")) == str(job.get("document_ref"))
-                or str(item.get("document_id")) == str(job.get("document_ref"))
+                if str(item.get("document_ref")) == document_ref
+                or str(item.get("document_id")) == document_ref
             ),
             None,
         )
         if document is None:
-            raise ValueError(f"uploaded document not found: {job.get('document_ref')}")
+            raise ValueError(f"uploaded document not found: {document_ref}")
         runtime = (
             {
                 "product_classifier": product_classifier,
@@ -535,6 +623,16 @@ def process_next_job_once(
             if product_classifier or statement_ai_provider or statement_ai_policy
             else build_ai_runtime_from_env()
         )
+        selected_provider = getattr(getattr(runtime["product_classifier"], "provider", None), "provider_name", "")
+        if selected_provider:
+            pipeline_event(
+                "ai_provider_selected",
+                "ok",
+                f"AI provider seçildi: {selected_provider}.",
+                "ai_provider_selected",
+                {"provider": selected_provider},
+            )
+        workspace = _workspace_with_nace_research(workspace, store)
         result = build_processing_result(
             document,
             job,
@@ -543,15 +641,96 @@ def process_next_job_once(
             statement_ai_provider=runtime["statement_ai_provider"],
             statement_ai_policy=runtime["statement_ai_policy"],
         )
+        pipeline_event(
+            "parse_succeeded",
+            "ok",
+            "Belge parse edildi.",
+            "parse_succeeded",
+            {
+                "document_validation_status": str(result.get("document_validation_status") or ""),
+                "product_category": str(result.get("product_category") or ""),
+            },
+        )
+        if any("ocr" in str(note).lower() for note in result.get("parse_notes") or []):
+            pipeline_event(
+                "ocr_fallback_succeeded",
+                "ok",
+                "Belge OCR fallback ile okundu.",
+                "ocr_fallback_succeeded",
+                {"parse_notes": list(result.get("parse_notes") or [])},
+            )
+        ai_provider_name = str(result.get("ai_classification_provider") or "")
+        if ai_provider_name and ai_provider_name != "static_rules":
+            ai_status = "error" if result.get("ai_classification_skipped_reason") == "ai_provider_error" else "ok"
+            pipeline_event(
+                "ai_decision_ready" if ai_status == "ok" else "ai_provider_failed",
+                ai_status,
+                "AI geldi karar verdi." if ai_status == "ok" else "AI provider hata verdi; fallback kontrol kullanıldı.",
+                "ai_decision_ready" if ai_status == "ok" else "ai_provider_failed",
+                {
+                    "provider": str(result.get("ai_classification_provider") or ""),
+                    "skipped_reason": str(result.get("ai_classification_skipped_reason") or ""),
+                    "reason": str(result.get("ai_classification_reason") or ""),
+                },
+            )
+            pipeline_event(
+                "accountant_ai_explanation_ready",
+                "ok",
+                "Müşavir AI çıktısını Türkçe gerekçeyle görebilir.",
+                "accountant_ai_explanation_ready",
+                {"ai_explanation_tr": str(result.get("ai_explanation_tr") or _ai_explanation_tr(result))},
+            )
+        if result.get("business_relevance_relation") == "weak_match":
+            pipeline_event(
+                "weak_match",
+                "warning",
+                "Kalem faaliyet profiliyle zayıf eşleşti.",
+                "weak_match",
+                {"business_relevance_reason": str(result.get("business_relevance_reason") or "")},
+            )
+        if result.get("draft_lines"):
+            pipeline_event(
+                "journal_draft_ready",
+                "ok",
+                "Belge muhasebe fişi olarak doldu.",
+                "journal_draft_ready",
+                {"draft_line_count": len(result.get("draft_lines") or [])},
+            )
+        if result.get("draft_lines") and not result.get("is_balanced"):
+            pipeline_event(
+                "journal_unbalanced",
+                "warning",
+                "Muhasebe fişi dengeli değil.",
+                "journal_unbalanced",
+                {
+                    "total_debit": str(result.get("total_debit") or ""),
+                    "total_credit": str(result.get("total_credit") or ""),
+                },
+            )
+        if result.get("export_status") == "export_ready":
+            pipeline_event(
+                "export_ready",
+                "ok",
+                "Muhasebe fişi kaydedildi; exporta gönderilebilir durumda.",
+                "export_ready",
+                {},
+            )
         store.save_simulation_result(
-            client_id=str(job["client_id"]),
-            document_ref=str(job["document_ref"]),
+            client_id=client_id,
+            document_ref=document_ref,
             result=result,
         )
-        _record_ai_usage_from_result(store, client_id=str(job["client_id"]), result=result)
+        _record_ai_usage_from_result(store, client_id=client_id, result=result)
         store.update_processing_job(job_id=str(job["id"]), status="completed")
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
+        pipeline_event(
+            "parser_failed",
+            "error",
+            "Belge parse edilemedi.",
+            "parser_failed",
+            {"error": str(exc)},
+        )
         store.update_processing_job(job_id=str(job.get("id") or ""), status="failed", error_message=str(exc))
         return {"processed_count": 1, "completed_count": 0, "failed_count": 1}
 

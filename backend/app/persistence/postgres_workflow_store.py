@@ -35,6 +35,10 @@ def taxpayer_uuid(client_id: str) -> UUID:
     return uuid5(NAMESPACE_URL, f"fisora:taxpayer:{client_id}")
 
 
+def normalize_nace_code(value: str) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
 class PostgresWorkflowStore:
     """PostgreSQL-backed MVP workspace store.
 
@@ -250,6 +254,62 @@ class PostgresWorkflowStore:
         events = self._payloads(client_id, "operation_event")
         return events[-max(limit, 1):]
 
+    def record_document_pipeline_event(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        step: str,
+        status: str,
+        message_tr: str,
+        debug_code: str,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        event_id = str(uuid4())
+        record = {
+            "event_id": event_id,
+            "event_type": "document_pipeline_event",
+            "client_id": client_id,
+            "document_ref": document_ref,
+            "step": step,
+            "status": status,
+            "message_tr": message_tr,
+            "debug_code": debug_code,
+            "details": details or {},
+            "created_at": utc_now(),
+        }
+        return self._upsert_record(client_id, "document_pipeline_event", event_id, record)
+
+    def list_document_pipeline_events(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        events = [
+            event
+            for event in self._payloads(client_id, "document_pipeline_event")
+            if event.get("document_ref") == document_ref
+        ]
+        return events[-max(limit, 1):]
+
+    def save_nace_research_profile(self, *, nace_code: str, profile: dict[str, Any]) -> dict[str, Any]:
+        normalized = normalize_nace_code(nace_code)
+        existing = self.get_nace_research_profile(normalized) or {}
+        timestamp = utc_now()
+        record = {
+            **existing,
+            **profile,
+            "nace_code": normalized,
+            "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+            "updated_at": timestamp,
+        }
+        return self._upsert_record("nace", "nace_research_profile", normalized, record)
+
+    def get_nace_research_profile(self, nace_code: str) -> dict[str, Any] | None:
+        return self._get_record("nace", "nace_research_profile", normalize_nace_code(nace_code))
+
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
         timestamp = utc_now()
@@ -459,6 +519,7 @@ class PostgresWorkflowStore:
                 if client_id in set(user.get("allowed_client_ids") or []) or "*" in set(user.get("allowed_client_ids") or [])
             ],
             "operation_events": self.list_operation_events(client_id=client_id),
+            "document_pipeline_events": self._payloads(client_id, "document_pipeline_event"),
         }
 
     def _payloads(self, client_id: str, record_type: str) -> list[dict[str, Any]]:

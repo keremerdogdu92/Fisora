@@ -58,6 +58,7 @@ const workspaceRecord = {
         business_relevance_requires_review: false,
         ai_classification_provider: "static_rules",
         ai_classification_reason: "Kalem satis olarak siniflandi.",
+        ai_explanation_tr: "AI kararı: statik kurallar belge kalemini satış olarak değerlendirdi.",
         accounting_intent: "e_fatura_yazilim_gideri",
         accounting_intent_confidence: 84,
         learning_rule_scope: "client_rule",
@@ -92,6 +93,38 @@ const workspaceRecord = {
           { account_code: "391.01", description: "KDV", debit: "0.00", credit: "20.00" },
         ],
       },
+    },
+  ],
+  document_pipeline_events: [
+    {
+      client_id: "client-1",
+      document_ref: "processed-1",
+      step: "uploaded",
+      status: "ok",
+      message_tr: "Belge yüklendi.",
+      debug_code: "uploaded",
+      details: { size_bytes: 120 },
+      created_at: "2026-06-07T10:00:00Z",
+    },
+    {
+      client_id: "client-1",
+      document_ref: "processed-1",
+      step: "ai_decision_ready",
+      status: "ok",
+      message_tr: "AI geldi karar verdi.",
+      debug_code: "ai_decision_ready",
+      details: { provider: "static_rules" },
+      created_at: "2026-06-07T10:01:00Z",
+    },
+    {
+      client_id: "client-1",
+      document_ref: "upload-1",
+      step: "uploaded",
+      status: "ok",
+      message_tr: "Belge yüklendi.",
+      debug_code: "uploaded",
+      details: {},
+      created_at: "2026-06-07T10:02:00Z",
     },
   ],
   processing_jobs: [
@@ -148,6 +181,14 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].businessRelation, "core_business");
   assert.equal(data.documents[0].accountTreatment, "stock_or_cogs");
   assert.equal(data.documents[0].requiresAccountantReview, false);
+  assert.equal(data.documents[0].aiReason, "AI kararı: statik kurallar belge kalemini satış olarak değerlendirdi.");
+  assert.deepEqual(
+    data.documents[0].pipelineEvents.map((event) => [event.step, event.status, event.messageTr, event.debugCode]),
+    [
+      ["uploaded", "ok", "Belge yüklendi.", "uploaded"],
+      ["ai_decision_ready", "ok", "AI geldi karar verdi.", "ai_decision_ready"],
+    ],
+  );
   assert.equal(data.documents[0].accountingIntent, "e_fatura_yazilim_gideri");
   assert.equal(data.documents[0].accountingIntentConfidence, 84);
   assert.deepEqual(data.documents[0].rulePrompt, {
@@ -171,6 +212,7 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[1].originalDocumentRef, "upload-1");
   assert.equal(data.documents[1].originalDocumentMimeType, "application/pdf");
   assert.equal(data.documents[1].previewText, "Belge alındı; işleme sonucu hazırlanıyor.");
+  assert.deepEqual(data.documents[1].pipelineEvents.map((event) => event.step), ["uploaded"]);
   assert.deepEqual(data.exportBasket[0], {
     id: "package-1",
     clientId: "client-1",

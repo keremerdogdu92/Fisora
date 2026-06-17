@@ -97,6 +97,21 @@ def store_processing_jobs(
     )
 
 
+@router.get("/store/document-pipeline/{client_id}/{document_ref}")
+def store_document_pipeline(
+    client_id: str,
+    document_ref: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_document_service().document_pipeline(
+        client_id=client_id,
+        document_ref=document_ref,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+
+
 @router.get("/store/document-file/{client_id}/{document_ref}")
 def store_document_file(
     client_id: str,

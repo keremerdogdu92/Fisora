@@ -69,6 +69,7 @@ import type {
 } from "./portal-types";
 import { emptyPilotData } from "./portal-data-mappers";
 import { periodLabel } from "./portal-formatters";
+import { previousCompletedPeriod } from "./portal-periods";
 import { journalDraftLinesForDocument, useReviewCommands } from "./features/review";
 
 export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
@@ -131,7 +132,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         ? current
         : payload.clients[0]?.clientId ?? "",
     );
-    setSelectedPeriod(Array.from(new Set(payload.documents.map((document) => document.period))).sort().at(-1) ?? "");
+    setSelectedPeriod(previousCompletedPeriod());
   }
 
   async function refreshBackendPilotData(shouldCancel: () => boolean = () => false) {

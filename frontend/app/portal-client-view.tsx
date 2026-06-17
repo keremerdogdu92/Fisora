@@ -1,7 +1,8 @@
 "use client";
 
 import { buildClientCancellationViewModel } from "./portal-dashboard";
-import { Info, Metric } from "./portal-shared";
+import { DocumentPreview } from "./portal-review-panels";
+import { Metric } from "./portal-shared";
 import { INTAKE_TABS, buildUploadIntakeMetadata, labelForIntakeCategory } from "./upload-intake";
 import type { CancellationRequest, IntakeCategory, PilotClient, PilotDocument, PilotStatus } from "./portal-types";
 
@@ -30,12 +31,6 @@ const documentTypeLabels: Record<string, string> = {
   ALIS: "Alış faturası",
   SATIS: "Satış faturası",
 };
-
-function documentPreviewTitle(document: PilotDocument) {
-  if (document.intakeCategory === "bank_statement") return "EKSTRE";
-  if (document.intakeCategory === "special_document") return "ÖZEL BELGE";
-  return "FATURA";
-}
 
 function periodLabel(period: string) {
   const [year, month] = period.split("-");
@@ -231,16 +226,7 @@ function ClientDocumentDetailPanel({
         </div>
         <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
       </div>
-      <article className="client-preview-paper" aria-label="Seçili belge önizlemesi">
-        <span>{documentPreviewTitle(selectedDocument)}</span>
-        <strong>{selectedDocument.fileName}</strong>
-        <p>{selectedDocument.previewText}</p>
-        <div className="preview-meta-grid">
-          <Info label="Dönem" value={periodLabel(selectedDocument.period)} />
-          <Info label="Belge türü" value={labelForIntakeCategory(selectedDocument.intakeCategory)} />
-          <Info label="Tutar" value={selectedDocument.amount} />
-        </div>
-      </article>
+      <DocumentPreview document={selectedDocument} />
       <button className="primary" onClick={() => onOpenCancellationRequest(selectedDocument)} type="button">
         İptal/Düzeltme talebi aç
       </button>

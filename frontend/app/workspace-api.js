@@ -169,6 +169,7 @@ function processedBackendDocument(document, workspace, client) {
   const result = document?.result || {};
   const documentRef = safeText(document?.document_ref || result.file_name || document?.id);
   const uploadedDocument = safeList(workspace?.uploaded_documents).find((item) => safeText(item?.document_ref) === documentRef) || {};
+  const originalDocumentRef = safeText(uploadedDocument?.document_ref || documentRef);
   return {
     id: documentRef,
     clientId: client.clientId,
@@ -180,7 +181,7 @@ function processedBackendDocument(document, workspace, client) {
     uploadedAt: safeText(document?.created_at || document?.updated_at),
     uploadedBy: client.userLabel,
     status: statusForBackendDocument(document?.export_status || result.export_status || result.status),
-    originalDocumentRef: safeText(uploadedDocument?.document_ref || documentRef),
+    originalDocumentRef,
     originalDocumentMimeType: safeText(uploadedDocument?.content_type || result.content_type || mimeTypeForFile(safeText(result.file_name || document?.document_ref))),
     provider: safeText(result.provider_hint, "Çalışma alanı"),
     issueDate: safeText(result.issue_date, "-"),
@@ -192,7 +193,7 @@ function processedBackendDocument(document, workspace, client) {
     accountTreatment: safeText(result.business_relevance_account_treatment, "-"),
     requiresAccountantReview: Boolean(result.business_relevance_requires_review),
     previewText: safeText(result.business_relevance_reason || result.provider_hint, "İşleme sonucu hazır."),
-    aiReason: safeText(result.ai_classification_reason || result.business_relevance_reason, "Öneri gerekçesi hazır."),
+    aiReason: safeText(result.ai_explanation_tr || result.ai_classification_reason || result.business_relevance_reason, "Öneri gerekçesi hazır."),
     aiProvider: safeText(result.ai_classification_provider || result.draft_decision_source, "-"),
     aiSuggestedAccountCode: safeText(result.ai_suggested_account_code || result.selected_expense_account),
     aiSuggestedCounterpartyCode: safeText(result.ai_suggested_counterparty_code || result.counterparty_match_code || result.selected_supplier_account),
@@ -203,6 +204,7 @@ function processedBackendDocument(document, workspace, client) {
     draftStatus: safeText(result.draft_status, safeList(result.draft_lines).length ? "draft_ready" : "manual_draft_required"),
     accountantSummary: safeText(result.accountant_summary, accountantSummaryForResult(result)),
     technicalDetails: result.technical_details && typeof result.technical_details === "object" ? result.technical_details : {},
+    pipelineEvents: pipelineEventsForDocument(workspace, documentRef, originalDocumentRef),
     selectedExpenseAccount: safeText(result.selected_expense_account, "-"),
     selectedVatAccount: safeText(result.selected_vat_account, "-"),
     selectedCounterpartyAccount: safeText(result.selected_supplier_account || result.counterparty_match_code, "-"),
@@ -258,6 +260,7 @@ function pendingBackendDocument(document, workspace, client) {
     draftStatus: "processing",
     accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
     technicalDetails: {},
+    pipelineEvents: pipelineEventsForDocument(workspace, documentRef, documentRef),
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",
@@ -276,6 +279,25 @@ function pendingBackendDocument(document, workspace, client) {
     learningRuleSourceSummary: "",
     rulePrompt: normalizeRulePrompt({}),
   };
+}
+
+function normalizePipelineEvent(event) {
+  return {
+    eventId: safeText(event?.event_id || event?.eventId),
+    step: safeText(event?.step),
+    status: safeText(event?.status),
+    messageTr: safeText(event?.message_tr || event?.messageTr),
+    debugCode: safeText(event?.debug_code || event?.debugCode),
+    details: event?.details && typeof event.details === "object" ? event.details : {},
+    createdAt: safeText(event?.created_at || event?.createdAt),
+  };
+}
+
+function pipelineEventsForDocument(workspace, documentRef, originalDocumentRef) {
+  const refs = new Set([documentRef, originalDocumentRef].map(safeText).filter(Boolean));
+  return safeList(workspace?.document_pipeline_events)
+    .filter((event) => refs.has(safeText(event?.document_ref || event?.documentRef)))
+    .map(normalizePipelineEvent);
 }
 
 function mimeTypeForFile(fileName) {

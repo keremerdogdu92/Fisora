@@ -64,6 +64,100 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(len(workspace["uploaded_documents"]), 1)
         self.assertEqual(len(workspace["processing_jobs"]), 1)
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "fatura.pdf")
+        pipeline = workspace["document_pipeline_events"]
+        self.assertEqual([event["step"] for event in pipeline], ["uploaded", "file_preview_ready"])
+        self.assertEqual(pipeline[0]["message_tr"], "Belge yüklendi.")
+        self.assertEqual(pipeline[1]["message_tr"], "Belge önizlenebiliyor.")
+
+    def test_document_pipeline_endpoint_returns_events_for_document(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by": "mukellef-user",
+                    "uploaded_by_user_id": "mukellef-user",
+                    "content_base64": "ZmF0dXJh",
+                },
+            ).json()
+
+            response = client.get(
+                f"/phase0/store/document-pipeline/client-1/{upload['document_ref']}",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["client_id"], "client-1")
+        self.assertEqual(payload["document_ref"], upload["document_ref"])
+        self.assertEqual([event["step"] for event in payload["events"]], ["uploaded", "file_preview_ready"])
+
+    def test_store_document_file_records_preview_fetch_failure_when_file_is_missing(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by": "mukellef-user",
+                    "uploaded_by_user_id": "mukellef-user",
+                    "content_base64": "ZmF0dXJh",
+                },
+            ).json()
+            stored_path = Path(upload["storage_path"])
+            stored_path.unlink()
+
+            response = client.get(
+                f"/phase0/store/document-file/client-1/{upload['document_ref']}",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+            )
+            pipeline = client.get(
+                f"/phase0/store/document-pipeline/client-1/{upload['document_ref']}",
+                headers={"X-Fisora-User-Id": "mukellef-user"},
+            ).json()["events"]
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(pipeline[-1]["step"], "preview_fetch_failed")
+        self.assertEqual(pipeline[-1]["message_tr"], "Önizleme alınamadı: dosya storage'da bulunamadı.")
 
     def test_store_document_file_endpoint_returns_original_file_for_authorized_user(self) -> None:
         if TestClient is None or phase0 is None or app is None:

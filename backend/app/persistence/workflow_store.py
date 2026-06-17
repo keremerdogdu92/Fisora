@@ -40,7 +40,13 @@ def empty_store() -> dict[str, Any]:
         "auth_tokens": {},
         "ai_usage_events": [],
         "operation_events": [],
+        "document_pipeline_events": [],
+        "nace_research_profiles": {},
     }
+
+
+def normalize_nace_code(value: str) -> str:
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
 class JsonWorkflowStore:
@@ -273,6 +279,70 @@ class JsonWorkflowStore:
             if event.get("client_id") == client_id
         ]
         return events[-max(limit, 1):]
+
+    def record_document_pipeline_event(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        step: str,
+        status: str,
+        message_tr: str,
+        debug_code: str,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        data = self._read()
+        record = {
+            "event_id": str(uuid4()),
+            "event_type": "document_pipeline_event",
+            "client_id": client_id,
+            "document_ref": document_ref,
+            "step": step,
+            "status": status,
+            "message_tr": message_tr,
+            "debug_code": debug_code,
+            "details": details or {},
+            "created_at": utc_now(),
+        }
+        data["document_pipeline_events"].append(record)
+        self._write(data)
+        return deepcopy(record)
+
+    def list_document_pipeline_events(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        data = self._read()
+        events = [
+            deepcopy(event)
+            for event in data["document_pipeline_events"]
+            if event.get("client_id") == client_id and event.get("document_ref") == document_ref
+        ]
+        return events[-max(limit, 1):]
+
+    def save_nace_research_profile(self, *, nace_code: str, profile: dict[str, Any]) -> dict[str, Any]:
+        normalized = normalize_nace_code(nace_code)
+        data = self._read()
+        existing = data["nace_research_profiles"].get(normalized, {})
+        timestamp = utc_now()
+        record = {
+            **existing,
+            **profile,
+            "nace_code": normalized,
+            "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+            "updated_at": timestamp,
+        }
+        data["nace_research_profiles"][normalized] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def get_nace_research_profile(self, nace_code: str) -> dict[str, Any] | None:
+        data = self._read()
+        profile = data["nace_research_profiles"].get(normalize_nace_code(nace_code))
+        return deepcopy(profile) if profile else None
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -520,6 +590,11 @@ class JsonWorkflowStore:
                 if client_id in set(user.get("allowed_client_ids") or []) or "*" in set(user.get("allowed_client_ids") or [])
             ],
             "operation_events": self.list_operation_events(client_id=client_id),
+            "document_pipeline_events": [
+                deepcopy(event)
+                for event in data["document_pipeline_events"]
+                if event.get("client_id") == client_id
+            ],
         }
 
     def _read(self) -> dict[str, Any]:

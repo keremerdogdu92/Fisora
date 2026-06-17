@@ -121,6 +121,58 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(workspace["learning_events"][0]["client_id"], "client-1")
         self.assertEqual(workspace["operation_events"][0]["event_type"], "review_decision_saved")
 
+    def test_review_service_records_journal_edit_save_and_export_pipeline_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={
+                    "file_name": "fatura.pdf",
+                    "export_status": "review_required",
+                    "is_balanced": True,
+                    "selected_expense_account": "770.01",
+                    "selected_supplier_account": "320.01",
+                    "counterparty_match_code": "320.01",
+                    "product_category": "e_fatura_hizmeti",
+                    "draft_lines": [
+                        {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.01", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="fatura.pdf",
+                        action="approve_with_changes",
+                        reviewer="mali-musavir",
+                        corrected_account_code="770.05",
+                        corrected_counterparty_code="320.01.888",
+                        category="e_fatura_hizmeti",
+                        reason="Hesap ve cari müşavir tarafından düzeltildi.",
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual([event["step"] for event in workspace["document_pipeline_events"]], [
+            "journal_edited",
+            "journal_saved",
+            "export_ready",
+        ])
+        self.assertEqual(workspace["document_pipeline_events"][0]["message_tr"], "Müşavir muhasebe fişine müdahale etti.")
+        self.assertEqual(workspace["documents"][0]["export_status"], "export_ready")
+
 
 if __name__ == "__main__":
     unittest.main()

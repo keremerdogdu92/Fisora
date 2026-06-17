@@ -7,14 +7,16 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy commit: `a7dc639`
+- Son dogrulanan runtime deploy commit: `405b318`
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
+- AI fallback kodu: `FISORA_AI_PROVIDER_CHAIN=groq,openai` destekli; serverda
+  su an `OPENAI_API_KEY` bos oldugu icin canli zincir Groq ile sinirli.
 - Server env dosyasi: `/opt/fisora/app/deploy/production.env`
 
-`deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD` ve `GROQ_API_KEY`
-sadece serverdaki bu dosyada tutulur.
+`deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD`, `GROQ_API_KEY`
+ve varsa fallback provider keyleri sadece serverdaki bu dosyada tutulur.
 
 ## Yeni Bilgisayarda Devam Etme
 

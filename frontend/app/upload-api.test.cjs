@@ -299,6 +299,7 @@ test("uploadDocumentToBackend posts the selected intake category as multipart da
     uploadedBy: "Client User",
     documentType: "invoice",
     intakeCategory: "sales_invoice",
+    period: "2026-05",
     file,
     fetchImpl,
     FormDataCtor: CapturingFormData,
@@ -314,6 +315,7 @@ test("uploadDocumentToBackend posts the selected intake category as multipart da
       ["client_id", "client-1"],
       ["document_type", "invoice"],
       ["intake_category", "sales_invoice"],
+      ["period", "2026-05"],
       ["uploaded_by", "Client User"],
       ["uploaded_by_user_id", "client-user"],
       ["retention_policy_days", "90"],
@@ -322,12 +324,12 @@ test("uploadDocumentToBackend posts the selected intake category as multipart da
   );
 });
 
-test("uploadTaxCertificateToBackend stores the certificate as a special document", async () => {
+test("uploadTaxCertificateToBackend stores the certificate outside the processing queue", async () => {
   let request;
   const file = { name: "vergi-levhasi.pdf" };
   const fetchImpl = async (url, init) => {
     request = { url, init };
-    return { ok: true, json: async () => ({ document_ref: "tax-cert-1" }) };
+    return { ok: true, json: async () => ({ attachment_ref: "tax-cert-1" }) };
   };
 
   const result = await uploadTaxCertificateToBackend({
@@ -340,16 +342,15 @@ test("uploadTaxCertificateToBackend stores the certificate as a special document
     FormDataCtor: CapturingFormData,
   });
 
-  assert.deepEqual(result, { document_ref: "tax-cert-1" });
-  assert.equal(request.url, "http://localhost:8000/phase0/store/document-upload-multipart");
+  assert.deepEqual(result, { attachment_ref: "tax-cert-1" });
+  assert.equal(request.url, "http://localhost:8000/phase0/store/client-onboarding-attachment");
   assert.equal(request.init.method, "POST");
   assert.deepEqual(request.init.headers, { "X-Fisora-User-Id": "mali-musavir" });
   assert.deepEqual(
     request.init.body.fields.map(([key, value]) => [key, value && value.name ? value.name : value]),
     [
       ["client_id", "client-1"],
-      ["document_type", "special_document"],
-      ["intake_category", "special_document"],
+      ["attachment_type", "tax_certificate"],
       ["uploaded_by", "Mali Musavir"],
       ["uploaded_by_user_id", "mali-musavir"],
       ["retention_policy_days", "365"],

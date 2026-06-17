@@ -36,6 +36,7 @@ class DocumentService:
         client_id: str,
         document_type: str,
         intake_category: str = "",
+        period: str = "",
         file_name: str,
         uploaded_by: str,
         uploaded_by_user_id: str = "",
@@ -71,6 +72,7 @@ class DocumentService:
                 file_name=file_name,
                 document_type=document_type,
                 intake_category=intake_category,
+                period=period,
                 uploaded_by=uploaded_by,
                 content=content,
                 declared_size_bytes=size_bytes,
@@ -97,6 +99,7 @@ class DocumentService:
                 "file_name": file_name,
                 "document_type": document_type,
                 "intake_category": saved.get("intake_category", ""),
+                "period": saved.get("period", ""),
                 "size_bytes": saved.get("size_bytes", 0),
                 "uploaded_by_user_id": effective_user_id,
             },
@@ -142,6 +145,7 @@ class DocumentService:
                 "document_ref": saved["document_ref"],
                 "document_type": document_type,
                 "intake_category": saved.get("intake_category", ""),
+                "period": saved.get("period", ""),
                 "file_name": file_name,
                 "processing_job_id": job["id"],
                 "parser_kind": job["parser_kind"],
@@ -149,6 +153,79 @@ class DocumentService:
             },
         )
         return {**saved, "processing_job": job}
+
+    def store_onboarding_attachment(
+        self,
+        *,
+        client_id: str,
+        attachment_type: str,
+        file_name: str,
+        uploaded_by: str,
+        uploaded_by_user_id: str = "",
+        request_user_id: str | None = None,
+        content: bytes | None = None,
+        size_bytes: int | None = None,
+        retention_policy_days: int = 365,
+    ) -> dict[str, object]:
+        normalized_client_id = client_id.strip()
+        if not normalized_client_id:
+            raise HTTPException(status_code=400, detail="client_id is required for onboarding attachment")
+        normalized_type = attachment_type.strip() or "tax_certificate"
+        request_user = (request_user_id or "").strip()
+        effective_user_id = uploaded_by_user_id.strip() or uploaded_by.strip() or request_user
+        if request_user and effective_user_id and request_user != effective_user_id:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "allowed": False,
+                    "reason": "mock_user_header_mismatch",
+                    "user_id": request_user,
+                    "payload_user_id": effective_user_id,
+                },
+            )
+        self.require_client_access(
+            client_id=normalized_client_id,
+            user_id=effective_user_id,
+            allowed_roles=("accountant", "admin"),
+        )
+        try:
+            document = store_document_content(
+                base_dir=self.document_storage_path,
+                client_id=normalized_client_id,
+                file_name=file_name,
+                document_type="special_document",
+                intake_category="special_document",
+                uploaded_by=uploaded_by,
+                content=content,
+                declared_size_bytes=size_bytes,
+                retention_days=retention_policy_days,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        payload = asdict(document)
+        attachment_ref = str(payload.get("document_id") or "")
+        payload.update(
+            {
+                "attachment_ref": attachment_ref,
+                "attachment_type": normalized_type,
+                "uploaded_by_user_id": effective_user_id,
+            }
+        )
+        saved = self.store.save_onboarding_attachment(client_id=normalized_client_id, attachment=payload)
+        self.record_operation_event(
+            store=self.store,
+            client_id=normalized_client_id,
+            event_type="onboarding_attachment_uploaded",
+            status="ok",
+            message="Onboarding eki kaydedildi.",
+            metadata={
+                "attachment_ref": saved["attachment_ref"],
+                "attachment_type": saved["attachment_type"],
+                "file_name": file_name,
+                "uploaded_by_user_id": effective_user_id,
+            },
+        )
+        return saved
 
     def store_document_retention_run(self, *, delete_files: bool) -> dict[str, object]:
         summary = self.store.apply_document_retention(delete_files=delete_files)

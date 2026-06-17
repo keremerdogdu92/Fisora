@@ -7,6 +7,7 @@ import type {
   CorrectionDraft,
   DashboardClientRow,
   NewClientDraft,
+  LocalSession,
   PilotClient,
   PilotDocument,
   PilotStatus,
@@ -60,6 +61,7 @@ export function AccountantWorkspace({
   selectedClient,
   selectedDocument,
   selectedStatementLineNo,
+  session,
   setCorrectionDraft,
   setNewClientDraft,
   setReviewFilter,
@@ -101,6 +103,7 @@ export function AccountantWorkspace({
   selectedClient?: PilotClient;
   selectedDocument?: PilotDocument;
   selectedStatementLineNo: number;
+  session: LocalSession | null;
   setCorrectionDraft: (value: CorrectionDraft) => void;
   setNewClientDraft: (value: NewClientDraft) => void;
   setReviewFilter: (value: ReviewFilter) => void;
@@ -254,7 +257,7 @@ export function AccountantWorkspace({
         ) : null}
 
         <section className="review-split">
-          <DocumentPreview document={selectedDocument} />
+          <DocumentPreview document={selectedDocument} session={session} />
           <JournalPanel
             correctionDraft={correctionDraft}
             decisionStatus={decisionStatus}

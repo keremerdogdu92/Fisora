@@ -11,11 +11,13 @@ export function ModeButton({ active, href, label }: { active: boolean; href: str
 }
 
 export function PortalTopbarStatus({
+  clientName,
   localFallbackAllowed,
   onExit,
   session,
   source,
 }: {
+  clientName?: string;
   localFallbackAllowed: boolean;
   onExit: () => void;
   session: LocalSession | null;
@@ -25,7 +27,7 @@ export function PortalTopbarStatus({
     <div className="portal-statusbar" aria-label="Portal oturum durumu">
       <div className="topbar-user">
         <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalı"}</span>
-        <strong>{session?.userId || "Oturum yok"}</strong>
+        <strong>{clientName || session?.userId || "Oturum yok"}</strong>
       </div>
       <div className="pilot-source compact">
         <span>Veri kaynağı</span>

@@ -258,6 +258,7 @@ class DocumentUploadPayload(BaseModel):
     client_id: str
     document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement", "special_document"] = "invoice"
     intake_category: str = ""
+    period: str = ""
     file_name: str
     uploaded_by: str = ""
     uploaded_by_user_id: str = ""

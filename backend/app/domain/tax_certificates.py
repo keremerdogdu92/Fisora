@@ -42,6 +42,8 @@ LABEL_ALIASES = {
         "adisoyadi",
         "adsoyadunvan",
         "unvani",
+        "ticariunvani",
+        "ticaretunvani",
         "mukellefinunvani",
     ),
     "tax_id": (

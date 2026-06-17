@@ -14,3 +14,14 @@ test("default upload period uses the last completed month", () => {
   assert.match(documentActions, /TODO: Bulunulan ay yüklemelerini açma\./);
   assert.match(documentActions, /previousCompletedPeriod\(now\)/);
 });
+
+test("client portal keeps upload period fixed and list period selectable", () => {
+  const portalApp = readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+  const clientView = readFileSync(join(__dirname, "portal-client-view.tsx"), "utf8");
+
+  assert.match(portalApp, /clientPeriods/);
+  assert.match(portalApp, /uploadPeriod=\{previousCompletedPeriod\(\)\}/);
+  assert.doesNotMatch(clientView, /<h2>Mükellef portalı<\/h2>/);
+  assert.match(clientView, /Yükleme dönemi/);
+  assert.match(clientView, /Belge listesi/);
+});

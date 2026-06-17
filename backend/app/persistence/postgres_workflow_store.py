@@ -323,6 +323,19 @@ class PostgresWorkflowStore:
         record["created_at"] = existing.get("created_at", timestamp) if existing else timestamp
         return self._upsert_record(client_id, "uploaded_document", document_ref, record)
 
+    def save_onboarding_attachment(self, *, client_id: str, attachment: dict[str, Any]) -> dict[str, Any]:
+        attachment_ref = str(attachment.get("attachment_ref") or attachment.get("document_id") or uuid4())
+        timestamp = utc_now()
+        record = {
+            **attachment,
+            "client_id": client_id,
+            "attachment_ref": attachment_ref,
+            "updated_at": timestamp,
+        }
+        existing = self._get_record(client_id, "onboarding_attachment", attachment_ref)
+        record["created_at"] = existing.get("created_at", timestamp) if existing else timestamp
+        return self._upsert_record(client_id, "onboarding_attachment", attachment_ref, record)
+
     def apply_document_retention(self, *, delete_files: bool = True) -> dict[str, Any]:
         checked_count = 0
         expiring_count = 0
@@ -508,6 +521,7 @@ class PostgresWorkflowStore:
             "client": self._get_record(client_id, "client", client_id),
             "chart_accounts": self._get_record(client_id, "chart_accounts", client_id),
             "uploaded_documents": self._payloads(client_id, "uploaded_document"),
+            "onboarding_attachments": self._payloads(client_id, "onboarding_attachment"),
             "documents": self._payloads(client_id, "document"),
             "processing_jobs": self._payloads(client_id, "processing_job"),
             "review_decisions": self._payloads(client_id, "review_decision"),

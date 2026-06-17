@@ -178,12 +178,12 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
-  const allPeriods = useMemo(() => {
-    return Array.from(new Set(data.documents.map((document) => document.period))).sort().reverse();
-  }, [data.documents]);
   const clientDocuments = useMemo(() => {
     return data.documents.filter((document) => document.clientId === selectedClient?.clientId);
   }, [data.documents, selectedClient?.clientId]);
+  const clientPeriods = useMemo(() => {
+    return Array.from(new Set([previousCompletedPeriod(), ...clientDocuments.map((document) => document.period).filter(Boolean)])).sort().reverse();
+  }, [clientDocuments]);
   const periodDocuments = useMemo(() => {
     return clientDocuments.filter((document) => !selectedPeriod || document.period === selectedPeriod);
   }, [clientDocuments, selectedPeriod]);
@@ -413,6 +413,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           <h1>{mode === "client" ? "Mükellef portalı" : activeNavItem?.label || "Müşavir çalışma alanı"}</h1>
         </div>
         <PortalTopbarStatus
+          clientName={mode === "client" ? selectedClient?.clientName : undefined}
           localFallbackAllowed={localFallbackAllowed}
           onExit={exitPortal}
           session={session}
@@ -428,7 +429,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         </nav>
       ) : null}
 
-      {mode === "accountant" ? null : (
+      {mode === "accountant" || mode === "client" ? null : (
         <SelectedClientStrip client={selectedClient} documents={clientDocuments} openCancellationCount={openCancellationRequests.length} />
       )}
 
@@ -448,11 +449,13 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
             setSelectedDocumentId(document.id);
             setClientCancellationDocumentId((current) => current === document.id ? current : "");
           }}
-          periods={allPeriods}
+          periods={clientPeriods}
           selectedClient={selectedClient}
           selectedDocument={clientSelectedDocument}
           selectedIntakeCategory={selectedIntakeCategory}
           selectedPeriod={selectedPeriod}
+          uploadPeriod={previousCompletedPeriod()}
+          session={session}
           setSelectedIntakeCategory={(value) => {
             setSelectedIntakeCategory(value);
             setSelectedDocumentId("");
@@ -518,6 +521,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           selectedClient={selectedClient}
           selectedDocument={selectedDocument}
           selectedStatementLineNo={selectedStatementLineNo}
+          session={session}
           setCorrectionDraft={setCorrectionDraft}
           setNewClientDraft={setNewClientDraft}
           setReviewFilter={setReviewFilter}

@@ -122,6 +122,7 @@ export async function addLocalUploadsAction({
       uploadedBy: uploadDisplayName,
       documentType: intakeMetadata.documentType,
       intakeCategory: intakeMetadata.intakeCategory,
+      period,
       sessionToken: session?.sessionToken,
       files: selectedFiles,
     });

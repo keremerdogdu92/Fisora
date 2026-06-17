@@ -37,6 +37,7 @@ class StoredDocument:
     client_id: str
     document_type: str
     intake_category: str
+    period: str
     original_file_name: str
     stored_file_name: str
     storage_path: str
@@ -135,6 +136,7 @@ def store_document_content(
     file_name: str,
     document_type: str,
     intake_category: str = "",
+    period: str = "",
     uploaded_by: str,
     content: bytes | None = None,
     declared_size_bytes: int = 0,
@@ -185,6 +187,7 @@ def store_document_content(
         client_id=client_id,
         document_type=document_type,
         intake_category=normalized_intake_category,
+        period=period.strip(),
         original_file_name=file_name,
         stored_file_name=safe_name,
         storage_path=str(storage_path),

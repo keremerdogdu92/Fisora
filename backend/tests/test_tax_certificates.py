@@ -175,6 +175,21 @@ class TaxCertificateParserTests(unittest.TestCase):
             },
         )
 
+    def test_parse_tax_certificate_text_prefers_commercial_title_value(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            MUKELLEFIN VERGI LEVHASI
+            TICARI UNVANI
+            ABC ISITME CIHAZLARI LIMITED SIRKETI
+            VERGI KIMLIK NO
+            1234567890
+            ANA FAALIYET KODU VE ADI
+            477401-TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI
+            """
+        )
+
+        self.assertEqual(extraction.title, "ABC ISITME CIHAZLARI LIMITED SIRKETI")
+
 
 if __name__ == "__main__":
     unittest.main()

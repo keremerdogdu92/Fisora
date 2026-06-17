@@ -34,6 +34,7 @@ const workspaceRecord = {
       content_type: "application/pdf",
       document_type: "invoice",
       intake_category: "purchase_invoice",
+      period: "2026-05",
       status: "stored",
       uploaded_by: "mukellef-user",
       created_at: "2026-06-07T10:00:00Z",
@@ -211,6 +212,7 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[1].status, "queued");
   assert.equal(data.documents[1].originalDocumentRef, "upload-1");
   assert.equal(data.documents[1].originalDocumentMimeType, "application/pdf");
+  assert.equal(data.documents[1].period, "2026-05");
   assert.equal(data.documents[1].previewText, "Belge alındı; işleme sonucu hazırlanıyor.");
   assert.deepEqual(data.documents[1].pipelineEvents.map((event) => event.step), ["uploaded"]);
   assert.deepEqual(data.exportBasket[0], {

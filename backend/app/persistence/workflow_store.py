@@ -29,6 +29,7 @@ def empty_store() -> dict[str, Any]:
         "clients": {},
         "chart_accounts": {},
         "uploaded_documents": {},
+        "onboarding_attachments": {},
         "documents": {},
         "processing_jobs": [],
         "review_decisions": [],
@@ -359,6 +360,21 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def save_onboarding_attachment(self, *, client_id: str, attachment: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        attachment_ref = str(attachment.get("attachment_ref") or attachment.get("document_id") or uuid4())
+        attachment_key = self._document_key(client_id, attachment_ref)
+        record = {
+            **attachment,
+            "client_id": client_id,
+            "attachment_ref": attachment_ref,
+            "updated_at": utc_now(),
+        }
+        record.setdefault("created_at", record["updated_at"])
+        data["onboarding_attachments"][attachment_key] = record
+        self._write(data)
+        return deepcopy(record)
+
     def apply_document_retention(self, *, delete_files: bool = True) -> dict[str, Any]:
         data = self._read()
         now = utc_now()
@@ -557,6 +573,11 @@ class JsonWorkflowStore:
             "uploaded_documents": [
                 deepcopy(document)
                 for key, document in data["uploaded_documents"].items()
+                if key.startswith(document_prefix)
+            ],
+            "onboarding_attachments": [
+                deepcopy(attachment)
+                for key, attachment in data["onboarding_attachments"].items()
                 if key.startswith(document_prefix)
             ],
             "documents": [

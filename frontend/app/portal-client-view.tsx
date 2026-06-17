@@ -4,7 +4,7 @@ import { buildClientCancellationViewModel } from "./portal-dashboard";
 import { DocumentPreview } from "./portal-review-panels";
 import { Metric } from "./portal-shared";
 import { INTAKE_TABS, buildUploadIntakeMetadata, labelForIntakeCategory } from "./upload-intake";
-import type { CancellationRequest, IntakeCategory, PilotClient, PilotDocument, PilotStatus } from "./portal-types";
+import type { CancellationRequest, IntakeCategory, LocalSession, PilotClient, PilotDocument, PilotStatus } from "./portal-types";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -64,8 +64,10 @@ export function ClientPortal({
   selectedDocument,
   selectedIntakeCategory,
   selectedPeriod,
+  session,
   setSelectedIntakeCategory,
   setSelectedPeriod,
+  uploadPeriod,
   uploadStatus,
 }: {
   cancelReason: string;
@@ -81,8 +83,10 @@ export function ClientPortal({
   selectedDocument?: PilotDocument;
   selectedIntakeCategory: IntakeCategory;
   selectedPeriod: string;
+  session: LocalSession | null;
   setSelectedIntakeCategory: (value: IntakeCategory) => void;
   setSelectedPeriod: (value: string) => void;
+  uploadPeriod: string;
   uploadStatus: string;
 }) {
   const activeDocuments = documents.filter((document) => document.intakeCategory === selectedIntakeCategory);
@@ -102,14 +106,13 @@ export function ClientPortal({
       <div className="panel upload-panel">
         <div className="panel-heading">
           <div>
-            <h2>Mükellef portalı</h2>
+            <h2>Belge yükleme</h2>
             <span>{selectedClient?.clientName ?? "-"}</span>
           </div>
-          <select aria-label="Ay seçimi" onChange={(event) => setSelectedPeriod(event.target.value)} value={selectedPeriod}>
-            {periods.map((period) => (
-              <option key={period} value={period}>{periodLabel(period)}</option>
-            ))}
-          </select>
+          <div className="period-badge" aria-label="Yükleme dönemi">
+            <span>Yükleme dönemi</span>
+            <strong>{periodLabel(uploadPeriod)}</strong>
+          </div>
         </div>
         <div className="intake-tabs" role="tablist" aria-label="Belge yükleme türü">
           {INTAKE_TABS.map((tab) => {
@@ -156,9 +159,14 @@ export function ClientPortal({
       <div className="panel">
         <div className="panel-heading">
           <div>
-            <h2>Ay bazlı belge listesi</h2>
+            <h2>Belge listesi</h2>
             <span>{selectedPeriod ? periodLabel(selectedPeriod) : "Dönem seçilmedi"}</span>
           </div>
+          <select aria-label="Belge listesi dönemi" onChange={(event) => setSelectedPeriod(event.target.value)} value={selectedPeriod}>
+            {periods.map((period) => (
+              <option key={period} value={period}>{periodLabel(period)}</option>
+            ))}
+          </select>
         </div>
         <div className="document-list">
           {activeDocuments.length ? null : <p className="empty">{selectedIntake.label} için bu ay yüklenen belge yok.</p>}
@@ -182,6 +190,7 @@ export function ClientPortal({
         onOpenCancellationRequest={onOpenCancellationRequest}
         onRequestCancellation={onRequestCancellation}
         selectedDocument={selectedDocument}
+        session={session}
       />
     </section>
   );
@@ -194,6 +203,7 @@ function ClientDocumentDetailPanel({
   onOpenCancellationRequest,
   onRequestCancellation,
   selectedDocument,
+  session,
 }: {
   cancelReason: string;
   cancellationView: {
@@ -205,6 +215,7 @@ function ClientDocumentDetailPanel({
   onOpenCancellationRequest: (document: PilotDocument) => void;
   onRequestCancellation: (document: PilotDocument) => void;
   selectedDocument?: PilotDocument;
+  session: LocalSession | null;
 }) {
   if (!selectedDocument) {
     return (
@@ -226,7 +237,7 @@ function ClientDocumentDetailPanel({
         </div>
         <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
       </div>
-      <DocumentPreview document={selectedDocument} />
+      <DocumentPreview document={selectedDocument} session={session} />
       <button className="primary" onClick={() => onOpenCancellationRequest(selectedDocument)} type="button">
         İptal/Düzeltme talebi aç
       </button>

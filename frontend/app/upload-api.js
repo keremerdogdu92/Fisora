@@ -335,6 +335,7 @@ async function uploadDocumentToBackend({
   uploadedBy,
   documentType,
   intakeCategory,
+  period = "",
   file,
   retentionPolicyDays = 90,
   sessionToken = "",
@@ -346,6 +347,7 @@ async function uploadDocumentToBackend({
   formData.append("client_id", String(clientId || ""));
   formData.append("document_type", String(documentType || "invoice"));
   formData.append("intake_category", String(intakeCategory || ""));
+  if (period) formData.append("period", String(period));
   formData.append("uploaded_by", String(uploadedBy || normalizedUserId));
   formData.append("uploaded_by_user_id", normalizedUserId);
   formData.append("retention_policy_days", String(retentionPolicyDays));
@@ -373,18 +375,24 @@ function uploadTaxCertificateToBackend({
   fetchImpl = fetch,
   FormDataCtor = FormData,
 }) {
-  return uploadDocumentToBackend({
-    apiBaseUrl,
-    clientId,
-    userId,
-    uploadedBy,
-    documentType: "special_document",
-    intakeCategory: "special_document",
-    file,
-    retentionPolicyDays,
-    sessionToken,
-    fetchImpl,
-    FormDataCtor,
+  const normalizedUserId = String(userId || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID;
+  const formData = new FormDataCtor();
+  formData.append("client_id", String(clientId || ""));
+  formData.append("attachment_type", "tax_certificate");
+  formData.append("uploaded_by", String(uploadedBy || normalizedUserId));
+  formData.append("uploaded_by_user_id", normalizedUserId);
+  formData.append("retention_policy_days", String(retentionPolicyDays));
+  formData.append("file", file);
+
+  return fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/client-onboarding-attachment`, {
+    method: "POST",
+    headers: sessionToken ? { "X-Fisora-Session": String(sessionToken) } : { "X-Fisora-User-Id": normalizedUserId },
+    body: formData,
+  }).then(async (response) => {
+    if (!response.ok) {
+      throw new Error(await responseErrorMessage(response, `tax certificate attachment failed with ${response.status}`));
+    }
+    return response.json();
   });
 }
 
@@ -395,6 +403,7 @@ async function uploadDocumentsToBackend({
   uploadedBy,
   documentType,
   intakeCategory,
+  period = "",
   files,
   retentionPolicyDays = 90,
   sessionToken = "",
@@ -412,6 +421,7 @@ async function uploadDocumentsToBackend({
         uploadedBy,
         documentType,
         intakeCategory,
+        period,
         file,
         retentionPolicyDays,
         sessionToken,

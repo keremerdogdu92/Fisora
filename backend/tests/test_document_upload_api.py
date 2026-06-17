@@ -48,6 +48,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by": "mukellef-user",
                     "uploaded_by_user_id": "mukellef-user",
@@ -64,6 +65,7 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(len(workspace["uploaded_documents"]), 1)
         self.assertEqual(len(workspace["processing_jobs"]), 1)
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "fatura.pdf")
+        self.assertEqual(workspace["uploaded_documents"][0]["period"], "2026-05")
         pipeline = workspace["document_pipeline_events"]
         self.assertEqual([event["step"] for event in pipeline], ["uploaded", "file_preview_ready"])
         self.assertEqual(pipeline[0]["message_tr"], "Belge yüklendi.")
@@ -111,6 +113,49 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["client_id"], "client-1")
         self.assertEqual(payload["document_ref"], upload["document_ref"])
         self.assertEqual([event["step"] for event in payload["events"]], ["uploaded", "file_preview_ready"])
+
+    def test_onboarding_attachment_does_not_create_processing_job(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": False},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            response = client.post(
+                "/phase0/store/client-onboarding-attachment",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                data={
+                    "client_id": "client-1",
+                    "attachment_type": "tax_certificate",
+                    "uploaded_by": "mali-musavir",
+                    "uploaded_by_user_id": "mali-musavir",
+                },
+                files={"file": ("vergi-levhasi.pdf", b"%PDF-1.7", "application/pdf")},
+            )
+            workspace = client.get(
+                "/phase0/store/workspace/client-1",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["attachment_type"], "tax_certificate")
+        self.assertEqual(len(workspace["onboarding_attachments"]), 1)
+        self.assertEqual(workspace["uploaded_documents"], [])
+        self.assertEqual(workspace["processing_jobs"], [])
 
     def test_store_document_file_records_preview_fetch_failure_when_file_is_missing(self) -> None:
         if TestClient is None or phase0 is None or app is None:

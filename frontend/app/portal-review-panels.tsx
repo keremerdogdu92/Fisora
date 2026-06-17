@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Info, ReasonCard } from "./portal-shared";
-import type { CorrectionDraft, DocumentPipelineEvent, DraftLine, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
+import type { CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -103,6 +103,12 @@ function latestPipelineProblem(document: PilotDocument) {
   return [...(document.pipelineEvents ?? [])].reverse().find((event) => event.status === "error" || event.status === "warning");
 }
 
+function previewAuthHeaders(session: LocalSession | null | undefined, document?: PilotDocument): Record<string, string> {
+  if (session?.sessionToken) return { "X-Fisora-Session": session.sessionToken };
+  const userId = session?.userId || document?.uploadedBy || "";
+  return userId ? { "X-Fisora-User-Id": userId } : {};
+}
+
 export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineEvent[] }) {
   return (
     <section className="pipeline-timeline" aria-label="İşlem geçmişi">
@@ -134,7 +140,7 @@ export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineE
   );
 }
 
-export function DocumentPreview({ document }: { document?: PilotDocument }) {
+export function DocumentPreview({ document, session }: { document?: PilotDocument; session?: LocalSession | null }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
 
@@ -150,7 +156,7 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
       try {
         const response = await fetch(
           `${resolvePreviewApiBaseUrl()}/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`,
-          { cache: "no-store" },
+          { cache: "no-store", headers: previewAuthHeaders(session, document) },
         );
         if (!response.ok) throw new Error(`Önizleme alınamadı: ${response.status}`);
         const blob = await response.blob();
@@ -171,7 +177,7 @@ export function DocumentPreview({ document }: { document?: PilotDocument }) {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [document?.clientId, document?.originalDocumentRef]);
+  }, [document?.clientId, document?.originalDocumentRef, session?.sessionToken, session?.userId]);
 
   if (!document) {
     return (

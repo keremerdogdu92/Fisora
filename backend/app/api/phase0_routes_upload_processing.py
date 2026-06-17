@@ -35,6 +35,7 @@ def store_document_upload(
         client_id=payload.client_id,
         document_type=payload.document_type,
         intake_category=payload.intake_category,
+        period=payload.period,
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
         uploaded_by_user_id=payload.uploaded_by_user_id,
@@ -51,6 +52,7 @@ async def store_document_upload_multipart(
     client_id: str = Form(...),
     document_type: Literal["invoice", "einvoice_xml", "bank_statement", "pos_statement", "special_document"] = Form("invoice"),
     intake_category: str = Form(""),
+    period: str = Form(""),
     uploaded_by: str = Form(""),
     uploaded_by_user_id: str = Form(""),
     retention_policy_days: int = Form(90),
@@ -64,6 +66,7 @@ async def store_document_upload_multipart(
         client_id=client_id,
         document_type=document_type,
         intake_category=intake_category,
+        period=period,
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
         uploaded_by_user_id=uploaded_by_user_id,
@@ -94,6 +97,32 @@ def store_processing_jobs(
     return get_document_service().store_processing_jobs(
         client_id=client_id,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+
+
+@router.post("/store/client-onboarding-attachment")
+async def store_client_onboarding_attachment(
+    client_id: str = Form(...),
+    attachment_type: str = Form("tax_certificate"),
+    uploaded_by: str = Form(""),
+    uploaded_by_user_id: str = Form(""),
+    retention_policy_days: int = Form(365),
+    file: UploadFile = File(...),
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    content = await file.read()
+    return get_document_service().store_onboarding_attachment(
+        client_id=client_id,
+        attachment_type=attachment_type,
+        file_name=file.filename or "attachment.bin",
+        uploaded_by=uploaded_by,
+        uploaded_by_user_id=uploaded_by_user_id,
+        request_user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+        content=content,
+        size_bytes=len(content),
+        retention_policy_days=retention_policy_days,
     )
 
 

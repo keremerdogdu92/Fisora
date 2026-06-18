@@ -91,8 +91,12 @@ export function SettingsView({
   localFallbackAllowed,
   onLogin,
   onLogout,
+  onResetTestData,
   readinessView,
+  resetConfirmation,
+  resetStatus,
   session,
+  setResetConfirmation,
   setLoginPassword,
   setLoginRole,
   setLoginUserId,
@@ -114,8 +118,12 @@ export function SettingsView({
   localFallbackAllowed: boolean;
   onLogin: () => void | Promise<void>;
   onLogout: () => void;
+  onResetTestData: () => void | Promise<void>;
   readinessView: PilotReadinessView;
+  resetConfirmation: string;
+  resetStatus: string;
   session: LocalSession | null;
+  setResetConfirmation: (value: string) => void;
   setLoginPassword: (value: string) => void;
   setLoginRole: (value: "client_user" | "accountant") => void;
   setLoginUserId: (value: string) => void;
@@ -150,6 +158,31 @@ export function SettingsView({
         <Info label="Mükellef" value={String(dashboardMetrics.totalClients)} />
         <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
       </section>
+      {session?.role === "accountant" ? (
+        <section className="panel settings-danger-panel" aria-label="Test verisi temizleme">
+          <div>
+            <span>Test verisi</span>
+            <strong>Mükellefleri ve yüklenen dosyaları temizle</strong>
+            <p>{resetStatus || "Müşavir hesabı ve şifresi korunur; mükellefler, dosyalar, işler ve çıktılar silinir."}</p>
+          </div>
+          <div className="session-controls">
+            <input
+              aria-label="Temizleme onayı"
+              onChange={(event) => setResetConfirmation(event.target.value)}
+              placeholder="TEMIZLE"
+              value={resetConfirmation}
+            />
+            <button
+              className="danger-action"
+              disabled={resetConfirmation.trim() !== "TEMIZLE"}
+              onClick={onResetTestData}
+              type="button"
+            >
+              Temizle
+            </button>
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }

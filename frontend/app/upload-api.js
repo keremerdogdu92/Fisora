@@ -151,6 +151,28 @@ async function loginWithPassword({
   };
 }
 
+async function resetTestData({
+  apiBaseUrl,
+  confirmation,
+  userId,
+  sessionToken = "",
+  deleteFiles = true,
+  fetchImpl = fetch,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/admin/test-reset",
+    payload: {
+      confirmation: String(confirmation || ""),
+      delete_files: Boolean(deleteFiles),
+    },
+    headers: sessionToken
+      ? { "X-Fisora-Session": String(sessionToken) }
+      : { "X-Fisora-User-Id": String(userId || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID },
+    fetchImpl,
+  });
+}
+
 async function ensureUploadWorkspace({ apiBaseUrl, client, userId, displayName, sessionToken = "", fetchImpl = fetch }) {
   const clientPayload = buildClientBootstrapPayload(client);
   const headers = sessionToken ? { "X-Fisora-Session": String(sessionToken) } : {};
@@ -560,6 +582,7 @@ module.exports = {
   parseTaxCertificateFromBackend,
   pickUploadUser,
   requestStatementAiSuggestions,
+  resetTestData,
   resolveApiBaseUrl,
   setPortalPassword,
   storeReviewDecision,

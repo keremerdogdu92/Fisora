@@ -18,6 +18,7 @@ from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
 )
+from app.persistence.workflow_store import _clear_directory_contents
 
 
 ConnectFactory = Callable[[], Any]
@@ -240,6 +241,132 @@ class PostgresWorkflowStore:
 
     def list_ai_usage(self, *, client_id: str) -> list[dict[str, Any]]:
         return self._payloads(client_id, "ai_usage_event")
+
+    def reset_test_data(
+        self,
+        *,
+        document_storage_path: Path | str,
+        export_path: Path | str,
+        delete_files: bool = True,
+    ) -> dict[str, Any]:
+        self._ensure_tenant()
+        deleted_record_count = 0
+        deleted_portal_user_count = 0
+        deleted_client_count = 0
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select record_key
+                    from workflow_records
+                    where tenant_id = %s
+                      and client_id = %s
+                      and record_type = 'portal_user'
+                      and lower(payload->>'role') in ('accountant', 'admin')
+                    order by record_key asc
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+                )
+                preserved_user_ids = [str(row[0]) for row in cursor.fetchall()]
+                cursor.execute(
+                    """
+                    select count(*)
+                    from workflow_records
+                    where tenant_id = %s and record_type = 'client'
+                    """,
+                    (self.tenant_id,),
+                )
+                deleted_client_count = int(cursor.fetchone()[0] or 0)
+                for table_name in (
+                    "learning_rules",
+                    "review_decisions",
+                    "export_batches",
+                    "journal_entry_lines",
+                    "journal_entries",
+                    "counterparties",
+                    "invoice_lines",
+                    "documents",
+                    "chart_accounts",
+                    "chart_account_imports",
+                    "portal_user_client_access",
+                    "taxpayers",
+                ):
+                    cursor.execute(f"delete from {table_name} where tenant_id = %s", (self.tenant_id,))
+                cursor.execute(
+                    """
+                    delete from workflow_records
+                    where tenant_id = %s and client_id <> %s
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+                )
+                deleted_record_count += cursor.rowcount
+                cursor.execute(
+                    """
+                    delete from workflow_records
+                    where tenant_id = %s
+                      and client_id = %s
+                      and record_type = 'portal_user'
+                      and not (lower(payload->>'role') in ('accountant', 'admin'))
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+                )
+                deleted_portal_user_count = cursor.rowcount
+                deleted_record_count += cursor.rowcount
+                if preserved_user_ids:
+                    cursor.execute(
+                        """
+                        delete from workflow_records
+                        where tenant_id = %s
+                          and client_id = %s
+                          and record_type = 'auth_credential'
+                          and not (record_key = any(%s))
+                        """,
+                        (self.tenant_id, PORTAL_USERS_CLIENT_ID, preserved_user_ids),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        delete from workflow_records
+                        where tenant_id = %s
+                          and client_id = %s
+                          and record_type = 'auth_credential'
+                        """,
+                        (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+                    )
+                deleted_record_count += cursor.rowcount
+                cursor.execute(
+                    """
+                    delete from workflow_records
+                    where tenant_id = %s
+                      and client_id = %s
+                      and record_type in ('auth_session', 'auth_token')
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+                )
+                deleted_record_count += cursor.rowcount
+                cursor.execute(
+                    """
+                    delete from workflow_records
+                    where tenant_id = %s
+                      and client_id = %s
+                      and record_type not in ('portal_user', 'auth_credential')
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+                )
+                deleted_record_count += cursor.rowcount
+        deleted_file_count = 0
+        if delete_files:
+            deleted_file_count += _clear_directory_contents(Path(document_storage_path))
+            deleted_file_count += _clear_directory_contents(Path(export_path))
+        return {
+            "reset": True,
+            "deleted_client_count": deleted_client_count,
+            "deleted_portal_user_count": deleted_portal_user_count,
+            "deleted_record_count": deleted_record_count,
+            "deleted_file_count": deleted_file_count,
+            "preserved_portal_user_count": len(preserved_user_ids),
+            "preserved_user_ids": preserved_user_ids,
+        }
 
     def record_operation_event(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
         event_id = str(event.get("event_id") or uuid4())

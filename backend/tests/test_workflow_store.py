@@ -228,6 +228,75 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(denied["reason"], "client_not_onboarded")
         self.assertEqual(workspace["portal_users"][0]["user_id"], "mukellef-user")
 
+    def test_json_store_reset_test_data_preserves_accountant_login_and_deletes_client_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            document_dir = base / "documents"
+            export_dir = base / "exports"
+            stored_file = document_dir / "client-1" / "stored.pdf"
+            export_file = export_dir / "client-1-export.csv"
+            stored_file.parent.mkdir(parents=True)
+            export_dir.mkdir()
+            stored_file.write_bytes(b"stored")
+            export_file.write_text("export", encoding="utf-8")
+            store = JsonWorkflowStore(base / "phase0_store.json")
+            store.upsert_portal_user(
+                user_id="mali-musavir",
+                display_name="Mali Musavir",
+                role="accountant",
+                allowed_client_ids=["*"],
+            )
+            store.set_auth_password(user_id="mali-musavir", password_hash="hash-accountant")
+            store.upsert_portal_user(
+                user_id="client-user",
+                display_name="Client User",
+                role="client_user",
+                allowed_client_ids=["client-1"],
+            )
+            store.set_auth_password(user_id="client-user", password_hash="hash-client")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1", "title": "Client One"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(client_id="client-1", accounts=[{"raw_account_code": "100"}])
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "stored",
+                    "original_file_name": "stored.pdf",
+                    "storage_path": str(stored_file),
+                    "status": "stored",
+                },
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="stored.pdf",
+                result={"file_name": "stored.pdf", "export_status": "review_required"},
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref="stored.pdf",
+                document_type="invoice",
+                parser_kind="invoice_pdf",
+            )
+            store.save_export_package(client_id="client-1", package={"output_filename": export_file.name})
+
+            summary = store.reset_test_data(document_storage_path=document_dir, export_path=export_dir)
+            reloaded = JsonWorkflowStore(base / "phase0_store.json")
+            self.assertEqual(summary["preserved_portal_user_count"], 1)
+            self.assertEqual(summary["deleted_client_count"], 1)
+            self.assertGreaterEqual(summary["deleted_record_count"], 6)
+            self.assertGreaterEqual(summary["deleted_file_count"], 2)
+            self.assertEqual(reloaded.list_clients(), [])
+            self.assertEqual(reloaded.get_auth_password_hash(user_id="mali-musavir"), "hash-accountant")
+            self.assertEqual(reloaded.get_auth_password_hash(user_id="client-user"), "")
+            self.assertEqual(reloaded.get_portal_user("mali-musavir")["role"], "accountant")
+            self.assertEqual(reloaded.verify_portal_access(client_id="client-1", user_id="mali-musavir")["reason"], "client_not_onboarded")
+            self.assertFalse(reloaded.verify_portal_access(client_id="client-1", user_id="client-user")["allowed"])
+            self.assertFalse(stored_file.exists())
+            self.assertFalse(export_file.exists())
+
     def test_json_store_applies_document_retention_without_losing_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             storage_path = Path(temp_dir) / "expired.pdf"

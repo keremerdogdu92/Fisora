@@ -312,6 +312,11 @@ class AuthPasswordResetConfirmPayload(BaseModel):
     password: str
 
 
+class TestDataResetPayload(BaseModel):
+    confirmation: str
+    delete_files: bool = True
+
+
 class DocumentRetentionRunPayload(BaseModel):
     delete_files: bool = True
 

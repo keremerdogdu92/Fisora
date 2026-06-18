@@ -1937,6 +1937,29 @@ tbody tr:last-child td {
   text-transform: uppercase;
 }
 
+.settings-danger-panel {
+  background: #fff7f7;
+  border-color: rgba(185, 28, 28, 0.28);
+}
+
+.settings-danger-panel p {
+  color: #7f1d1d;
+  margin: 0.35rem 0 0;
+}
+
+.danger-action {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+.danger-action:disabled {
+  background: #d1d5db;
+  border-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
 .compact-upload {
   min-height: 92px;
 }

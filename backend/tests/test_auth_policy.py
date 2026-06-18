@@ -353,6 +353,108 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(login_old.status_code, 401)
         self.assertEqual(login_new.status_code, 200)
 
+    def test_admin_test_reset_preserves_accountant_password_and_removes_client_data(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.persistence.workflow_store import JsonWorkflowStore
+
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        previous_document_storage_path = phase0.DEFAULT_DOCUMENT_STORAGE_PATH
+        previous_export_path = phase0.DEFAULT_EXPORT_PATH
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                base = Path(temp_dir)
+                phase0.DEFAULT_STORE_PATH = base / "store.json"
+                phase0.DEFAULT_DOCUMENT_STORAGE_PATH = base / "documents"
+                phase0.DEFAULT_EXPORT_PATH = base / "exports"
+                stored_file = phase0.DEFAULT_DOCUMENT_STORAGE_PATH / "client-1" / "stored.pdf"
+                export_file = phase0.DEFAULT_EXPORT_PATH / "client-1.csv"
+                stored_file.parent.mkdir(parents=True)
+                phase0.DEFAULT_EXPORT_PATH.mkdir()
+                stored_file.write_bytes(b"stored")
+                export_file.write_text("export", encoding="utf-8")
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["*"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/auth/password",
+                    json={"user_id": "mali-musavir", "password": "GizliSifre123"},
+                )
+                client.post(
+                    "/phase0/store/client",
+                    json={"client_id": "client-1", "title": "Client One", "has_chart_accounts": True},
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "client-user",
+                        "display_name": "Client User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                store = JsonWorkflowStore(phase0.DEFAULT_STORE_PATH)
+                store.set_auth_password(user_id="client-user", password_hash="hash-client")
+                store.save_uploaded_document(
+                    client_id="client-1",
+                    document={
+                        "document_id": "stored",
+                        "original_file_name": "stored.pdf",
+                        "storage_path": str(stored_file),
+                        "status": "stored",
+                    },
+                )
+                forbidden = client.post(
+                    "/phase0/store/admin/test-reset",
+                    headers={"X-Fisora-User-Id": "client-user"},
+                    json={"confirmation": "TEMIZLE"},
+                )
+                bad_confirmation = client.post(
+                    "/phase0/store/admin/test-reset",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"confirmation": "sil"},
+                )
+                reset = client.post(
+                    "/phase0/store/admin/test-reset",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"confirmation": "TEMIZLE"},
+                )
+                clients_after = client.get("/phase0/store/clients", headers={"X-Fisora-User-Id": "mali-musavir"})
+                store_after = JsonWorkflowStore(phase0.DEFAULT_STORE_PATH)
+                accountant_password_after = store_after.get_auth_password_hash(user_id="mali-musavir")
+                client_password_after = store_after.get_auth_password_hash(user_id="client-user")
+                stored_file_exists = stored_file.exists()
+                export_file_exists = export_file.exists()
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = previous_document_storage_path
+            phase0.DEFAULT_EXPORT_PATH = previous_export_path
+
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(bad_confirmation.status_code, 400)
+        self.assertEqual(reset.status_code, 200)
+        self.assertEqual(reset.json()["deleted_client_count"], 1)
+        self.assertEqual(reset.json()["preserved_portal_user_count"], 1)
+        self.assertEqual(clients_after.status_code, 200)
+        self.assertEqual(clients_after.json()["clients"], [])
+        self.assertTrue(accountant_password_after)
+        self.assertEqual(client_password_after, "")
+        self.assertFalse(stored_file_exists)
+        self.assertFalse(export_file_exists)
+
     def test_product_classification_records_ai_usage_when_client_id_is_supplied(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

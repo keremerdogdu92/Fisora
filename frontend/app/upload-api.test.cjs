@@ -13,6 +13,7 @@ const {
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   requestStatementAiSuggestions,
+  resetTestData,
   resolveApiBaseUrl,
   setPortalPassword,
   storeReviewDecision,
@@ -686,4 +687,43 @@ test("storeReviewDecision marks one-click rule requests as apply-to-similar", as
   assert.equal(request.url, "http://localhost:8000/phase0/store/review-decision");
   assert.equal(JSON.parse(request.init.body).decision.apply_to_similar, true);
   assert.equal(JSON.parse(request.init.body).decision.action, "suggest_for_similar");
+});
+
+test("resetTestData posts guarded accountant reset request", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return {
+      ok: true,
+      json: async () => ({
+        reset: true,
+        deleted_client_count: 2,
+        preserved_portal_user_count: 1,
+      }),
+    };
+  };
+
+  const result = await resetTestData({
+    apiBaseUrl: "http://localhost:8000",
+    confirmation: "TEMIZLE",
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/admin/test-reset");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    confirmation: "TEMIZLE",
+    delete_files: true,
+  });
+  assert.deepEqual(result, {
+    reset: true,
+    deleted_client_count: 2,
+    preserved_portal_user_count: 1,
+  });
 });

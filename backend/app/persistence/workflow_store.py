@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -261,6 +262,81 @@ class JsonWorkflowStore:
             for event in data["ai_usage_events"]
             if event.get("client_id") == client_id
         ]
+
+    def reset_test_data(
+        self,
+        *,
+        document_storage_path: Path | str,
+        export_path: Path | str,
+        delete_files: bool = True,
+    ) -> dict[str, Any]:
+        data = self._read()
+        preserved_users = {
+            user_id: user
+            for user_id, user in data["portal_users"].items()
+            if str(user.get("role") or "").strip().lower() in {"accountant", "admin"}
+        }
+        preserved_credentials = {
+            user_id: credential
+            for user_id, credential in data["auth_credentials"].items()
+            if user_id in preserved_users
+        }
+        deleted_portal_user_count = len(data["portal_users"]) - len(preserved_users)
+        deleted_record_count = (
+            len(data["clients"])
+            + len(data["chart_accounts"])
+            + len(data["uploaded_documents"])
+            + len(data["onboarding_attachments"])
+            + len(data["documents"])
+            + len(data["processing_jobs"])
+            + len(data["review_decisions"])
+            + len(data["learning_events"])
+            + len(data["export_packages"])
+            + len(data["auth_sessions"])
+            + len(data["auth_tokens"])
+            + len(data["ai_usage_events"])
+            + len(data["operation_events"])
+            + len(data["document_pipeline_events"])
+            + len(data["nace_research_profiles"])
+            + deleted_portal_user_count
+            + (len(data["auth_credentials"]) - len(preserved_credentials))
+        )
+        deleted_client_count = len(data["clients"])
+        data.update(
+            {
+                "clients": {},
+                "chart_accounts": {},
+                "uploaded_documents": {},
+                "onboarding_attachments": {},
+                "documents": {},
+                "processing_jobs": [],
+                "review_decisions": [],
+                "learning_events": [],
+                "export_packages": [],
+                "portal_users": preserved_users,
+                "auth_credentials": preserved_credentials,
+                "auth_sessions": {},
+                "auth_tokens": {},
+                "ai_usage_events": [],
+                "operation_events": [],
+                "document_pipeline_events": [],
+                "nace_research_profiles": {},
+            }
+        )
+        self._write(data)
+        deleted_file_count = 0
+        if delete_files:
+            deleted_file_count += _clear_directory_contents(Path(document_storage_path))
+            deleted_file_count += _clear_directory_contents(Path(export_path))
+        return {
+            "reset": True,
+            "deleted_client_count": deleted_client_count,
+            "deleted_portal_user_count": deleted_portal_user_count,
+            "deleted_record_count": deleted_record_count,
+            "deleted_file_count": deleted_file_count,
+            "preserved_portal_user_count": len(preserved_users),
+            "preserved_user_ids": sorted(preserved_users),
+        }
 
     def record_operation_event(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -638,3 +714,17 @@ class JsonWorkflowStore:
     @staticmethod
     def _document_key(client_id: str, document_ref: str) -> str:
         return f"{client_id}:{document_ref}"
+
+
+def _clear_directory_contents(path: Path) -> int:
+    if not path.exists() or not path.is_dir():
+        return 0
+    deleted_count = 0
+    for child in path.iterdir():
+        if child.is_dir():
+            deleted_count += sum(1 for item in child.rglob("*") if item.is_file())
+            shutil.rmtree(child)
+        elif child.is_file():
+            child.unlink()
+            deleted_count += 1
+    return deleted_count

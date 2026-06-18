@@ -1,2 +1,3 @@
 export { persistSession, readStoredSession, roleLabels } from "../../portal-session";
-export { loginWithPassword, resolveApiBaseUrl } from "../../upload-api";
+export { loginWithPassword, resetTestData, resolveApiBaseUrl } from "../../upload-api";
+export { useTestDataReset } from "./use-test-data-reset";

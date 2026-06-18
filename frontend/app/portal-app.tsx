@@ -17,6 +17,7 @@ import {
   persistSession,
   readStoredSession,
   resolveApiBaseUrl,
+  useTestDataReset,
 } from "./features/session";
 import {
   PilotQueryProvider,
@@ -403,6 +404,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     setSelectedStatementLineNo,
     setStatementAiStatus,
   });
+  const testDataReset = useTestDataReset({ loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session, setSelectedClientId, setSelectedDocumentId });
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
 
   return (
@@ -583,6 +585,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           setLoginRole={setLoginRole}
           setLoginUserId={setLoginUserId}
           source={source}
+          {...testDataReset}
         />
       ) : null}
 

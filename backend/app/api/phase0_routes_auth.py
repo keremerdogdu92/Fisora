@@ -5,8 +5,11 @@ from fastapi import APIRouter, Cookie, Header, HTTPException, Response
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
     clear_portal_session_cookie,
+    default_document_storage_path,
+    default_export_path,
     get_workflow_store,
     password_bootstrap_enabled,
+    request_user_id,
     set_portal_session_cookie,
 )
 from app.api.phase0_schemas import (
@@ -19,6 +22,7 @@ from app.api.phase0_schemas import (
     AuthPasswordResetPayload,
     PortalAccessPayload,
     PortalUserPayload,
+    TestDataResetPayload,
 )
 from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.session_auth import (
@@ -204,3 +208,29 @@ def store_auth_logout(
     result = get_workflow_store().revoke_auth_session(token_hash=hash_session_token(token))
     clear_portal_session_cookie(response)
     return result
+
+
+@router.post("/store/admin/test-reset")
+def store_admin_test_reset(
+    payload: TestDataResetPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    if payload.confirmation.strip() != "TEMIZLE":
+        raise HTTPException(status_code=400, detail={"allowed": False, "reason": "confirmation_required"})
+    store = get_workflow_store()
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"allowed": False, "reason": "user_required"})
+    portal_user = store.get_portal_user(user_id) if hasattr(store, "get_portal_user") else None
+    role = str((portal_user or {}).get("role") or "").strip().lower()
+    if role not in {"accountant", "admin"}:
+        raise HTTPException(status_code=403, detail={"allowed": False, "reason": "accountant_required"})
+    if not hasattr(store, "reset_test_data"):
+        raise HTTPException(status_code=501, detail={"allowed": False, "reason": "reset_not_supported"})
+    return store.reset_test_data(
+        document_storage_path=default_document_storage_path(),
+        export_path=default_export_path(),
+        delete_files=payload.delete_files,
+    )

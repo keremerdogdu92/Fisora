@@ -17,7 +17,7 @@ export function useDocumentWorkflow({
   selectedClientId?: string;
 }) {
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
-  const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("invoices");
+  const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("sales_invoices");
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("review_required");
   const [selectedStatementLineNo, setSelectedStatementLineNo] = useState(0);
 

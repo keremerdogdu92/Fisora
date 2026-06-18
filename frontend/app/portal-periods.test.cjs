@@ -25,3 +25,11 @@ test("client portal keeps upload period fixed and list period selectable", () =>
   assert.match(clientView, /Yükleme dönemi/);
   assert.match(clientView, /Belge listesi/);
 });
+test("client portal renders document list and preview side by side", () => {
+  const clientView = readFileSync(join(__dirname, "portal-client-view.tsx"), "utf8");
+
+  assert.match(clientView, /client-document-workspace/);
+  assert.match(clientView, /ClientDocumentDetailPanel/);
+  assert.doesNotMatch(clientView, /documentTab === "list"/);
+  assert.doesNotMatch(clientView, /setDocumentTab\("preview"\)/);
+});

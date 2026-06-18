@@ -82,6 +82,16 @@ function intakeSegmentForDocument(document) {
   return "other_documents";
 }
 
+function processingSegmentForDocument(document) {
+  const intakeCategory = String(document?.intakeCategory || document?.intake_category || "");
+  const accountingDirection = String(document?.accountingDirection || document?.accounting_direction || "");
+  if (accountingDirection === "sales" || intakeCategory === "sales_invoice") return "sales_invoices";
+  if (accountingDirection === "purchase" || intakeCategory === "purchase_invoice") return "purchase_invoices";
+  if (INTAKE_INVOICE_ALIASES.has(intakeCategory) || INVOICE_INTAKES.has(intakeCategory)) return "invoices";
+  if (intakeCategory === "bank_statement" || String(document?.documentType || "") === "bank_statement") return "bank_statements";
+  return "other_documents";
+}
+
 const INTAKE_INVOICE_ALIASES = new Set(["invoice", "einvoice_xml"]);
 
 function countDocumentsBySegment(documents) {
@@ -125,7 +135,15 @@ function clientUploadTracking({ clients = [], documents = [] } = {}) {
 function documentsForProcessing({ documents = [], clientId = "", segment = "invoices" } = {}) {
   return safeList(documents).filter((document) => {
     const matchesClient = String(document?.clientId || "") === String(clientId || "");
-    return matchesClient && intakeSegmentForDocument(document) === segment;
+    if (!matchesClient) return false;
+    if (segment === "invoice_review") return intakeSegmentForDocument(document) === "invoice_review";
+    const processingSegment = processingSegmentForDocument(document);
+    if (segment === "invoices") {
+      return processingSegment === "sales_invoices"
+        || processingSegment === "purchase_invoices"
+        || processingSegment === "invoices";
+    }
+    return processingSegment === segment;
   });
 }
 

@@ -273,7 +273,7 @@ export type ReviewData = {
 
 export type PilotMode = "client" | "accountant" | "documents" | "clients" | "settings" | "exports" | "operations";
 export type PortalRouteKey = "home" | "mukellef" | "musavir" | "belgeler" | "mukellefler" | "ayarlar" | "cikti" | "operasyon";
-export type DocumentSegment = "invoices" | "bank_statements" | "other_documents";
+export type DocumentSegment = "sales_invoices" | "purchase_invoices" | "invoices" | "bank_statements" | "other_documents";
 export type PortalNavItem = { mode: PilotMode; label: string; href: string };
 export type ReviewFilter = "all" | "review_required" | "export_ready" | "cancel_requested";
 export type ExportMode = "bulk" | "by_client";

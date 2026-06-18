@@ -156,7 +156,8 @@ export function ClientPortal({
         {uploadStatus ? <p className="decision-status">{uploadStatus}</p> : null}
       </div>
 
-      <div className="panel">
+      <div className="client-document-workspace">
+      <div className="panel client-tab-panel">
         <div className="panel-heading">
           <div>
             <h2>Belge listesi</h2>
@@ -182,7 +183,6 @@ export function ClientPortal({
           ))}
         </div>
       </div>
-
       <ClientDocumentDetailPanel
         cancelReason={cancelReason}
         cancellationView={cancellationView}
@@ -192,6 +192,7 @@ export function ClientPortal({
         selectedDocument={selectedDocument}
         session={session}
       />
+      </div>
     </section>
   );
 }

@@ -491,6 +491,13 @@ button:disabled {
   grid-template-columns: minmax(300px, 0.7fr) minmax(360px, 0.9fr) minmax(360px, 1fr);
 }
 
+.client-document-workspace {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
+}
+
 .panel {
   padding: 16px;
 }
@@ -1900,6 +1907,10 @@ tbody tr:last-child td {
   padding: 8px;
 }
 
+.segment-tabs-sub {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .segment-tabs button {
   background: transparent;
   border: 1px solid transparent;
@@ -2028,6 +2039,7 @@ code {
   .session-controls,
   .selected-client-strip,
   .client-portal,
+  .client-document-workspace,
   .accountant-workspace,
   .dashboard-visual-grid,
   .client-management-page,
@@ -2069,6 +2081,7 @@ code {
 
   .portal-nav,
   .segment-tabs,
+  .client-document-workspace,
   .dashboard-visual-grid,
   .client-management-page,
   .intake-tabs,

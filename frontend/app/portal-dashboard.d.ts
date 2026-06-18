@@ -32,7 +32,7 @@ export type PortalChartRow = {
   count: number;
 };
 
-export type PortalDocumentSegment = "invoices" | "bank_statements" | "other_documents";
+export type PortalDocumentSegment = "sales_invoices" | "purchase_invoices" | "invoices" | "bank_statements" | "other_documents";
 
 export type ClientCancellationViewModel<TDocument = unknown> = {
   selectedDocument: TDocument | null;

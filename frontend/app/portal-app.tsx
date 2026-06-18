@@ -492,6 +492,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           selectedDocumentSegment={selectedDocumentSegment}
           setSelectedDocumentSegment={(segment) => {
             setSelectedDocumentSegment(segment);
+            setReviewFilter("review_required");
             setSelectedDocumentId("");
           }}
         >

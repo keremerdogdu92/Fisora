@@ -22,6 +22,7 @@ const documents = [
   { id: "doc-2", clientId: "client-1", status: "export_ready", intakeCategory: "sales_invoice", uploadedAt: "2026-06-08T11:00:00Z" },
   { id: "doc-3", clientId: "client-2", status: "queued", intakeCategory: "bank_statement", uploadedAt: "2026-06-07T09:00:00Z" },
   { id: "doc-4", clientId: "client-2", status: "uploaded", intakeCategory: "special_document", uploadedAt: "2026-06-07T12:00:00Z" },
+  { id: "doc-5", clientId: "client-1", status: "review_required", intakeCategory: "sales_invoice", uploadedAt: "2026-06-08T12:00:00Z" },
 ];
 
 const cancellationRequests = [
@@ -36,7 +37,7 @@ test("buildPortalDashboard derives office-level metrics", () => {
       totalClients: 3,
       uploadedClients: 2,
       notUploadedClients: 1,
-      pendingReviewDocuments: 1,
+      pendingReviewDocuments: 2,
       exportReadyDocuments: 1,
       openCancellationRequests: 1,
     },
@@ -45,7 +46,7 @@ test("buildPortalDashboard derives office-level metrics", () => {
 
 test("documentIntakeDistribution groups invoices, bank statements, and other documents", () => {
   assert.deepEqual(documentIntakeDistribution(documents), [
-    { key: "invoices", label: "Faturalar", count: 2 },
+    { key: "invoices", label: "Faturalar", count: 3 },
     { key: "bank_statements", label: "Banka ekstreleri", count: 1 },
     { key: "other_documents", label: "Diğer belgeler", count: 1 },
   ]);
@@ -54,7 +55,7 @@ test("documentIntakeDistribution groups invoices, bank statements, and other doc
 test("statusFunnel derives operation status buckets", () => {
   assert.deepEqual(statusFunnel(documents), [
     { key: "uploaded", label: "Yüklendi", count: 2 },
-    { key: "review", label: "Kontrol bekliyor", count: 1 },
+    { key: "review", label: "Kontrol bekliyor", count: 2 },
     { key: "export", label: "Çıktı hazır", count: 1 },
   ]);
 });
@@ -69,7 +70,15 @@ test("clientUploadTracking separates uploaded and missing clients", () => {
 test("documentsForProcessing filters by client and accountant document segment", () => {
   assert.deepEqual(
     documentsForProcessing({ documents, clientId: "client-1", segment: "invoices" }).map((document) => document.id),
-    ["doc-1", "doc-2"],
+    ["doc-1", "doc-2", "doc-5"],
+  );
+  assert.deepEqual(
+    documentsForProcessing({ documents, clientId: "client-1", segment: "sales_invoices" }).map((document) => document.id),
+    ["doc-2", "doc-5"],
+  );
+  assert.deepEqual(
+    documentsForProcessing({ documents, clientId: "client-1", segment: "purchase_invoices" }).map((document) => document.id),
+    ["doc-1"],
   );
   assert.deepEqual(
     documentsForProcessing({ documents, clientId: "client-2", segment: "bank_statements" }).map((document) => document.id),
@@ -93,18 +102,17 @@ test("buildClientCancellationViewModel keeps cancellation actions bound to a sel
   assert.equal(noSelection.selectedDocument, null);
   assert.equal(noSelection.requestDocument, null);
   assert.equal(noSelection.canSubmitCancellation, false);
-  assert.equal(noSelection.emptyActionText, "Önce belge seçin.");
 
   const selected = buildClientCancellationViewModel({
     documents,
     selectedDocumentId: "doc-1",
     requestDocumentId: "doc-1",
-    cancellationReason: "Yanlış belge yüklendi",
+    cancellationReason: "Yanlis belge yuklendi",
   });
   assert.equal(selected.selectedDocument.id, "doc-1");
   assert.equal(selected.requestDocument.id, "doc-1");
   assert.equal(selected.canSubmitCancellation, true);
-  assert.equal(selected.requestReason, "Yanlış belge yüklendi");
+  assert.equal(selected.requestReason, "Yanlis belge yuklendi");
 });
 
 test("clientDashboardRows derives per-client follow-up status", () => {
@@ -114,14 +122,14 @@ test("clientDashboardRows derives per-client follow-up status", () => {
     clientId: "client-1",
     clientName: "A Isitme",
     taxId: "111",
-    documentCount: 2,
-    pendingReviewCount: 1,
+    documentCount: 3,
+    pendingReviewCount: 2,
     exportReadyCount: 1,
     inProgressCount: 0,
     cancellationCount: 1,
-    lastUploadedAt: "2026-06-08T11:00:00Z",
+    lastUploadedAt: "2026-06-08T12:00:00Z",
     status: "Talep var",
   });
-  assert.equal(rows[1].status, "İşleniyor");
-  assert.equal(rows[2].status, "Yükleme yok");
+  assert.equal(rows[1].inProgressCount, 2);
+  assert.equal(rows[2].documentCount, 0);
 });

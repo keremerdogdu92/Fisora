@@ -20,7 +20,7 @@ from app.domain.chart_accounts import (
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
 from app.domain.ai_classification import AiClassificationContext, AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
-from app.domain.openai_provider import GroqAccountingProvider, OpenAiAccountingProvider
+from app.domain.openai_provider import ChatCompletionsAccountingProvider, GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.business_relevance import (
     build_activity_profile,
     ClientProfile,
@@ -189,6 +189,64 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(payload["checks"]["ai_provider_configured"])
         self.assertEqual(payload["ai_model"], "openai/gpt-oss-20b")
         self.assertNotIn("ai_model_missing", payload["warnings"])
+
+    def test_production_readiness_accepts_three_provider_ai_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER_CHAIN": "groq,openrouter,cerebras",
+                    "GROQ_API_KEY": "gsk-test",
+                    "OPENROUTER_API_KEY": "or-test",
+                    "CEREBRAS_API_KEY": "csk-test",
+                    "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                    "FISORA_OPENROUTER_MODEL": "openai/gpt-oss-20b:free",
+                    "FISORA_CEREBRAS_MODEL": "gpt-oss-120b",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["ai_provider_configured"])
+        self.assertEqual(payload["ai_provider"], "groq>openrouter>cerebras")
+        self.assertEqual(payload["ai_provider_chain"], ["groq", "openrouter", "cerebras"])
+        self.assertEqual(payload["ai_model"], "openai/gpt-oss-20b > openai/gpt-oss-20b:free > gpt-oss-120b")
+        self.assertTrue(payload["ai_openrouter_key_present"])
+        self.assertTrue(payload["ai_cerebras_key_present"])
+        self.assertNotIn("ai_openrouter_key_missing", payload["warnings"])
+        self.assertNotIn("ai_cerebras_key_missing", payload["warnings"])
+
+    def test_production_readiness_warns_when_chain_provider_key_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER_CHAIN": "groq,openrouter,cerebras",
+                    "GROQ_API_KEY": "gsk-test",
+                    "OPENROUTER_API_KEY": "or-test",
+                    "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                    "FISORA_OPENROUTER_MODEL": "openai/gpt-oss-20b:free",
+                    "FISORA_CEREBRAS_MODEL": "gpt-oss-120b",
+                },
+            )
+
+        self.assertFalse(payload["checks"]["ai_provider_configured"])
+        self.assertIn("ai_provider_configured", payload["blocking"])
+        self.assertIn("ai_cerebras_key_missing", payload["warnings"])
 
     def test_pilot_sellable_allows_closed_pilot_without_verified_zirve_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1005,6 +1063,68 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(provider.provider_name, "groq")
         self.assertIn("Bilinmeyen banka hizmet bedeli", request_payload["input"][1]["content"])
         self.assertEqual(response["category"], "bilinmeyen")
+
+    def test_chat_completions_provider_posts_structured_prompt_and_extracts_json(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"category":"genel_gider","confidence":82,'
+                                    '"reason":"Banka masrafi genel gider olarak islenebilir.",'
+                                    '"evidence":["banka masrafi"],"suggested_account_code":"770.01",'
+                                    '"suggested_counterparty_code":"320.B04",'
+                                    '"risk_flags":["accountant_review_required"],'
+                                    '"account_reason":"Mevcut gider hesabi kullanildi."}'
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["json"] = json
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        provider = ChatCompletionsAccountingProvider(
+            api_key="or-test",
+            model="openai/gpt-oss-20b:free",
+            chat_completions_url="https://openrouter.ai/api/v1/chat/completions",
+            provider_name="openrouter",
+            key_name="OPENROUTER_API_KEY",
+            extra_headers={"HTTP-Referer": "http://185.184.208.188", "X-Title": "Fisora Operasyon Portal"},
+            http_client=FakeClient(),
+        )
+        response = provider.classify_product(
+            AiClassificationRequest(
+                raw_line="Banka pos komisyon bedeli",
+                supplier_hint="Banka",
+                allowed_categories=("genel_gider", "bilinmeyen"),
+                max_input_chars=80,
+            )
+        )
+
+        request_payload = captured["json"]
+        self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer or-test")
+        self.assertEqual(captured["headers"]["HTTP-Referer"], "http://185.184.208.188")
+        self.assertEqual(captured["headers"]["X-Title"], "Fisora Operasyon Portal")
+        self.assertEqual(request_payload["model"], "openai/gpt-oss-20b:free")
+        self.assertFalse(request_payload["stream"])
+        self.assertEqual(request_payload["response_format"]["type"], "json_object")
+        self.assertIn("Banka pos komisyon bedeli", request_payload["messages"][1]["content"])
+        self.assertEqual(response["suggested_account_code"], "770.01")
 
     def test_ai_classification_request_includes_controlled_activity_tags(self) -> None:
         request = AiClassificationRequest(

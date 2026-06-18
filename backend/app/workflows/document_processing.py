@@ -14,7 +14,18 @@ from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
 from app.domain.matching_simulation import AccountSelection, simulate_invoice
 from app.domain.nace_research import resolve_nace_research_profile
-from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL, FallbackAccountingProvider, GroqAccountingProvider, OpenAiAccountingProvider
+from app.domain.openai_provider import (
+    CEREBRAS_CHAT_COMPLETIONS_URL,
+    DEFAULT_CEREBRAS_MODEL,
+    DEFAULT_GROQ_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_MODEL,
+    OPENROUTER_CHAT_COMPLETIONS_URL,
+    ChatCompletionsAccountingProvider,
+    FallbackAccountingProvider,
+    GroqAccountingProvider,
+    OpenAiAccountingProvider,
+)
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
 from app.domain.statement_ai_suggestions import (
     StatementAiSuggestionPolicy,
@@ -166,6 +177,26 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
             api_key=source.get("GROQ_API_KEY", ""),
             model=source.get("FISORA_GROQ_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_GROQ_MODEL)),
         )
+    if provider_name == "openrouter":
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("OPENROUTER_API_KEY", ""),
+            model=source.get("FISORA_OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL),
+            chat_completions_url=source.get("FISORA_OPENROUTER_CHAT_COMPLETIONS_URL", OPENROUTER_CHAT_COMPLETIONS_URL),
+            provider_name="openrouter",
+            key_name="OPENROUTER_API_KEY",
+            extra_headers={
+                "HTTP-Referer": source.get("FISORA_OPENROUTER_SITE_URL", ""),
+                "X-Title": source.get("FISORA_OPENROUTER_APP_TITLE", ""),
+            },
+        )
+    if provider_name == "cerebras":
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("CEREBRAS_API_KEY", ""),
+            model=source.get("FISORA_CEREBRAS_MODEL", DEFAULT_CEREBRAS_MODEL),
+            chat_completions_url=source.get("FISORA_CEREBRAS_CHAT_COMPLETIONS_URL", CEREBRAS_CHAT_COMPLETIONS_URL),
+            provider_name="cerebras",
+            key_name="CEREBRAS_API_KEY",
+        )
     return OpenAiAccountingProvider(
         api_key=source.get("OPENAI_API_KEY", ""),
         model=source.get("FISORA_OPENAI_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL)),
@@ -179,9 +210,10 @@ def _provider_chain_from_env(source: dict[str, str] | Any) -> OpenAiAccountingPr
         if name.strip()
     ]
     provider_name = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower()
-    if not chain and provider_name in {"openai", "groq"}:
+    supported_providers = {"openai", "groq", "openrouter", "cerebras"}
+    if not chain and provider_name in supported_providers:
         chain = [provider_name]
-    chain = [name for name in chain if name in {"openai", "groq"}]
+    chain = [name for name in chain if name in supported_providers]
     if not chain:
         return None
     providers = [_accounting_provider_from_env(name, source) for name in chain]

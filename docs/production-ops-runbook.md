@@ -41,14 +41,23 @@ FISORA_HTTP_PORT=80
 FISORA_AUTH_MODE=mock_header_required
 FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED=false
 FISORA_AI_PROVIDER=groq
+FISORA_AI_PROVIDER_CHAIN=groq,openrouter,cerebras
 FISORA_AI_MODEL=openai/gpt-oss-20b
+FISORA_GROQ_MODEL=openai/gpt-oss-20b
+FISORA_OPENROUTER_MODEL=openai/gpt-oss-20b:free
+FISORA_OPENROUTER_SITE_URL=http://185.184.208.188
+FISORA_OPENROUTER_APP_TITLE=Fisora Operasyon Portal
+FISORA_CEREBRAS_MODEL=gpt-oss-120b
 FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b
 FISORA_AI_MONTHLY_CAP_USD=0.01
 GROQ_API_KEY=...
+OPENROUTER_API_KEY=...
+CEREBRAS_API_KEY=...
 ```
 
-`GROQ_API_KEY` chat'e, GitHub'a veya commit'e yazilmaz; yalnizca serverdaki
-`deploy/production.env` dosyasinda tutulur.
+`GROQ_API_KEY`, `OPENROUTER_API_KEY` ve `CEREBRAS_API_KEY` chat'e, GitHub'a
+veya commit'e yazilmaz; yalnizca serverdaki `deploy/production.env` dosyasinda
+tutulur.
 
 4. Compose config kontrolu:
 

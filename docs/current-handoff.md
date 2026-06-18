@@ -11,12 +11,14 @@ oturumdan devam etmek icin son durumu ozetler.
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
-- AI fallback kodu: `FISORA_AI_PROVIDER_CHAIN=groq,openai` destekli; serverda
-  su an `OPENAI_API_KEY` bos oldugu icin canli zincir Groq ile sinirli.
+- AI fallback kodu: `FISORA_AI_PROVIDER_CHAIN=groq,openrouter,cerebras`
+  destekli. Keyler sadece serverdaki ignored `deploy/production.env` dosyasinda
+  tutulur.
 - Server env dosyasi: `/opt/fisora/app/deploy/production.env`
 
-`deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD`, `GROQ_API_KEY`
-ve varsa fallback provider keyleri sadece serverdaki bu dosyada tutulur.
+`deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD`, `GROQ_API_KEY`,
+`OPENROUTER_API_KEY`, `CEREBRAS_API_KEY` ve varsa fallback provider keyleri
+sadece serverdaki bu dosyada tutulur.
 
 ## Yeni Bilgisayarda Devam Etme
 
@@ -89,18 +91,28 @@ FISORA_HTTP_PORT=80
 FISORA_AUTH_MODE=mock_header_required
 FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED=false
 FISORA_AI_PROVIDER=groq
+FISORA_AI_PROVIDER_CHAIN=groq,openrouter,cerebras
 FISORA_AI_MODEL=openai/gpt-oss-20b
+FISORA_GROQ_MODEL=openai/gpt-oss-20b
+FISORA_OPENROUTER_MODEL=openai/gpt-oss-20b:free
+FISORA_OPENROUTER_SITE_URL=http://185.184.208.188
+FISORA_OPENROUTER_APP_TITLE=Fisora Operasyon Portal
+FISORA_CEREBRAS_MODEL=gpt-oss-120b
 FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b
 FISORA_AI_MONTHLY_CAP_USD=0.01
 GROQ_API_KEY=<groq-key>
+OPENROUTER_API_KEY=<rotated-openrouter-key>
+CEREBRAS_API_KEY=<cerebras-key>
 OPENAI_API_KEY=
 ```
 
 Key'i gostermeden kontrol:
 
 ```bash
-grep -E 'FISORA_AUTH_MODE|FISORA_AI_PROVIDER|FISORA_AI_MODEL|FISORA_AI_COMPARISON_MODEL' deploy/production.env
+grep -E 'FISORA_AUTH_MODE|FISORA_AI_PROVIDER|FISORA_AI_PROVIDER_CHAIN|FISORA_AI_MODEL|FISORA_(GROQ|OPENROUTER|CEREBRAS)_MODEL|FISORA_AI_COMPARISON_MODEL' deploy/production.env
 grep -q '^GROQ_API_KEY=.' deploy/production.env && echo "GROQ key var" || echo "GROQ key eksik"
+grep -q '^OPENROUTER_API_KEY=.' deploy/production.env && echo "OpenRouter key var" || echo "OpenRouter key eksik"
+grep -q '^CEREBRAS_API_KEY=.' deploy/production.env && echo "Cerebras key var" || echo "Cerebras key eksik"
 ```
 
 ## Beklenen Health ve Readiness

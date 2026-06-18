@@ -6,7 +6,12 @@ from typing import Mapping
 
 from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
-from app.domain.openai_provider import DEFAULT_GROQ_MODEL, DEFAULT_OPENAI_MODEL
+from app.domain.openai_provider import (
+    DEFAULT_CEREBRAS_MODEL,
+    DEFAULT_GROQ_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    DEFAULT_OPENROUTER_MODEL,
+)
 from app.domain.rate_limits import rate_limit_config
 from app.domain.storage_adapters import storage_readiness
 from app.domain.system_health import backup_health, storage_usage_health
@@ -18,6 +23,42 @@ def _env_bool(value: str, *, default: bool = False) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _ai_provider_chain(source: Mapping[str, str]) -> list[str]:
+    chain = [
+        name.strip().lower()
+        for name in source.get("FISORA_AI_PROVIDER_CHAIN", "").split(",")
+        if name.strip()
+    ]
+    provider_name = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower() or "disabled"
+    if not chain and provider_name != "disabled":
+        chain = [provider_name]
+    return chain
+
+
+def _ai_provider_model(provider_name: str, source: Mapping[str, str]) -> str:
+    configured_ai_model = source.get("FISORA_AI_MODEL", "").strip()
+    if provider_name == "openai":
+        return source.get("FISORA_OPENAI_MODEL", "").strip() or configured_ai_model or DEFAULT_OPENAI_MODEL
+    if provider_name == "groq":
+        return source.get("FISORA_GROQ_MODEL", "").strip() or configured_ai_model or DEFAULT_GROQ_MODEL
+    if provider_name == "openrouter":
+        return source.get("FISORA_OPENROUTER_MODEL", "").strip() or DEFAULT_OPENROUTER_MODEL
+    if provider_name == "cerebras":
+        return source.get("FISORA_CEREBRAS_MODEL", "").strip() or DEFAULT_CEREBRAS_MODEL
+    return configured_ai_model
+
+
+def _ai_provider_key_present(provider_name: str, source: Mapping[str, str]) -> bool:
+    key_names = {
+        "openai": "OPENAI_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "cerebras": "CEREBRAS_API_KEY",
+    }
+    key_name = key_names.get(provider_name, "")
+    return bool(key_name and source.get(key_name, "").strip())
+
+
 def production_readiness_payload(
     *,
     document_storage_path: Path | str,
@@ -26,24 +67,24 @@ def production_readiness_payload(
     env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     source = env if env is not None else os.environ
-    ai_provider = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower() or "disabled"
-    configured_ai_model = source.get("FISORA_AI_MODEL", "").strip()
-    if ai_provider == "openai":
-        ai_model = configured_ai_model or DEFAULT_OPENAI_MODEL
-    elif ai_provider == "groq":
-        ai_model = configured_ai_model or DEFAULT_GROQ_MODEL
-    else:
-        ai_model = configured_ai_model
+    supported_ai_providers = {"openai", "groq", "openrouter", "cerebras"}
+    ai_provider_chain = _ai_provider_chain(source)
+    ai_provider = ">".join(ai_provider_chain) if ai_provider_chain else "disabled"
+    ai_models = [_ai_provider_model(provider_name, source) for provider_name in ai_provider_chain]
+    ai_model = " > ".join(ai_models) if ai_models else source.get("FISORA_AI_MODEL", "").strip()
     openai_key_present = bool(source.get("OPENAI_API_KEY", "").strip())
     groq_key_present = bool(source.get("GROQ_API_KEY", "").strip())
-    if ai_provider == "disabled":
+    openrouter_key_present = bool(source.get("OPENROUTER_API_KEY", "").strip())
+    cerebras_key_present = bool(source.get("CEREBRAS_API_KEY", "").strip())
+    if not ai_provider_chain:
         ai_provider_configured = True
-    elif ai_provider == "openai":
-        ai_provider_configured = bool(openai_key_present and ai_model)
-    elif ai_provider == "groq":
-        ai_provider_configured = bool(groq_key_present and ai_model)
     else:
-        ai_provider_configured = False
+        ai_provider_configured = all(
+            provider_name in supported_ai_providers
+            and _ai_provider_key_present(provider_name, source)
+            and _ai_provider_model(provider_name, source)
+            for provider_name in ai_provider_chain
+        )
     auth = auth_status_payload(build_auth_config(source))
     rate_limit = rate_limit_config(source)
     document_storage = storage_readiness(
@@ -120,18 +161,16 @@ def production_readiness_payload(
         warnings.append("session_cookie_secure_missing")
     if not rate_limit.configured:
         warnings.append("rate_limit_missing")
-    if ai_provider == "disabled":
+    if not ai_provider_chain:
         warnings.append("ai_provider_disabled")
-    elif ai_provider == "openai" and not openai_key_present:
-        warnings.append("ai_openai_key_missing")
-    elif ai_provider == "groq" and not groq_key_present:
-        warnings.append("ai_groq_key_missing")
-    elif ai_provider == "openai" and not ai_model:
-        warnings.append("ai_model_missing")
-    elif ai_provider == "groq" and not ai_model:
-        warnings.append("ai_model_missing")
-    elif ai_provider not in {"openai", "groq", "disabled"}:
-        warnings.append("ai_provider_unsupported")
+    for provider_name in ai_provider_chain:
+        if provider_name not in supported_ai_providers:
+            warnings.append("ai_provider_unsupported")
+            continue
+        if not _ai_provider_key_present(provider_name, source):
+            warnings.append(f"ai_{provider_name}_key_missing")
+        if not _ai_provider_model(provider_name, source):
+            warnings.append("ai_model_missing")
     if not backup["ok"]:
         warnings.append("backup_missing")
     if storage_usage["disk_warning"]:
@@ -212,9 +251,12 @@ def production_readiness_payload(
         "storage_usage": storage_usage,
         "store_backend": store_backend,
         "ai_provider": ai_provider,
+        "ai_provider_chain": ai_provider_chain,
         "ai_model": ai_model,
         "ai_openai_key_present": openai_key_present,
         "ai_groq_key_present": groq_key_present,
+        "ai_openrouter_key_present": openrouter_key_present,
+        "ai_cerebras_key_present": cerebras_key_present,
         "rate_limit": {
             "enabled": rate_limit.enabled,
             "window_seconds": rate_limit.window_seconds,

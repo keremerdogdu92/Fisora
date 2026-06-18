@@ -83,6 +83,32 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(product_provider.provider_name, "groq>openai")
         self.assertEqual(statement_provider.provider_name, "groq>openai")
 
+    def test_ai_runtime_from_env_builds_three_provider_chain_for_fallback(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER_CHAIN": "groq,openrouter,cerebras",
+                "GROQ_API_KEY": "gsk-test",
+                "OPENROUTER_API_KEY": "or-test",
+                "CEREBRAS_API_KEY": "csk-test",
+                "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                "FISORA_OPENROUTER_MODEL": "openai/gpt-oss-20b:free",
+                "FISORA_CEREBRAS_MODEL": "gpt-oss-120b",
+                "FISORA_OPENROUTER_SITE_URL": "http://185.184.208.188",
+                "FISORA_OPENROUTER_APP_TITLE": "Fisora Operasyon Portal",
+            }
+        )
+
+        product_provider = runtime["product_classifier"].provider
+        statement_provider = runtime["statement_ai_provider"]
+
+        self.assertEqual(product_provider.provider_name, "groq>openrouter>cerebras")
+        self.assertEqual(statement_provider.provider_name, "groq>openrouter>cerebras")
+        self.assertEqual([provider.model for provider in product_provider.providers], [
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-20b:free",
+            "gpt-oss-120b",
+        ])
+
     def test_json_store_persists_client_documents_reviews_and_export_packages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store_path = Path(temp_dir) / "phase0_store.json"

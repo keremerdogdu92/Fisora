@@ -7,13 +7,19 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy commit: `405b318`
+- Son dogrulanan runtime deploy commit: `e987538`
+- Son deploy smoke: 2026-06-19, `/health` 200, readiness `ready=true`,
+  `pilot_sellable=true`, `production_ready=false`.
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
 - AI fallback kodu: `FISORA_AI_PROVIDER_CHAIN=groq,openrouter,cerebras`
   destekli. Keyler sadece serverdaki ignored `deploy/production.env` dosyasinda
   tutulur.
+- Faz 3 research harness deploy edildi. OpenAI web research sadece
+  `FISORA_RESEARCH_ENABLED=true` ve `OPENAI_API_KEY` birlikte varsa calisir;
+  kapaliyken mevcut statik/cache akisi devam eder. Bilgi Havuzu route'u:
+  `/portal/bilgi-havuzu`.
 - Server env dosyasi: `/opt/fisora/app/deploy/production.env`
 
 `deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD`, `GROQ_API_KEY`,
@@ -100,6 +106,10 @@ FISORA_OPENROUTER_APP_TITLE=Fisora Operasyon Portal
 FISORA_CEREBRAS_MODEL=gpt-oss-120b
 FISORA_AI_COMPARISON_MODEL=openai/gpt-oss-120b
 FISORA_AI_MONTHLY_CAP_USD=0.01
+FISORA_RESEARCH_ENABLED=false
+FISORA_RESEARCH_MODEL=gpt-5.4-mini
+FISORA_RESEARCH_MAX_PER_DOCUMENT=1
+FISORA_RESEARCH_CONFIDENCE_THRESHOLD=70
 GROQ_API_KEY=<groq-key>
 OPENROUTER_API_KEY=<rotated-openrouter-key>
 CEREBRAS_API_KEY=<cerebras-key>

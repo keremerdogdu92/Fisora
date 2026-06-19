@@ -217,6 +217,48 @@ export type PilotReadinessView = {
   warnings: string[];
 };
 
+export type ResearchSourceView = {
+  title?: string;
+  url?: string;
+  source_type?: string;
+  accepted?: boolean;
+};
+
+export type ResearchProfileView = {
+  kind: string;
+  key: string;
+  summary?: string;
+  summary_tr?: string;
+  product_category?: string;
+  common_product_categories?: string[];
+  business_relation?: string;
+  account_treatment?: string;
+  confidence?: number;
+  status?: string;
+  updated_at?: string;
+  evidence?: ResearchSourceView[];
+  sources?: ResearchSourceView[];
+  override?: boolean;
+};
+
+export type ResearchBenchmarkCaseView = {
+  key?: string;
+  expected_category?: string;
+  actual_category?: string;
+  confidence?: number;
+  passed?: boolean;
+};
+
+export type ResearchBenchmarkRunView = {
+  run_id?: string;
+  created_at?: string;
+  case_count?: number;
+  passed_count?: number;
+  matched_count?: number;
+  accuracy?: number;
+  cases?: ResearchBenchmarkCaseView[];
+};
+
 export type ReviewData = {
   generatedFrom?: string;
   clientId?: string;
@@ -306,8 +348,8 @@ export type ReviewData = {
   }[];
 };
 
-export type PilotMode = "client" | "accountant" | "documents" | "clients" | "settings" | "exports" | "operations";
-export type PortalRouteKey = "home" | "mukellef" | "musavir" | "belgeler" | "mukellefler" | "ayarlar" | "cikti" | "operasyon";
+export type PilotMode = "client" | "accountant" | "documents" | "clients" | "research" | "settings" | "exports" | "operations";
+export type PortalRouteKey = "home" | "mukellef" | "musavir" | "belgeler" | "mukellefler" | "bilgi-havuzu" | "ayarlar" | "cikti" | "operasyon";
 export type DocumentSegment = "sales_invoices" | "purchase_invoices" | "invoices" | "bank_statements" | "other_documents";
 export type PortalNavItem = { mode: PilotMode; label: string; href: string };
 export type ReviewFilter = "all" | "review_required" | "export_ready" | "cancel_requested";

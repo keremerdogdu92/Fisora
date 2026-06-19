@@ -28,6 +28,12 @@ from app.domain.openai_provider import (
     OpenAiAccountingProvider,
 )
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
+from app.domain.research_harness import (
+    ResearchHarness,
+    apply_research_to_result,
+    build_research_runtime_from_env,
+    sanitize_research_query,
+)
 from app.domain.statement_ai_suggestions import (
     StatementAiSuggestionPolicy,
     StatementSuggestionProvider,
@@ -341,6 +347,17 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
     return updated
 
 
+def _research_candidate_from_result(result: dict[str, Any], document: dict[str, Any]) -> str:
+    for value in (
+        result.get("product_line_hint"),
+        document.get("original_file_name"),
+    ):
+        candidate = str(value or "").strip()
+        if candidate:
+            return candidate
+    return ""
+
+
 def _parse_invoice_document(path: Path, document_type: str) -> ParsedInvoice:
     if document_type == "einvoice_xml" or path.suffix.lower() == ".xml":
         return parse_xml_invoice(path)
@@ -637,6 +654,7 @@ def process_next_job_once(
     product_classifier: ProductClassifier | None = None,
     statement_ai_provider: StatementSuggestionProvider | None = None,
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
+    research_runtime: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     job = store.claim_next_processing_job()
     if job is None:
@@ -796,6 +814,64 @@ def process_next_job_once(
                 "weak_match",
                 {"business_relevance_reason": str(result.get("business_relevance_reason") or "")},
             )
+        effective_research_runtime = research_runtime if research_runtime is not None else build_research_runtime_from_env(environ)
+        research_document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
+        if effective_research_runtime and research_document_type not in {"bank_statement", "pos_statement"}:
+            raw_line = _research_candidate_from_result(result, document)
+            if raw_line:
+                activity_context = str((workspace.get("client") or {}).get("profile", {}).get("activity_description") or "")
+                query = sanitize_research_query(
+                    kind="brand",
+                    raw_line=raw_line,
+                    supplier_hint=str(result.get("provider_hint") or ""),
+                    activity_context=activity_context,
+                )
+                cache_key = query.search_text.split(" ")[0] if query.search_text else query.key
+                cached = store.get_brand_research_profile(cache_key) if hasattr(store, "get_brand_research_profile") else None
+                pipeline_event(
+                    "research_cache_hit" if cached else "research_started",
+                    "ok",
+                    "Research cache kullanildi." if cached else "Marka/NACE arastirmasi basladi.",
+                    "research_cache_hit" if cached else "research_started",
+                    {
+                        "kind": "brand",
+                        "search_text": query.search_text,
+                        "supplier_hint": query.supplier_hint,
+                    },
+                )
+                harness = ResearchHarness(
+                    store=store,
+                    provider=effective_research_runtime.get("provider"),  # type: ignore[arg-type]
+                    policy=effective_research_runtime.get("policy"),  # type: ignore[arg-type]
+                )
+                profile = harness.research_brand(
+                    raw_line=raw_line,
+                    supplier_hint=str(result.get("provider_hint") or ""),
+                    activity_context=activity_context,
+                )
+                threshold = int(getattr(effective_research_runtime.get("policy"), "confidence_threshold", 70))
+                result = apply_research_to_result(result, profile, confidence_threshold=threshold)
+                confidence = int(profile.get("confidence") or 0)
+                research_ok = confidence >= threshold
+                pipeline_event(
+                    "research_completed" if research_ok else "research_low_confidence",
+                    "ok" if research_ok else "warning",
+                    "Arastirma profili hazirlandi." if research_ok else "Arastirma guveni dusuk; belge kontrolde kaldi.",
+                    "research_completed" if research_ok else "research_low_confidence",
+                    {
+                        "display_name": str(profile.get("display_name") or ""),
+                        "confidence": confidence,
+                        "source_urls": list(profile.get("source_urls") or []),
+                    },
+                )
+                if "research_source_rejected" in set(result.get("review_reason_codes") or []):
+                    pipeline_event(
+                        "research_source_rejected",
+                        "warning",
+                        "Arastirma kaynagi kaynak politikasindan gecemedi.",
+                        "research_source_rejected",
+                        {"source_urls": list(profile.get("source_urls") or [])},
+                    )
         if result.get("draft_lines"):
             pipeline_event(
                 "journal_draft_ready",
@@ -850,6 +926,7 @@ def process_queued_documents(
     product_classifier: ProductClassifier | None = None,
     statement_ai_provider: StatementSuggestionProvider | None = None,
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
+    research_runtime: dict[str, object] | None = None,
 ) -> dict[str, Any]:
     summary = {"processed_count": 0, "completed_count": 0, "failed_count": 0}
     for _ in range(max_jobs):
@@ -858,6 +935,7 @@ def process_queued_documents(
             product_classifier=product_classifier,
             statement_ai_provider=statement_ai_provider,
             statement_ai_policy=statement_ai_policy,
+            research_runtime=research_runtime,
         )
         if result["processed_count"] == 0:
             break

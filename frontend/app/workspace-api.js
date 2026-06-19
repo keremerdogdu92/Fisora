@@ -86,6 +86,21 @@ async function getJson({ apiBaseUrl, path, headers = {}, fetchImpl = fetch, time
   return response.json();
 }
 
+async function postJson({ apiBaseUrl, path, body = {}, headers = {}, fetchImpl = fetch, timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS }) {
+  const response = await fetchWithTimeout(fetchImpl, `${trimSlashes(apiBaseUrl)}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  }, timeoutMs);
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `${path} failed with ${response.status}`));
+  }
+  return response.json();
+}
+
 async function fetchBackendPilotData({
   apiBaseUrl,
   sessionToken = "",
@@ -129,6 +144,111 @@ async function fetchBackendReadiness({
     apiBaseUrl,
     path: "/phase0/store/system/readiness",
     headers: {},
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+async function fetchResearchProfiles({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  kind = "",
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  const query = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/store/research/profiles${query}`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+async function fetchResearchProfile({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  kind,
+  key,
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/store/research/profile/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+async function refreshResearchProfile({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  payload = {},
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/research/refresh",
+    body: payload,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+async function overrideResearchProfile({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  payload = {},
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/research/override",
+    body: payload,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+async function runResearchBenchmark({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/research/benchmark/run",
+    body: {},
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
+async function fetchResearchBenchmarkRuns({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: "/phase0/store/research/benchmark/runs",
+    headers: backendAuthHeaders({ sessionToken, userId }),
     fetchImpl,
     timeoutMs,
   });
@@ -458,7 +578,13 @@ function normalizeRulePrompt(value) {
 
 module.exports = {
   backendAuthHeaders,
+  fetchResearchBenchmarkRuns,
+  fetchResearchProfile,
+  fetchResearchProfiles,
   fetchBackendReadiness,
   fetchBackendPilotData,
   normalizeBackendWorkspaces,
+  overrideResearchProfile,
+  refreshResearchProfile,
+  runResearchBenchmark,
 };

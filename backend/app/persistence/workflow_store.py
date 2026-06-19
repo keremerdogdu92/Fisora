@@ -45,6 +45,7 @@ def empty_store() -> dict[str, Any]:
         "document_pipeline_events": [],
         "nace_research_profiles": {},
         "brand_research_profiles": {},
+        "research_benchmark_runs": [],
     }
 
 
@@ -304,6 +305,7 @@ class JsonWorkflowStore:
             + len(data["document_pipeline_events"])
             + len(data["nace_research_profiles"])
             + len(data["brand_research_profiles"])
+            + len(data["research_benchmark_runs"])
             + deleted_portal_user_count
             + (len(data["auth_credentials"]) - len(preserved_credentials))
         )
@@ -328,6 +330,7 @@ class JsonWorkflowStore:
                 "document_pipeline_events": [],
                 "nace_research_profiles": {},
                 "brand_research_profiles": {},
+                "research_benchmark_runs": [],
             }
         )
         self._write(data)
@@ -448,6 +451,43 @@ class JsonWorkflowStore:
         data = self._read()
         profile = data["brand_research_profiles"].get(normalize_brand_name(brand_name))
         return deepcopy(profile) if profile else None
+
+    def get_research_profile(self, *, kind: str, key: str) -> dict[str, Any] | None:
+        if kind == "nace":
+            return self.get_nace_research_profile(key)
+        if kind == "brand":
+            return self.get_brand_research_profile(key)
+        return None
+
+    def list_research_profiles(self, *, kind: str = "") -> list[dict[str, Any]]:
+        data = self._read()
+        profiles: list[dict[str, Any]] = []
+        if kind in {"", "brand"}:
+            profiles.extend(deepcopy(profile) for profile in data["brand_research_profiles"].values())
+        if kind in {"", "nace"}:
+            profiles.extend(deepcopy(profile) for profile in data["nace_research_profiles"].values())
+        return sorted(
+            profiles,
+            key=lambda profile: str(profile.get("updated_at") or profile.get("researched_at") or ""),
+            reverse=True,
+        )
+
+    def save_research_benchmark_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        timestamp = utc_now()
+        record = {
+            "run_id": str(uuid4()),
+            "run_type": "benchmark",
+            "created_at": timestamp,
+            **run,
+        }
+        data["research_benchmark_runs"].append(record)
+        self._write(data)
+        return deepcopy(record)
+
+    def list_research_benchmark_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        data = self._read()
+        return deepcopy(data["research_benchmark_runs"][-max(limit, 1):])
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         data = self._read()

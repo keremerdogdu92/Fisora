@@ -7,6 +7,7 @@ from app.api import (
     phase0_routes_auth,
     phase0_routes_operations,
     phase0_routes_review_export,
+    phase0_routes_research,
     phase0_routes_simulation,
     phase0_routes_upload_processing,
     phase0_routes_workspace,
@@ -85,6 +86,7 @@ router.include_router(phase0_routes_auth.router)
 router.include_router(phase0_routes_operations.router)
 router.include_router(phase0_routes_upload_processing.router)
 router.include_router(phase0_routes_review_export.router)
+router.include_router(phase0_routes_research.router)
 router.include_router(phase0_routes_workspace.router)
 router.include_router(phase0_routes_ai.router)
 router.include_router(phase0_routes_simulation.router)

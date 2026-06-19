@@ -1,4 +1,4 @@
-const ACCOUNTANT_MODES = ["accountant", "documents", "clients", "exports", "settings"];
+const ACCOUNTANT_MODES = ["accountant", "documents", "clients", "research", "exports", "settings"];
 
 const LANDING_ROLE_ENTRIES = [
   {
@@ -24,6 +24,7 @@ const PORTAL_NAV_ITEMS = [
   { mode: "accountant", label: "Anasayfa", href: "/portal/musavir" },
   { mode: "documents", label: "Belge işleme", href: "/portal/belgeler" },
   { mode: "clients", label: "Mükellefler", href: "/portal/mukellefler" },
+  { mode: "research", label: "Bilgi havuzu", href: "/portal/bilgi-havuzu" },
   { mode: "exports", label: "Çıktı listesi", href: "/portal/cikti" },
   { mode: "settings", label: "Ayarlar", href: "/portal/ayarlar" },
   { mode: "operations", label: "Operasyon", href: "/portal/operasyon" },
@@ -69,6 +70,14 @@ const PORTAL_ROUTE_CONFIGS = {
     lockedRole: "accountant",
     visibleModes: ACCOUNTANT_MODES,
   },
+  "bilgi-havuzu": {
+    routeKey: "bilgi-havuzu",
+    initialMode: "research",
+    defaultUserId: "mali-musavir",
+    defaultRole: "accountant",
+    lockedRole: "accountant",
+    visibleModes: ACCOUNTANT_MODES,
+  },
   ayarlar: {
     routeKey: "ayarlar",
     initialMode: "settings",
@@ -109,6 +118,7 @@ function portalConfigForPath(pathname) {
   if (path === "/portal/musavir") return PORTAL_ROUTE_CONFIGS.musavir;
   if (path === "/portal/belgeler") return PORTAL_ROUTE_CONFIGS.belgeler;
   if (path === "/portal/mukellefler") return PORTAL_ROUTE_CONFIGS.mukellefler;
+  if (path === "/portal/bilgi-havuzu") return PORTAL_ROUTE_CONFIGS["bilgi-havuzu"];
   if (path === "/portal/ayarlar") return PORTAL_ROUTE_CONFIGS.ayarlar;
   if (path === "/portal/cikti") return PORTAL_ROUTE_CONFIGS.cikti;
   if (path === "/portal/operasyon") return PORTAL_ROUTE_CONFIGS.operasyon;

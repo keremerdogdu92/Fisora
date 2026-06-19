@@ -3,9 +3,14 @@ const test = require("node:test");
 
 const {
   backendAuthHeaders,
+  fetchResearchBenchmarkRuns,
+  fetchResearchProfiles,
   fetchBackendReadiness,
   fetchBackendPilotData,
   normalizeBackendWorkspaces,
+  overrideResearchProfile,
+  refreshResearchProfile,
+  runResearchBenchmark,
 } = require("./workspace-api");
 
 const clientRecord = {
@@ -326,6 +331,62 @@ test("fetchBackendReadiness loads the system readiness payload without auth head
   assert.equal(requests[0].init.method, "GET");
   assert.deepEqual(requests[0].init.headers, {});
   assert.ok(requests[0].init.signal);
+});
+
+test("research API helpers use accountant auth and expected endpoints", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
+    requests.push({ url, init });
+    return {
+      ok: true,
+      json: async () => ({ ok: true, profiles: [], runs: [], profile: { key: "rexton" } }),
+    };
+  };
+
+  await fetchResearchProfiles({
+    apiBaseUrl: "http://localhost:8000/",
+    fetchImpl,
+    kind: "brand",
+    userId: "mali-musavir",
+  });
+  await refreshResearchProfile({
+    apiBaseUrl: "http://localhost:8000",
+    fetchImpl,
+    payload: { kind: "brand", key: "rexton", query: "Rexton isitme cihazi" },
+    userId: "mali-musavir",
+  });
+  await overrideResearchProfile({
+    apiBaseUrl: "http://localhost:8000",
+    fetchImpl,
+    payload: { kind: "brand", key: "rexton", category_tags: ["medical_device"], confidence: 95 },
+    userId: "mali-musavir",
+  });
+  await runResearchBenchmark({
+    apiBaseUrl: "http://localhost:8000",
+    fetchImpl,
+    userId: "mali-musavir",
+  });
+  await fetchResearchBenchmarkRuns({
+    apiBaseUrl: "http://localhost:8000",
+    fetchImpl,
+    userId: "mali-musavir",
+  });
+
+  assert.deepEqual(
+    requests.map((request) => [request.init.method, request.url]),
+    [
+      ["GET", "http://localhost:8000/phase0/store/research/profiles?kind=brand"],
+      ["POST", "http://localhost:8000/phase0/store/research/refresh"],
+      ["POST", "http://localhost:8000/phase0/store/research/override"],
+      ["POST", "http://localhost:8000/phase0/store/research/benchmark/run"],
+      ["GET", "http://localhost:8000/phase0/store/research/benchmark/runs"],
+    ],
+  );
+  assert.deepEqual(requests[1].init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(requests[2].init.body).category_tags, ["medical_device"]);
 });
 
 test("fetchBackendPilotData aborts slow backend requests so local fallback can continue", async () => {

@@ -5,10 +5,8 @@ import { AccountantDashboard } from "./portal-dashboard-view";
 import { ClientPortal } from "./portal-client-view";
 import { ClientManagementView } from "./portal-clients-view";
 import { DocumentProcessingWorkspace } from "./portal-documents-view";
-import {
-  ExportBasketView as ExportBasketRouteView,
-  OperationsView as OperationsRouteView,
-} from "./portal-exports-view";
+import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
+import { ResearchKnowledgeView } from "./portal-research-view";
 import { SettingsView } from "./portal-settings-view";
 import { ModeButton, PortalTopbarStatus, SelectedClientStrip } from "./shared/components";
 import { AccountantWorkspace } from "./portal-workspace-view";
@@ -431,7 +429,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         </nav>
       ) : null}
 
-      {mode === "accountant" || mode === "client" ? null : (
+      {mode === "accountant" || mode === "client" || mode === "research" ? null : (
         <SelectedClientStrip client={selectedClient} documents={clientDocuments} openCancellationCount={openCancellationRequests.length} />
       )}
 
@@ -589,6 +587,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           {...testDataReset}
         />
       ) : null}
+
+      {mode === "research" ? <ResearchKnowledgeView loginUserId={loginUserId} session={session} /> : null}
 
       {mode === "exports" ? (
         <ExportBasketRouteView

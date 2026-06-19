@@ -112,6 +112,126 @@ def build_sales_entry(
     )
 
 
+def build_purchase_return_entry(
+    *,
+    entry_date: str,
+    total: Decimal,
+    vat_rate: Decimal,
+    expense_account: str,
+    vat_account: str = "191.01",
+    supplier_account: str = "320.01.001",
+    supplier_tax_id: str | None = None,
+    document_ref: str | None = None,
+) -> JournalEntry:
+    net, vat = split_vat(total, vat_rate)
+    return JournalEntry(
+        entry_type="purchase_return",
+        entry_date=entry_date,
+        description=f"Alis iade faturasi {document_ref or ''}".strip(),
+        lines=(
+            JournalLine(
+                supplier_account,
+                "Satici cari iade",
+                debit=total,
+                counterparty_tax_id=supplier_tax_id,
+                document_ref=document_ref,
+            ),
+            JournalLine(expense_account, "Gider iade", credit=net, document_ref=document_ref),
+            JournalLine(vat_account, "Indirilecek KDV iade", credit=vat, document_ref=document_ref),
+        ),
+        risk_flags=("return_invoice_accountant_review",),
+    )
+
+
+def build_sales_return_entry(
+    *,
+    entry_date: str,
+    total: Decimal,
+    vat_rate: Decimal,
+    revenue_account: str,
+    vat_account: str = "391.01",
+    customer_account: str = "120.01.001",
+    customer_tax_id: str | None = None,
+    document_ref: str | None = None,
+) -> JournalEntry:
+    net, vat = split_vat(total, vat_rate)
+    lines = [
+        JournalLine(revenue_account, "Satis geliri iade", debit=net, document_ref=document_ref),
+    ]
+    if vat > Decimal("0.00"):
+        lines.append(JournalLine(vat_account, "Hesaplanan KDV iade", debit=vat, document_ref=document_ref))
+    lines.append(
+        JournalLine(
+            customer_account,
+            "Alici cari iade",
+            credit=total,
+            counterparty_tax_id=customer_tax_id,
+            document_ref=document_ref,
+        )
+    )
+    return JournalEntry(
+        entry_type="sales_return",
+        entry_date=entry_date,
+        description=f"Satis iade faturasi {document_ref or ''}".strip(),
+        lines=tuple(lines),
+        risk_flags=("return_invoice_accountant_review",),
+    )
+
+
+def build_purchase_return_review_entry(
+    *,
+    entry_date: str,
+    total: Decimal,
+    expense_account: str,
+    supplier_account: str = "320.01.001",
+    supplier_tax_id: str | None = None,
+    document_ref: str | None = None,
+) -> JournalEntry:
+    return JournalEntry(
+        entry_type="purchase_return_review",
+        entry_date=entry_date,
+        description=f"Kontrol gerekli alis iade faturasi {document_ref or ''}".strip(),
+        lines=(
+            JournalLine(
+                supplier_account,
+                "Satici cari iade kontrol",
+                debit=total,
+                counterparty_tax_id=supplier_tax_id,
+                document_ref=document_ref,
+            ),
+            JournalLine(expense_account, "Gider iade kontrol", credit=total, document_ref=document_ref),
+        ),
+        risk_flags=("return_invoice_accountant_review",),
+    )
+
+
+def build_sales_return_review_entry(
+    *,
+    entry_date: str,
+    total: Decimal,
+    revenue_account: str,
+    customer_account: str = "120.01.001",
+    customer_tax_id: str | None = None,
+    document_ref: str | None = None,
+) -> JournalEntry:
+    return JournalEntry(
+        entry_type="sales_return_review",
+        entry_date=entry_date,
+        description=f"Kontrol gerekli satis iade faturasi {document_ref or ''}".strip(),
+        lines=(
+            JournalLine(revenue_account, "Satis iade kontrol", debit=total, document_ref=document_ref),
+            JournalLine(
+                customer_account,
+                "Alici cari iade kontrol",
+                credit=total,
+                counterparty_tax_id=customer_tax_id,
+                document_ref=document_ref,
+            ),
+        ),
+        risk_flags=("return_invoice_accountant_review",),
+    )
+
+
 def build_bank_payment_entry(
     *,
     entry_date: str,
@@ -141,18 +261,20 @@ def build_bank_payment_entry(
 def build_mixed_vat_purchase_entry(
     *,
     entry_date: str,
-    items: Iterable[tuple[str, Decimal, Decimal]],
+    items: Iterable[tuple[str, Decimal, Decimal] | tuple[str, Decimal, Decimal, str]],
     supplier_account: str = "320.01.001",
     supplier_tax_id: str | None = None,
     document_ref: str | None = None,
 ) -> JournalEntry:
     lines: list[JournalLine] = []
     total = Decimal("0.00")
-    for expense_account, gross_amount, vat_rate in items:
+    for item in items:
+        expense_account, gross_amount, vat_rate = item[:3]
+        vat_account = item[3] if len(item) > 3 else "191.01"
         net, vat = split_vat(gross_amount, vat_rate)
         total += gross_amount
         lines.append(JournalLine(expense_account, f"Gider KDV {vat_rate:.2%}", debit=net, document_ref=document_ref))
-        lines.append(JournalLine("191.01", f"Indirilecek KDV {vat_rate:.2%}", debit=vat, document_ref=document_ref))
+        lines.append(JournalLine(vat_account, f"Indirilecek KDV {vat_rate:.2%}", debit=vat, document_ref=document_ref))
     lines.append(
         JournalLine(
             supplier_account,
@@ -168,6 +290,42 @@ def build_mixed_vat_purchase_entry(
         description=f"Karisik KDV alis faturasi {document_ref or ''}".strip(),
         lines=tuple(lines),
         risk_flags=("mixed_vat_manual_review",),
+    )
+
+
+def build_mixed_vat_sales_entry(
+    *,
+    entry_date: str,
+    items: Iterable[tuple[str, Decimal, Decimal] | tuple[str, Decimal, Decimal, str]],
+    customer_account: str = "120.01.001",
+    customer_tax_id: str | None = None,
+    document_ref: str | None = None,
+) -> JournalEntry:
+    revenue_and_vat_lines: list[JournalLine] = []
+    total = Decimal("0.00")
+    for item in items:
+        revenue_account, gross_amount, vat_rate = item[:3]
+        vat_account = item[3] if len(item) > 3 else "391.01"
+        net, vat = split_vat(gross_amount, vat_rate)
+        total += gross_amount
+        revenue_and_vat_lines.append(JournalLine(revenue_account, f"Satis KDV {vat_rate:.2%}", credit=net, document_ref=document_ref))
+        if vat > Decimal("0.00"):
+            revenue_and_vat_lines.append(JournalLine(vat_account, f"Hesaplanan KDV {vat_rate:.2%}", credit=vat, document_ref=document_ref))
+    return JournalEntry(
+        entry_type="mixed_vat_sales",
+        entry_date=entry_date,
+        description=f"Karisik KDV satis faturasi {document_ref or ''}".strip(),
+        lines=(
+            JournalLine(
+                customer_account,
+                "Alici cari",
+                debit=total.quantize(MONEY),
+                counterparty_tax_id=customer_tax_id,
+                document_ref=document_ref,
+            ),
+            *revenue_and_vat_lines,
+        ),
+        risk_flags=("mixed_vat_accountant_review",),
     )
 
 

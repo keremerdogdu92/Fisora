@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -27,6 +28,23 @@ TAX_ID_KEYS = ("tax_id", "vkn", "tckn", "vergi_no", "vergi no")
 TAX_OFFICE_KEYS = ("tax_office", "vergi_dairesi", "vergi dairesi")
 IBAN_KEYS = ("iban", "banka_iban", "banka iban", "counterparty_iban", "karsi_iban")
 DETAIL_KEYS = ("is_detail_account", "detay e/h", "detay", "detay hesap")
+VAT_RATE_HINTS = {"001": "1", "008": "8", "010": "10", "018": "18", "020": "20"}
+USAGE_KEYWORDS = {
+    "cihaz": ("cihaz", "makine", "malzeme"),
+    "pil": ("pil",),
+    "kalip": ("kalip", "kalib"),
+    "elektrik": ("elektrik",),
+    "su": (" su ", "su gider", "su fatur"),
+    "kira": ("kira",),
+    "kargo": ("kargo", "nakliye"),
+    "akaryakit": ("akaryakit", "yakit", "benzin", "motorin"),
+    "musavirlik": ("musavir", "muhasebe"),
+    "bakim": ("bakim", "tamir", "onarim"),
+    "satis": ("satis", "satislar"),
+    "tevkifat": ("tevkifat",),
+    "internet": ("internet",),
+    "yazilim": ("yazilim", "e-fatura", "efatura"),
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +69,37 @@ class ChartAccount:
             return "supplier"
         return None
 
+    @property
+    def account_family(self) -> str:
+        match = re.match(r"^(\d{3})", self.normalized_account_code)
+        return match.group(1) if match else ""
+
+    @property
+    def code_depth(self) -> int:
+        return len([part for part in self.normalized_account_code.split(".") if part])
+
+    @property
+    def vat_rate_hint(self) -> str:
+        code_parts = [part for part in self.normalized_account_code.split(".") if part]
+        for part in reversed(code_parts):
+            rate = VAT_RATE_HINTS.get(part.zfill(3))
+            if rate:
+                return rate
+        normalized_name = normalize_text(self.account_name)
+        match = re.search(r"(?:%|yuzde\s*)(0?1|0?8|10|18|20)\b", normalized_name)
+        if match:
+            return str(int(match.group(1)))
+        return ""
+
+    @property
+    def usage_tags(self) -> tuple[str, ...]:
+        normalized_name = f" {normalize_text(self.account_name)} "
+        tags: list[str] = []
+        for tag, needles in USAGE_KEYWORDS.items():
+            if any(needle in normalized_name for needle in needles):
+                tags.append(tag)
+        return tuple(tags)
+
 
 def normalize_account_code(value: str) -> str:
     compact = value.strip().replace(",", ".")
@@ -60,12 +109,50 @@ def normalize_account_code(value: str) -> str:
     return compact
 
 
+def normalize_text(value: str) -> str:
+    replacements = {
+        "\u0131": "i",
+        "\u0130": "i",
+        "I": "i",
+        "\u015f": "s",
+        "\u015e": "s",
+        "\u011f": "g",
+        "\u011e": "g",
+        "\u00fc": "u",
+        "\u00dc": "u",
+        "\u00f6": "o",
+        "\u00d6": "o",
+        "\u00e7": "c",
+        "\u00c7": "c",
+        "\u00e2": "a",
+        "\u00c2": "a",
+        "Ä±": "i",
+        "Ä°": "i",
+        "ÄŸ": "g",
+        "Ä": "g",
+        "Ã¼": "u",
+        "Ãœ": "u",
+        "ÅŸ": "s",
+        "Å": "s",
+        "Ã¶": "o",
+        "Ã–": "o",
+        "Ã§": "c",
+        "Ã‡": "c",
+    }
+    result = value
+    for source, target in replacements.items():
+        result = result.replace(source, target)
+    decomposed = unicodedata.normalize("NFKD", result)
+    asciiish = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return re.sub(r"\s+", " ", asciiish.lower()).strip()
+
+
 def normalize_iban(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z]", "", value).upper()
 
 
 def _normalized_header(value: str) -> str:
-    return value.strip().lower().replace("ı", "i").replace("İ", "i").replace("_", " ")
+    return normalize_text(value).replace("_", " ")
 
 
 def _first_value(row: dict[str, str], keys: Iterable[str]) -> str:
@@ -192,3 +279,88 @@ def validate_vat_accounts(accounts: Iterable[ChartAccount]) -> dict[str, bool]:
         "has_purchase_vat_191": any(code.startswith("191") for code in codes),
         "has_sales_vat_391": any(code.startswith("391") for code in codes),
     }
+
+
+def _detail_accounts(accounts: Iterable[ChartAccount], prefixes: tuple[str, ...]) -> list[ChartAccount]:
+    return [
+        account
+        for account in accounts
+        if account.is_detail_account and account.normalized_account_code.startswith(prefixes)
+    ]
+
+
+def _deepest(accounts: Iterable[ChartAccount]) -> ChartAccount | None:
+    candidates = list(accounts)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda account: (account.code_depth, len(account.normalized_account_code)))
+
+
+def _rate_text(vat_rate: str | int | None) -> str:
+    raw = str(vat_rate or "").strip()
+    return str(int(raw)) if raw.isdigit() else ""
+
+
+def select_vat_account(accounts: Iterable[ChartAccount], account_family: str, vat_rate: str | int | None) -> ChartAccount | None:
+    family = str(account_family)
+    normalized_rate = _rate_text(vat_rate)
+    candidates = _detail_accounts(accounts, (family,))
+    if normalized_rate:
+        selected = _deepest(account for account in candidates if account.vat_rate_hint == normalized_rate)
+        if selected:
+            return selected
+    return _deepest(candidates)
+
+
+def select_revenue_account(accounts: Iterable[ChartAccount], vat_rate: str | int | None = None) -> ChartAccount | None:
+    return select_vat_like_revenue_account(accounts, "600", vat_rate)
+
+
+def select_vat_like_revenue_account(
+    accounts: Iterable[ChartAccount],
+    family: str,
+    vat_rate: str | int | None = None,
+) -> ChartAccount | None:
+    normalized_rate = _rate_text(vat_rate)
+    candidates = _detail_accounts(accounts, (family,))
+    if normalized_rate:
+        selected = _deepest(account for account in candidates if account.vat_rate_hint == normalized_rate)
+        if selected:
+            return selected
+    return _deepest(candidates)
+
+
+def select_usage_account(
+    accounts: Iterable[ChartAccount],
+    line_hint: str,
+    direction: str,
+    *,
+    account_treatment: str = "",
+) -> ChartAccount | None:
+    normalized_hint = f" {normalize_text(line_hint)} "
+    desired_tags = {
+        tag
+        for tag, needles in USAGE_KEYWORDS.items()
+        if any(needle in normalized_hint for needle in needles)
+    }
+    treatment = normalize_text(account_treatment)
+    if "mal" in normalized_hint or "stok" in treatment or desired_tags.intersection({"cihaz", "pil", "kalip"}):
+        preferred_prefixes = ("153", "740", "760", "770")
+    elif direction == "sales":
+        preferred_prefixes = ("600",)
+    else:
+        preferred_prefixes = ("770", "760", "740", "153")
+    candidates = _detail_accounts(accounts, preferred_prefixes)
+    if not candidates:
+        return None
+
+    def score(account: ChartAccount) -> tuple[int, int, int, str]:
+        tags = set(account.usage_tags)
+        tag_score = len(desired_tags.intersection(tags)) * 20
+        if account.account_family == "153" and desired_tags.intersection({"cihaz", "pil", "kalip"}):
+            tag_score += 15
+        if account.account_family in {"770", "760", "740"} and desired_tags and desired_tags.isdisjoint({"cihaz", "pil", "kalip"}):
+            tag_score += 5
+        return (tag_score, account.code_depth, len(account.normalized_account_code), account.normalized_account_code)
+
+    return max(candidates, key=score)

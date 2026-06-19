@@ -39,7 +39,7 @@ from app.domain.counterparty_matching import match_counterparty
 from app.domain.export_adapters import get_export_adapter, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.exporters import export_universal_journal_csv, export_zirve_trial_csv
-from app.domain.invoice_lines import extract_invoice_lines_from_text
+from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_operations import (
     ReviewTaskDraft,
@@ -1119,6 +1119,11 @@ class Phase0DomainTests(unittest.TestCase):
             risk_flags=(),
             suggested_route="journal_candidate",
             parse_notes=(),
+            issuer_title="Isitme Merkezi A",
+            issuer_tax_id="1234567890",
+            recipient_title="Alici Firma",
+            recipient_tax_id="9999999999",
+            is_return_invoice=True,
         )
         selection = AccountSelection(
             chart_file_name="chart.xlsx",
@@ -1127,14 +1132,171 @@ class Phase0DomainTests(unittest.TestCase):
             supplier_account="320.01",
             bank_account="102.01",
             selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection)
+        result = simulate_invoice(invoice, selection, profile)
 
         self.assertEqual(result.simulated_status, "review_required")
-        self.assertEqual(result.accounting_direction, "return_review")
-        self.assertEqual(result.draft_lines, ())
+        self.assertEqual(result.accounting_direction, "sales")
+        self.assertEqual(result.draft_entry_type, "sales_return")
+        self.assertEqual(result.total_debit, result.total_credit)
+        self.assertTrue(result.draft_lines)
+        self.assertEqual(result.selected_revenue_account, "600.20")
+        self.assertEqual(result.selected_sales_vat_account, "391.20")
         self.assertIn("return_invoice_manual_review", result.review_reason_codes)
+        self.assertIn("return_invoice_accountant_review", result.review_reason_codes)
+
+    def test_explicit_issuer_recipient_drives_direction_before_tax_id_order(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="supplier-sales.xml",
+            provider_hint="Isitme Merkezi A",
+            page_count=0,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1234567890", "9999999999"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            issuer_title="Tedarikci Firma",
+            issuer_tax_id="9999999999",
+            recipient_title="Isitme Merkezi A",
+            recipient_tax_id="1234567890",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, intended_direction="purchase")
+
+        self.assertEqual(result.accounting_direction, "purchase")
+        self.assertEqual(result.selected_vat_account, "191.20")
+        self.assertIn("client_tax_id_matches_recipient", result.direction_evidence)
+
+    def test_select_accounts_prefers_deep_rate_specific_chart_accounts(self) -> None:
+        accounts = [
+            ChartAccount("191", "191", "Indirilecek KDV", False),
+            ChartAccount("191.01", "191.01", "Indirilecek KDV genel", False),
+            ChartAccount("191.01.020", "191.01.020", "Indirilecek KDV yuzde 20", True),
+            ChartAccount("391.01.020", "391.01.020", "Hesaplanan KDV %20", True),
+            ChartAccount("600.01", "600.01", "Satislar", False),
+            ChartAccount("600.01.020", "600.01.020", "Satislar yuzde 20", True),
+            ChartAccount("600.00.3065", "600.00.3065", "3065 kapsaminda 0 KDV satislar", True),
+            ChartAccount("770.01.001", "770.01.001", "Genel giderler", True),
+            ChartAccount("120.A01", "120.A01", "Alici cari", True),
+            ChartAccount("320.A01", "320.A01", "Satici cari", True),
+            ChartAccount("102.01", "102.01", "Banka", True),
+        ]
+
+        selection = select_accounts("chart.xlsx", accounts)
+
+        self.assertEqual(selection.purchase_vat_account, "191.01.020")
+        self.assertEqual(selection.sales_vat_account, "391.01.020")
+        self.assertEqual(selection.revenue_account, "600.01.020")
+        self.assertEqual(selection.zero_vat_revenue_account, "600.00.3065")
+        self.assertIn("purchase_vat", selection.account_candidates)
+        self.assertEqual(selection.next_customer_account, "120.A02")
+
+    def test_mixed_vat_sales_uses_line_details_and_rate_specific_accounts(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="mixed-sales.pdf",
+            provider_hint="Isitme Merkezi A",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="MIX2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1234567890", "9999999999"),
+            vat_rates=("10", "20"),
+            goods_services_total="1900.00",
+            vat_total="300.00",
+            special_tax_total="",
+            tax_inclusive_total="2200.00",
+            payable_total="2200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Pil satisi", "Cihaz satisi"),
+            line_item_details=(
+                InvoiceLine(raw_text="Pil satisi 1100,00", description="Pil satisi", amount_hint="1100,00"),
+                InvoiceLine(raw_text="Cihaz satisi 1200,00", description="Cihaz satisi", amount_hint="1200,00"),
+            ),
+            issuer_title="Isitme Merkezi A",
+            issuer_tax_id="1234567890",
+            recipient_title="Alici Firma",
+            recipient_tax_id="9999999999",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+            account_candidates={
+                "sales_revenue": (
+                    {"code": "600.10", "name": "Satislar %10", "reason": ""},
+                    {"code": "600.20", "name": "Satislar %20", "reason": ""},
+                ),
+                "sales_vat": (
+                    {"code": "391.10", "name": "Hesaplanan KDV %10", "reason": ""},
+                    {"code": "391.20", "name": "Hesaplanan KDV %20", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.simulated_status, "review_required")
+        self.assertEqual(result.draft_entry_type, "mixed_vat_sales")
+        self.assertEqual(result.total_debit, result.total_credit)
+        self.assertEqual(result.draft_lines[1]["account_code"], "600.10")
+        self.assertEqual(result.draft_lines[2]["account_code"], "391.10")
+        self.assertEqual(result.draft_lines[3]["account_code"], "600.20")
+        self.assertEqual(result.draft_lines[4]["account_code"], "391.20")
+        self.assertIn("mixed_vat_accountant_review", result.review_reason_codes)
 
     def test_matching_simulation_marks_incomplete_client_profile_for_review(self) -> None:
         invoice = ParsedInvoice(

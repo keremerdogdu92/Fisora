@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
-from app.domain.invoice_lines import extract_invoice_lines_from_text, invoice_line_hints
+from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text, invoice_line_hints
 
 
 DATE_RE = re.compile(r"(?<!\d)([0-3]?\d)\s*[./-]\s*([01]?\d)\s*[./-]\s*(20\d{2})(?!\d)")
@@ -90,6 +90,16 @@ class ParsedInvoice:
     suggested_route: str
     parse_notes: tuple[str, ...]
     line_items: tuple[str, ...] = ()
+    line_item_details: tuple[InvoiceLine, ...] = ()
+    issuer_title: str = ""
+    issuer_tax_id: str = ""
+    recipient_title: str = ""
+    recipient_tax_id: str = ""
+    invoice_type_code: str = ""
+    is_return_invoice: bool = False
+    accounting_direction: str = "uncertain"
+    direction_confidence: int = 0
+    direction_evidence: tuple[str, ...] = ()
 
 
 def extract_pdf_text(path: Path) -> tuple[int, str, tuple[str, ...]]:
@@ -250,6 +260,116 @@ def extract_tax_ids(text: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(TAX_ID_RE.findall(text)))
 
 
+def _tax_id_from_line(line: str) -> str:
+    match = TAX_ID_RE.search(line)
+    return match.group(1) if match else ""
+
+
+def _meaningful_party_line(line: str) -> bool:
+    normalized = normalize_for_search(line)
+    if not normalized:
+        return False
+    location_tokens = {
+        "istanbul",
+        "samsun",
+        "bursa",
+        "maltepe",
+        "kagithane",
+        "kartal",
+        "tekkekoy",
+        "nilufer",
+        "kadikoy",
+        "merkez",
+    }
+    address_tokens = (" mah", "cad", "sok", "no ", "sitesi", "web sitesi", "siparis tarihi", "yalniz")
+    if normalized in location_tokens or any(token in normalized for token in address_tokens):
+        return False
+    stop_tokens = (
+        "vergi dairesi",
+        "vkn",
+        "tckn",
+        "ettn",
+        "fatura",
+        "senaryo",
+        "ozellestirme",
+        "mal hizmet",
+        "toplam",
+        "kdv",
+        "vergiler",
+        "odenecek",
+    )
+    return not any(token in normalized for token in stop_tokens)
+
+
+def _title_before_tax_line(lines: list[str], tax_line_index: int) -> str:
+    parts: list[str] = []
+    for line in reversed(lines[max(0, tax_line_index - 8) : tax_line_index]):
+        if not _meaningful_party_line(line):
+            continue
+        if any(character.isdigit() for character in line) or "/" in line:
+            continue
+        parts.append(line)
+        if len(parts) >= 2:
+            break
+    return " ".join(reversed(parts))[:120]
+
+
+def extract_recipient_title_from_text(text: str) -> str:
+    lines = [normalize_spaces(line) for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        normalized = normalize_for_search(line)
+        if not normalized.startswith("sayin"):
+            continue
+        parts = line.split(maxsplit=1)
+        title_parts: list[str] = []
+        if len(parts) > 1 and _meaningful_party_line(parts[1]):
+            title_parts.append(parts[1].strip(" :\t"))
+        for next_line in lines[index + 1 : index + 6]:
+            if _tax_id_from_line(next_line):
+                break
+            if _meaningful_party_line(next_line) and not any(character.isdigit() for character in next_line) and "/" not in next_line:
+                title_parts.append(next_line)
+            if len(title_parts) >= 2:
+                break
+        if title_parts:
+            return " ".join(title_parts)[:120]
+    return ""
+
+
+def extract_pdf_party_details_from_text(text: str) -> tuple[str, str, str, str]:
+    lines = [normalize_spaces(line) for line in text.splitlines()]
+    sayin_index = next((index for index, line in enumerate(lines) if normalize_for_search(line).startswith("sayin")), -1)
+    tax_lines = [(index, _tax_id_from_line(line)) for index, line in enumerate(lines)]
+    tax_lines = [(index, tax_id) for index, tax_id in tax_lines if tax_id]
+
+    issuer_tax_id = ""
+    issuer_title = ""
+    recipient_tax_id = ""
+    recipient_title = extract_recipient_title_from_text(text)
+
+    if sayin_index >= 0:
+        before_sayin = [(index, tax_id) for index, tax_id in tax_lines if index < sayin_index]
+        after_sayin = [(index, tax_id) for index, tax_id in tax_lines if index > sayin_index]
+        if after_sayin:
+            recipient_tax_index, recipient_tax_id = after_sayin[0]
+            if not recipient_title:
+                recipient_title = _title_before_tax_line(lines, recipient_tax_index)
+        if before_sayin:
+            issuer_tax_index, issuer_tax_id = before_sayin[-1]
+            issuer_title = _title_before_tax_line(lines, issuer_tax_index)
+        elif len(after_sayin) > 1:
+            issuer_tax_index, issuer_tax_id = after_sayin[-1]
+            issuer_title = _title_before_tax_line(lines, issuer_tax_index)
+    elif tax_lines:
+        issuer_tax_index, issuer_tax_id = tax_lines[0]
+        issuer_title = _title_before_tax_line(lines, issuer_tax_index)
+        if len(tax_lines) > 1:
+            recipient_tax_index, recipient_tax_id = tax_lines[1]
+            recipient_title = _title_before_tax_line(lines, recipient_tax_index)
+
+    return issuer_title, issuer_tax_id, recipient_title, recipient_tax_id
+
+
 def extract_vat_rates(text: str) -> tuple[str, ...]:
     rates = set()
     for line in text.splitlines():
@@ -330,15 +450,18 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         "payable_total": parsed_totals["payable_total"],
     }
     route, route_notes = build_route(edge_summary.risk_flags, parsed_identity)
-    line_items = invoice_line_hints(extract_invoice_lines_from_text(text))
+    line_item_details = extract_invoice_lines_from_text(text)
+    line_items = invoice_line_hints(line_item_details)
+    issuer_title, issuer_tax_id, recipient_title, recipient_tax_id = extract_pdf_party_details_from_text(text)
+    invoice_type = extract_invoice_type(text)
     return ParsedInvoice(
         file_name=path.name,
-        provider_hint=extract_seller_hint(text) or edge_summary.provider_hint,
+        provider_hint=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,
         page_count=page_count,
         text_extractable=len(stripped_text) >= 100,
         extracted_char_count=len(stripped_text),
         scenario=extract_scenario(text),
-        invoice_type=extract_invoice_type(text),
+        invoice_type=invoice_type,
         invoice_no=parsed_identity["invoice_no"],
         ettn=extract_ettn(text) or edge_summary.ettn,
         issue_date=parsed_identity["issue_date"],
@@ -353,6 +476,13 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         suggested_route=route,
         parse_notes=tuple(dict.fromkeys((*extraction_notes, *route_notes))),
         line_items=line_items,
+        line_item_details=line_item_details,
+        issuer_title=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,
+        issuer_tax_id=issuer_tax_id,
+        recipient_title=recipient_title,
+        recipient_tax_id=recipient_tax_id,
+        invoice_type_code=invoice_type,
+        is_return_invoice=normalize_for_search(invoice_type) in {"iade", "return"},
     )
 
 

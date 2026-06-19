@@ -163,6 +163,33 @@ def _chart_accounts(workspace: dict[str, Any]) -> list[ChartAccount]:
     return [_chart_account(account) for account in chart_accounts.get("accounts", [])]
 
 
+def _counterparty_match_for_invoice(
+    accounts: list[ChartAccount],
+    invoice: ParsedInvoice,
+    profile: ClientProfile | None,
+):
+    if not accounts:
+        return None
+    client_ids = {
+        re.sub(r"\D+", "", value)
+        for value in (
+            profile.vkn if profile else "",
+            profile.tckn if profile else "",
+            profile.tax_id if profile else "",
+            profile.tax_identifier if profile else "",
+            profile.effective_tax_identifier if profile else "",
+        )
+        if value
+    }
+    issuer_tax_id = re.sub(r"\D+", "", getattr(invoice, "issuer_tax_id", ""))
+    recipient_tax_id = re.sub(r"\D+", "", getattr(invoice, "recipient_tax_id", ""))
+    if issuer_tax_id and issuer_tax_id in client_ids:
+        return match_counterparty(accounts, tax_ids=(recipient_tax_id,), name_hint=getattr(invoice, "recipient_title", ""))
+    if recipient_tax_id and recipient_tax_id in client_ids:
+        return match_counterparty(accounts, tax_ids=(issuer_tax_id,), name_hint=getattr(invoice, "issuer_title", "") or invoice.provider_hint)
+    return match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
+
+
 def _serializable_simulation(
     invoice: ParsedInvoice,
     workspace: dict[str, Any],
@@ -171,11 +198,12 @@ def _serializable_simulation(
     intended_direction: str | None = None,
 ) -> dict[str, Any]:
     accounts = _chart_accounts(workspace)
-    counterparty = match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint) if accounts else None
+    profile = _client_profile(workspace)
+    counterparty = _counterparty_match_for_invoice(accounts, invoice, profile)
     result = simulate_invoice(
         invoice,
         _account_selection(workspace),
-        _client_profile(workspace),
+        profile,
         counterparty,
         product_classifier or StaticFirstClassifier(),
         processing_mode="ai_assisted_draft" if product_classifier else "controlled_automation",

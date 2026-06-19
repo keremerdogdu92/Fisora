@@ -117,6 +117,12 @@ def parsed_invoice_from_payload(payload: InvoicePayload) -> ParsedInvoice:
         suggested_route=payload.suggested_route,
         parse_notes=tuple(payload.parse_notes),
         line_items=tuple(payload.line_items),
+        issuer_title=payload.issuer_title,
+        issuer_tax_id=payload.issuer_tax_id,
+        recipient_title=payload.recipient_title,
+        recipient_tax_id=payload.recipient_tax_id,
+        invoice_type_code=payload.invoice_type_code,
+        is_return_invoice=payload.is_return_invoice,
     )
 
 

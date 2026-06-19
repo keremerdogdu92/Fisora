@@ -36,6 +36,28 @@ def _first_text(root: ET.Element, names: tuple[str, ...]) -> str:
     return ""
 
 
+def _party_details(root: ET.Element, parent_name: str) -> tuple[str, str]:
+    tax_id = ""
+    legal_title = ""
+    display_title = ""
+    for parent in root.iter():
+        if _local_name(parent.tag) != parent_name:
+            continue
+        for element in parent.iter():
+            local_name = _local_name(element.tag)
+            value = _text(element)
+            if not value:
+                continue
+            if local_name in {"CompanyID", "ID"} and TAX_ID_RE.match(value) and not tax_id:
+                tax_id = value
+            elif local_name == "RegistrationName" and not legal_title:
+                legal_title = value[:120]
+            elif local_name == "Name" and not display_title:
+                display_title = value[:120]
+        break
+    return legal_title or display_title, tax_id
+
+
 def _first_amount(root: ET.Element, names: tuple[str, ...]) -> str:
     value = _first_text(root, names)
     return _decimal_text(value)
@@ -68,6 +90,9 @@ def _vat_rates(root: ET.Element) -> tuple[str, ...]:
 
 
 def _provider_hint(root: ET.Element) -> str:
+    supplier_title, _ = _party_details(root, "AccountingSupplierParty")
+    if supplier_title:
+        return supplier_title
     for name in ("RegistrationName", "Name"):
         value = _first_text(root, (name,))
         if value:
@@ -133,6 +158,9 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
 
     route = "review_queue" if notes else "journal_candidate"
     xml_text = ET.tostring(root, encoding="unicode")
+    issuer_title, issuer_tax_id = _party_details(root, "AccountingSupplierParty")
+    recipient_title, recipient_tax_id = _party_details(root, "AccountingCustomerParty")
+    invoice_type_code = _first_text(root, ("InvoiceTypeCode",))
     return ParsedInvoice(
         file_name=path.name,
         provider_hint=_provider_hint(root),
@@ -140,7 +168,7 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         text_extractable=True,
         extracted_char_count=len(xml_text),
         scenario=_first_text(root, ("ProfileID",)),
-        invoice_type=_first_text(root, ("InvoiceTypeCode",)),
+        invoice_type=invoice_type_code,
         invoice_no=invoice_no,
         ettn=_first_text(root, ("UUID",)),
         issue_date=issue_date,
@@ -155,4 +183,10 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         suggested_route=route,
         parse_notes=tuple(notes),
         line_items=_invoice_line_hints(root),
+        issuer_title=issuer_title,
+        issuer_tax_id=issuer_tax_id,
+        recipient_title=recipient_title,
+        recipient_tax_id=recipient_tax_id,
+        invoice_type_code=invoice_type_code,
+        is_return_invoice=invoice_type_code.upper() in {"IADE", "\u0130ADE", "RETURN"},
     )

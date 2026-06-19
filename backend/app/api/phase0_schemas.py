@@ -89,6 +89,12 @@ class InvoicePayload(BaseModel):
     suggested_route: str = "journal_candidate"
     parse_notes: list[str] = Field(default_factory=list)
     line_items: list[str] = Field(default_factory=list)
+    issuer_title: str = ""
+    issuer_tax_id: str = ""
+    recipient_title: str = ""
+    recipient_tax_id: str = ""
+    invoice_type_code: str = ""
+    is_return_invoice: bool = False
 
 
 class CounterpartyMatchPayload(BaseModel):

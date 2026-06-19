@@ -78,9 +78,12 @@ def detect_keywords(text: str) -> tuple[str, ...]:
 
 
 def detect_vat_rates(text: str) -> tuple[str, ...]:
-    normalized = normalize_text(text)
-    matches = set(re.findall(r"(?:kdv|katma deger vergisi)[^\n\r%]{0,30}%?\s*(0|1|8|10|18|20)\b", normalized))
-    matches.update(re.findall(r"%\s*(0|1|8|10|18|20)\s*(?:kdv|katma deger vergisi)", normalized))
+    matches: set[str] = set()
+    for line in text.splitlines():
+        normalized = normalize_text(line)
+        if "kdv" not in normalized and "katma deger vergisi" not in normalized:
+            continue
+        matches.update(re.findall(r"%\s*(0|1|8|10|18|20)(?:[,.]0+)?\b", normalized))
     return tuple(sorted(matches, key=lambda value: int(value)))
 
 

@@ -168,6 +168,7 @@ def _serializable_simulation(
     workspace: dict[str, Any],
     *,
     product_classifier: ProductClassifier | None = None,
+    intended_direction: str | None = None,
 ) -> dict[str, Any]:
     accounts = _chart_accounts(workspace)
     counterparty = match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint) if accounts else None
@@ -178,6 +179,7 @@ def _serializable_simulation(
         counterparty,
         product_classifier or StaticFirstClassifier(),
         processing_mode="ai_assisted_draft" if product_classifier else "controlled_automation",
+        intended_direction=intended_direction,
     )
     result = apply_learning_rules(
         result,
@@ -627,7 +629,12 @@ def build_processing_result(
             job,
             reason="Fatura numarasi, tarih, tutar veya vergi kimligi okunamadi.",
         )
-    return _serializable_simulation(invoice, workspace, product_classifier=product_classifier)
+    return _serializable_simulation(
+        invoice,
+        workspace,
+        product_classifier=product_classifier,
+        intended_direction=str(document.get("intake_category") or job.get("intake_category") or ""),
+    )
 
 
 def _record_ai_usage_from_result(store: Any, *, client_id: str, result: dict[str, Any]) -> None:

@@ -35,6 +35,30 @@ def _normalize(value: str) -> str:
     return " ".join(lowered.split())
 
 
+def _distinctive_tokens(value: str) -> set[str]:
+    legal_noise = {
+        "a",
+        "as",
+        "aş",
+        "ltd",
+        "limited",
+        "sti",
+        "şti",
+        "sirketi",
+        "şirketi",
+        "tic",
+        "ticaret",
+        "san",
+        "sanayi",
+        "ve",
+    }
+    return {
+        token
+        for token in _normalize(value).replace(".", " ").split()
+        if len(token) >= 4 and token not in legal_noise
+    }
+
+
 def match_counterparty(
     accounts: list[ChartAccount],
     *,
@@ -81,6 +105,15 @@ def match_counterparty(
                     account_name=account.account_name,
                     confidence=82,
                     match_reason="title_similarity",
+                    requires_review=True,
+                )
+            overlap = _distinctive_tokens(normalized_hint) & _distinctive_tokens(normalized_name)
+            if len(overlap) >= 2:
+                return CounterpartyMatch(
+                    account_code=account.normalized_account_code,
+                    account_name=account.account_name,
+                    confidence=76,
+                    match_reason="title_token_overlap",
                     requires_review=True,
                 )
 

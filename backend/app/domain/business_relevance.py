@@ -46,6 +46,7 @@ HEARING_CENTER_CATEGORIES = {
 PERSONAL_USE_CATEGORIES = {
     "kisisel_bakim_kozmetik",
     "market_kisisel",
+    "personal_clothing",
 }
 
 CORE_INPUT_CATEGORIES = {
@@ -107,6 +108,9 @@ PRODUCT_RULES: tuple[tuple[str, str, int], ...] = (
     ("sampuan", "kisisel_bakim_kozmetik", 94),
     ("shampoo", "kisisel_bakim_kozmetik", 94),
     ("kozmetik", "kisisel_bakim_kozmetik", 90),
+    ("slim taper", "personal_clothing", 88),
+    ("jean", "personal_clothing", 82),
+    ("pantolon", "personal_clothing", 82),
 )
 
 ACTIVITY_TAG_CATEGORY_ALLOWLIST: dict[str, tuple[str, ...]] = {

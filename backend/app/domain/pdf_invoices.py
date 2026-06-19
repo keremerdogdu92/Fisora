@@ -21,6 +21,7 @@ VAT_RATE_RE = re.compile(
     r"(?:KDV|Katma\s+Değer\s+Vergisi|Katma\s+Deger\s+Vergisi)[^\n\r%]{0,40}%?\s*\(?\s*([0-9]{1,2})(?:[,.]0+)?\s*\)?",
     re.IGNORECASE,
 )
+VAT_PERCENT_RE = re.compile(r"%\s*(0|1|8|10|18|20)(?:[,.]0+)?\b")
 AMOUNT_RE = re.compile(r"(-?\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|-?\d+(?:,\d{2}))")
 
 
@@ -251,11 +252,53 @@ def extract_tax_ids(text: str) -> tuple[str, ...]:
 
 def extract_vat_rates(text: str) -> tuple[str, ...]:
     rates = set()
-    for match in VAT_RATE_RE.finditer(text):
-        value = match.group(1)
-        if value in {"0", "1", "8", "10", "18", "20"}:
-            rates.add(value)
+    for line in text.splitlines():
+        normalized = normalize_for_search(line)
+        if "kdv" not in normalized and "katma deger vergisi" not in normalized:
+            continue
+        for match in VAT_PERCENT_RE.finditer(line):
+            rates.add(match.group(1))
     return tuple(sorted(rates, key=lambda item: int(item)))
+
+
+def extract_seller_hint(text: str) -> str:
+    company_tokens = (
+        "ltd",
+        "limited",
+        "anonim",
+        "a.ş",
+        "a.s",
+        "şirket",
+        "sirket",
+        "ticaret",
+        "mağazacılık",
+        "magazacilik",
+        "odyoloji",
+    )
+    lines = [normalize_spaces(line) for line in text.splitlines() if normalize_spaces(line)]
+    for index, line in enumerate(lines):
+        normalized = normalize_for_search(line)
+        if not any(token in normalized for token in company_tokens):
+            continue
+        parts = [line]
+        cursor = index + 1
+        while cursor < len(lines):
+            candidate = lines[cursor]
+            candidate_normalized = normalize_for_search(candidate)
+            if any(
+                stop in candidate_normalized
+                for stop in ("vergi dairesi", "vkn", "tckn", "ettn", "sayin", " mah", " cad", " sok", " no:")
+            ):
+                break
+            if candidate in {"/", "No:", "Kapı No:"} or re.search(r"\d", candidate):
+                break
+            if len(parts) >= 3:
+                break
+            if len(candidate.split()) <= 6:
+                parts.append(candidate)
+            cursor += 1
+        return normalize_spaces(" ".join(parts))
+    return ""
 
 
 def build_route(risk_flags: tuple[str, ...], parsed: dict[str, str]) -> tuple[str, tuple[str, ...]]:
@@ -290,7 +333,7 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
     line_items = invoice_line_hints(extract_invoice_lines_from_text(text))
     return ParsedInvoice(
         file_name=path.name,
-        provider_hint=edge_summary.provider_hint,
+        provider_hint=extract_seller_hint(text) or edge_summary.provider_hint,
         page_count=page_count,
         text_extractable=len(stripped_text) >= 100,
         extracted_char_count=len(stripped_text),

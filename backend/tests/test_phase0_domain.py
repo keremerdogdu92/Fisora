@@ -598,6 +598,35 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual(str(parse_amount("1.234,56")), "1234.56")
         self.assertEqual(extract_vat_rates(text), ("8", "20"))
+        noisy_table_header = "KDV Oranı\nKDV Tutarı\n1\nSLIM TAPER\n"
+        self.assertEqual(extract_vat_rates(noisy_table_header), ())
+        self.assertEqual(extract_vat_rates("KATMA DEĞER VERGİSİ(%10)\n309,09 TL"), ("10",))
+
+    def test_pdf_invoice_line_extraction_prefers_product_table_rows(self) -> None:
+        text = "\n".join(
+            [
+                "SAYIN",
+                "ORHAN ELIBOL",
+                "TCKN: 30052309394",
+                "Fatura No:",
+                "AVQ2026000000026",
+                "Malzeme/Hizmet Açıklaması",
+                "Miktar",
+                "Birim Fiyat",
+                "KDV Oranı",
+                "1",
+                "SLIM TAPER",
+                "1",
+                "Adet",
+                "3.090,9 TL",
+                "%10,00",
+                "309,09 TL",
+            ]
+        )
+
+        lines = extract_invoice_lines_from_text(text)
+
+        self.assertEqual(lines[0].description, "SLIM TAPER")
 
     def test_pdf_invoice_route_returns_notes_tuple_for_journal_candidate(self) -> None:
         route, notes = build_route(
@@ -915,6 +944,81 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_sales_vat_account, "")
         self.assertEqual(result.suggested_counterparty_account, "320.M03")
         self.assertEqual([line["account_code"] for line in result.draft_lines], ["153.01.001", "191.20", "320.01"])
+
+    def test_purchase_intake_handles_supplier_perspective_sales_pdf(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="purchase-tab.pdf",
+            provider_hint="Avrupa Yakasi Online",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="AVQ2026000000026",
+            ettn="",
+            issue_date="13.05.2026",
+            tax_ids=("30052309394", "1061386125"),
+            vat_rates=("10",),
+            goods_services_total="3090.90",
+            vat_total="309.09",
+            special_tax_total="",
+            tax_inclusive_total="3399.99",
+            payable_total="3399.99",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("SLIM TAPER",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.010",
+            purchase_vat_account="191.01.001",
+            supplier_account="320.A04",
+            bank_account="102.01",
+            selection_notes=(),
+            non_deductible_account="689.01",
+            sales_vat_account="391.01.010",
+            revenue_account="600.01.010",
+            customer_account="120.A01",
+            next_supplier_account="320.A06",
+            account_candidates={
+                "purchase_vat": (
+                    {"code": "191.01.001", "name": "KDV 1", "reason": "191 adayi"},
+                    {"code": "191.01.010", "name": "Yuzde 10 KDV", "reason": "191 adayi"},
+                ),
+                "non_deductible": ({"code": "689.01", "name": "K.K.E Giderler", "reason": "KKEG adayi"},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="ORHAN ELIBOL",
+            tax_id="30052309394",
+            tckn="30052309394",
+            tax_identifier="30052309394",
+            activity_description="TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        counterparty = match_counterparty([], name_hint="Avrupa Yakasi Online")
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            counterparty,
+            processing_mode="controlled_automation",
+            intended_direction="purchase_invoice",
+        )
+
+        self.assertEqual(result.accounting_direction, "purchase")
+        self.assertEqual(result.product_category, "personal_clothing")
+        self.assertEqual(result.business_relevance_account_treatment, "non_deductible_review")
+        self.assertEqual(result.selected_expense_account, "689.01")
+        self.assertEqual(result.selected_purchase_vat_account, "")
+        self.assertEqual([line["account_code"] for line in result.draft_lines], ["689.01", "320.A06"])
+        self.assertEqual(result.export_status, "review_required")
 
     def test_account_selection_exposes_semantic_detail_account_candidates(self) -> None:
         selection = select_accounts(

@@ -41,6 +41,7 @@ def empty_store() -> dict[str, Any]:
         "auth_sessions": {},
         "auth_tokens": {},
         "ai_usage_events": [],
+        "ai_capacity_snapshots": {},
         "operation_events": [],
         "document_pipeline_events": [],
         "nace_research_profiles": {},
@@ -269,6 +270,24 @@ class JsonWorkflowStore:
             if event.get("client_id") == client_id
         ]
 
+    def record_ai_capacity_snapshot(self, *, provider: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        key = str(provider or "").strip().lower()
+        if not key:
+            raise ValueError("provider is required")
+        record = {
+            **snapshot,
+            "provider": key,
+            "updated_at": utc_now(),
+        }
+        data["ai_capacity_snapshots"][key] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def latest_ai_capacity_snapshots(self) -> dict[str, dict[str, Any]]:
+        data = self._read()
+        return deepcopy(data["ai_capacity_snapshots"])
+
     def reset_test_data(
         self,
         *,
@@ -301,6 +320,7 @@ class JsonWorkflowStore:
             + len(data["auth_sessions"])
             + len(data["auth_tokens"])
             + len(data["ai_usage_events"])
+            + len(data["ai_capacity_snapshots"])
             + len(data["operation_events"])
             + len(data["document_pipeline_events"])
             + len(data["nace_research_profiles"])
@@ -326,6 +346,7 @@ class JsonWorkflowStore:
                 "auth_sessions": {},
                 "auth_tokens": {},
                 "ai_usage_events": [],
+                "ai_capacity_snapshots": {},
                 "operation_events": [],
                 "document_pipeline_events": [],
                 "nace_research_profiles": {},

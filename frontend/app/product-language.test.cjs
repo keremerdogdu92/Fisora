@@ -34,6 +34,14 @@ test("review actions clearly name the export exclusion decision", () => {
   assert.match(reviewSource, /Çıktı listesine ekleme/);
 });
 
+test("operations page uses AI agent capacity language without plan wording", () => {
+  const operationsSource = source("portal-exports-view.tsx");
+
+  assert.match(operationsSource, /AI ajanı kapasitesi/);
+  assert.match(operationsSource, /Araştırma ajanı/);
+  assert.doesNotMatch(operationsSource, /free tier|free|ücretsiz|API key|secret/i);
+});
+
 test("client onboarding labels portal user as the client email login", () => {
   const clientsSource = source("portal-clients-view.tsx");
 

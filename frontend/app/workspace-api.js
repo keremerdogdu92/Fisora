@@ -149,6 +149,22 @@ async function fetchBackendReadiness({
   });
 }
 
+async function fetchAiCapacity({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: "/phase0/store/ai-capacity",
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
 async function fetchResearchProfiles({
   apiBaseUrl,
   sessionToken = "",
@@ -578,6 +594,7 @@ function normalizeRulePrompt(value) {
 
 module.exports = {
   backendAuthHeaders,
+  fetchAiCapacity,
   fetchResearchBenchmarkRuns,
   fetchResearchProfile,
   fetchResearchProfiles,

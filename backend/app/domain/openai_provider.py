@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 import httpx
 
+from app.domain.ai_capacity import normalize_cerebras_rate_limit_headers, normalize_groq_rate_limit_headers
 from app.domain.ai_classification import AiClassificationRequest
 from app.domain.statement_ai_suggestions import StatementAiSuggestionRequest
 
@@ -45,6 +46,7 @@ class OpenAiAccountingProvider:
         self.provider_name = provider_name
         self.http_client = http_client or httpx.Client()
         self.timeout_seconds = timeout_seconds
+        self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
@@ -104,8 +106,13 @@ class OpenAiAccountingProvider:
             },
             timeout=self.timeout_seconds,
         )
+        self._capture_capacity_snapshot(response)
         response.raise_for_status()
         return _extract_json_response(response.json())
+
+    def _capture_capacity_snapshot(self, response: Any) -> None:
+        if self.provider_name == "groq":
+            self.last_capacity_snapshot = normalize_groq_rate_limit_headers(dict(getattr(response, "headers", {}) or {}))
 
 
 class GroqAccountingProvider(OpenAiAccountingProvider):
@@ -158,6 +165,7 @@ class ChatCompletionsAccountingProvider:
         self.extra_headers = {key: value for key, value in (extra_headers or {}).items() if value.strip()}
         self.http_client = http_client or httpx.Client()
         self.timeout_seconds = timeout_seconds
+        self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
@@ -222,8 +230,15 @@ class ChatCompletionsAccountingProvider:
             },
             timeout=self.timeout_seconds,
         )
+        self._capture_capacity_snapshot(response)
         response.raise_for_status()
         return _extract_chat_completion_json_response(response.json())
+
+    def _capture_capacity_snapshot(self, response: Any) -> None:
+        if self.provider_name == "groq":
+            self.last_capacity_snapshot = normalize_groq_rate_limit_headers(dict(getattr(response, "headers", {}) or {}))
+        if self.provider_name == "cerebras":
+            self.last_capacity_snapshot = normalize_cerebras_rate_limit_headers(dict(getattr(response, "headers", {}) or {}))
 
 
 class FallbackAccountingProvider:
@@ -235,6 +250,7 @@ class FallbackAccountingProvider:
         self.providers = providers
         self.provider_name = ">".join(provider.provider_name for provider in providers)
         self.last_provider_name = ""
+        self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         return self._call("classify_product", request)
@@ -248,6 +264,7 @@ class FallbackAccountingProvider:
             try:
                 result = getattr(provider, method_name)(request)
                 self.last_provider_name = provider.provider_name
+                self.last_capacity_snapshot = dict(getattr(provider, "last_capacity_snapshot", {}) or {})
                 return result
             except Exception as exc:  # noqa: BLE001 - fallback boundary keeps the pipeline alive
                 errors.append(f"{provider.provider_name}: {type(exc).__name__}: {str(exc)[:160]}")

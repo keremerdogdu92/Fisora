@@ -38,13 +38,29 @@ from app.domain.statement_ai_suggestions import (
 router = APIRouter()
 
 
+def _record_ai_capacity_snapshot(provider: object | None) -> None:
+    if provider is None:
+        return
+    snapshot = getattr(provider, "last_capacity_snapshot", {}) or {}
+    if not isinstance(snapshot, dict) or not snapshot:
+        return
+    provider_name = str(getattr(provider, "last_provider_name", "") or getattr(provider, "provider_name", "")).strip()
+    if not provider_name:
+        return
+    store = get_workflow_store()
+    if hasattr(store, "record_ai_capacity_snapshot"):
+        store.record_ai_capacity_snapshot(provider=provider_name, snapshot=snapshot)
+
+
 @router.post("/classification/product")
 def product_classification(payload: ProductClassificationPayload, request: Request) -> dict[str, object]:
     enforce_rate_limit(scope="ai", key=payload.client_id.strip(), request=request)
-    result = static_first_classifier_from_payload(payload.ai_policy).classify(
+    classifier = static_first_classifier_from_payload(payload.ai_policy)
+    result = classifier.classify(
         payload.raw_line,
         supplier_hint=payload.supplier_hint,
     )
+    _record_ai_capacity_snapshot(getattr(classifier, "provider", None))
     usage_event = None
     if payload.client_id.strip():
         usage_event = ai_usage_payload(
@@ -102,6 +118,7 @@ def statement_ai_suggestions(
         provider=provider,
         policy=statement_ai_policy_from_payload(payload.ai_policy),
     )
+    _record_ai_capacity_snapshot(provider)
     data = statement_ai_batch_payload(batch)
     usage_event = None
     if payload.client_id.strip():

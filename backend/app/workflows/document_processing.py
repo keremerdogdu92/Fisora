@@ -648,6 +648,40 @@ def _record_ai_usage_from_result(store: Any, *, client_id: str, result: dict[str
     store.record_ai_usage(client_id=client_id, event=event)
 
 
+def _record_ai_capacity_snapshot(store: Any, provider: Any) -> None:
+    if not hasattr(store, "record_ai_capacity_snapshot") or provider is None:
+        return
+    snapshot = getattr(provider, "last_capacity_snapshot", {}) or {}
+    if not isinstance(snapshot, dict) or not snapshot:
+        return
+    provider_name = str(getattr(provider, "last_provider_name", "") or getattr(provider, "provider_name", "")).strip()
+    if not provider_name:
+        return
+    store.record_ai_capacity_snapshot(provider=provider_name, snapshot=snapshot)
+
+
+def _record_research_usage(
+    store: Any,
+    *,
+    client_id: str,
+    provider_name: str,
+    input_chars: int,
+) -> None:
+    if not hasattr(store, "record_ai_usage"):
+        return
+    event = ai_usage_payload(
+        build_ai_usage_event(
+            client_id=client_id,
+            provider=provider_name or "research_agent",
+            operation="internet_research",
+            input_chars=input_chars,
+            ai_used=True,
+            skipped_reason="",
+        )
+    )
+    store.record_ai_usage(client_id=client_id, event=event)
+
+
 def process_next_job_once(
     store: Any,
     *,
@@ -722,6 +756,9 @@ def process_next_job_once(
             statement_ai_provider=runtime["statement_ai_provider"],
             statement_ai_policy=runtime["statement_ai_policy"],
         )
+        product_provider = getattr(runtime["product_classifier"], "provider", None)
+        _record_ai_capacity_snapshot(store, product_provider)
+        _record_ai_capacity_snapshot(store, runtime["statement_ai_provider"])
         pipeline_event(
             "parse_succeeded",
             "ok",
@@ -849,6 +886,13 @@ def process_next_job_once(
                     supplier_hint=str(result.get("provider_hint") or ""),
                     activity_context=activity_context,
                 )
+                if harness.call_count > 0:
+                    _record_research_usage(
+                        store,
+                        client_id=client_id,
+                        provider_name=str(getattr(effective_research_runtime.get("provider"), "provider_name", "")),
+                        input_chars=len(query.search_text) + len(query.supplier_hint) + len(query.activity_context),
+                    )
                 threshold = int(getattr(effective_research_runtime.get("policy"), "confidence_threshold", 70))
                 result = apply_research_to_result(result, profile, confidence_threshold=threshold)
                 confidence = int(profile.get("confidence") or 0)

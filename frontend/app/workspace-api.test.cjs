@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   backendAuthHeaders,
+  fetchAiCapacity,
   fetchResearchBenchmarkRuns,
   fetchResearchProfiles,
   fetchBackendReadiness,
@@ -331,6 +332,33 @@ test("fetchBackendReadiness loads the system readiness payload without auth head
   assert.equal(requests[0].init.method, "GET");
   assert.deepEqual(requests[0].init.headers, {});
   assert.ok(requests[0].init.signal);
+});
+
+test("fetchAiCapacity loads the protected AI agent capacity endpoint with accountant auth", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
+    requests.push({ url, init });
+    return {
+      ok: true,
+      json: async () => ({
+        status: "ok",
+        agents: [{ label: "Araştırma ajanı", configured: true }],
+        totals: { document_queries: 12, internet_researches: 1 },
+      }),
+    };
+  };
+
+  const capacity = await fetchAiCapacity({
+    apiBaseUrl: "http://localhost:8000/",
+    fetchImpl,
+    sessionToken: "session-1",
+    userId: "mali-musavir",
+  });
+
+  assert.equal(capacity.agents[0].label, "Araştırma ajanı");
+  assert.equal(requests[0].url, "http://localhost:8000/phase0/store/ai-capacity");
+  assert.equal(requests[0].init.method, "GET");
+  assert.deepEqual(requests[0].init.headers, { "X-Fisora-Session": "session-1" });
 });
 
 test("research API helpers use accountant auth and expected endpoints", async () => {

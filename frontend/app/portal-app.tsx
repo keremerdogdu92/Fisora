@@ -22,6 +22,7 @@ import {
   buildPilotReadinessView,
   loadInitialPilotData,
   refreshBackendPilotData as refreshBackendPilotDataAction,
+  useAiCapacityQuery,
   usePilotReadinessQuery,
 } from "./features/workspace";
 import {
@@ -122,6 +123,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [portalPassword, setPortalPasswordDraft] = useState("");
   const [portalPasswordStatus, setPortalPasswordStatus] = useState("");
   const readinessQuery = usePilotReadinessQuery();
+  const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });
 
   function applyPilotData(payload: PilotData, nextSource: string) {
     setData(payload);
@@ -602,12 +604,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       ) : null}
 
       {mode === "operations" ? (
-        <OperationsRouteView
-          data={data}
-          localFallbackAllowed={localFallbackAllowed}
-          readinessView={readinessView}
-          source={source}
-        />
+        <OperationsRouteView aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed} readinessView={readinessView} source={source} />
       ) : null}
     </main>
   );

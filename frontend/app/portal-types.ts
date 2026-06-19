@@ -217,6 +217,40 @@ export type PilotReadinessView = {
   warnings: string[];
 };
 
+export type AiCapacityWindow = {
+  limit?: number | null;
+  remaining?: number | null;
+  reset?: string;
+};
+
+export type AiCapacityAgentView = {
+  kind: "document" | "research" | string;
+  slot: string;
+  label: string;
+  configured: boolean;
+  status: string;
+  model?: string;
+  source?: string;
+  last_checked_at?: string;
+  daily_requests?: AiCapacityWindow;
+  minute_tokens?: AiCapacityWindow;
+  estimates?: {
+    document_queries?: number;
+    internet_researches?: number;
+    confidence?: string;
+  };
+};
+
+export type AiCapacityView = {
+  generated_at?: string;
+  status?: string;
+  agents?: AiCapacityAgentView[];
+  totals?: {
+    document_queries?: number;
+    internet_researches?: number;
+  };
+};
+
 export type ResearchSourceView = {
   title?: string;
   url?: string;

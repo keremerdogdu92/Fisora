@@ -19,6 +19,12 @@ from app.domain.chart_accounts import (
 )
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
 from app.domain.ai_classification import AiClassificationContext, AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
+from app.domain.ai_capacity import (
+    ai_capacity_payload,
+    normalize_cerebras_rate_limit_headers,
+    normalize_groq_rate_limit_headers,
+    normalize_openrouter_key_payload,
+)
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
 from app.domain.openai_provider import ChatCompletionsAccountingProvider, GroqAccountingProvider, OpenAiAccountingProvider
 from app.domain.business_relevance import (
@@ -122,6 +128,87 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(summary["estimated_total_cost_usd"], "0.000000")
         self.assertEqual(summary["remaining_cap_usd"], "0.010000")
         self.assertFalse(summary["cap_exceeded"])
+
+    def test_ai_capacity_normalizes_provider_limits_without_public_plan_language(self) -> None:
+        groq = normalize_groq_rate_limit_headers(
+            {
+                "x-ratelimit-limit-requests": "1000",
+                "x-ratelimit-remaining-requests": "742",
+                "x-ratelimit-limit-tokens": "8000",
+                "x-ratelimit-remaining-tokens": "6500",
+                "x-ratelimit-reset-requests": "3h12m",
+                "x-ratelimit-reset-tokens": "12s",
+            }
+        )
+        cerebras = normalize_cerebras_rate_limit_headers(
+            {
+                "x-ratelimit-limit-requests-day": "100",
+                "x-ratelimit-remaining-requests-day": "81",
+                "x-ratelimit-limit-tokens-minute": "30000",
+                "x-ratelimit-remaining-tokens-minute": "24000",
+                "x-ratelimit-reset-requests-day": "500",
+                "x-ratelimit-reset-tokens-minute": "10",
+            }
+        )
+        openrouter = normalize_openrouter_key_payload(
+            {
+                "data": {
+                    "limit": 100,
+                    "limit_remaining": 74.5,
+                    "usage_daily": 25.5,
+                    "usage_monthly": 25.5,
+                    "is_free_tier": True,
+                    "label": "sk-or-secret",
+                }
+            }
+        )
+
+        self.assertEqual(groq["daily_requests"]["remaining"], 742)
+        self.assertEqual(groq["daily_requests"]["limit"], 1000)
+        self.assertEqual(groq["minute_tokens"]["remaining"], 6500)
+        self.assertEqual(cerebras["daily_requests"]["remaining"], 81)
+        self.assertEqual(cerebras["minute_tokens"]["limit"], 30000)
+        self.assertEqual(openrouter["credit"]["remaining"], "74.500000")
+        self.assertNotIn("is_free_tier", openrouter)
+        self.assertNotIn("label", openrouter)
+        self.assertNotIn("secret", str(openrouter).lower())
+
+    def test_ai_capacity_payload_reports_research_agent_configuration_without_keys(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_AI_PROVIDER_CHAIN": "groq,openrouter,cerebras",
+                "GROQ_API_KEY": "gsk-secret",
+                "OPENROUTER_API_KEY": "or-secret",
+                "CEREBRAS_API_KEY": "csk-secret",
+                "FISORA_RESEARCH_ENABLED": "true",
+                "OPENAI_API_KEY": "sk-secret",
+                "FISORA_RESEARCH_MODEL": "gpt-5.4-mini",
+                "FISORA_RESEARCH_MAX_PER_DOCUMENT": "1",
+            },
+            provider_snapshots={
+                "groq": normalize_groq_rate_limit_headers(
+                    {
+                        "x-ratelimit-limit-requests": "1000",
+                        "x-ratelimit-remaining-requests": "742",
+                    }
+                )
+            },
+        )
+
+        labels = [agent["label"] for agent in payload["agents"]]
+        research = next(agent for agent in payload["agents"] if agent["kind"] == "research")
+        self.assertEqual(labels, ["Belge ajanı 1", "Belge ajanı 2", "Belge ajanı 3", "Araştırma ajanı"])
+        self.assertTrue(research["configured"])
+        self.assertEqual(research["status"], "ready")
+        self.assertGreaterEqual(payload["totals"]["document_queries"], 247)
+        self.assertGreaterEqual(payload["totals"]["internet_researches"], 1)
+        public_text = str(payload).lower()
+        self.assertNotIn("gsk-secret", public_text)
+        self.assertNotIn("or-secret", public_text)
+        self.assertNotIn("csk-secret", public_text)
+        self.assertNotIn("sk-secret", public_text)
+        self.assertNotIn("free", public_text)
+        self.assertNotIn("ücretsiz", public_text)
 
     def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

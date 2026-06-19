@@ -246,6 +246,23 @@ class PostgresWorkflowStore:
     def list_ai_usage(self, *, client_id: str) -> list[dict[str, Any]]:
         return self._payloads(client_id, "ai_usage_event")
 
+    def record_ai_capacity_snapshot(self, *, provider: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        key = str(provider or "").strip().lower()
+        if not key:
+            raise ValueError("provider is required")
+        record = {
+            **snapshot,
+            "provider": key,
+            "updated_at": utc_now(),
+        }
+        return self._upsert_record("__system__", "ai_capacity_snapshot", key, record)
+
+    def latest_ai_capacity_snapshots(self) -> dict[str, dict[str, Any]]:
+        return {
+            str(row["record_key"]): deepcopy(row["payload"])
+            for row in self._list_records("ai_capacity_snapshot", client_id="__system__")
+        }
+
     def reset_test_data(
         self,
         *,

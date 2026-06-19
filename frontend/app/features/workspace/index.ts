@@ -4,4 +4,4 @@ export {
   refreshBackendPilotData,
 } from "../../portal-workspace-actions";
 export { PilotQueryProvider } from "./query-provider";
-export { usePilotReadinessQuery, useWorkspaceDataQuery, workspaceQueryKeys } from "./queries";
+export { useAiCapacityQuery, usePilotReadinessQuery, useWorkspaceDataQuery, workspaceQueryKeys } from "./queries";

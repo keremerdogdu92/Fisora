@@ -304,6 +304,86 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(health.json()["summary"]["health_status"], "ok")
         self.assertEqual(health.json()["summary"]["event_count"], 1)
 
+    def test_ai_capacity_endpoint_requires_accountant_and_hides_secrets(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        previous_env = {
+            key: os.environ.get(key)
+            for key in (
+                "FISORA_AI_PROVIDER_CHAIN",
+                "GROQ_API_KEY",
+                "OPENROUTER_API_KEY",
+                "CEREBRAS_API_KEY",
+                "FISORA_RESEARCH_ENABLED",
+                "OPENAI_API_KEY",
+                "FISORA_RESEARCH_MODEL",
+                "FISORA_RESEARCH_MAX_PER_DOCUMENT",
+            )
+        }
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        os.environ["FISORA_AI_PROVIDER_CHAIN"] = "groq,openrouter,cerebras"
+        os.environ["GROQ_API_KEY"] = "gsk-secret"
+        os.environ["OPENROUTER_API_KEY"] = "or-secret"
+        os.environ["CEREBRAS_API_KEY"] = "csk-secret"
+        os.environ["FISORA_RESEARCH_ENABLED"] = "true"
+        os.environ["OPENAI_API_KEY"] = "sk-secret"
+        os.environ["FISORA_RESEARCH_MODEL"] = "gpt-5.4-mini"
+        os.environ["FISORA_RESEARCH_MAX_PER_DOCUMENT"] = "1"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["*"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "client-user",
+                        "display_name": "Client User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+
+                anonymous = client.get("/phase0/store/ai-capacity")
+                forbidden = client.get("/phase0/store/ai-capacity", headers={"X-Fisora-User-Id": "client-user"})
+                response = client.get("/phase0/store/ai-capacity", headers={"X-Fisora-User-Id": "mali-musavir"})
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agents"][0]["label"], "Belge ajanı 1")
+        self.assertEqual(payload["agents"][-1]["label"], "Araştırma ajanı")
+        self.assertTrue(payload["agents"][-1]["configured"])
+        public_text = str(payload).lower()
+        self.assertNotIn("gsk-secret", public_text)
+        self.assertNotIn("or-secret", public_text)
+        self.assertNotIn("csk-secret", public_text)
+        self.assertNotIn("sk-secret", public_text)
+        self.assertNotIn("free", public_text)
+        self.assertNotIn("ücretsiz", public_text)
+
     def test_invite_accept_and_password_reset_flow(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

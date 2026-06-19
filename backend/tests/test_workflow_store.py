@@ -15,6 +15,7 @@ from app.persistence.workflow_store import JsonWorkflowStore
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
+from app.persistence.postgres_workflow_store import PostgresWorkflowStore
 from app.persistence.store_factory import build_workflow_store
 from backend.scripts.import_private_intake_manifest import import_manifest
 from app.workflows.document_processing import build_ai_runtime_from_env, build_statement_processing_result, parser_kind_for_document_type, process_queued_documents
@@ -532,6 +533,23 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(cached["brand_summary"], "Sampuan markasi.")
         self.assertEqual(cached["common_product_categories"], ["kisisel_bakim_kozmetik"])
         self.assertEqual(calls, [])
+
+    def test_postgres_store_exposes_generic_research_profile_lookup(self) -> None:
+        class FakePostgresStore(PostgresWorkflowStore):
+            def __init__(self) -> None:
+                pass
+
+            def get_nace_research_profile(self, nace_code: str) -> dict[str, object] | None:
+                return {"kind": "nace", "key": nace_code}
+
+            def get_brand_research_profile(self, brand_name: str) -> dict[str, object] | None:
+                return {"kind": "brand", "key": brand_name}
+
+        store = FakePostgresStore()
+
+        self.assertEqual(store.get_research_profile(kind="brand", key="Rexton")["kind"], "brand")
+        self.assertEqual(store.get_research_profile(kind="nace", key="477401")["kind"], "nace")
+        self.assertIsNone(store.get_research_profile(kind="other", key="x"))
 
     def test_json_store_applies_review_correction_to_stored_document(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

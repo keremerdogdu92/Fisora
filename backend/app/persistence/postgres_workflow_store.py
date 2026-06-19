@@ -474,6 +474,13 @@ class PostgresWorkflowStore:
     def get_brand_research_profile(self, brand_name: str) -> dict[str, Any] | None:
         return self._get_record("brand", "brand_research_profile", normalize_brand_name(brand_name))
 
+    def get_research_profile(self, *, kind: str, key: str) -> dict[str, Any] | None:
+        if kind == "nace":
+            return self.get_nace_research_profile(key)
+        if kind == "brand":
+            return self.get_brand_research_profile(key)
+        return None
+
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
         timestamp = utc_now()

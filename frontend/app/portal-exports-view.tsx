@@ -140,6 +140,7 @@ function agentStatusLabel(status = "") {
   if (status === "configured") return "Tanımlı";
   if (status === "disabled") return "Kapalı";
   if (status === "missing_key") return "Eksik";
+  if (status === "configuration_error") return "Son kontrolde hata";
   if (status === "last_check_error") return "Kontrol hatası";
   return "Bilinmiyor";
 }
@@ -147,7 +148,7 @@ function agentStatusLabel(status = "") {
 function agentStatusClass(status = "") {
   if (status === "ready" || status === "configured") return "export_ready";
   if (status === "disabled" || status === "missing_key") return "review_required";
-  if (status === "last_check_error") return "cancel_requested";
+  if (status === "configuration_error" || status === "last_check_error") return "cancel_requested";
   return "queued";
 }
 
@@ -157,6 +158,7 @@ function agentCapacityText(agent: AiCapacityAgentView) {
   if (agent.kind === "research") {
     if (agent.status === "disabled") return "Araştırma ajanı kapalı.";
     if (agent.status === "missing_key") return "Araştırma bağlantısı eksik.";
+    if (agent.status === "configuration_error") return "Araştırma ajanı son kontrolde hata verdi.";
     return `Yaklaşık ${researches} internet araştırması.`;
   }
   const daily = agent.daily_requests?.remaining;

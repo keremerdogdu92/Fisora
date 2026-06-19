@@ -158,14 +158,24 @@ def _research_enabled(env: Mapping[str, str]) -> bool:
     return str(env.get("FISORA_RESEARCH_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def looks_like_openai_api_key(value: str) -> bool:
+    key = str(value or "").strip()
+    return bool(key) and key.startswith("sk-") and not key.lower().startswith("sk-or-")
+
+
 def _research_agent(env: Mapping[str, str]) -> dict[str, object]:
     enabled = _research_enabled(env)
-    key_present = bool(str(env.get("OPENAI_API_KEY", "")).strip())
-    configured = enabled and key_present
+    api_key = str(env.get("OPENAI_API_KEY", "")).strip()
+    key_present = bool(api_key)
+    key_valid = looks_like_openai_api_key(api_key)
+    configured = enabled and key_valid
     max_per_document = max(_int_or_none(env.get("FISORA_RESEARCH_MAX_PER_DOCUMENT", "1")) or 1, 1)
     if configured:
         status = "ready"
         internet_researches = max_per_document
+    elif enabled and key_present:
+        status = "configuration_error"
+        internet_researches = 0
     elif enabled:
         status = "missing_key"
         internet_researches = 0

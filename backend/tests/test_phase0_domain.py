@@ -210,6 +210,22 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("free", public_text)
         self.assertNotIn("ücretsiz", public_text)
 
+    def test_ai_capacity_payload_does_not_mark_openrouter_key_as_research_ready(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_RESEARCH_ENABLED": "true",
+                "OPENAI_API_KEY": "sk-or-v1-not-openai",
+                "FISORA_RESEARCH_MODEL": "gpt-5.4-mini",
+            },
+            provider_snapshots={},
+        )
+
+        research = next(agent for agent in payload["agents"] if agent["kind"] == "research")
+        self.assertFalse(research["configured"])
+        self.assertEqual(research["status"], "configuration_error")
+        self.assertEqual(payload["totals"]["internet_researches"], 0)
+        self.assertNotIn("sk-or-v1-not-openai", str(payload))
+
     def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

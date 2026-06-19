@@ -120,6 +120,14 @@ class ResearchHarnessTests(unittest.TestCase):
 
     def test_build_research_runtime_from_env_is_openai_only_and_disabled_without_key(self) -> None:
         self.assertIsNone(build_research_runtime_from_env({"FISORA_RESEARCH_ENABLED": "true"}))
+        self.assertIsNone(
+            build_research_runtime_from_env(
+                {
+                    "FISORA_RESEARCH_ENABLED": "true",
+                    "OPENAI_API_KEY": "sk-or-v1-not-openai",
+                }
+            )
+        )
         runtime = build_research_runtime_from_env(
             {
                 "FISORA_RESEARCH_ENABLED": "true",

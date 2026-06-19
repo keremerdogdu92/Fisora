@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 
 from app.domain.brand_research import normalize_brand_name
+from app.domain.ai_capacity import looks_like_openai_api_key
 from app.domain.nace_research import normalize_nace_code
 
 
@@ -286,7 +287,7 @@ class OpenAIAgentsResearchProvider:
 def build_research_runtime_from_env(env: dict[str, str] | Any) -> dict[str, object] | None:
     enabled = str(env.get("FISORA_RESEARCH_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
     api_key = str(env.get("OPENAI_API_KEY", "")).strip()
-    if not enabled or not api_key:
+    if not enabled or not looks_like_openai_api_key(api_key):
         return None
     policy = ResearchPolicy(
         enabled=True,

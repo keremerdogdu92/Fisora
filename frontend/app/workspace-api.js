@@ -15,6 +15,29 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizeAccountCandidate(candidate) {
+  return {
+    code: safeText(candidate?.code),
+    name: safeText(candidate?.name),
+    reason: safeText(candidate?.reason),
+  };
+}
+
+function normalizeAccountCandidates(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const list = (key) => safeList(source[key]).map(normalizeAccountCandidate).filter((candidate) => candidate.code);
+  return {
+    purchaseStock: list("purchase_stock"),
+    purchaseExpense: list("purchase_expense"),
+    purchaseVat: list("purchase_vat"),
+    salesRevenue: list("sales_revenue"),
+    zeroVatRevenue: list("zero_vat_revenue"),
+    salesVat: list("sales_vat"),
+    customer: list("customer"),
+    supplier: list("supplier"),
+  };
+}
+
 const DEFAULT_BACKEND_TIMEOUT_MS = 2500;
 
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
@@ -203,11 +226,20 @@ function processedBackendDocument(document, workspace, client) {
     exportGateReason: safeText(result.export_gate_reason),
     draftStatus: safeText(result.draft_status, safeList(result.draft_lines).length ? "draft_ready" : "manual_draft_required"),
     accountantSummary: safeText(result.accountant_summary, accountantSummaryForResult(result)),
+    accountantExplanation: safeText(result.accountant_explanation_tr || result.ai_explanation_tr || result.accountant_summary),
     technicalDetails: result.technical_details && typeof result.technical_details === "object" ? result.technical_details : {},
     pipelineEvents: pipelineEventsForDocument(workspace, documentRef, originalDocumentRef),
+    accountingDirection: safeText(result.accounting_direction || directionForBackendDocument(result.invoice_type || document?.document_type || result.intake_category)),
     selectedExpenseAccount: safeText(result.selected_expense_account, "-"),
     selectedVatAccount: safeText(result.selected_vat_account, "-"),
     selectedCounterpartyAccount: safeText(result.selected_supplier_account || result.counterparty_match_code, "-"),
+    selectedRevenueAccount: safeText(result.selected_revenue_account, "-"),
+    selectedPurchaseVatAccount: safeText(result.selected_purchase_vat_account, result.selected_vat_account || "-"),
+    selectedSalesVatAccount: safeText(result.selected_sales_vat_account, result.selected_vat_account || "-"),
+    selectedCustomerAccount: safeText(result.selected_customer_account, "-"),
+    suggestedCounterpartyAccount: safeText(result.suggested_counterparty_account, result.selected_supplier_account || result.counterparty_match_code || "-"),
+    counterpartyCreationSuggestion: result.counterparty_creation_suggestion && typeof result.counterparty_creation_suggestion === "object" ? result.counterparty_creation_suggestion : {},
+    accountCandidates: normalizeAccountCandidates(result.account_candidates),
     counterpartyConfidence: safeNumber(result.counterparty_match_confidence),
     reviewReasons: safeList(document?.review_reason_codes || result.review_reason_codes).map(String),
     riskFlags: safeList(result.risk_flags).map(String),
@@ -259,11 +291,20 @@ function pendingBackendDocument(document, workspace, client) {
     exportGateReason: "İşleme ve müşavir kontrolü tamamlanmadan çıktıya alınmaz.",
     draftStatus: "processing",
     accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
+    accountantExplanation: "Belge henuz muhasebe gerekcesi uretmedi.",
     technicalDetails: {},
     pipelineEvents: pipelineEventsForDocument(workspace, documentRef, documentRef),
+    accountingDirection: directionForBackendDocument(document?.intake_category || job.intake_category || documentType),
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",
+    selectedRevenueAccount: "-",
+    selectedPurchaseVatAccount: "-",
+    selectedSalesVatAccount: "-",
+    selectedCustomerAccount: "-",
+    suggestedCounterpartyAccount: "-",
+    counterpartyCreationSuggestion: {},
+    accountCandidates: normalizeAccountCandidates({}),
     counterpartyConfidence: 0,
     reviewReasons: [],
     riskFlags: [],
@@ -348,6 +389,13 @@ function intakeCategoryForBackendDocument(value) {
   }
   if (normalized === "special_document") return "special_document";
   return "purchase_invoice";
+}
+
+function directionForBackendDocument(value) {
+  const category = intakeCategoryForBackendDocument(value);
+  if (category === "sales_invoice") return "sales";
+  if (category === "purchase_invoice") return "purchase";
+  return "";
 }
 
 function statusForBackendDocument(value) {

@@ -7,6 +7,23 @@ export type DraftLine = {
   credit: string;
 };
 
+export type AccountCandidate = {
+  code: string;
+  name: string;
+  reason: string;
+};
+
+export type AccountCandidateGroups = {
+  purchaseStock: AccountCandidate[];
+  purchaseExpense: AccountCandidate[];
+  purchaseVat: AccountCandidate[];
+  salesRevenue: AccountCandidate[];
+  zeroVatRevenue: AccountCandidate[];
+  salesVat: AccountCandidate[];
+  customer: AccountCandidate[];
+  supplier: AccountCandidate[];
+};
+
 export type StatementLineReview = {
   line_no: number;
   transaction_date: string;
@@ -114,11 +131,20 @@ export type PilotDocument = {
   exportGateReason: string;
   draftStatus: string;
   accountantSummary: string;
+  accountantExplanation?: string;
   technicalDetails: Record<string, unknown>;
   pipelineEvents: DocumentPipelineEvent[];
+  accountingDirection?: string;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedCounterpartyAccount: string;
+  selectedRevenueAccount?: string;
+  selectedPurchaseVatAccount?: string;
+  selectedSalesVatAccount?: string;
+  selectedCustomerAccount?: string;
+  suggestedCounterpartyAccount?: string;
+  counterpartyCreationSuggestion?: Record<string, unknown>;
+  accountCandidates?: AccountCandidateGroups;
   counterpartyConfidence: number;
   reviewReasons: string[];
   riskFlags: string[];
@@ -242,6 +268,15 @@ export type ReviewData = {
     selectedExpenseAccount?: string;
     selectedVatAccount?: string;
     selectedSupplierAccount?: string;
+    selectedRevenueAccount?: string;
+    selectedPurchaseVatAccount?: string;
+    selectedSalesVatAccount?: string;
+    selectedCustomerAccount?: string;
+    suggestedCounterpartyAccount?: string;
+    counterpartyCreationSuggestion?: Record<string, unknown>;
+    accountingDirection?: string;
+    accountantExplanationTr?: string;
+    accountant_explanation_tr?: string;
     counterpartyMatchCode?: string;
     counterpartyMatchConfidence?: number;
     processingMode?: string;

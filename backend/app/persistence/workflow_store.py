@@ -44,11 +44,16 @@ def empty_store() -> dict[str, Any]:
         "operation_events": [],
         "document_pipeline_events": [],
         "nace_research_profiles": {},
+        "brand_research_profiles": {},
     }
 
 
 def normalize_nace_code(value: str) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def normalize_brand_name(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
 
 
 class JsonWorkflowStore:
@@ -298,6 +303,7 @@ class JsonWorkflowStore:
             + len(data["operation_events"])
             + len(data["document_pipeline_events"])
             + len(data["nace_research_profiles"])
+            + len(data["brand_research_profiles"])
             + deleted_portal_user_count
             + (len(data["auth_credentials"]) - len(preserved_credentials))
         )
@@ -321,6 +327,7 @@ class JsonWorkflowStore:
                 "operation_events": [],
                 "document_pipeline_events": [],
                 "nace_research_profiles": {},
+                "brand_research_profiles": {},
             }
         )
         self._write(data)
@@ -419,6 +426,27 @@ class JsonWorkflowStore:
     def get_nace_research_profile(self, nace_code: str) -> dict[str, Any] | None:
         data = self._read()
         profile = data["nace_research_profiles"].get(normalize_nace_code(nace_code))
+        return deepcopy(profile) if profile else None
+
+    def save_brand_research_profile(self, *, brand_name: str, profile: dict[str, Any]) -> dict[str, Any]:
+        normalized = normalize_brand_name(brand_name)
+        data = self._read()
+        existing = data["brand_research_profiles"].get(normalized, {})
+        timestamp = utc_now()
+        record = {
+            **existing,
+            **profile,
+            "brand_name": normalized,
+            "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+            "updated_at": timestamp,
+        }
+        data["brand_research_profiles"][normalized] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def get_brand_research_profile(self, brand_name: str) -> dict[str, Any] | None:
+        data = self._read()
+        profile = data["brand_research_profiles"].get(normalize_brand_name(brand_name))
         return deepcopy(profile) if profile else None
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:

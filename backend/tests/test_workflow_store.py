@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -506,6 +506,33 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(profile["scope_summary"], "Cache edilmiş faaliyet kapsamı.")
         self.assertEqual(calls, [])
 
+    def test_json_store_caches_brand_research_profiles(self) -> None:
+        from app.domain.brand_research import resolve_brand_research_profile
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            profile = store.save_brand_research_profile(
+                brand_name="Blendax",
+                profile={
+                    "display_name": "Blendax",
+                    "brand_summary": "Sampuan markasi.",
+                    "common_product_categories": ["kisisel_bakim_kozmetik"],
+                    "source_urls": ["https://example.test/brand"],
+                    "confidence": 88,
+                },
+            )
+            calls: list[str] = []
+            cached = resolve_brand_research_profile(
+                store=store,
+                brand_name="blendax",
+                researcher=lambda brand: calls.append(brand) or {"brand_summary": "Arastirma yapildi."},
+            )
+
+        self.assertEqual(profile["brand_name"], "blendax")
+        self.assertEqual(cached["brand_summary"], "Sampuan markasi.")
+        self.assertEqual(cached["common_product_categories"], ["kisisel_bakim_kozmetik"])
+        self.assertEqual(calls, [])
+
     def test_json_store_applies_review_correction_to_stored_document(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
@@ -913,10 +940,18 @@ class WorkflowStoreTests(unittest.TestCase):
         pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
         self.assertEqual(
             pipeline_steps,
-            ["parse_started", "parse_succeeded", "journal_draft_ready", "export_ready"],
+            [
+                "parse_started",
+                "parse_succeeded",
+                "direction_detected",
+                "vat_summary_parsed",
+                "accounting_explanation_ready",
+                "journal_draft_ready",
+                "export_ready",
+            ],
         )
         self.assertEqual(workspace["document_pipeline_events"][1]["message_tr"], "Belge parse edildi.")
-        self.assertEqual(workspace["document_pipeline_events"][2]["message_tr"], "Belge muhasebe fişi olarak doldu.")
+        self.assertEqual(workspace["document_pipeline_events"][5]["message_tr"], "Belge muhasebe fişi olarak doldu.")
 
     def test_processing_worker_records_ai_decision_events_and_turkish_explanation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -187,11 +187,27 @@ class ClientProfile:
     client_id: str
     title: str
     tax_id: str
+    tckn: str = ""
+    vkn: str = ""
+    identity_type: str = ""
+    tax_identifier: str = ""
+    legal_name: str = ""
+    trade_name: str = ""
+    display_title: str = ""
+    tax_office: str = ""
     activity_description: str = ""
     nace_code: str = ""
     activity_tags: tuple[str, ...] = field(default_factory=tuple)
     workplace_addresses: tuple[str, ...] = field(default_factory=tuple)
     has_chart_accounts: bool = False
+
+    @property
+    def effective_tax_identifier(self) -> str:
+        return self.tax_identifier or self.vkn or self.tckn or self.tax_id
+
+    @property
+    def effective_title(self) -> str:
+        return self.display_title or self.trade_name or self.legal_name or self.title
 
 
 @dataclass(frozen=True)
@@ -344,9 +360,9 @@ def check_client_onboarding(profile: ClientProfile) -> OnboardingCheck:
     missing: list[str] = []
     if not profile.client_id.strip():
         missing.append("client_id")
-    if not profile.title.strip():
+    if not profile.effective_title.strip():
         missing.append("title")
-    if not profile.tax_id.strip():
+    if not profile.effective_tax_identifier.strip():
         missing.append("tax_id")
     if not (profile.activity_description.strip() or profile.nace_code.strip() or profile.activity_tags):
         missing.append("activity_or_nace")

@@ -39,6 +39,14 @@ def client_profile_from_payload(payload: ClientProfilePayload) -> ClientProfile:
         client_id=payload.client_id,
         title=payload.title,
         tax_id=payload.tax_id,
+        tckn=payload.tckn,
+        vkn=payload.vkn,
+        identity_type=payload.identity_type,
+        tax_identifier=payload.tax_identifier,
+        legal_name=payload.legal_name,
+        trade_name=payload.trade_name,
+        display_title=payload.display_title,
+        tax_office=payload.tax_office,
         activity_description=payload.activity_description,
         nace_code=payload.nace_code,
         activity_tags=tuple(payload.activity_tags),
@@ -72,6 +80,17 @@ def account_selection_from_payload(payload: AccountSelectionPayload) -> AccountS
         supplier_account=payload.supplier_account,
         bank_account=payload.bank_account,
         selection_notes=tuple(payload.selection_notes),
+        revenue_account=payload.revenue_account,
+        zero_vat_revenue_account=payload.zero_vat_revenue_account,
+        sales_vat_account=payload.sales_vat_account,
+        customer_account=payload.customer_account,
+        next_customer_account=payload.next_customer_account,
+        next_supplier_account=payload.next_supplier_account,
+        stock_account=payload.stock_account,
+        account_candidates={
+            key: tuple(value) if isinstance(value, list) else tuple()
+            for key, value in payload.account_candidates.items()
+        },
     )
 
 

@@ -24,6 +24,14 @@ class ClientProfilePayload(BaseModel):
     client_id: str = ""
     title: str = ""
     tax_id: str = ""
+    tckn: str = ""
+    vkn: str = ""
+    identity_type: str = ""
+    tax_identifier: str = ""
+    legal_name: str = ""
+    trade_name: str = ""
+    display_title: str = ""
+    tax_office: str = ""
     activity_description: str = ""
     nace_code: str = ""
     activity_tags: list[str] = Field(default_factory=list)
@@ -49,6 +57,14 @@ class AccountSelectionPayload(BaseModel):
     supplier_account: str = "320.01"
     bank_account: str = "102.01"
     selection_notes: list[str] = Field(default_factory=list)
+    revenue_account: str = "600.01"
+    zero_vat_revenue_account: str = "600.00.3065"
+    sales_vat_account: str = "391.01"
+    customer_account: str = "120.01"
+    next_customer_account: str = ""
+    next_supplier_account: str = ""
+    stock_account: str = "153.01"
+    account_candidates: dict[str, object] = Field(default_factory=dict)
 
 
 class InvoicePayload(BaseModel):

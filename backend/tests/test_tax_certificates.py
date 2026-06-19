@@ -115,6 +115,40 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.start_date, "12.06.2024")
         self.assertGreaterEqual(extraction.confidence, 75)
 
+    def test_parse_tax_certificate_text_separates_gib_column_identity_fields(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            VERGI LEVHASI
+            ADI SOYADI
+            TICARET UNVANI
+            IS YERI ADRESI
+            VERGI TURU
+            VERGI DAIRESI
+            VERGI KIMLIK NO
+            TC KIMLIK NO
+            FAALIYET KODU VE ADI
+            15/02/2021
+            477401 - TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI
+            30052309394
+            MASLAK VERGI DAIRESI MUD.
+            YILLIK GELIR VERGISI
+            SULTAN SELIM MAH. HUMEYRA SK. NO: 7/10 KAGITHANE / ISTANBUL
+            ORHAN ELIBOL
+            """
+        )
+
+        self.assertEqual(extraction.title, "ORHAN ELIBOL")
+        self.assertEqual(extraction.legal_name, "ORHAN ELIBOL")
+        self.assertEqual(extraction.display_title, "ORHAN ELIBOL")
+        self.assertEqual(extraction.tckn, "30052309394")
+        self.assertEqual(extraction.vkn, "")
+        self.assertEqual(extraction.identity_type, "tckn")
+        self.assertEqual(extraction.tax_identifier, "30052309394")
+        self.assertEqual(extraction.tax_id, "30052309394")
+        self.assertEqual(extraction.tax_office, "MASLAK VERGI DAIRESI MUD.")
+        self.assertEqual(extraction.workplace_addresses, ("SULTAN SELIM MAH. HUMEYRA SK. NO: 7/10 KAGITHANE / ISTANBUL",))
+        self.assertEqual(extraction.nace_code, "477401")
+
     def test_tax_certificate_parse_endpoint_returns_fields_without_storing_file(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -155,6 +189,13 @@ class TaxCertificateParserTests(unittest.TestCase):
             {
                 "title": "IBRAHIM DEGERLI",
                 "tax_id": "1234567890",
+                "tckn": "",
+                "vkn": "1234567890",
+                "identity_type": "vkn",
+                "tax_identifier": "1234567890",
+                "legal_name": "IBRAHIM DEGERLI",
+                "trade_name": "",
+                "display_title": "IBRAHIM DEGERLI",
                 "tax_office": "CEKMEKOY VERGI DAIRESI",
                 "activity_description": "Isitme cihazi satisi",
                 "nace_code": "477401",

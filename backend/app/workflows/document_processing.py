@@ -4,6 +4,7 @@ from dataclasses import asdict
 from decimal import Decimal
 from os import environ
 from pathlib import Path
+import re
 from typing import Any
 
 from app.domain.ai_classification import AiClassificationPolicy, ProductClassifier, StaticFirstClassifier
@@ -12,7 +13,7 @@ from app.domain.business_relevance import ClientProfile
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
-from app.domain.matching_simulation import AccountSelection, simulate_invoice
+from app.domain.matching_simulation import AccountSelection, select_accounts, simulate_invoice
 from app.domain.nace_research import resolve_nace_research_profile
 from app.domain.openai_provider import (
     CEREBRAS_CHAT_COMPLETIONS_URL,
@@ -72,17 +73,29 @@ def _first_detail_account(accounts: list[ChartAccount], prefixes: tuple[str, ...
     return fallback
 
 
+def _first_detail_account_with_hint(accounts: list[ChartAccount], prefix: str, hints: tuple[str, ...], fallback: str) -> str:
+    for account in accounts:
+        name = account.account_name.lower()
+        if account.is_detail_account and account.normalized_account_code.startswith(prefix) and any(hint in name for hint in hints):
+            return account.normalized_account_code
+    return fallback
+
+
+def _next_counterparty_account(accounts: list[ChartAccount], prefix: str, letter: str = "A") -> str:
+    pattern = re.compile(rf"^{re.escape(prefix)}\.?{re.escape(letter)}(\d+)$", re.IGNORECASE)
+    max_index = 0
+    for account in accounts:
+        compact = account.normalized_account_code.replace(".", "")
+        match = pattern.match(compact) or pattern.match(account.normalized_account_code)
+        if match:
+            max_index = max(max_index, int(match.group(1)))
+    return f"{prefix}.{letter}{max_index + 1:02d}" if max_index else f"{prefix}.{letter}01"
+
+
 def _account_selection(workspace: dict[str, Any]) -> AccountSelection:
     chart_accounts = workspace.get("chart_accounts") or {}
     accounts = [_chart_account(account) for account in chart_accounts.get("accounts", [])]
-    return AccountSelection(
-        chart_file_name="workspace-store",
-        expense_account=_first_detail_account(accounts, ("770", "760", "740", "730"), "770.01"),
-        purchase_vat_account=_first_detail_account(accounts, ("191",), "191.01"),
-        supplier_account=_first_detail_account(accounts, ("320",), "320.01.001"),
-        bank_account=_first_detail_account(accounts, ("102",), "102.01"),
-        selection_notes=(),
-    )
+    return select_accounts("workspace-store", accounts)
 
 
 def _client_profile(workspace: dict[str, Any]) -> ClientProfile | None:
@@ -96,6 +109,14 @@ def _client_profile(workspace: dict[str, Any]) -> ClientProfile | None:
         client_id=client_id,
         title=str(profile.get("title") or ""),
         tax_id=str(profile.get("tax_id") or ""),
+        tckn=str(profile.get("tckn") or ""),
+        vkn=str(profile.get("vkn") or ""),
+        identity_type=str(profile.get("identity_type") or ""),
+        tax_identifier=str(profile.get("tax_identifier") or profile.get("tax_id") or ""),
+        legal_name=str(profile.get("legal_name") or ""),
+        trade_name=str(profile.get("trade_name") or ""),
+        display_title=str(profile.get("display_title") or profile.get("title") or ""),
+        tax_office=str(profile.get("tax_office") or ""),
         activity_description=str(profile.get("activity_description") or ""),
         nace_code=str(profile.get("nace_code") or ""),
         activity_tags=tuple(profile.get("activity_tags") or ()),
@@ -314,6 +335,7 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
     updated.setdefault("document_validation_status", document_validation_status)
     updated.setdefault("draft_status", _draft_status(updated))
     updated.setdefault("accountant_summary", _accountant_summary(updated))
+    updated.setdefault("accountant_explanation_tr", updated.get("accountant_explanation_tr") or _ai_explanation_tr(updated))
     updated.setdefault("ai_explanation_tr", _ai_explanation_tr(updated))
     updated.setdefault("technical_details", _technical_details(updated))
     return updated
@@ -323,6 +345,15 @@ def _parse_invoice_document(path: Path, document_type: str) -> ParsedInvoice:
     if document_type == "einvoice_xml" or path.suffix.lower() == ".xml":
         return parse_xml_invoice(path)
     return parse_pdf_invoice(path)
+
+
+def _intake_direction(value: str) -> str:
+    normalized = value.strip().lower().replace("ı", "i").replace("ş", "s")
+    if normalized in {"sales_invoice", "satis", "satis_faturasi", "satis faturasi"}:
+        return "sales"
+    if normalized in {"purchase_invoice", "alis", "alis_faturasi", "alis faturasi"}:
+        return "purchase"
+    return ""
 
 
 def _unexpected_document_result(document: dict[str, Any], job: dict[str, Any], *, reason: str) -> dict[str, Any]:
@@ -683,6 +714,51 @@ def process_next_job_once(
                 "product_category": str(result.get("product_category") or ""),
             },
         )
+        if result.get("accounting_direction"):
+            pipeline_event(
+                "direction_detected",
+                "ok",
+                "Fatura yonu icerikten tespit edildi.",
+                "direction_detected",
+                {
+                    "accounting_direction": str(result.get("accounting_direction") or ""),
+                    "direction_confidence": int(result.get("direction_confidence") or 0),
+                    "direction_evidence": list(result.get("direction_evidence") or []),
+                },
+            )
+            intended_direction = _intake_direction(str(document.get("intake_category") or job.get("intake_category") or ""))
+            detected_direction = str(result.get("accounting_direction") or "")
+            if intended_direction and detected_direction in {"sales", "purchase"} and intended_direction != detected_direction:
+                pipeline_event(
+                    "direction_conflict_detected",
+                    "warning",
+                    "Yukleme sekmesi ile belge icerigi celisti; icerik karari kazandi.",
+                    "direction_conflict_detected",
+                    {
+                        "intake_direction": intended_direction,
+                        "detected_direction": detected_direction,
+                    },
+                )
+        if "vat_rates" in result:
+            pipeline_event(
+                "vat_summary_parsed",
+                "ok",
+                "KDV ozeti parse edildi.",
+                "vat_summary_parsed",
+                {
+                    "vat_rates": list(result.get("vat_rates") or []),
+                    "vat_total": str(result.get("vat_total") or ""),
+                    "payable_total": str(result.get("payable_total") or ""),
+                },
+            )
+        if result.get("accountant_explanation_tr"):
+            pipeline_event(
+                "accounting_explanation_ready",
+                "ok",
+                "Musavir icin muhasebe gerekcesi hazirlandi.",
+                "accounting_explanation_ready",
+                {"accountant_explanation_tr": str(result.get("accountant_explanation_tr") or "")},
+            )
         if any("ocr" in str(note).lower() for note in result.get("parse_notes") or []):
             pipeline_event(
                 "ocr_fallback_succeeded",

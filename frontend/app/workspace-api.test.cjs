@@ -73,9 +73,31 @@ const workspaceRecord = {
           office_distinct_client_count: 1,
           office_consistent_decision_count: 3,
         },
-        selected_expense_account: "600.01",
-        selected_vat_account: "391.01",
-        selected_supplier_account: "120.01",
+        accounting_direction: "sales",
+        selected_expense_account: "",
+        selected_vat_account: "391.20",
+        selected_supplier_account: "",
+        selected_revenue_account: "600.20",
+        selected_sales_vat_account: "391.20",
+        selected_customer_account: "120.01",
+        suggested_counterparty_account: "120.A03",
+        counterparty_creation_suggestion: {
+          type: "customer",
+          base_account: "120",
+          suggested_code: "120.A03",
+          always_suggest_new: true,
+        },
+        account_candidates: {
+          sales_revenue: [
+            { code: "600.20", name: "Yurt ici satislar yuzde 20", reason: "600 satis geliri adayi" },
+          ],
+          sales_vat: [
+            { code: "391.20", name: "Hesaplanan KDV yuzde 20", reason: "391 hesaplanan KDV adayi" },
+          ],
+          customer: [
+            { code: "120.A03", name: "Yeni alici onerisi", reason: "120 alici cari adayi" },
+          ],
+        },
         counterparty_match_confidence: 92,
         review_reason_codes: [],
         risk_flags: [],
@@ -84,6 +106,7 @@ const workspaceRecord = {
         document_validation_status: "expected_document",
         draft_status: "draft_ready",
         accountant_summary: "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir.",
+        accountant_explanation_tr: "Satis faturasi olarak yorumlandi; gelir 600.20 ve KDV 391.20 hesaplarina gider.",
         technical_details: {
           parse_notes: [],
           review_reason_codes: [],
@@ -204,6 +227,19 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].originalDocumentRef, "processed-1");
   assert.equal(data.documents[0].draftStatus, "draft_ready");
   assert.equal(data.documents[0].accountantSummary, "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir.");
+  assert.equal(data.documents[0].accountantExplanation, "Satis faturasi olarak yorumlandi; gelir 600.20 ve KDV 391.20 hesaplarina gider.");
+  assert.equal(data.documents[0].accountingDirection, "sales");
+  assert.equal(data.documents[0].selectedExpenseAccount, "-");
+  assert.equal(data.documents[0].selectedRevenueAccount, "600.20");
+  assert.equal(data.documents[0].selectedSalesVatAccount, "391.20");
+  assert.equal(data.documents[0].selectedCustomerAccount, "120.01");
+  assert.equal(data.documents[0].suggestedCounterpartyAccount, "120.A03");
+  assert.deepEqual(data.documents[0].accountCandidates.salesRevenue, [
+    { code: "600.20", name: "Yurt ici satislar yuzde 20", reason: "600 satis geliri adayi" },
+  ]);
+  assert.deepEqual(data.documents[0].accountCandidates.salesVat, [
+    { code: "391.20", name: "Hesaplanan KDV yuzde 20", reason: "391 hesaplanan KDV adayi" },
+  ]);
   assert.deepEqual(data.documents[0].technicalDetails, {
     parse_notes: [],
     review_reason_codes: [],

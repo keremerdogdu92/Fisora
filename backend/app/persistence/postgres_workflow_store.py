@@ -40,6 +40,10 @@ def normalize_nace_code(value: str) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
+def normalize_brand_name(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
 class PostgresWorkflowStore:
     """PostgreSQL-backed MVP workspace store.
 
@@ -436,6 +440,22 @@ class PostgresWorkflowStore:
 
     def get_nace_research_profile(self, nace_code: str) -> dict[str, Any] | None:
         return self._get_record("nace", "nace_research_profile", normalize_nace_code(nace_code))
+
+    def save_brand_research_profile(self, *, brand_name: str, profile: dict[str, Any]) -> dict[str, Any]:
+        normalized = normalize_brand_name(brand_name)
+        existing = self.get_brand_research_profile(normalized) or {}
+        timestamp = utc_now()
+        record = {
+            **existing,
+            **profile,
+            "brand_name": normalized,
+            "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+            "updated_at": timestamp,
+        }
+        return self._upsert_record("brand", "brand_research_profile", normalized, record)
+
+    def get_brand_research_profile(self, brand_name: str) -> dict[str, Any] | None:
+        return self._get_record("brand", "brand_research_profile", normalize_brand_name(brand_name))
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())

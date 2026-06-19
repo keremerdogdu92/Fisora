@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict, dataclass
+import re
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
@@ -18,7 +19,7 @@ from app.domain.business_relevance import (
 from app.domain.chart_accounts import ChartAccount, extract_counterparty_candidates, parse_chart_accounts, validate_vat_accounts
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
 from app.domain.ai_classification import AiClassificationContext, ProductClassifier
-from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, money
+from app.domain.journal_entries import JournalEntry, JournalLine, build_purchase_entry, build_sales_entry, money
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
 
 ProcessingMode = Literal["conservative", "ai_assisted_draft", "controlled_automation"]
@@ -32,6 +33,14 @@ class AccountSelection:
     supplier_account: str
     bank_account: str
     selection_notes: tuple[str, ...]
+    revenue_account: str = "600.01"
+    zero_vat_revenue_account: str = "600.00.3065"
+    sales_vat_account: str = "391.01"
+    customer_account: str = "120.01.001"
+    next_customer_account: str = ""
+    next_supplier_account: str = ""
+    stock_account: str = "153.01"
+    account_candidates: dict[str, tuple[dict[str, str], ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -90,6 +99,17 @@ class SimulatedInvoiceResult:
     rule_prompt: dict[str, object]
     export_status: str
     draft_lines: tuple[dict[str, str], ...]
+    selected_revenue_account: str = ""
+    selected_purchase_vat_account: str = ""
+    selected_sales_vat_account: str = ""
+    selected_customer_account: str = ""
+    suggested_counterparty_account: str = ""
+    counterparty_creation_suggestion: dict[str, object] | None = None
+    accounting_direction: str = "purchase"
+    direction_confidence: int = 0
+    direction_evidence: tuple[str, ...] = ()
+    accountant_explanation_tr: str = ""
+    account_candidates: dict[str, tuple[dict[str, str], ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -124,20 +144,81 @@ def _first_account(accounts: list[ChartAccount], prefixes: tuple[str, ...]) -> C
     return None
 
 
+def _account_with_name_hint(accounts: list[ChartAccount], prefix: str, hints: tuple[str, ...]) -> ChartAccount | None:
+    for account in accounts:
+        name = account.account_name.lower()
+        if account.is_detail_account and account.normalized_account_code.startswith(prefix) and any(hint in name for hint in hints):
+            return account
+    return None
+
+
+def _candidate_payload(account: ChartAccount, reason: str) -> dict[str, str]:
+    return {
+        "code": account.normalized_account_code,
+        "name": account.account_name,
+        "reason": reason,
+    }
+
+
+def _candidate_group(accounts: list[ChartAccount], prefixes: tuple[str, ...], reason: str) -> tuple[dict[str, str], ...]:
+    return tuple(
+        _candidate_payload(account, reason)
+        for account in accounts
+        if account.is_detail_account and account.normalized_account_code.startswith(prefixes)
+    )
+
+
+def _candidate_group_with_hint(accounts: list[ChartAccount], prefix: str, hints: tuple[str, ...], reason: str) -> tuple[dict[str, str], ...]:
+    return tuple(
+        _candidate_payload(account, reason)
+        for account in accounts
+        if account.is_detail_account
+        and account.normalized_account_code.startswith(prefix)
+        and any(hint in account.account_name.lower() for hint in hints)
+    )
+
+
+def _next_counterparty_account(accounts: list[ChartAccount], prefix: str, letter: str = "A") -> str:
+    pattern = re.compile(rf"^{re.escape(prefix)}\.?{re.escape(letter)}(\d+)$", re.IGNORECASE)
+    max_index = 0
+    for account in accounts:
+        compact = account.normalized_account_code.replace(".", "")
+        match = pattern.match(compact) or pattern.match(account.normalized_account_code)
+        if match:
+            max_index = max(max_index, int(match.group(1)))
+    if max_index:
+        return f"{prefix}.{letter}{max_index + 1:02d}"
+    return f"{prefix}.{letter}01"
+
+
 def select_accounts(chart_file_name: str, accounts: list[ChartAccount]) -> AccountSelection:
     notes: list[str] = []
+    customers = [account for account in extract_counterparty_candidates(accounts) if account.counterparty_type == "customer"]
     suppliers = [account for account in extract_counterparty_candidates(accounts) if account.counterparty_type == "supplier"]
+    customer = customers[0] if customers else _first_account(accounts, ("120",))
     supplier = suppliers[0] if suppliers else _first_account(accounts, ("320",))
+    stock = _first_account(accounts, ("153",))
     expense = _first_account(accounts, ("770", "760", "740", "730", " gider"))
     purchase_vat = _first_account(accounts, ("191",))
+    revenue = _first_account(accounts, ("600",))
+    zero_vat_revenue = _account_with_name_hint(accounts, "600", ("3065", "%0", "0 kdv", "istisna")) or revenue
+    sales_vat = _first_account(accounts, ("391",))
     bank = _first_account(accounts, ("102",))
 
+    if customer is None:
+        notes.append("fallback_customer_120_missing")
     if supplier is None:
         notes.append("fallback_supplier_320_missing")
+    if stock is None:
+        notes.append("fallback_stock_153_missing")
     if expense is None:
         notes.append("fallback_expense_770_missing")
     if purchase_vat is None:
         notes.append("fallback_purchase_vat_191_missing")
+    if revenue is None:
+        notes.append("fallback_revenue_600_missing")
+    if sales_vat is None:
+        notes.append("fallback_sales_vat_391_missing")
     if bank is None:
         notes.append("fallback_bank_102_missing")
 
@@ -148,6 +229,24 @@ def select_accounts(chart_file_name: str, accounts: list[ChartAccount]) -> Accou
         supplier_account=supplier.normalized_account_code if supplier else "320.01.001",
         bank_account=bank.normalized_account_code if bank else "102.01",
         selection_notes=tuple(notes),
+        revenue_account=revenue.normalized_account_code if revenue else "600.01",
+        zero_vat_revenue_account=zero_vat_revenue.normalized_account_code if zero_vat_revenue else "600.00.3065",
+        sales_vat_account=sales_vat.normalized_account_code if sales_vat else "391.01",
+        customer_account=customer.normalized_account_code if customer else "120.01.001",
+        next_customer_account=_next_counterparty_account(accounts, "120"),
+        next_supplier_account=_next_counterparty_account(accounts, "320"),
+        stock_account=stock.normalized_account_code if stock else "153.01",
+        account_candidates={
+            "purchase_stock": _candidate_group(accounts, ("153",), "153 ticari mal/stok adayi"),
+            "purchase_expense": _candidate_group(accounts, ("770", "760", "740"), "7xx gider hesabi adayi"),
+            "purchase_vat": _candidate_group(accounts, ("191",), "191 indirilecek KDV adayi"),
+            "sales_revenue": _candidate_group(accounts, ("600",), "600 satis geliri adayi"),
+            "zero_vat_revenue": _candidate_group_with_hint(accounts, "600", ("3065", "%0", "0 kdv", "istisna"), "3065 kapsaminda yuzde 0 KDV satis geliri adayi")
+            or _candidate_group(accounts, ("600",), "600 satis geliri adayi"),
+            "sales_vat": _candidate_group(accounts, ("391",), "391 hesaplanan KDV adayi"),
+            "customer": _candidate_group(accounts, ("120",), "120 alici cari adayi"),
+            "supplier": _candidate_group(accounts, ("320",), "320 satici cari adayi"),
+        },
     )
 
 
@@ -162,6 +261,133 @@ def _single_vat_rate(invoice: ParsedInvoice) -> Decimal:
     if not invoice.vat_rates:
         return Decimal("0.00")
     return Decimal(invoice.vat_rates[0]) / Decimal("100")
+
+
+def _is_return_invoice(invoice: ParsedInvoice) -> bool:
+    haystack = " ".join(
+        (
+            invoice.invoice_type,
+            invoice.scenario,
+            " ".join(invoice.risk_flags),
+            " ".join(invoice.parse_notes),
+        )
+    ).upper()
+    return "IADE" in haystack or "İADE" in haystack
+
+
+def _client_identifiers(client_profile: ClientProfile | None) -> tuple[str, ...]:
+    if client_profile is None:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            value
+            for value in (
+                client_profile.vkn,
+                client_profile.tckn,
+                client_profile.tax_identifier,
+                client_profile.tax_id,
+                client_profile.effective_tax_identifier,
+            )
+            if value
+        )
+    )
+
+
+def _client_title_tokens(client_profile: ClientProfile | None) -> tuple[str, ...]:
+    if client_profile is None:
+        return ()
+    return tuple(
+        dict.fromkeys(
+            normalize.strip()
+            for normalize in (
+                client_profile.effective_title,
+                client_profile.title,
+                client_profile.legal_name,
+                client_profile.trade_name,
+            )
+            if normalize and normalize.strip()
+        )
+    )
+
+
+def _line_mentions_client_after_sayin(invoice: ParsedInvoice, client_profile: ClientProfile | None) -> bool:
+    titles = _client_title_tokens(client_profile)
+    if not titles:
+        return False
+    for line in invoice.line_items:
+        lowered = line.lower()
+        if "sayin" not in lowered and "sayın" not in lowered:
+            continue
+        if any(title.lower() in lowered for title in titles):
+            return True
+    return False
+
+
+def infer_accounting_direction(invoice: ParsedInvoice, client_profile: ClientProfile | None) -> tuple[str, int, tuple[str, ...]]:
+    if _is_return_invoice(invoice):
+        return "return_review", 100, ("return_invoice_signal",)
+    identifiers = _client_identifiers(client_profile)
+    if not identifiers:
+        return "purchase", 40, ("client_identity_missing_purchase_fallback",)
+    if _line_mentions_client_after_sayin(invoice, client_profile):
+        return "purchase", 90, ("sayin_recipient_is_client",)
+    if invoice.invoice_type.upper() in {"ALIS", "ALIŞ"}:
+        return "purchase", 82, ("invoice_type_purchase",)
+    for identifier in identifiers:
+        if not invoice.tax_ids:
+            continue
+        if invoice.tax_ids[0] == identifier:
+            return "sales", 86, ("client_identifier_first_tax_id",)
+        if identifier in invoice.tax_ids[1:]:
+            return "purchase", 86, ("client_identifier_later_tax_id",)
+    if invoice.invoice_type.upper() in {"SATIS", "SATIŞ"}:
+        provider = invoice.provider_hint.lower()
+        if provider and not any(title.lower() in provider for title in _client_title_tokens(client_profile)):
+            return "purchase", 65, ("invoice_type_sales_but_issuer_not_client",)
+        return "sales", 55, ("invoice_type_sales_fallback",)
+    return "purchase", 55, ("purchase_fallback",)
+
+
+def _counterparty_creation_suggestion(direction: str, selection: AccountSelection) -> tuple[str, dict[str, object]]:
+    if direction == "sales":
+        suggested = selection.next_customer_account or selection.customer_account
+        return suggested, {"type": "customer", "base_account": "120", "suggested_code": suggested, "always_suggest_new": True}
+    suggested = selection.next_supplier_account or selection.supplier_account
+    return suggested, {"type": "supplier", "base_account": "320", "suggested_code": suggested, "always_suggest_new": True}
+
+
+def _sales_revenue_account(selection: AccountSelection, vat_rate: Decimal) -> str:
+    if vat_rate == Decimal("0.00"):
+        return selection.zero_vat_revenue_account or selection.revenue_account
+    return selection.revenue_account
+
+
+def _accountant_explanation(
+    *,
+    direction: str,
+    direction_evidence: tuple[str, ...],
+    invoice: ParsedInvoice,
+    revenue_account: str,
+    expense_account: str,
+    purchase_vat_account: str,
+    sales_vat_account: str,
+    suggested_counterparty: str,
+) -> str:
+    if direction == "return_review":
+        return "Iade sinyali bulundu. Bu fazda otomatik fis uretilmedi; belge iade kontrol kuyrugunda tutulmali."
+    if direction == "sales":
+        vat_text = ", ".join(invoice.vat_rates) or "yok"
+        vat_account_text = sales_vat_account or "KDV satiri yok"
+        return (
+            f"Belge satis/gelir olarak yorumlandi ({', '.join(direction_evidence)}). "
+            f"KDV oranlari: {vat_text}. Gelir hesabi: {revenue_account}. "
+            f"Hesaplanan KDV hesabi: {vat_account_text}. Cari onerisi: {suggested_counterparty}."
+        )
+    return (
+        f"Belge alis/gider olarak yorumlandi ({', '.join(direction_evidence)}). "
+        f"Gider/stok hesabi: {expense_account}. Indirilecek KDV hesabi: {purchase_vat_account}. "
+        f"Cari onerisi: {suggested_counterparty}."
+    )
 
 
 def _gross_review_entry(invoice: ParsedInvoice, selection: AccountSelection, supplier_account: str) -> JournalEntry:
@@ -327,16 +553,57 @@ def simulate_invoice(
     entry: JournalEntry | None = None
     draft_quality = "none"
     supplier_account = counterparty_match.account_code if counterparty_match and counterparty_match.account_code else selection.supplier_account
+    direction, direction_confidence, direction_evidence = infer_accounting_direction(invoice, client_profile)
+    suggested_counterparty, counterparty_creation_suggestion = _counterparty_creation_suggestion(direction, selection)
+    selected_revenue_account = ""
+    selected_purchase_vat_account = ""
+    selected_sales_vat_account = ""
+    selected_customer_account = ""
+    raw_line = _product_line_hint(invoice)
+    relevance = (
+        assess_business_relevance(raw_line, client_profile, supplier_hint=invoice.provider_hint)
+        if client_profile
+        else _not_assessed_relevance(raw_line)
+    )
+    purchase_account = selection.stock_account if relevance.account_treatment == "stock_or_cogs" else selection.expense_account
 
-    if amount is None or amount <= 0:
+    if direction == "return_review":
+        status = "review_required"
+        draft_quality = "return_manual_review"
+        reasons = tuple(dict.fromkeys((*reasons, "return_invoice_manual_review")))
+    elif amount is None or amount <= 0:
         status = "review_required"
         draft_quality = "no_positive_amount"
+    elif direction == "sales" and len(invoice.vat_rates) <= 1:
+        vat_rate = _single_vat_rate(invoice)
+        selected_revenue_account = _sales_revenue_account(selection, vat_rate)
+        selected_sales_vat_account = selection.sales_vat_account if vat_rate > Decimal("0.00") else ""
+        selected_customer_account = counterparty_match.account_code if counterparty_match and counterparty_match.account_code else selection.customer_account
+        entry = build_sales_entry(
+            entry_date=invoice.issue_date or "1900-01-01",
+            total=money(invoice.payable_total),
+            vat_rate=vat_rate,
+            revenue_account=selected_revenue_account,
+            vat_account=selection.sales_vat_account,
+            customer_account=selected_customer_account,
+            document_ref=invoice.file_name,
+        )
+        draft_quality = "full_basic_sales" if not reasons else "partial_review_required"
+        status = "auto_ready" if not reasons else "review_required"
+    elif direction == "sales":
+        entry = _gross_review_entry(invoice, selection, selection.customer_account)
+        selected_revenue_account = selection.revenue_account
+        selected_sales_vat_account = selection.sales_vat_account
+        selected_customer_account = selection.customer_account
+        draft_quality = "gross_balanced_needs_vat_split"
+        status = "review_required"
     elif len(invoice.vat_rates) <= 1:
+        selected_purchase_vat_account = selection.purchase_vat_account
         entry = build_purchase_entry(
             entry_date=invoice.issue_date or "1900-01-01",
             total=money(invoice.payable_total),
             vat_rate=_single_vat_rate(invoice),
-            expense_account=selection.expense_account,
+            expense_account=purchase_account,
             vat_account=selection.purchase_vat_account,
             supplier_account=supplier_account,
             document_ref=invoice.file_name,
@@ -344,11 +611,11 @@ def simulate_invoice(
         draft_quality = "full_basic_purchase" if not reasons else "partial_review_required"
         status = "auto_ready" if not reasons else "review_required"
     else:
+        selected_purchase_vat_account = selection.purchase_vat_account
         entry = _gross_review_entry(invoice, selection, supplier_account)
         draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
-    raw_line = _product_line_hint(invoice)
     ai_used = False
     ai_provider = ""
     ai_skipped_reason = "client_profile_not_provided"
@@ -358,11 +625,6 @@ def simulate_invoice(
     ai_suggested_counterparty_code = ""
     ai_risk_flags: tuple[str, ...] = ()
     ai_account_reason = ""
-    relevance = (
-        assess_business_relevance(raw_line, client_profile, supplier_hint=invoice.provider_hint)
-        if client_profile
-        else _not_assessed_relevance(raw_line)
-    )
     if client_profile and product_classifier:
         classification_result = product_classifier.classify(
             raw_line,
@@ -432,6 +694,16 @@ def simulate_invoice(
         counterparty_match=counterparty_match,
         entry=entry,
     )
+    accountant_explanation = _accountant_explanation(
+        direction=direction,
+        direction_evidence=direction_evidence,
+        invoice=invoice,
+        revenue_account=selected_revenue_account,
+        expense_account="" if direction == "sales" else purchase_account,
+        purchase_vat_account=selected_purchase_vat_account,
+        sales_vat_account=selected_sales_vat_account,
+        suggested_counterparty=suggested_counterparty,
+    )
 
     return SimulatedInvoiceResult(
         chart_file_name=selection.chart_file_name,
@@ -449,9 +721,9 @@ def simulate_invoice(
         total_debit=f"{entry.total_debit:.2f}" if entry else "",
         total_credit=f"{entry.total_credit:.2f}" if entry else "",
         is_balanced=entry.is_balanced if entry else False,
-        selected_expense_account=selection.expense_account,
-        selected_vat_account=selection.purchase_vat_account,
-        selected_supplier_account=supplier_account,
+        selected_expense_account="" if direction == "sales" else purchase_account,
+        selected_vat_account=selected_sales_vat_account if direction == "sales" else selection.purchase_vat_account,
+        selected_supplier_account="" if direction == "sales" else supplier_account,
         counterparty_match_code=counterparty_match.account_code if counterparty_match else "",
         counterparty_match_confidence=counterparty_match.confidence if counterparty_match else 0,
         counterparty_match_reason=counterparty_match.match_reason if counterparty_match else "not_assessed",
@@ -488,6 +760,17 @@ def simulate_invoice(
         rule_prompt={},
         export_status=export_status,
         draft_lines=_entry_lines(entry),
+        selected_revenue_account=selected_revenue_account,
+        selected_purchase_vat_account=selected_purchase_vat_account,
+        selected_sales_vat_account=selected_sales_vat_account,
+        selected_customer_account=selected_customer_account,
+        suggested_counterparty_account=suggested_counterparty,
+        counterparty_creation_suggestion=counterparty_creation_suggestion,
+        accounting_direction=direction,
+        direction_confidence=direction_confidence,
+        direction_evidence=direction_evidence,
+        accountant_explanation_tr=accountant_explanation,
+        account_candidates=selection.account_candidates,
     )
 
 

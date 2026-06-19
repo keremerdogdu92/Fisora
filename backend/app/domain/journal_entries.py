@@ -92,11 +92,7 @@ def build_sales_entry(
     document_ref: str | None = None,
 ) -> JournalEntry:
     net, vat = split_vat(total, vat_rate)
-    return JournalEntry(
-        entry_type="sales",
-        entry_date=entry_date,
-        description=f"Satis faturasi {document_ref or ''}".strip(),
-        lines=(
+    lines = [
             JournalLine(
                 customer_account,
                 "Alici cari",
@@ -105,8 +101,14 @@ def build_sales_entry(
                 document_ref=document_ref,
             ),
             JournalLine(revenue_account, "Satis geliri", credit=net, document_ref=document_ref),
-            JournalLine(vat_account, "Hesaplanan KDV", credit=vat, document_ref=document_ref),
-        ),
+    ]
+    if vat > Decimal("0.00"):
+        lines.append(JournalLine(vat_account, "Hesaplanan KDV", credit=vat, document_ref=document_ref))
+    return JournalEntry(
+        entry_type="sales",
+        entry_date=entry_date,
+        description=f"Satis faturasi {document_ref or ''}".strip(),
+        lines=tuple(lines),
     )
 
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Info, ReasonCard } from "./portal-shared";
-import type { CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
+import type { AccountCandidate, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -87,6 +87,19 @@ function blankDraftLine(): DraftLine {
   return { account_code: "", description: "", debit: "0.00", credit: "0.00" };
 }
 
+function uniqueAccountCandidates(candidates: AccountCandidate[]) {
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (!candidate.code || seen.has(candidate.code)) return false;
+    seen.add(candidate.code);
+    return true;
+  });
+}
+
+function candidateLabel(candidate: AccountCandidate) {
+  return `${candidate.code} - ${candidate.name || "Hesap"}${candidate.reason ? ` (${candidate.reason})` : ""}`;
+}
+
 function isImageMime(value: string) {
   return String(value || "").toLowerCase().startsWith("image/");
 }
@@ -101,6 +114,13 @@ function isFramePreviewMime(value: string) {
 
 function latestPipelineProblem(document: PilotDocument) {
   return [...(document.pipelineEvents ?? [])].reverse().find((event) => event.status === "error" || event.status === "warning");
+}
+
+function accountingDirectionForDocument(document: PilotDocument) {
+  if (document.accountingDirection) return document.accountingDirection;
+  if (document.intakeCategory === "sales_invoice") return "sales";
+  if (document.intakeCategory === "purchase_invoice") return "purchase";
+  return "";
 }
 
 function previewAuthHeaders(session: LocalSession | null | undefined, document?: PilotDocument): Record<string, string> {
@@ -261,6 +281,30 @@ export function JournalPanel({
   const activeDraftLines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines;
   const totals = draftTotals(activeDraftLines);
   const needsManualDraft = !generatedDraftLines.length || document.draftStatus === "manual_draft_required";
+  const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
+  const accountingDirection = accountingDirectionForDocument(document);
+  const isSales = accountingDirection === "sales";
+  const primaryAccountLabel = isStatement ? "Banka hesabÄ±" : isSales ? "Gelir hesabÄ±" : "Gider/stok hesabÄ±";
+  const primaryAccountValue = isStatement ? document.selectedExpenseAccount : isSales ? (document.selectedRevenueAccount || "-") : document.selectedExpenseAccount;
+  const vatAccountLabel = isStatement ? "FiÅŸ KDV" : isSales ? "Hesaplanan KDV" : "Ä°ndirilecek KDV";
+  const vatAccountValue = isSales
+    ? (document.selectedSalesVatAccount && document.selectedSalesVatAccount !== "-" ? document.selectedSalesVatAccount : "KDV satÄ±rÄ± yok")
+    : (document.selectedPurchaseVatAccount || document.selectedVatAccount);
+  const counterpartyLabel = isStatement ? "KarÅŸÄ± hesap" : isSales ? "MÃ¼ÅŸteri cari" : "SatÄ±cÄ± cari";
+  const counterpartyValue = isSales
+    ? (document.selectedCustomerAccount || document.suggestedCounterpartyAccount || document.selectedCounterpartyAccount)
+    : (document.selectedCounterpartyAccount || document.suggestedCounterpartyAccount || "-");
+  const correctionAccountLabel = isStatement ? "Yeni iÅŸlem hesabÄ±" : isSales ? "Yeni gelir hesabÄ±" : "Yeni gider/stok hesabÄ±";
+  const correctionAccountPlaceholder = isSales ? (document.selectedRevenueAccount || "") : document.selectedExpenseAccount;
+  const candidateGroups = document.accountCandidates;
+  const accountCandidateOptions = uniqueAccountCandidates(
+    isSales
+      ? [...(candidateGroups?.salesRevenue ?? []), ...(candidateGroups?.zeroVatRevenue ?? [])]
+      : document.selectedExpenseAccount?.startsWith("153")
+        ? [...(candidateGroups?.purchaseStock ?? []), ...(candidateGroups?.purchaseExpense ?? [])]
+        : [...(candidateGroups?.purchaseExpense ?? []), ...(candidateGroups?.purchaseStock ?? [])],
+  );
+  const counterpartyCandidateOptions = uniqueAccountCandidates(isSales ? (candidateGroups?.customer ?? []) : (candidateGroups?.supplier ?? []));
 
   function setManualDraftLine(index: number, patch: Partial<DraftLine>) {
     const lines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : (generatedDraftLines.length ? generatedDraftLines : [blankDraftLine(), blankDraftLine()]);
@@ -285,7 +329,7 @@ export function JournalPanel({
   }
 
   return (
-    <section className={`review-panel journal-panel ${document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "statement-mode" : ""}`}>
+    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}`}>
       <div className="panel-heading">
         <div>
           <h2>Muhasebe fişi</h2>
@@ -301,13 +345,17 @@ export function JournalPanel({
       <p className="accountant-summary">
         {document.accountantSummary || (needsManualDraft ? "Fiş taslağı çıkarılamadı; manuel satır girerek belgeyi tamamlayın." : "Fiş taslağı kontrol için hazır.")}
       </p>
+      <div className="accountant-explanation">
+        <strong>AI muhasebe gerekÃ§esi</strong>
+        <p>{document.accountantExplanation || document.aiReason || document.accountantSummary || "-"}</p>
+      </div>
       <LearningRuleCard document={document} />
       <div className="journal-meta">
-        <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Banka hesabı" : "Gider hesabı"} value={document.selectedExpenseAccount} />
-        <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Fiş KDV" : "KDV hesabı"} value={document.selectedVatAccount} />
-        <Info label={document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Karşı hesap" : "Cari"} value={`${document.selectedCounterpartyAccount} (${document.counterpartyConfidence})`} />
+        <Info label={primaryAccountLabel} value={primaryAccountValue} />
+        <Info label={vatAccountLabel} value={vatAccountValue} />
+        <Info label={counterpartyLabel} value={`${counterpartyValue} (${document.counterpartyConfidence})`} />
       </div>
-      {document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? (
+      {isStatement ? (
         <StatementReviewPanel
           correctionDraft={correctionDraft}
           document={document}
@@ -328,19 +376,47 @@ export function JournalPanel({
         onUpdateLine={setManualDraftLine}
       />
       <div className="correction-form">
+        {accountCandidateOptions.length ? (
+          <label>
+            <span>Hesap adaylari</span>
+            <select
+              onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
+              value=""
+            >
+              <option value="">Hesap plani adaylarindan sec</option>
+              {accountCandidateOptions.map((candidate) => (
+                <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {counterpartyCandidateOptions.length ? (
+          <label>
+            <span>Cari adaylari</span>
+            <select
+              onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
+              value=""
+            >
+              <option value="">Cari adaylarindan sec</option>
+              {counterpartyCandidateOptions.map((candidate) => (
+                <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label>
-          <span>{document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Yeni işlem hesabı" : "Yeni gider hesabı"}</span>
+          <span>{correctionAccountLabel}</span>
           <input
             onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
-            placeholder={document.selectedExpenseAccount}
+            placeholder={correctionAccountPlaceholder}
             value={correctionDraft.accountCode}
           />
         </label>
         <label>
-          <span>{document.intakeCategory === "bank_statement" || document.statementLines.length > 0 ? "Yeni karşı hesap" : "Yeni cari"}</span>
+          <span>{isStatement ? "Yeni karşı hesap" : "Yeni cari"}</span>
           <input
             onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
-            placeholder={document.selectedCounterpartyAccount}
+            placeholder={counterpartyValue}
             value={correctionDraft.counterpartyCode}
           />
         </label>

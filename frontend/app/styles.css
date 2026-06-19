@@ -1354,6 +1354,23 @@ button:disabled {
   padding: 10px 12px;
 }
 
+.accountant-explanation {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+}
+
+.accountant-explanation p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
 .manual-draft-panel {
   background: #fff;
   border: 1px solid var(--border);

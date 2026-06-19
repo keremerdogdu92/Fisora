@@ -6,7 +6,7 @@ oturumdan devam etmek icin son durumu ozetler.
 ## Son Durum
 
 - Repo: `keremerdogdu92/Fisora`
-- Aktif branch: `codex/ai-agent-capacity`
+- Aktif branch: `main`
 - Son dogrulanan runtime deploy: aktif branch ucu, deploy sonunda `git rev-parse`
   ile tekrar kontrol edilir.
 - Son deploy smoke: 2026-06-19, `/health` 200, readiness `ready=true`,
@@ -32,7 +32,7 @@ sadece serverdaki bu dosyada tutulur.
 GitHub hesabi private repoya yetkili olmalidir. Aktif pilot branch'ini almak icin:
 
 ```bash
-git clone -b codex/ai-agent-capacity https://github.com/keremerdogdu92/Fisora.git
+git clone -b main https://github.com/keremerdogdu92/Fisora.git
 cd Fisora
 ```
 
@@ -40,7 +40,7 @@ Zaten clone varsa:
 
 ```bash
 git fetch origin
-git checkout codex/ai-agent-capacity
+git checkout main
 git pull --ff-only
 ```
 
@@ -71,8 +71,8 @@ Serverda son commit'i almak icin:
 ```bash
 cd /opt/fisora/app
 git fetch origin
-git checkout codex/ai-agent-capacity
-git pull --ff-only origin codex/ai-agent-capacity
+git checkout main
+git pull --ff-only origin main
 ```
 
 Config kontrolu ve deploy:
@@ -183,7 +183,7 @@ docker compose --env-file deploy/production.env -f docker-compose.production.yml
 
 ## Kaldigimiz Pratik Sira
 
-1. Serverda `git checkout codex/ai-agent-capacity && git pull --ff-only origin codex/ai-agent-capacity` ile son commit'i cek.
+1. Serverda `git checkout main && git pull --ff-only origin main` ile son commit'i cek.
 2. `sh deploy/scripts/fisora-prod.sh check && sh deploy/scripts/fisora-prod.sh deploy && sh deploy/scripts/fisora-prod.sh smoke` calistir.
 3. Auth status `mock_header_required` donuyor mu kontrol et.
 4. Readiness icinde `pilot_sellable=true`, `production_ready=false`,

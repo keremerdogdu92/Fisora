@@ -156,10 +156,40 @@ def parse_amount(raw: str) -> Decimal | None:
         return None
 
 
+def _parse_resolved_total(raw: str) -> Decimal | None:
+    value = str(raw or "").strip()
+    if "." in value and "," not in value and len(value.rsplit(".", 1)[-1]) == 2:
+        try:
+            return Decimal(value)
+        except InvalidOperation:
+            return None
+    return parse_amount(value)
+
+
 def format_decimal(value: Decimal | None) -> str:
     if value is None:
         return ""
     return f"{value:.2f}"
+
+
+def resolve_payable_total(parsed_totals: dict[str, str]) -> tuple[str, tuple[str, ...]]:
+    payable_total = str(parsed_totals.get("payable_total") or "").strip()
+    if payable_total:
+        return payable_total, ()
+
+    tax_inclusive_total = _parse_resolved_total(str(parsed_totals.get("tax_inclusive_total") or ""))
+    if tax_inclusive_total is None or tax_inclusive_total <= 0:
+        return "", ()
+
+    goods_total = _parse_resolved_total(str(parsed_totals.get("goods_services_total") or ""))
+    vat_total = _parse_resolved_total(str(parsed_totals.get("vat_total") or ""))
+    special_tax_total = _parse_resolved_total(str(parsed_totals.get("special_tax_total") or "")) or Decimal("0.00")
+    if goods_total is not None and vat_total is not None:
+        expected_total = goods_total + vat_total + special_tax_total
+        if abs(expected_total - tax_inclusive_total) > Decimal("0.01"):
+            return "", ()
+
+    return format_decimal(tax_inclusive_total), ("payable_total_fallback_tax_inclusive_total",)
 
 
 def normalize_date_match(match: re.Match[str]) -> str:
@@ -444,10 +474,11 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         key: extract_label_amount(text, labels)
         for key, labels in TOTAL_LABELS.items()
     }
+    payable_total, payable_notes = resolve_payable_total(parsed_totals)
     parsed_identity = {
         "invoice_no": extract_invoice_no(text) or edge_summary.invoice_no,
         "issue_date": extract_issue_date(text),
-        "payable_total": parsed_totals["payable_total"],
+        "payable_total": payable_total,
     }
     route, route_notes = build_route(edge_summary.risk_flags, parsed_identity)
     line_item_details = extract_invoice_lines_from_text(text)
@@ -471,10 +502,10 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         vat_total=parsed_totals["vat_total"],
         special_tax_total=parsed_totals["special_tax_total"],
         tax_inclusive_total=parsed_totals["tax_inclusive_total"],
-        payable_total=parsed_totals["payable_total"],
+        payable_total=payable_total,
         risk_flags=edge_summary.risk_flags,
         suggested_route=route,
-        parse_notes=tuple(dict.fromkeys((*extraction_notes, *route_notes))),
+        parse_notes=tuple(dict.fromkeys((*extraction_notes, *route_notes, *payable_notes))),
         line_items=line_items,
         line_item_details=line_item_details,
         issuer_title=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,

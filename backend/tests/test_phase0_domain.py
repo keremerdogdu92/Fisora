@@ -48,7 +48,8 @@ from app.domain.invoice_operations import (
 )
 from app.domain.learning_intelligence import LearningPolicy, enrich_learning_event
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload, rule_from_learning_event
-from app.domain.matching_simulation import AccountSelection, simulate_invoice
+from app.domain.matching_simulation import AccountSelection, SimulatedChartRun, private_benchmark_summary, simulate_chart_run, simulate_invoice
+from app.domain.matching_simulation import build_review_ui_payload, write_simulation_csv
 from app.domain.matching_simulation import select_accounts
 from app.domain.journal_entries import (
     build_bank_payment_entry,
@@ -57,7 +58,7 @@ from app.domain.journal_entries import (
     build_sales_entry,
     money,
 )
-from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount
+from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount, resolve_payable_total
 from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, StatementAiSuggestionRequest, suggest_statement_lines
@@ -1314,6 +1315,341 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.draft_lines[3]["account_code"], "600.20")
         self.assertEqual(result.draft_lines[4]["account_code"], "391.20")
         self.assertIn("mixed_vat_accountant_review", result.review_reason_codes)
+
+    def test_mixed_vat_sales_without_line_details_keeps_sales_review_entry_type(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="sgk-mixed-sales.pdf",
+            provider_hint="SGK",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SGK",
+            invoice_no="AAA2026000000007",
+            ettn="",
+            issue_date="30.05.2026",
+            tax_ids=("45661316282", "7750409379"),
+            vat_rates=("0", "20"),
+            goods_services_total="15261.12",
+            vat_total="3744.00",
+            special_tax_total="",
+            tax_inclusive_total="19005.12",
+            payable_total="19005.12",
+            risk_flags=("exemption_manual_review", "mixed_vat_manual_review"),
+            suggested_route="review_queue",
+            parse_notes=(),
+            line_items=("ISITME CIHAZI RECETE BEDELI",),
+            line_item_details=(),
+            issuer_title="Omer Yagci",
+            issuer_tax_id="45661316282",
+            recipient_title="Sosyal Guvenlik Kurumu",
+            recipient_tax_id="7750409379",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Omer Yagci",
+            tax_id="45661316282",
+            has_chart_accounts=True,
+            workplace_addresses=("Istanbul",),
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.accounting_direction, "sales")
+        self.assertEqual(result.draft_quality, "gross_balanced_needs_vat_split")
+        self.assertEqual(result.draft_entry_type, "review_sales")
+        self.assertNotEqual(result.draft_entry_type, "review_purchase")
+        self.assertEqual(result.selected_revenue_account, "600.20")
+        self.assertEqual(result.selected_customer_account, "120.01")
+        self.assertEqual(result.export_status, "review_required")
+
+    def test_payable_total_falls_back_to_single_safe_total_candidate(self) -> None:
+        parsed_totals = {
+            "goods_services_total": "1000.00",
+            "vat_total": "200.00",
+            "special_tax_total": "",
+            "tax_inclusive_total": "1200.00",
+            "payable_total": "",
+        }
+
+        resolved_total, notes = resolve_payable_total(parsed_totals)
+
+        self.assertEqual(resolved_total, "1200.00")
+        self.assertIn("payable_total_fallback_tax_inclusive_total", notes)
+
+    def test_payable_total_keeps_missing_note_when_totals_conflict(self) -> None:
+        parsed_totals = {
+            "goods_services_total": "1000.00",
+            "vat_total": "180.00",
+            "special_tax_total": "",
+            "tax_inclusive_total": "1170.00",
+            "payable_total": "",
+        }
+
+        resolved_total, notes = resolve_payable_total(parsed_totals)
+
+        self.assertEqual(resolved_total, "")
+        self.assertEqual(notes, ())
+
+    def test_private_simulation_outputs_direction_and_ai_decision_fields(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="sales.pdf",
+            provider_hint="Client",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="SAT2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1111111111", "2222222222"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton cihaz",),
+            issuer_title="Client",
+            issuer_tax_id="1111111111",
+            recipient_title="Buyer",
+            recipient_tax_id="2222222222",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
+        result = simulate_invoice(invoice, selection, profile)
+        run = SimulatedChartRun(
+            chart_file_name="chart.xlsx",
+            account_count=1,
+            detail_account_count=1,
+            customer_candidate_count=1,
+            supplier_candidate_count=1,
+            has_purchase_vat_191=True,
+            has_sales_vat_391=True,
+            account_selection=selection,
+            invoice_results=(result,),
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = write_simulation_csv([run], Path(temp_dir) / "matching.csv")
+            csv_text = csv_path.read_text(encoding="utf-8-sig")
+        payload = build_review_ui_payload([run])
+        row = payload["invoiceRows"][0]
+
+        self.assertIn("accounting_direction", csv_text.splitlines()[0])
+        self.assertIn("draft_entry_type", csv_text.splitlines()[0])
+        self.assertEqual(row["accountingDirection"], "sales")
+        self.assertEqual(row["directionConfidence"], 95)
+        self.assertEqual(row["draftEntryType"], "sales")
+        self.assertEqual(row["selectedRevenueAccount"], "600.20")
+        self.assertIn("aiProviderStatus", row)
+
+    def test_private_benchmark_summary_counts_pipeline_quality_signals(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="sales.pdf",
+            provider_hint="Client",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="SAT2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1111111111", "2222222222"),
+            vat_rates=("0", "20"),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=("mixed_vat_manual_review",),
+            suggested_route="review_queue",
+            parse_notes=(),
+            line_items=("Cihaz satisi",),
+            issuer_title="Client",
+            issuer_tax_id="1111111111",
+            recipient_title="Buyer",
+            recipient_tax_id="2222222222",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
+        result = simulate_invoice(invoice, selection, profile)
+        run = SimulatedChartRun(
+            chart_file_name="chart.xlsx",
+            account_count=1,
+            detail_account_count=1,
+            customer_candidate_count=1,
+            supplier_candidate_count=1,
+            has_purchase_vat_191=True,
+            has_sales_vat_391=True,
+            account_selection=selection,
+            invoice_results=(result,),
+        )
+
+        summary = private_benchmark_summary([run], run_label="baseline", firm_id="firma-1")
+
+        self.assertEqual(summary["firm_id"], "firma-1")
+        self.assertEqual(summary["run_label"], "baseline")
+        self.assertEqual(summary["invoice_count"], 1)
+        self.assertEqual(summary["mixed_vat_review_count"], 1)
+        self.assertEqual(summary["sales_direction_purchase_draft_count"], 0)
+        self.assertEqual(summary["counterparty_missing_count"], 1)
+        self.assertIn("provider_failure_count", summary)
+
+    def test_ai_tie_breaker_can_select_stock_account_without_export_ready(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="unknown-device.pdf",
+            provider_hint="Medikal Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="10000.00",
+            vat_total="2000.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("ZX Sonic Pro 9 receiver unit",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01", "name": "Cihaz stoku", "reason": ""},),
+                "purchase_expense": ({"code": "770.01", "name": "Gider", "reason": ""},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        classifier = StaticFirstClassifier(
+            provider=FakeProductProvider(
+                {
+                    "category": "isitme_cihazi",
+                    "confidence": 86,
+                    "reason": "Isitme cihazi stok urunu.",
+                    "evidence": ["ai:stock"],
+                    "suggested_account_code": "153.01",
+                    "suggested_counterparty_code": "320.01",
+                    "risk_flags": [],
+                    "account_reason": "Stok hesabi onerildi.",
+                }
+            ),
+            policy=AiClassificationPolicy(enabled=True),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertTrue(result.ai_classification_used)
+        self.assertEqual(result.product_category, "isitme_cihazi")
+        self.assertEqual(result.selected_expense_account, "153.01")
+        self.assertEqual(result.draft_lines[0]["account_code"], "153.01")
+        self.assertEqual(result.export_status, "review_required")
+
+    def test_sales_counterparty_match_uses_customer_prefix_not_supplier_prefix(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="sales-customer.pdf",
+            provider_hint="Client",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="SAT2026000000002",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1111111111", "2222222222"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Cihaz satisi",),
+            issuer_title="Client",
+            issuer_tax_id="1111111111",
+            recipient_title="Acme Musteri",
+            recipient_tax_id="2222222222",
+        )
+        accounts = [
+            ChartAccount("320.01", "320.01", "Acme Musteri", True),
+            ChartAccount("120.01", "120.01", "Acme Musteri", True),
+            ChartAccount("600.20", "600.20", "Satis", True),
+            ChartAccount("391.20", "391.20", "Hesaplanan KDV", True),
+        ]
+        profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            chart_path = Path(temp_dir) / "chart.csv"
+            chart_path.write_text(
+                "account_code,account_name,is_detail_account\n"
+                + "\n".join(f"{account.raw_account_code},{account.account_name},true" for account in accounts),
+                encoding="utf-8",
+            )
+            run = simulate_chart_run(chart_path, [invoice], profile)
+        result = run.invoice_results[0]
+
+        self.assertEqual(result.accounting_direction, "sales")
+        self.assertEqual(result.counterparty_match_code, "120.01")
+        self.assertEqual(result.selected_customer_account, "120.01")
 
     def test_matching_simulation_marks_incomplete_client_profile_for_review(self) -> None:
         invoice = ParsedInvoice(

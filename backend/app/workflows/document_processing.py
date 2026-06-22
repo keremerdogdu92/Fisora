@@ -184,9 +184,19 @@ def _counterparty_match_for_invoice(
     issuer_tax_id = re.sub(r"\D+", "", getattr(invoice, "issuer_tax_id", ""))
     recipient_tax_id = re.sub(r"\D+", "", getattr(invoice, "recipient_tax_id", ""))
     if issuer_tax_id and issuer_tax_id in client_ids:
-        return match_counterparty(accounts, tax_ids=(recipient_tax_id,), name_hint=getattr(invoice, "recipient_title", ""))
+        return match_counterparty(
+            accounts,
+            tax_ids=(recipient_tax_id,),
+            name_hint=getattr(invoice, "recipient_title", ""),
+            account_prefixes=("120",),
+        )
     if recipient_tax_id and recipient_tax_id in client_ids:
-        return match_counterparty(accounts, tax_ids=(issuer_tax_id,), name_hint=getattr(invoice, "issuer_title", "") or invoice.provider_hint)
+        return match_counterparty(
+            accounts,
+            tax_ids=(issuer_tax_id,),
+            name_hint=getattr(invoice, "issuer_title", "") or invoice.provider_hint,
+            account_prefixes=("320",),
+        )
     return match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
 
 

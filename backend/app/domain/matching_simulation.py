@@ -475,9 +475,19 @@ def _counterparty_match_for_invoice(
     issuer_tax_id = _only_digits(getattr(invoice, "issuer_tax_id", ""))
     recipient_tax_id = _only_digits(getattr(invoice, "recipient_tax_id", ""))
     if issuer_tax_id and issuer_tax_id in identifiers:
-        return match_counterparty(accounts, tax_ids=(recipient_tax_id,), name_hint=getattr(invoice, "recipient_title", ""))
+        return match_counterparty(
+            accounts,
+            tax_ids=(recipient_tax_id,),
+            name_hint=getattr(invoice, "recipient_title", ""),
+            account_prefixes=("120",),
+        )
     if recipient_tax_id and recipient_tax_id in identifiers:
-        return match_counterparty(accounts, tax_ids=(issuer_tax_id,), name_hint=getattr(invoice, "issuer_title", "") or invoice.provider_hint)
+        return match_counterparty(
+            accounts,
+            tax_ids=(issuer_tax_id,),
+            name_hint=getattr(invoice, "issuer_title", "") or invoice.provider_hint,
+            account_prefixes=("320",),
+        )
     return match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
 
 
@@ -530,6 +540,25 @@ def _gross_review_entry(
         lines=(
             JournalLine(expense_account or selection.expense_account, "Kontrol bekleyen gider taslagi", debit=total, document_ref=invoice.file_name),
             JournalLine(supplier_account, "Kontrol bekleyen satici cari", credit=total, document_ref=invoice.file_name),
+        ),
+        risk_flags=invoice.risk_flags,
+    )
+
+
+def _gross_sales_review_entry(
+    invoice: ParsedInvoice,
+    *,
+    revenue_account: str,
+    customer_account: str,
+) -> JournalEntry:
+    total = money(invoice.payable_total)
+    return JournalEntry(
+        entry_type="review_sales",
+        entry_date=invoice.issue_date or "1900-01-01",
+        description=f"Kontrol gerekli satis faturasi {invoice.file_name}",
+        lines=(
+            JournalLine(customer_account, "Kontrol bekleyen alici cari", debit=total, document_ref=invoice.file_name),
+            JournalLine(revenue_account, "Kontrol bekleyen satis geliri", credit=total, document_ref=invoice.file_name),
         ),
         risk_flags=invoice.risk_flags,
     )
@@ -611,13 +640,24 @@ def _ai_context(
     client_profile: ClientProfile | None,
     counterparty_match: CounterpartyMatch | None,
 ) -> AiClassificationContext:
+    semantic_candidates = tuple(
+        str(candidate.get("code") or "").strip()
+        for candidates in (selection.account_candidates or {}).values()
+        for candidate in candidates
+        if str(candidate.get("code") or "").strip()
+    )
     account_candidates = tuple(
         dict.fromkeys(
             code
             for code in (
+                selection.stock_account,
                 selection.expense_account,
+                selection.non_deductible_account,
                 selection.purchase_vat_account,
+                selection.revenue_account,
+                selection.sales_vat_account,
                 selection.bank_account,
+                *semantic_candidates,
             )
             if code
         )
@@ -751,12 +791,48 @@ def simulate_invoice(
         if client_profile
         else _not_assessed_relevance(raw_line)
     )
+    ai_used = False
+    ai_provider = ""
+    ai_skipped_reason = "client_profile_not_provided"
+    ai_reason = ""
+    ai_estimated_chars = 0
+    ai_suggested_account_code = ""
+    ai_suggested_counterparty_code = ""
+    ai_risk_flags: tuple[str, ...] = ()
+    ai_account_reason = ""
+    if client_profile and product_classifier:
+        classification_result = product_classifier.classify(
+            raw_line,
+            supplier_hint=invoice.provider_hint,
+            context=_ai_context(
+                selection=selection,
+                client_profile=client_profile,
+                counterparty_match=counterparty_match,
+            ),
+        )
+        relevance = assess_business_relevance(
+            raw_line,
+            client_profile,
+            supplier_hint=invoice.provider_hint,
+            classification=classification_result.classification,
+        )
+        ai_used = classification_result.ai_used
+        ai_provider = classification_result.provider
+        ai_skipped_reason = classification_result.skipped_reason
+        ai_reason = classification_result.provider_reason
+        ai_estimated_chars = classification_result.estimated_input_chars
+        ai_suggested_account_code = classification_result.suggested_account_code
+        ai_suggested_counterparty_code = classification_result.suggested_counterparty_code
+        ai_risk_flags = classification_result.risk_flags
+        ai_account_reason = classification_result.account_reason
+    elif client_profile:
+        ai_skipped_reason = "classifier_not_configured"
     if relevance.account_treatment == "stock_or_cogs":
-        purchase_account = selection.stock_account
+        purchase_account = ai_suggested_account_code or selection.stock_account
     elif relevance.account_treatment == "non_deductible_review":
         purchase_account = selection.non_deductible_account
     else:
-        purchase_account = selection.expense_account
+        purchase_account = ai_suggested_account_code or selection.expense_account
 
     if _is_return_invoice(invoice) and amount is not None and amount > 0:
         reasons = tuple(dict.fromkeys((*reasons, "return_invoice_manual_review")))
@@ -861,7 +937,11 @@ def simulate_invoice(
             selected_sales_vat_account = mixed_items[-1][3]
             draft_quality = "mixed_vat_sales_review"
         else:
-            entry = _gross_review_entry(invoice, selection, selected_customer_account)
+            entry = _gross_sales_review_entry(
+                invoice,
+                revenue_account=selected_revenue_account,
+                customer_account=selected_customer_account,
+            )
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
     elif len(invoice.vat_rates) <= 1:
@@ -906,42 +986,6 @@ def simulate_invoice(
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
-    ai_used = False
-    ai_provider = ""
-    ai_skipped_reason = "client_profile_not_provided"
-    ai_reason = ""
-    ai_estimated_chars = 0
-    ai_suggested_account_code = ""
-    ai_suggested_counterparty_code = ""
-    ai_risk_flags: tuple[str, ...] = ()
-    ai_account_reason = ""
-    if client_profile and product_classifier:
-        classification_result = product_classifier.classify(
-            raw_line,
-            supplier_hint=invoice.provider_hint,
-            context=_ai_context(
-                selection=selection,
-                client_profile=client_profile,
-                counterparty_match=counterparty_match,
-            ),
-        )
-        relevance = assess_business_relevance(
-            raw_line,
-            client_profile,
-            supplier_hint=invoice.provider_hint,
-            classification=classification_result.classification,
-        )
-        ai_used = classification_result.ai_used
-        ai_provider = classification_result.provider
-        ai_skipped_reason = classification_result.skipped_reason
-        ai_reason = classification_result.provider_reason
-        ai_estimated_chars = classification_result.estimated_input_chars
-        ai_suggested_account_code = classification_result.suggested_account_code
-        ai_suggested_counterparty_code = classification_result.suggested_counterparty_code
-        ai_risk_flags = classification_result.risk_flags
-        ai_account_reason = classification_result.account_reason
-    elif client_profile:
-        ai_skipped_reason = "classifier_not_configured"
     counterparty_reasons: tuple[str, ...] = ()
     if counterparty_match and counterparty_match.requires_review:
         counterparty_reasons = (f"counterparty_{counterparty_match.match_reason}",)
@@ -1123,10 +1167,19 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "vat_rates",
         "simulated_status",
         "draft_quality",
+        "draft_entry_type",
         "is_balanced",
         "selected_expense_account",
         "selected_vat_account",
         "selected_supplier_account",
+        "selected_revenue_account",
+        "selected_purchase_vat_account",
+        "selected_sales_vat_account",
+        "selected_customer_account",
+        "suggested_counterparty_account",
+        "accounting_direction",
+        "direction_confidence",
+        "direction_evidence",
         "counterparty_match_code",
         "counterparty_match_confidence",
         "counterparty_match_reason",
@@ -1169,6 +1222,7 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
                 row["review_reason_codes"] = ";".join(result.review_reason_codes)
                 row["deterministic_checks"] = ";".join(result.deterministic_checks)
                 row["business_relevance_evidence"] = ";".join(result.business_relevance_evidence)
+                row["direction_evidence"] = ";".join(result.direction_evidence)
                 writer.writerow({column: row[column] for column in columns})
     return output_path
 
@@ -1204,10 +1258,14 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "vatRates": list(result.vat_rates),
                     "status": result.simulated_status,
                     "draftQuality": result.draft_quality,
+                    "draftEntryType": result.draft_entry_type,
                     "isBalanced": result.is_balanced,
                     "riskFlags": list(result.risk_flags),
                     "parseNotes": list(result.parse_notes),
                     "reviewReasonCodes": list(result.review_reason_codes),
+                    "accountingDirection": result.accounting_direction,
+                    "directionConfidence": result.direction_confidence,
+                    "directionEvidence": list(result.direction_evidence),
                     "productLineHint": result.product_line_hint,
                     "productCategory": result.product_category,
                     "productConfidence": result.product_confidence,
@@ -1224,6 +1282,7 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "aiSuggestedCounterpartyCode": result.ai_suggested_counterparty_code,
                     "aiRiskFlags": list(result.ai_risk_flags),
                     "aiAccountReason": result.ai_account_reason,
+                    "aiProviderStatus": result.ai_classification_skipped_reason or ("used" if result.ai_classification_used else "not_used"),
                     "learningRuleApplied": result.learning_rule_applied,
                     "learningRuleScope": result.learning_rule_scope,
                     "learningRuleReason": result.learning_rule_reason,
@@ -1235,6 +1294,11 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "selectedExpenseAccount": result.selected_expense_account,
                     "selectedVatAccount": result.selected_vat_account,
                     "selectedSupplierAccount": result.selected_supplier_account,
+                    "selectedRevenueAccount": result.selected_revenue_account,
+                    "selectedPurchaseVatAccount": result.selected_purchase_vat_account,
+                    "selectedSalesVatAccount": result.selected_sales_vat_account,
+                    "selectedCustomerAccount": result.selected_customer_account,
+                    "suggestedCounterpartyAccount": result.suggested_counterparty_account,
                     "counterpartyMatchCode": result.counterparty_match_code,
                     "counterpartyMatchConfidence": result.counterparty_match_confidence,
                     "counterpartyMatchReason": result.counterparty_match_reason,
@@ -1262,6 +1326,50 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
         },
         "chartRuns": chart_runs,
         "invoiceRows": invoice_rows,
+    }
+
+
+def private_benchmark_summary(
+    runs: list[SimulatedChartRun],
+    *,
+    run_label: str,
+    firm_id: str,
+) -> dict[str, object]:
+    results = [result for run in runs for result in run.invoice_results]
+    review_reasons = [reason for result in results for reason in result.review_reason_codes]
+    return {
+        "firm_id": firm_id,
+        "run_label": run_label,
+        "chart_run_count": len(runs),
+        "invoice_count": len(results),
+        "auto_ready_count": sum(1 for result in results if result.simulated_status == "auto_ready"),
+        "review_required_count": sum(1 for result in results if result.simulated_status == "review_required"),
+        "blocked_count": sum(1 for result in results if result.export_status == "blocked"),
+        "mixed_vat_review_count": sum(1 for result in results if "mixed_vat_manual_review" in result.review_reason_codes),
+        "sales_direction_purchase_draft_count": sum(
+            1
+            for result in results
+            if result.accounting_direction == "sales" and "purchase" in result.draft_entry_type
+        ),
+        "missing_total_count": sum(1 for result in results if "missing_payable_total" in result.review_reason_codes),
+        "counterparty_matched_count": sum(
+            1
+            for result in results
+            if result.counterparty_match_code and result.counterparty_match_confidence >= 80
+        ),
+        "counterparty_weak_count": sum(
+            1
+            for result in results
+            if result.counterparty_match_code and result.counterparty_match_confidence < 80
+        ),
+        "counterparty_missing_count": sum(1 for result in results if not result.counterparty_match_code),
+        "unknown_product_count": sum(1 for result in results if result.product_confidence < 70),
+        "ai_used_count": sum(1 for result in results if result.ai_classification_used),
+        "provider_failure_count": sum(1 for result in results if "ai_provider_error" in result.ai_risk_flags),
+        "review_reason_counts": {
+            reason: review_reasons.count(reason)
+            for reason in sorted(set(review_reasons))
+        },
     }
 
 

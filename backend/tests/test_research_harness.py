@@ -14,6 +14,7 @@ from app.domain.research_harness import (
     ResearchHarness,
     ResearchPolicy,
     ResearchQuery,
+    TavilySearchResearchProvider,
     apply_research_to_result,
     build_research_runtime_from_env,
     normalize_research_profile,
@@ -43,6 +44,27 @@ class FakeResearchProvider:
     def research(self, query: ResearchQuery) -> dict[str, object]:
         self.queries.append(query)
         return self.payload
+
+
+class FakeResponse:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return self.payload
+
+
+class FakeHttpClient:
+    def __init__(self, payload: dict[str, object]) -> None:
+        self.payload = payload
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        return FakeResponse(self.payload)
 
 
 class ResearchHarnessTests(unittest.TestCase):
@@ -139,6 +161,60 @@ class ResearchHarnessTests(unittest.TestCase):
 
         self.assertEqual(runtime["policy"].max_per_document, 1)
         self.assertEqual(runtime["provider"].provider_name, "openai_agents_research")
+
+    def test_build_research_runtime_from_env_supports_tavily_without_openai_key(self) -> None:
+        runtime = build_research_runtime_from_env(
+            {
+                "FISORA_RESEARCH_ENABLED": "true",
+                "FISORA_RESEARCH_PROVIDER": "tavily",
+                "TAVILY_API_KEY": "tvly-test",
+                "FISORA_RESEARCH_MAX_PER_DOCUMENT": "2",
+            }
+        )
+
+        self.assertEqual(runtime["policy"].max_per_document, 2)
+        self.assertEqual(runtime["provider"].provider_name, "tavily_search")
+
+    def test_tavily_provider_maps_search_results_to_research_profile_payload(self) -> None:
+        http_client = FakeHttpClient(
+            {
+                "answer": "Rexton isitme cihazlari ve aksesuarları ureten bir markadir.",
+                "results": [
+                    {
+                        "title": "Rexton hearing aids",
+                        "url": "https://www.rexton.com/hearing-aids/",
+                        "content": "Rexton hearing aids and accessories.",
+                    },
+                    {
+                        "title": "Marketplace listing",
+                        "url": "https://www.trendyol.com/rexton/urun",
+                        "content": "Pazaryeri urun listesi.",
+                    },
+                ],
+            }
+        )
+        provider = TavilySearchResearchProvider(api_key="tvly-test", http_client=http_client)
+
+        payload = provider.research(
+            ResearchQuery(
+                kind="brand",
+                key="Rexton",
+                search_text="Rexton isitme cihazi",
+                supplier_hint="Rexton",
+                activity_context="isitme merkezi",
+            )
+        )
+        profile = normalize_research_profile(kind="brand", key="Rexton", payload=payload)
+
+        request = http_client.requests[0]
+        self.assertEqual(request["url"], "https://api.tavily.com/search")
+        self.assertEqual(request["headers"]["Authorization"], "Bearer tvly-test")
+        self.assertEqual(request["json"]["max_results"], 5)
+        self.assertIn("Rexton isitme cihazi", request["json"]["query"])
+        self.assertEqual(profile["summary_tr"], "Rexton isitme cihazlari ve aksesuarları ureten bir markadir.")
+        self.assertEqual(profile["confidence"], 75)
+        self.assertEqual(profile["source_urls"], ["https://www.rexton.com/hearing-aids/"])
+        self.assertEqual(profile["evidence"][1]["accepted"], False)
 
     def test_store_lists_research_profiles_and_tracks_benchmark_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

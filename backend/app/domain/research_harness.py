@@ -8,9 +8,13 @@ import re
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
+import httpx
+
 from app.domain.brand_research import normalize_brand_name
 from app.domain.ai_capacity import looks_like_openai_api_key
 from app.domain.nace_research import normalize_nace_code
+
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
 
 @dataclass(frozen=True)
@@ -284,16 +288,100 @@ class OpenAIAgentsResearchProvider:
         return json.loads(str(output)) if isinstance(output, str) else dict(output)
 
 
+class TavilySearchResearchProvider:
+    provider_name = "tavily_search"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        search_url: str = TAVILY_SEARCH_URL,
+        http_client: Any | None = None,
+        timeout_seconds: float = 20.0,
+    ) -> None:
+        if not api_key.strip():
+            raise ValueError("TAVILY_API_KEY is required when FISORA_RESEARCH_PROVIDER=tavily")
+        self.api_key = api_key.strip()
+        self.search_url = search_url
+        self.http_client = http_client or httpx.Client()
+        self.timeout_seconds = timeout_seconds
+
+    def research(self, query: ResearchQuery) -> dict[str, Any]:
+        response = self.http_client.post(
+            self.search_url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "query": _tavily_search_text(query),
+                "topic": "general",
+                "search_depth": "basic",
+                "max_results": 5,
+                "include_answer": True,
+                "include_raw_content": False,
+            },
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        return _tavily_payload_to_research_profile(query, response.json())
+
+
+def _tavily_search_text(query: ResearchQuery) -> str:
+    parts = [
+        query.search_text,
+        query.supplier_hint,
+        query.activity_context,
+        "official manufacturer product category",
+    ]
+    return " ".join(part for part in parts if str(part).strip())
+
+
+def _tavily_payload_to_research_profile(query: ResearchQuery, payload: dict[str, Any]) -> dict[str, Any]:
+    results = payload.get("results") if isinstance(payload, dict) else []
+    evidence = []
+    for item in results if isinstance(results, list) else []:
+        if not isinstance(item, dict):
+            continue
+        evidence.append(
+            {
+                "url": str(item.get("url") or "").strip(),
+                "title": str(item.get("title") or "").strip(),
+                "source_type": "search_result",
+                "summary_tr": str(item.get("content") or item.get("raw_content") or "").strip(),
+            }
+        )
+    answer = str(payload.get("answer") or "").strip()
+    accepted_evidence = [item for item in evidence if source_policy_accepts(str(item.get("url") or ""))]
+    return {
+        "display_name": query.key or query.search_text,
+        "summary_tr": answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else ""),
+        "common_product_categories": [],
+        "activity_tags": [],
+        "confidence": 75 if answer and accepted_evidence else 65 if accepted_evidence else 40,
+        "evidence": evidence,
+        "source_policy": query.source_policy,
+    }
+
+
 def build_research_runtime_from_env(env: dict[str, str] | Any) -> dict[str, object] | None:
     enabled = str(env.get("FISORA_RESEARCH_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
-    api_key = str(env.get("OPENAI_API_KEY", "")).strip()
-    if not enabled or not looks_like_openai_api_key(api_key):
+    if not enabled:
         return None
     policy = ResearchPolicy(
         enabled=True,
         confidence_threshold=_int_between(env.get("FISORA_RESEARCH_CONFIDENCE_THRESHOLD", 70), 0, 100),
         max_per_document=max(1, _int_between(env.get("FISORA_RESEARCH_MAX_PER_DOCUMENT", 1), 1, 10)),
     )
+    provider_name = str(env.get("FISORA_RESEARCH_PROVIDER", "openai")).strip().lower() or "openai"
+    if provider_name == "tavily":
+        api_key = str(env.get("TAVILY_API_KEY", "")).strip()
+        if not api_key:
+            return None
+        return {"provider": TavilySearchResearchProvider(api_key=api_key), "policy": policy}
+    api_key = str(env.get("OPENAI_API_KEY", "")).strip()
+    if not looks_like_openai_api_key(api_key):
+        return None
     provider = OpenAIAgentsResearchProvider(
         api_key=api_key,
         model=str(env.get("FISORA_RESEARCH_MODEL", "")).strip() or "gpt-5.4-mini",

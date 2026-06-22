@@ -158,21 +158,35 @@ def _research_enabled(env: Mapping[str, str]) -> bool:
     return str(env.get("FISORA_RESEARCH_ENABLED", "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _research_provider(env: Mapping[str, str]) -> str:
+    return str(env.get("FISORA_RESEARCH_PROVIDER", "openai")).strip().lower() or "openai"
+
+
 def looks_like_openai_api_key(value: str) -> bool:
     key = str(value or "").strip()
     return bool(key) and key.startswith("sk-") and not key.lower().startswith("sk-or-")
 
 
+def looks_like_tavily_api_key(value: str) -> bool:
+    return str(value or "").strip().startswith("tvly-")
+
+
 def _research_agent(env: Mapping[str, str]) -> dict[str, object]:
     enabled = _research_enabled(env)
-    api_key = str(env.get("OPENAI_API_KEY", "")).strip()
+    provider = _research_provider(env)
+    key_name = "TAVILY_API_KEY" if provider == "tavily" else "OPENAI_API_KEY"
+    api_key = str(env.get(key_name, "")).strip()
     key_present = bool(api_key)
-    key_valid = looks_like_openai_api_key(api_key)
-    configured = enabled and key_valid
+    key_valid = looks_like_tavily_api_key(api_key) if provider == "tavily" else looks_like_openai_api_key(api_key)
+    supported = provider in {"openai", "tavily"}
+    configured = enabled and supported and key_valid
     max_per_document = max(_int_or_none(env.get("FISORA_RESEARCH_MAX_PER_DOCUMENT", "1")) or 1, 1)
     if configured:
         status = "ready"
         internet_researches = max_per_document
+    elif enabled and not supported:
+        status = "configuration_error"
+        internet_researches = 0
     elif enabled and key_present:
         status = "configuration_error"
         internet_researches = 0
@@ -188,7 +202,7 @@ def _research_agent(env: Mapping[str, str]) -> dict[str, object]:
         "label": "Araştırma ajanı",
         "configured": configured,
         "status": status,
-        "model": str(env.get("FISORA_RESEARCH_MODEL") or "gpt-5.4-mini"),
+        "model": "tavily-search" if provider == "tavily" else str(env.get("FISORA_RESEARCH_MODEL") or "gpt-5.4-mini"),
         "source": "server_config",
         "last_checked_at": "",
         "daily_requests": {"limit": None, "remaining": None, "reset": ""},

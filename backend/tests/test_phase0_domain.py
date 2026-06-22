@@ -226,6 +226,23 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(payload["totals"]["internet_researches"], 0)
         self.assertNotIn("sk-or-v1-not-openai", str(payload))
 
+    def test_ai_capacity_payload_marks_tavily_research_ready_without_openai_key(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_RESEARCH_ENABLED": "true",
+                "FISORA_RESEARCH_PROVIDER": "tavily",
+                "TAVILY_API_KEY": "tvly-secret",
+                "FISORA_RESEARCH_MAX_PER_DOCUMENT": "2",
+            },
+            provider_snapshots={},
+        )
+
+        research = next(agent for agent in payload["agents"] if agent["kind"] == "research")
+        self.assertTrue(research["configured"])
+        self.assertEqual(research["status"], "ready")
+        self.assertEqual(payload["totals"]["internet_researches"], 2)
+        self.assertNotIn("tvly-secret", str(payload))
+
     def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

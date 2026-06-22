@@ -43,6 +43,10 @@ gecis icin kullanilir.
   olarak tutulur; asil sinir Groq console free-tier/rate-limit kurallaridir.
 - Ucretli OpenAI kalite kiyasi ayrica istenirse `FISORA_AI_PROVIDER=openai`,
   `OPENAI_API_KEY` ve OpenAI billing cap ile acilir.
+- Faz 3 pilot research icin `FISORA_RESEARCH_ENABLED=true`,
+  `FISORA_RESEARCH_PROVIDER=tavily`, `FISORA_RESEARCH_MAX_PER_DOCUMENT=1`,
+  `FISORA_RESEARCH_CONFIDENCE_THRESHOLD=70` ve server env dosyasinda
+  `TAVILY_API_KEY` gerekir. OpenAI research sonraki iterasyona birakilir.
 - `FISORA_BACKUP_PATH=/opt/fisora/data/backups`.
 
 ## 4. TLS ve Nginx

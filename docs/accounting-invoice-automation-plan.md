@@ -8,7 +8,7 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 | --- | --- | --- | --- |
 | Faz 1 | done | Dogru kimlik, yon tespiti ve musavir gerekcesi | TCKN/VKN ayrimi, fatura yonu, iade dislama, UI yon bazli panel |
 | Faz 2 | done | Hesap plani, KDV ve cari onerisi | 600/391, 153 veya 7xx/191, %0/3065, yeni 120/320 cari onerisi |
-| Faz 3 | partial_done | Ortak bilgi havuzu ve operasyonel gorunurluk | NACE cache ve marka cache temeli var; internet arastirma entegrasyonu sonraki iterasyon |
+| Faz 3 | in_progress | Ortak bilgi havuzu ve operasyonel gorunurluk | Pilot provider Tavily; otomatik research sadece belirsiz faturalarda calisir |
 
 ## Kararlar
 
@@ -55,7 +55,7 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
   - JSON ve Postgres store marka research profilini save/get edebiliyor.
   - Pipeline teknik timeline structured payload ile yeni karar adimlarini tasiyor.
 - Acik isler:
-  - Belirsiz marka icin gercek internet arastirma provider entegrasyonu.
+  - Tavily research provider pilotta belirsiz faturalara otomatik baglandi; canli env ve server readiness deploy oncesi ayrica dogrulanacak.
   - Marka/model ayrimini satir parser'ina baglama.
   - Mustavir geri bildirimiyle NACE/marka aciklamasi duzeltme arayuzu.
   - AI provider/model kalitesi icin ayni gercekci belge, ekstre ve research case setini model-model benchmark etme; secimi maliyet, JSON uyumu, dogruluk ve mustavir is yuku etkisine gore yapma.

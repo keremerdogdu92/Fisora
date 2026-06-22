@@ -12,6 +12,7 @@ import httpx
 
 from app.domain.brand_research import normalize_brand_name
 from app.domain.ai_capacity import looks_like_openai_api_key
+from app.domain.business_relevance import account_treatment_for_category, classify_product_line
 from app.domain.nace_research import normalize_nace_code
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
@@ -139,6 +140,16 @@ def normalize_research_profile(*, kind: str, key: str, payload: dict[str, Any] |
     categories = source.get("category_tags") or source.get("common_product_categories") or source.get("activity_tags") or []
     summary = str(source.get("summary_tr") or source.get("brand_summary") or source.get("scope_summary") or "").strip()
     normalized_categories = [str(item).strip() for item in categories if str(item).strip()]
+    research_confidence = _research_confidence(source, summary=summary, categories=normalized_categories, source_urls=source_urls)
+    account_treatment = str(source.get("account_treatment") or "").strip()
+    if not account_treatment and normalized_categories:
+        account_treatment = account_treatment_for_category(normalized_categories[0])
+    accounting_impact_confidence = _accounting_impact_confidence(
+        source,
+        research_confidence=research_confidence,
+        categories=normalized_categories,
+        account_treatment=account_treatment,
+    )
     return {
         "kind": kind,
         "key": normalized_key,
@@ -153,7 +164,10 @@ def normalize_research_profile(*, kind: str, key: str, payload: dict[str, Any] |
         "product_category": normalized_categories[0] if normalized_categories else "",
         "common_product_categories": normalized_categories,
         "activity_tags": [str(item).strip() for item in source.get("activity_tags") or [] if str(item).strip()],
-        "confidence": _int_between(source.get("confidence"), 0, 100),
+        "account_treatment": account_treatment,
+        "confidence": research_confidence,
+        "research_confidence": research_confidence,
+        "accounting_impact_confidence": accounting_impact_confidence,
         "evidence": evidence,
         "sources": evidence,
         "source_urls": source_urls,
@@ -162,6 +176,50 @@ def normalize_research_profile(*, kind: str, key: str, payload: dict[str, Any] |
         "researched_at": str(source.get("researched_at") or _timestamp()),
         "expires_at": str(source.get("expires_at") or _future_timestamp()),
     }
+
+
+def _research_confidence(
+    source: dict[str, Any],
+    *,
+    summary: str,
+    categories: list[str],
+    source_urls: list[str],
+) -> int:
+    if source.get("override"):
+        return 100
+    explicit = source.get("research_confidence")
+    if explicit is None and source.get("confidence") is not None:
+        explicit = source.get("confidence")
+    if explicit is not None:
+        return _int_between(explicit, 0, 100)
+    if source_urls and summary and categories:
+        return 85
+    if source_urls and summary:
+        return 75
+    if source_urls:
+        return 65
+    return 40
+
+
+def _accounting_impact_confidence(
+    source: dict[str, Any],
+    *,
+    research_confidence: int,
+    categories: list[str],
+    account_treatment: str,
+) -> int:
+    if source.get("override"):
+        return 100
+    explicit = source.get("accounting_impact_confidence")
+    if explicit is not None:
+        return _int_between(explicit, 0, 100)
+    if research_confidence < 70 or not categories:
+        return 40
+    if account_treatment in {"stock_or_cogs", "expense"}:
+        return 90
+    if account_treatment in {"fixed_asset_review", "non_deductible_review"}:
+        return 80
+    return 60
 
 
 def _normalize_evidence(item: dict[str, Any]) -> dict[str, Any]:
@@ -195,13 +253,29 @@ def apply_research_to_result(
     review_reason_codes = list(updated.get("review_reason_codes") or [])
     risk_flags = list(updated.get("risk_flags") or [])
     accepted_sources = [item for item in profile.get("evidence") or [] if item.get("accepted")] or profile.get("source_urls")
-    if int(profile.get("confidence") or 0) < confidence_threshold:
+    research_confidence = int(profile.get("research_confidence") or profile.get("confidence") or 0)
+    accounting_impact_confidence = int(profile.get("accounting_impact_confidence") or 0)
+    if research_confidence < confidence_threshold:
         _append_unique(review_reason_codes, "research_low_confidence")
         _append_unique(risk_flags, "research_low_confidence")
+    if accounting_impact_confidence < confidence_threshold:
+        _append_unique(review_reason_codes, "research_accounting_impact_low_confidence")
+        _append_unique(risk_flags, "research_accounting_impact_low_confidence")
     if not accepted_sources:
         _append_unique(review_reason_codes, "research_source_rejected")
         _append_unique(risk_flags, "research_source_rejected")
-    if "research_low_confidence" in review_reason_codes or "research_source_rejected" in review_reason_codes:
+    if str(profile.get("account_treatment") or "") in {"fixed_asset_review", "non_deductible_review"}:
+        _append_unique(review_reason_codes, "research_accounting_treatment_review")
+        _append_unique(risk_flags, "research_accounting_treatment_review")
+    if any(
+        code in review_reason_codes
+        for code in (
+            "research_low_confidence",
+            "research_accounting_impact_low_confidence",
+            "research_source_rejected",
+            "research_accounting_treatment_review",
+        )
+    ):
         updated["export_status"] = "review_required"
         updated["simulated_status"] = "review_required"
     updated["review_reason_codes"] = review_reason_codes
@@ -236,9 +310,9 @@ class ResearchHarness:
             activity_context=activity_context,
         )
         key = query.search_text.split(" ")[0] if query.search_text else query.key
-        if not bypass_cache and hasattr(self.store, "get_brand_research_profile"):
+        if hasattr(self.store, "get_brand_research_profile"):
             cached = self.store.get_brand_research_profile(key)
-            if cached:
+            if cached and (cached.get("override") or not bypass_cache):
                 return normalize_research_profile(kind="brand", key=key, payload=cached)
         return self._research_and_store(query=query, key=key)
 
@@ -360,15 +434,36 @@ def _tavily_payload_to_research_profile(query: ResearchQuery, payload: dict[str,
         )
     answer = str(payload.get("answer") or "").strip()
     accepted_evidence = [item for item in evidence if source_policy_accepts(str(item.get("url") or ""))]
+    category = _infer_category_from_research(query=query, answer=answer, evidence=evidence)
+    categories = [category] if category else []
+    account_treatment = account_treatment_for_category(category) if category else ""
+    research_confidence = 85 if answer and accepted_evidence and categories else 75 if answer and accepted_evidence else 65 if accepted_evidence else 40
     return {
         "display_name": query.key or query.search_text,
         "summary_tr": answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else ""),
-        "common_product_categories": [],
+        "common_product_categories": categories,
         "activity_tags": [],
-        "confidence": 75 if answer and accepted_evidence else 65 if accepted_evidence else 40,
+        "account_treatment": account_treatment,
+        "confidence": research_confidence,
+        "research_confidence": research_confidence,
         "evidence": evidence,
         "source_policy": query.source_policy,
     }
+
+
+def _infer_category_from_research(*, query: ResearchQuery, answer: str, evidence: list[dict[str, Any]]) -> str:
+    text = " ".join(
+        part
+        for part in (
+            query.search_text,
+            query.supplier_hint,
+            answer,
+            " ".join(str(item.get("summary_tr") or "") for item in evidence),
+        )
+        if str(part).strip()
+    )
+    classification = classify_product_line(text)
+    return "" if classification.category in {"bilinmeyen", "not_assessed"} else classification.category
 
 
 def build_research_runtime_from_env(env: dict[str, str] | Any) -> dict[str, object] | None:

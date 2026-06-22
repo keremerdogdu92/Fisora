@@ -20,6 +20,7 @@ type ResearchPayload = {
   activity_context?: string;
   summary_tr?: string;
   category_tags?: string[];
+  account_treatment?: string;
   confidence?: number;
   force?: boolean;
 };
@@ -48,6 +49,28 @@ function formatConfidence(value?: number) {
 function formatRunAccuracy(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return "-";
   return `${Math.round(value > 1 ? value : value * 100)}%`;
+}
+
+function profileResearchConfidence(profile?: ResearchProfileView) {
+  return profile?.research_confidence ?? profile?.confidence;
+}
+
+function profileImpactConfidence(profile?: ResearchProfileView) {
+  return profile?.accounting_impact_confidence;
+}
+
+function reviewReason(profile?: ResearchProfileView) {
+  if (!profile) return "";
+  if (profile.override) return "Ofis override";
+  const researchConfidence = profileResearchConfidence(profile) ?? 0;
+  const impactConfidence = profileImpactConfidence(profile) ?? 0;
+  if (sourceSummary(profile) === "Kaynak yok") return "Kaynak yok";
+  if (researchConfidence < 70) return "Kaynak guveni dusuk";
+  if (impactConfidence < 70) return "Muhasebe etkisi belirsiz";
+  if (profile.account_treatment === "fixed_asset_review") return "Demirbas kontrolu";
+  if (profile.account_treatment === "non_deductible_review") return "KKEG kontrolu";
+  if (profile.account_treatment === "manual_review") return "Manuel etki";
+  return "Otomatik kullanilabilir";
 }
 
 function benchmarkRunTime(run: ResearchBenchmarkRunView) {
@@ -136,6 +159,7 @@ export function ResearchKnowledgeView({
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
+        account_treatment: selectedProfile.account_treatment || "",
         confidence: 100,
       },
       ...auth,
@@ -185,7 +209,7 @@ export function ResearchKnowledgeView({
                 <strong>{profile.key}</strong>
                 <span>{profile.summary || profile.summary_tr || categorySummary(profile) || "Özet yok"}</span>
               </div>
-              <span className="status export_ready">{formatConfidence(profile.confidence)}</span>
+              <span className="status export_ready">{formatConfidence(profileResearchConfidence(profile))}</span>
             </button>
           )) : (
             <p className="decision-status">Henüz research profili yok.</p>
@@ -197,7 +221,9 @@ export function ResearchKnowledgeView({
         <h2>Seçili profil</h2>
         <Info label="Anahtar" value={selectedProfile?.key || ""} />
         <Info label="Kategori" value={categorySummary(selectedProfile)} />
-        <Info label="Güven" value={formatConfidence(selectedProfile?.confidence)} />
+        <Info label="Research guveni" value={formatConfidence(profileResearchConfidence(selectedProfile))} />
+        <Info label="Muhasebe etkisi" value={formatConfidence(profileImpactConfidence(selectedProfile))} />
+        <Info label="Kontrol nedeni" value={reviewReason(selectedProfile)} />
         <Info label="Kaynak" value={selectedProfile ? sourceSummary(selectedProfile) : ""} />
         <Info label="Durum" value={selectedProfile?.override ? "Ofis override" : selectedProfile?.status || "Cache"} />
         <input
@@ -252,6 +278,10 @@ export function ResearchKnowledgeView({
         </div>
         <Info label="Son başarı" value={formatRunAccuracy(latestRun?.accuracy)} />
         <Info label="Case" value={latestRun?.case_count ? String(latestRun.case_count) : ""} />
+        <Info label="Marka" value={formatRunAccuracy(latestRun?.metrics?.brand_accuracy)} />
+        <Info label="Kategori" value={formatRunAccuracy(latestRun?.metrics?.category_accuracy)} />
+        <Info label="Muhasebe etkisi" value={formatRunAccuracy(latestRun?.metrics?.accounting_impact_accuracy)} />
+        <Info label="Kontrol kapisi" value={formatRunAccuracy(latestRun?.metrics?.review_gate_accuracy)} />
         <p className="decision-status">
           Benchmark canlı model çağırmaz; mevcut research cache ve override kayıtlarını ölçer.
         </p>

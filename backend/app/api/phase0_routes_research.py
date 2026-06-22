@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import csv
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, Cookie, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -10,6 +12,7 @@ from app.domain.research_harness import ResearchHarness, build_research_runtime_
 
 
 router = APIRouter()
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class ResearchRefreshPayload(BaseModel):
@@ -27,6 +30,7 @@ class ResearchOverridePayload(BaseModel):
     summary_tr: str = ""
     category_tags: list[str] = Field(default_factory=list)
     activity_tags: list[str] = Field(default_factory=list)
+    account_treatment: str = ""
     confidence: int = 70
 
 
@@ -99,7 +103,10 @@ def store_research_override(
             "summary_tr": payload.summary_tr,
             "common_product_categories": payload.category_tags,
             "activity_tags": payload.activity_tags,
+            "account_treatment": payload.account_treatment,
             "confidence": payload.confidence,
+            "research_confidence": 100,
+            "accounting_impact_confidence": 100,
             "override": True,
             "source_policy": "accountant_override",
         },
@@ -159,12 +166,102 @@ def store_research_refresh(
 
 
 GOLDEN_RESEARCH_CASES = (
-    {"case_id": "brand-rexton", "kind": "brand", "key": "Rexton", "expected": "isitme_cihazi"},
-    {"case_id": "brand-phonak", "kind": "brand", "key": "Phonak", "expected": "isitme_cihazi"},
-    {"case_id": "brand-urban-care", "kind": "brand", "key": "Urban Care", "expected": "kisisel_bakim_kozmetik"},
-    {"case_id": "brand-blendax", "kind": "brand", "key": "Blendax", "expected": "kisisel_bakim_kozmetik"},
-    {"case_id": "general-internet", "kind": "brand", "key": "internet", "expected": "internet"},
+    {
+        "case_id": "brand-rexton",
+        "kind": "brand",
+        "key": "Rexton",
+        "expected_brand": "Rexton",
+        "expected_category": "isitme_cihazi",
+        "expected_account_treatment": "stock_or_cogs",
+        "expected_review_required": False,
+    },
+    {
+        "case_id": "brand-phonak",
+        "kind": "brand",
+        "key": "Phonak",
+        "expected_brand": "Phonak",
+        "expected_category": "isitme_cihazi",
+        "expected_account_treatment": "stock_or_cogs",
+        "expected_review_required": False,
+    },
+    {
+        "case_id": "brand-urban-care",
+        "kind": "brand",
+        "key": "Urban Care",
+        "expected_brand": "Urban Care",
+        "expected_category": "kisisel_bakim_kozmetik",
+        "expected_account_treatment": "non_deductible_review",
+        "expected_review_required": True,
+    },
+    {
+        "case_id": "brand-blendax",
+        "kind": "brand",
+        "key": "Blendax",
+        "expected_brand": "Blendax",
+        "expected_category": "kisisel_bakim_kozmetik",
+        "expected_account_treatment": "non_deductible_review",
+        "expected_review_required": True,
+    },
+    {
+        "case_id": "general-internet",
+        "kind": "brand",
+        "key": "internet",
+        "expected_brand": "internet",
+        "expected_category": "internet",
+        "expected_account_treatment": "expense",
+        "expected_review_required": False,
+    },
 )
+
+
+def _real_pilot_research_cases() -> list[dict[str, object]]:
+    cases: list[dict[str, object]] = []
+    analysis_root = REPO_ROOT / "private_samples" / "real_pilot"
+    for csv_path in sorted(analysis_root.glob("firma-*/analysis/matching_simulation.csv")):
+        try:
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                for index, row in enumerate(csv.DictReader(handle), start=1):
+                    key = str(row.get("product_line_hint") or row.get("provider_hint") or "").strip()
+                    category = str(row.get("product_category") or "").strip()
+                    treatment = str(row.get("business_relevance_account_treatment") or "").strip()
+                    if not key or not category or category in {"bilinmeyen", "not_assessed"}:
+                        continue
+                    cases.append(
+                        {
+                            "case_id": f"{csv_path.parent.parent.name}-{index}",
+                            "kind": "brand",
+                            "key": key,
+                            "document": str(row.get("file_name") or ""),
+                            "supplier_hint": str(row.get("provider_hint") or ""),
+                            "expected_brand": key.split(" ")[0],
+                            "expected_category": category,
+                            "expected_account_treatment": treatment,
+                            "expected_review_required": str(row.get("export_status") or "") != "export_ready",
+                        }
+                    )
+        except OSError:
+            continue
+    return cases
+
+
+def _benchmark_cases() -> list[dict[str, object]]:
+    real_cases = _real_pilot_research_cases()
+    return real_cases or [dict(case) for case in GOLDEN_RESEARCH_CASES]
+
+
+def _percent(part: int, total: int) -> int:
+    return int(round((part / total) * 100)) if total else 0
+
+
+def _profile_review_required(profile: dict[str, object], *, threshold: int = 70) -> bool:
+    research_confidence = int(profile.get("research_confidence") or profile.get("confidence") or 0)
+    impact_confidence = int(profile.get("accounting_impact_confidence") or 0)
+    treatment = str(profile.get("account_treatment") or "")
+    return (
+        research_confidence < threshold
+        or impact_confidence < threshold
+        or treatment in {"fixed_asset_review", "non_deductible_review", "manual_review"}
+    )
 
 
 @router.post("/store/research/benchmark/run")
@@ -180,20 +277,47 @@ def store_research_benchmark_run(
     )
     store = get_workflow_store()
     evaluated = []
-    matched_count = 0
-    for case in GOLDEN_RESEARCH_CASES:
+    brand_matches = 0
+    category_matches = 0
+    accounting_matches = 0
+    review_matches = 0
+    cases = _benchmark_cases()
+    for case in cases:
         profile = store.get_research_profile(kind=case["kind"], key=case["key"]) or {}
         categories = set(profile.get("common_product_categories") or profile.get("activity_tags") or [])
-        matched = case["expected"] in categories
-        matched_count += 1 if matched else 0
-        evaluated.append({**case, "matched": matched, "confidence": int(profile.get("confidence") or 0)})
-    accuracy = int(round((matched_count / len(evaluated)) * 100)) if evaluated else 0
+        display_name = str(profile.get("display_name") or profile.get("key") or "").lower()
+        expected_brand = str(case.get("expected_brand") or case["key"]).lower()
+        brand_matched = bool(profile) and expected_brand.split(" ")[0] in display_name
+        category_matched = str(case.get("expected_category") or "") in categories
+        accounting_matched = str(case.get("expected_account_treatment") or "") == str(profile.get("account_treatment") or "")
+        review_matched = bool(case.get("expected_review_required")) == _profile_review_required(profile)
+        brand_matches += 1 if brand_matched else 0
+        category_matches += 1 if category_matched else 0
+        accounting_matches += 1 if accounting_matched else 0
+        review_matches += 1 if review_matched else 0
+        evaluated.append(
+            {
+                **case,
+                "brand_matched": brand_matched,
+                "category_matched": category_matched,
+                "accounting_impact_matched": accounting_matched,
+                "review_gate_matched": review_matched,
+                "confidence": int(profile.get("research_confidence") or profile.get("confidence") or 0),
+            }
+        )
+    metrics = {
+        "brand_accuracy": _percent(brand_matches, len(evaluated)),
+        "category_accuracy": _percent(category_matches, len(evaluated)),
+        "accounting_impact_accuracy": _percent(accounting_matches, len(evaluated)),
+        "review_gate_accuracy": _percent(review_matches, len(evaluated)),
+    }
     run = store.save_research_benchmark_run(
         {
             "run_type": "benchmark",
             "case_count": len(evaluated),
-            "matched_count": matched_count,
-            "accuracy": accuracy,
+            "matched_count": category_matches,
+            "accuracy": metrics["category_accuracy"],
+            "metrics": metrics,
             "model": "research-cache",
             "cases": evaluated,
         }

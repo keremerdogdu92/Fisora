@@ -9,7 +9,7 @@ from typing import Any
 
 from app.domain.ai_classification import AiClassificationPolicy, ProductClassifier, StaticFirstClassifier
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
-from app.domain.business_relevance import ClientProfile
+from app.domain.business_relevance import ClientProfile, ProductClassification, assess_business_relevance
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
@@ -386,6 +386,58 @@ def _research_candidate_from_result(result: dict[str, Any], document: dict[str, 
         if candidate:
             return candidate
     return ""
+
+
+def _should_run_research_for_result(result: dict[str, Any]) -> bool:
+    category = str(result.get("product_category") or "").strip()
+    relation = str(result.get("business_relevance_relation") or "").strip()
+    treatment = str(result.get("business_relevance_account_treatment") or "").strip()
+    status = str(result.get("business_relevance_status") or "").strip()
+    product_confidence = int(result.get("product_confidence") or 0)
+    if category in {"", "bilinmeyen", "not_assessed"}:
+        return True
+    if product_confidence < 70:
+        return True
+    if relation == "weak_match":
+        return True
+    if treatment in {"manual_review", "non_deductible_review"}:
+        return True
+    return status == "is_alani_disi"
+
+
+def _apply_research_accounting_effect(
+    result: dict[str, Any],
+    profile: dict[str, Any],
+    *,
+    client_profile: ClientProfile | None,
+) -> dict[str, Any]:
+    category = str(profile.get("product_category") or "").strip()
+    if not category or not client_profile:
+        return result
+    confidence = int(profile.get("accounting_impact_confidence") or profile.get("research_confidence") or 0)
+    classification = ProductClassification(
+        raw_line=str(result.get("product_line_hint") or profile.get("display_name") or ""),
+        category=category,
+        confidence=confidence,
+        evidence=("research_profile",),
+    )
+    relevance = assess_business_relevance(
+        str(result.get("product_line_hint") or profile.get("display_name") or ""),
+        client_profile,
+        supplier_hint=str(result.get("provider_hint") or ""),
+        classification=classification,
+    )
+    updated = dict(result)
+    updated["product_category"] = relevance.classification.category
+    updated["product_confidence"] = relevance.classification.confidence
+    updated["business_relevance_status"] = relevance.status
+    updated["business_relevance_confidence"] = relevance.confidence
+    updated["business_relevance_reason"] = relevance.reason
+    updated["business_relevance_evidence"] = list(relevance.evidence)
+    updated["business_relevance_relation"] = relevance.relation
+    updated["business_relevance_account_treatment"] = relevance.account_treatment
+    updated["business_relevance_requires_review"] = relevance.requires_accountant_review
+    return updated
 
 
 def _parse_invoice_document(path: Path, document_type: str) -> ParsedInvoice:
@@ -890,7 +942,7 @@ def process_next_job_once(
         research_document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
         if effective_research_runtime and research_document_type not in {"bank_statement", "pos_statement"}:
             raw_line = _research_candidate_from_result(result, document)
-            if raw_line:
+            if raw_line and _should_run_research_for_result(result):
                 activity_context = str((workspace.get("client") or {}).get("profile", {}).get("activity_description") or "")
                 query = sanitize_research_query(
                     kind="brand",
@@ -929,8 +981,13 @@ def process_next_job_once(
                         input_chars=len(query.search_text) + len(query.supplier_hint) + len(query.activity_context),
                     )
                 threshold = int(getattr(effective_research_runtime.get("policy"), "confidence_threshold", 70))
+                result = _apply_research_accounting_effect(
+                    result,
+                    profile,
+                    client_profile=_client_profile(workspace),
+                )
                 result = apply_research_to_result(result, profile, confidence_threshold=threshold)
-                confidence = int(profile.get("confidence") or 0)
+                confidence = int(profile.get("research_confidence") or profile.get("confidence") or 0)
                 research_ok = confidence >= threshold
                 pipeline_event(
                     "research_completed" if research_ok else "research_low_confidence",

@@ -67,6 +67,56 @@ class FakeHttpClient:
         return FakeResponse(self.payload)
 
 
+def write_invoice_xml(path: Path, *, line_name: str, supplier_name: str = "Acme A.S.", total: str = "1200.00") -> None:
+    path.write_text(
+        f"""<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>ABC202600000001</cbc:ID>
+  <cbc:IssueDate>2026-05-03</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>{supplier_name}</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>{line_name}</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>{total}</cbc:TaxInclusiveAmount><cbc:PayableAmount>{total}</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>
+""",
+        encoding="utf-8",
+    )
+
+
+def queue_invoice(store: JsonWorkflowStore, xml_path: Path, *, document_type: str = "einvoice_xml") -> None:
+    store.upsert_client(
+        client_id="client-1",
+        profile={
+            "client_id": "client-1",
+            "title": "Demo Isitme Merkezi",
+            "tax_id": "1111111111",
+            "activity_description": "isitme cihazi satis ve servis",
+            "workplace_addresses": ["Istanbul"],
+            "has_chart_accounts": True,
+        },
+        onboarding={"is_ready": True, "missing_fields": []},
+    )
+    store.save_uploaded_document(
+        client_id="client-1",
+        document={
+            "document_id": "xml-doc",
+            "document_ref": "xml-doc",
+            "document_type": document_type,
+            "original_file_name": xml_path.name,
+            "storage_path": str(xml_path),
+            "status": "stored",
+        },
+    )
+    store.create_processing_job(
+        client_id="client-1",
+        document_ref="xml-doc",
+        document_type=document_type,
+        parser_kind=parser_kind_for_document_type(document_type),
+    )
+
+
 class ResearchHarnessTests(unittest.TestCase):
     def test_research_query_sanitizer_keeps_brand_and_supplier_but_removes_private_invoice_fields(self) -> None:
         query = sanitize_research_query(
@@ -148,6 +198,35 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(profile["summary_tr"], "Rexton isitme cihazi markasidir.")
         self.assertEqual(profile["confidence"], 75)
 
+    def test_research_harness_does_not_bypass_accountant_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_brand_research_profile(
+                brand_name="Rexton",
+                profile={
+                    "display_name": "Rexton",
+                    "summary_tr": "Musavir karari.",
+                    "common_product_categories": ["isitme_cihazi"],
+                    "account_treatment": "stock_or_cogs",
+                    "override": True,
+                    "confidence": 100,
+                },
+            )
+            provider = FakeResearchProvider({"display_name": "Rexton", "confidence": 40})
+            harness = ResearchHarness(store=store, provider=provider, policy=ResearchPolicy(enabled=True))
+
+            profile = harness.research_brand(
+                raw_line="Rexton isitme cihazi",
+                supplier_hint="Rexton",
+                activity_context="isitme merkezi",
+                bypass_cache=True,
+            )
+
+        self.assertEqual(provider.queries, [])
+        self.assertTrue(profile["override"])
+        self.assertEqual(profile["research_confidence"], 100)
+        self.assertEqual(profile["accounting_impact_confidence"], 100)
+
     def test_apply_research_to_result_keeps_low_confidence_research_in_review(self) -> None:
         result = {
             "export_status": "export_ready",
@@ -172,6 +251,33 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(updated["export_status"], "review_required")
         self.assertIn("research_low_confidence", updated["review_reason_codes"])
         self.assertEqual(updated["research_profile"]["confidence"], 69)
+        self.assertEqual(updated["research_profile"]["research_confidence"], 69)
+
+    def test_apply_research_to_result_uses_accounting_impact_confidence(self) -> None:
+        result = {
+            "export_status": "export_ready",
+            "simulated_status": "auto_ready",
+            "review_reason_codes": [],
+            "risk_flags": [],
+        }
+        profile = normalize_research_profile(
+            kind="brand",
+            key="unknown brand",
+            payload={
+                "display_name": "Unknown Brand",
+                "summary_tr": "Kaynak iyi ama muhasebe etkisi belirsiz.",
+                "common_product_categories": ["bilinmeyen"],
+                "research_confidence": 85,
+                "accounting_impact_confidence": 60,
+                "evidence": [{"url": "https://manufacturer.example/product", "summary_tr": "Urun sayfasi."}],
+            },
+        )
+
+        updated = apply_research_to_result(result, profile, confidence_threshold=70)
+
+        self.assertEqual(updated["export_status"], "review_required")
+        self.assertIn("research_accounting_impact_low_confidence", updated["review_reason_codes"])
+
 
     def test_build_research_runtime_from_env_is_openai_only_and_disabled_without_key(self) -> None:
         self.assertIsNone(build_research_runtime_from_env({"FISORA_RESEARCH_ENABLED": "true"}))
@@ -245,9 +351,38 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(request["json"]["max_results"], 5)
         self.assertIn("Rexton isitme cihazi", request["json"]["query"])
         self.assertEqual(profile["summary_tr"], "Rexton isitme cihazlari ve aksesuarları ureten bir markadir.")
-        self.assertEqual(profile["confidence"], 75)
+        self.assertEqual(profile["confidence"], 85)
+        self.assertEqual(profile["research_confidence"], 85)
+        self.assertEqual(profile["accounting_impact_confidence"], 90)
+        self.assertEqual(profile["common_product_categories"], ["isitme_cihazi"])
+        self.assertEqual(profile["account_treatment"], "stock_or_cogs")
         self.assertEqual(profile["source_urls"], ["https://www.rexton.com/hearing-aids/"])
         self.assertEqual(profile["evidence"][1]["accepted"], False)
+
+    def test_tavily_research_confidence_scoring_tiers(self) -> None:
+        accepted_result = {"results": [{"url": "https://www.rexton.com/", "content": "Rexton hearing aids."}]}
+        rejected_result = {
+            "answer": "Marketplace summary.",
+            "results": [{"url": "https://www.trendyol.com/rexton", "content": "x"}],
+        }
+
+        accepted_profile = normalize_research_profile(
+            kind="brand",
+            key="Rexton",
+            payload=TavilySearchResearchProvider(api_key="tvly-test", http_client=FakeHttpClient(accepted_result)).research(
+                ResearchQuery(kind="brand", key="Rexton", search_text="Rexton isitme cihazi")
+            ),
+        )
+        rejected_profile = normalize_research_profile(
+            kind="brand",
+            key="Rexton",
+            payload=TavilySearchResearchProvider(api_key="tvly-test", http_client=FakeHttpClient(rejected_result)).research(
+                ResearchQuery(kind="brand", key="Rexton", search_text="Rexton unknown")
+            ),
+        )
+
+        self.assertEqual(accepted_profile["research_confidence"], 65)
+        self.assertEqual(rejected_profile["research_confidence"], 40)
 
     def test_store_lists_research_profiles_and_tracks_benchmark_runs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -337,9 +472,15 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(profiles.json()["profiles"][0]["display_name"], "Blendax")
         self.assertEqual(detail.json()["profile"]["display_name"], "Blendax")
         self.assertEqual(override.json()["profile"]["summary_tr"], "Müşavir düzeltti.")
+        self.assertEqual(override.json()["profile"]["research_confidence"], 100)
+        self.assertEqual(override.json()["profile"]["accounting_impact_confidence"], 100)
         self.assertEqual(refresh.status_code, 200)
         self.assertEqual(benchmark.status_code, 200)
         self.assertGreaterEqual(benchmark.json()["run"]["case_count"], 3)
+        self.assertIn("brand_accuracy", benchmark.json()["run"]["metrics"])
+        self.assertIn("category_accuracy", benchmark.json()["run"]["metrics"])
+        self.assertIn("accounting_impact_accuracy", benchmark.json()["run"]["metrics"])
+        self.assertIn("review_gate_accuracy", benchmark.json()["run"]["metrics"])
         self.assertEqual(runs.json()["runs"][0]["run_type"], "benchmark")
 
     def test_worker_records_research_timeline_and_keeps_low_confidence_result_in_review(self) -> None:
@@ -414,6 +555,55 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(result["research_profile"]["confidence"], 69)
         self.assertIn("research_started", pipeline_steps)
         self.assertIn("research_low_confidence", pipeline_steps)
+
+    def test_worker_skips_research_for_high_confidence_known_invoice(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "known.xml"
+            write_invoice_xml(xml_path, line_name="Rexton RLi 20 isitme cihazi", supplier_name="Rexton Medikal")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            queue_invoice(store, xml_path)
+            provider = FakeResearchProvider({"display_name": "Should Not Call", "confidence": 99})
+
+            process_queued_documents(
+                store,
+                research_runtime={"provider": provider, "policy": ResearchPolicy(enabled=True, confidence_threshold=70)},
+            )
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+            pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
+
+        self.assertEqual(provider.queries, [])
+        self.assertNotIn("research_started", pipeline_steps)
+        self.assertNotIn("research_profile", result)
+
+    def test_worker_applies_research_category_to_accounting_impact_for_uncertain_invoice(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "uncertain.xml"
+            write_invoice_xml(xml_path, line_name="Mystery Sonic Pro bakim seti", supplier_name="Acme A.S.")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            queue_invoice(store, xml_path)
+            provider = FakeResearchProvider(
+                {
+                    "display_name": "Mystery Sonic",
+                    "summary_tr": "Isitme cihazi aksesuaridir.",
+                    "common_product_categories": ["isitme_cihazi"],
+                    "account_treatment": "stock_or_cogs",
+                    "research_confidence": 85,
+                    "accounting_impact_confidence": 90,
+                    "evidence": [{"url": "https://manufacturer.example/mystery", "summary_tr": "Uretici sayfasi."}],
+                }
+            )
+
+            process_queued_documents(
+                store,
+                research_runtime={"provider": provider, "policy": ResearchPolicy(enabled=True, confidence_threshold=70)},
+            )
+            result = store.get_workspace("client-1")["documents"][0]["result"]
+
+        self.assertEqual(len(provider.queries), 1)
+        self.assertEqual(result["product_category"], "isitme_cihazi")
+        self.assertEqual(result["business_relevance_account_treatment"], "stock_or_cogs")
+        self.assertEqual(result["research_profile"]["accounting_impact_confidence"], 90)
 
 
 if __name__ == "__main__":

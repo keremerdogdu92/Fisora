@@ -268,6 +268,8 @@ export type ResearchProfileView = {
   business_relation?: string;
   account_treatment?: string;
   confidence?: number;
+  research_confidence?: number;
+  accounting_impact_confidence?: number;
   status?: string;
   updated_at?: string;
   evidence?: ResearchSourceView[];
@@ -290,6 +292,12 @@ export type ResearchBenchmarkRunView = {
   passed_count?: number;
   matched_count?: number;
   accuracy?: number;
+  metrics?: {
+    brand_accuracy?: number;
+    category_accuracy?: number;
+    accounting_impact_accuracy?: number;
+    review_gate_accuracy?: number;
+  };
   cases?: ResearchBenchmarkCaseView[];
 };
 

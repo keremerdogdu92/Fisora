@@ -138,6 +138,7 @@ def store_research_refresh(
             raw_line=payload.query or payload.key,
             supplier_hint=payload.supplier_hint,
             activity_context=payload.activity_context,
+            bypass_cache=payload.force,
         )
         return {"profile": profile, "refreshed": True, "reason": "research_runtime"}
     profile = normalize_research_profile(

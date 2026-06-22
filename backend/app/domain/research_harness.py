@@ -221,7 +221,14 @@ class ResearchHarness:
         self.policy = policy or ResearchPolicy()
         self.call_count = 0
 
-    def research_brand(self, *, raw_line: str, supplier_hint: str = "", activity_context: str = "") -> dict[str, Any]:
+    def research_brand(
+        self,
+        *,
+        raw_line: str,
+        supplier_hint: str = "",
+        activity_context: str = "",
+        bypass_cache: bool = False,
+    ) -> dict[str, Any]:
         query = sanitize_research_query(
             kind="brand",
             raw_line=raw_line,
@@ -229,7 +236,7 @@ class ResearchHarness:
             activity_context=activity_context,
         )
         key = query.search_text.split(" ")[0] if query.search_text else query.key
-        if hasattr(self.store, "get_brand_research_profile"):
+        if not bypass_cache and hasattr(self.store, "get_brand_research_profile"):
             cached = self.store.get_brand_research_profile(key)
             if cached:
                 return normalize_research_profile(kind="brand", key=key, payload=cached)

@@ -115,6 +115,39 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(profile["brand_summary"], "Sampuan markasi.")
         self.assertEqual(provider.queries, [])
 
+    def test_research_harness_can_bypass_cache_for_forced_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_brand_research_profile(
+                brand_name="Rexton",
+                profile={
+                    "display_name": "Rexton",
+                    "summary_tr": "",
+                    "confidence": 0,
+                    "source_urls": [],
+                },
+            )
+            provider = FakeResearchProvider(
+                {
+                    "display_name": "Rexton",
+                    "summary_tr": "Rexton isitme cihazi markasidir.",
+                    "confidence": 75,
+                    "evidence": [{"url": "https://www.rexton.com/", "summary_tr": "Uretici sitesi."}],
+                }
+            )
+            harness = ResearchHarness(store=store, provider=provider, policy=ResearchPolicy(enabled=True))
+
+            profile = harness.research_brand(
+                raw_line="Rexton isitme cihazi",
+                supplier_hint="Rexton",
+                activity_context="isitme merkezi",
+                bypass_cache=True,
+            )
+
+        self.assertEqual(len(provider.queries), 1)
+        self.assertEqual(profile["summary_tr"], "Rexton isitme cihazi markasidir.")
+        self.assertEqual(profile["confidence"], 75)
+
     def test_apply_research_to_result_keeps_low_confidence_research_in_review(self) -> None:
         result = {
             "export_status": "export_ready",

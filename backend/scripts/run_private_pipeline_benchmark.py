@@ -133,9 +133,9 @@ def main() -> None:
         )
 
     if args.include_ai:
-        runtime = build_ai_runtime_from_env(os.environ)
-        classifier = runtime.get("product_classifier")
         for firm_id in firms:
+            runtime = build_ai_runtime_from_env(os.environ)
+            classifier = runtime.get("product_classifier")
             summaries.append(
                 _run_one(
                     root=root,

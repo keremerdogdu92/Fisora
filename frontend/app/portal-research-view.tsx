@@ -50,6 +50,22 @@ function formatRunAccuracy(value?: number) {
   return `${Math.round(value > 1 ? value : value * 100)}%`;
 }
 
+function benchmarkRunTime(run: ResearchBenchmarkRunView) {
+  const value = run.created_at || "";
+  if (!value) return "Benchmark koşumu";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Benchmark koşumu";
+  return parsed.toLocaleString("tr-TR");
+}
+
+function sortBenchmarkRuns(runs: ResearchBenchmarkRunView[]) {
+  return [...runs].sort((left, right) => {
+    const leftTime = new Date(left.created_at || "").getTime();
+    const rightTime = new Date(right.created_at || "").getTime();
+    return (Number.isNaN(rightTime) ? 0 : rightTime) - (Number.isNaN(leftTime) ? 0 : leftTime);
+  });
+}
+
 export function ResearchKnowledgeView({
   loginUserId,
   session,
@@ -135,7 +151,8 @@ export function ResearchKnowledgeView({
     setStatus("Benchmark tamamlandı.");
   }
 
-  const latestRun = benchmarkRuns[0];
+  const sortedBenchmarkRuns = useMemo(() => sortBenchmarkRuns(benchmarkRuns), [benchmarkRuns]);
+  const latestRun = sortedBenchmarkRuns[0];
 
   return (
     <section className="operations-grid">
@@ -229,22 +246,33 @@ export function ResearchKnowledgeView({
         <div className="panel-heading">
           <div>
             <h2>Benchmark</h2>
-            <span>Sabit altın set ile research cache kalitesi.</span>
+            <span>Altın set ile bilgi havuzu eşleşmeleri.</span>
           </div>
           <button onClick={() => void submitBenchmark()} type="button">Benchmark çalıştır</button>
         </div>
         <Info label="Son başarı" value={formatRunAccuracy(latestRun?.accuracy)} />
         <Info label="Case" value={latestRun?.case_count ? String(latestRun.case_count) : ""} />
+        <p className="decision-status">
+          Benchmark canlı model çağırmaz; mevcut research cache ve override kayıtlarını ölçer.
+        </p>
         <div className="basket-list">
-          {benchmarkRuns.slice(0, 5).map((run) => (
+          {sortedBenchmarkRuns.length ? sortedBenchmarkRuns.slice(0, 5).map((run) => (
             <div className="basket-row" key={run.run_id || run.created_at}>
               <div>
-                <strong>{run.created_at || run.run_id}</strong>
-                <span>{run.passed_count ?? run.matched_count ?? 0}/{run.case_count || 0} geçti</span>
+                <strong>{benchmarkRunTime(run)}</strong>
+                <span>{run.passed_count ?? run.matched_count ?? 0}/{run.case_count || 0} cache eşleşmesi</span>
               </div>
               <span className="status export_added">{formatRunAccuracy(run.accuracy)}</span>
             </div>
-          ))}
+          )) : (
+            <div className="basket-row">
+              <div>
+                <strong>Henüz ölçüm yok</strong>
+                <span>Profil yenileme veya override sonrası benchmark çalıştırılır.</span>
+              </div>
+              <span className="status queued">Bekliyor</span>
+            </div>
+          )}
         </div>
       </div>
     </section>

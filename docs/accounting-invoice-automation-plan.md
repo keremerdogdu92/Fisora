@@ -58,6 +58,8 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
   - Belirsiz marka icin gercek internet arastirma provider entegrasyonu.
   - Marka/model ayrimini satir parser'ina baglama.
   - Mustavir geri bildirimiyle NACE/marka aciklamasi duzeltme arayuzu.
+  - AI provider/model kalitesi icin ayni gercekci belge, ekstre ve research case setini model-model benchmark etme; secimi maliyet, JSON uyumu, dogruluk ve mustavir is yuku etkisine gore yapma.
+  - Bilgi Havuzu benchmark ekranini netlestirme: mevcut hali research cache kalitesini olcer; bos cache veya eksik profil durumunda sonucun neden dusuk/0 gorundugunu mustavire debug dili kullanmadan anlatma.
 
 ## Sonraki Faz Notlari
 

@@ -481,6 +481,32 @@ class PostgresWorkflowStore:
             return self.get_brand_research_profile(key)
         return None
 
+    def list_research_profiles(self, *, kind: str = "") -> list[dict[str, Any]]:
+        profiles: list[dict[str, Any]] = []
+        if kind in {"", "brand"}:
+            profiles.extend(deepcopy(row["payload"]) for row in self._list_records("brand_research_profile", client_id="brand"))
+        if kind in {"", "nace"}:
+            profiles.extend(deepcopy(row["payload"]) for row in self._list_records("nace_research_profile", client_id="nace"))
+        return sorted(
+            profiles,
+            key=lambda profile: str(profile.get("updated_at") or profile.get("researched_at") or ""),
+            reverse=True,
+        )
+
+    def save_research_benchmark_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        timestamp = utc_now()
+        record = {
+            "run_id": str(uuid4()),
+            "run_type": "benchmark",
+            "created_at": timestamp,
+            **run,
+        }
+        return self._upsert_record("__system__", "research_benchmark_run", record["run_id"], record)
+
+    def list_research_benchmark_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        runs = [deepcopy(row["payload"]) for row in self._list_records("research_benchmark_run", client_id="__system__")]
+        return runs[-max(limit, 1):]
+
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
         timestamp = utc_now()

@@ -551,6 +551,62 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(store.get_research_profile(kind="nace", key="477401")["kind"], "nace")
         self.assertIsNone(store.get_research_profile(kind="other", key="x"))
 
+    def test_postgres_store_lists_research_profiles_and_benchmark_runs(self) -> None:
+        class FakePostgresStore(PostgresWorkflowStore):
+            def __init__(self) -> None:
+                self.rows: list[dict[str, object]] = []
+
+            def _upsert_record(
+                self,
+                client_id: str,
+                record_type: str,
+                record_key: str,
+                payload: dict[str, object],
+            ) -> dict[str, object]:
+                self.rows.append(
+                    {
+                        "client_id": client_id,
+                        "record_type": record_type,
+                        "record_key": record_key,
+                        "payload": payload,
+                    }
+                )
+                return payload
+
+            def _list_records(self, record_type: str, *, client_id: str | None = None) -> list[dict[str, object]]:
+                return [
+                    row
+                    for row in self.rows
+                    if row["record_type"] == record_type and (client_id is None or row["client_id"] == client_id)
+                ]
+
+        store = FakePostgresStore()
+        store.rows.extend(
+            [
+                {
+                    "client_id": "brand",
+                    "record_type": "brand_research_profile",
+                    "record_key": "old",
+                    "payload": {"key": "old", "updated_at": "2026-01-01T00:00:00+00:00"},
+                },
+                {
+                    "client_id": "brand",
+                    "record_type": "brand_research_profile",
+                    "record_key": "new",
+                    "payload": {"key": "new", "updated_at": "2026-02-01T00:00:00+00:00"},
+                },
+            ]
+        )
+
+        profiles = store.list_research_profiles(kind="brand")
+        first_run = store.save_research_benchmark_run({"case_count": 1, "accuracy": 0})
+        second_run = store.save_research_benchmark_run({"case_count": 2, "accuracy": 50})
+        runs = store.list_research_benchmark_runs(limit=1)
+
+        self.assertEqual([profile["key"] for profile in profiles], ["new", "old"])
+        self.assertEqual(first_run["run_type"], "benchmark")
+        self.assertEqual(runs, [second_run])
+
     def test_json_store_applies_review_correction_to_stored_document(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

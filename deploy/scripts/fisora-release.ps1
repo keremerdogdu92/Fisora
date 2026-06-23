@@ -72,6 +72,7 @@ function New-RemoteScript {
 
     return @"
 set -eu
+exec 2>&1
 cd '$RemotePath'
 before_commit=`$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 git fetch origin
@@ -173,7 +174,7 @@ try {
             $sshArgs += @("-i", $SshKey)
         }
         $sshArgs += @($Server, $remoteShell)
-        $releaseOutput = Get-Content -LiteralPath $tempScript | ssh @sshArgs 2>&1
+        $releaseOutput = Get-Content -LiteralPath $tempScript | ssh @sshArgs
         $summaryLine = @($releaseOutput | Where-Object { $_ -like "FISORA_RELEASE_SUMMARY *" } | Select-Object -Last 1)
         if ($summaryLine.Count) {
             $summary.remote_summary = ($summaryLine[-1] -replace "^FISORA_RELEASE_SUMMARY ", "") | ConvertFrom-Json

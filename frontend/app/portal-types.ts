@@ -165,6 +165,8 @@ export type PilotClient = {
   clientId: string;
   clientName: string;
   taxId: string;
+  tckn?: string;
+  vkn?: string;
   userLabel: string;
   portalUserId: string;
   onboardingStatus: string;
@@ -408,6 +410,14 @@ export type NewClientDraft = {
   clientId: string;
   title: string;
   taxId: string;
+  tckn: string;
+  vkn: string;
+  identityType: string;
+  taxIdentifier: string;
+  legalName: string;
+  tradeName: string;
+  displayTitle: string;
+  taxOffice: string;
   activityDescription: string;
   naceCode: string;
   activityTags: string[];

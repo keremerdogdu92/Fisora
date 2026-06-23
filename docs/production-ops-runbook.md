@@ -79,6 +79,24 @@ sh deploy/scripts/fisora-prod.sh smoke
 
 ## Gunluk Operasyon Komutlari
 
+Tek komutla local dogrulama, server deploy ve live health/readiness kontrolu:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1
+```
+
+Daha hizli bir server-only release icin local test/build atlanabilir:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -SkipLocalVerify
+```
+
+Komutun ne yapacagini server'a dokunmadan JSON olarak gormek:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -PlanOnly -Json
+```
+
 Servisleri gormek:
 
 ```bash

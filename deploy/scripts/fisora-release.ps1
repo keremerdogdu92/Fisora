@@ -1,0 +1,196 @@
+param(
+    [string]$Server = $env:FISORA_RELEASE_SERVER,
+    [string]$SshKey = $env:FISORA_RELEASE_SSH_KEY,
+    [string]$RemotePath = "/opt/fisora/app",
+    [string]$Branch = "main",
+    [string]$BaseUrl = "http://127.0.0.1",
+    [switch]$SkipLocalVerify,
+    [switch]$SkipSmoke,
+    [switch]$AllowDirty,
+    [switch]$NoSudo,
+    [switch]$PlanOnly,
+    [switch]$Json
+)
+
+$ErrorActionPreference = "Stop"
+
+if (-not $Server) {
+    $Server = "codex@185.184.208.188"
+}
+if (-not $SshKey) {
+    $defaultKey = Join-Path $HOME ".ssh\fisero_server_ed25519"
+    if (Test-Path -LiteralPath $defaultKey) {
+        $SshKey = $defaultKey
+    }
+}
+
+function Invoke-Step {
+    param(
+        [string]$Name,
+        [scriptblock]$Script
+    )
+    $started = Get-Date
+    try {
+        & $Script
+        return [ordered]@{
+            name = $Name
+            status = "ok"
+            seconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 2)
+        }
+    } catch {
+        return [ordered]@{
+            name = $Name
+            status = "failed"
+            seconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 2)
+            error = $_.Exception.Message
+        }
+    }
+}
+
+function Invoke-CommandLine {
+    param([string]$Command)
+    Write-Host ">> $Command"
+    & powershell -NoProfile -ExecutionPolicy Bypass -Command $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Command failed with exit code $LASTEXITCODE"
+    }
+}
+
+function New-RemoteScript {
+    param(
+        [string]$RemotePath,
+        [string]$Branch,
+        [string]$BaseUrl,
+        [bool]$SkipSmoke
+    )
+
+    $smokeBlock = if ($SkipSmoke) {
+        'smoke_status=skipped'
+    } else {
+        'if sh deploy/scripts/fisora-prod.sh smoke; then smoke_status=ok; else smoke_status=failed; fi'
+    }
+
+    return @"
+set -eu
+cd '$RemotePath'
+before_commit=`$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+git fetch origin
+git checkout $Branch
+git pull --ff-only origin $Branch
+after_commit=`$(git rev-parse --short HEAD)
+sh deploy/scripts/fisora-prod.sh check
+sh deploy/scripts/fisora-prod.sh deploy
+$smokeBlock
+health_status=`$(curl -fsS -o /tmp/fisora-release-health.json -w '%{http_code}' '$BaseUrl/health' || true)
+readiness_status=`$(curl -fsS -o /tmp/fisora-release-readiness.json -w '%{http_code}' '$BaseUrl/api/phase0/store/system/readiness' || true)
+route_status=`$(curl -fsS -o /tmp/fisora-release-root.html -w '%{http_code}' '$BaseUrl/' || true)
+ready=false
+pilot_sellable=false
+if command -v python3 >/dev/null 2>&1 && [ -s /tmp/fisora-release-readiness.json ]; then
+  ready=`$(python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path('/tmp/fisora-release-readiness.json').read_text())
+print(str(bool(data.get('ready'))).lower())
+PY
+)
+  pilot_sellable=`$(python3 - <<'PY'
+import json
+from pathlib import Path
+data = json.loads(Path('/tmp/fisora-release-readiness.json').read_text())
+print(str(bool(data.get('pilot_sellable'))).lower())
+PY
+)
+fi
+printf 'FISORA_RELEASE_SUMMARY {"before_commit":"%s","after_commit":"%s","smoke":"%s","health_status":"%s","readiness_status":"%s","route_status":"%s","ready":%s,"pilot_sellable":%s}\n' "`$before_commit" "`$after_commit" "`$smoke_status" "`$health_status" "`$readiness_status" "`$route_status" "`$ready" "`$pilot_sellable"
+"@
+}
+
+$remoteScript = New-RemoteScript -RemotePath $RemotePath -Branch $Branch -BaseUrl $BaseUrl -SkipSmoke ([bool]$SkipSmoke)
+
+if ($PlanOnly) {
+    $payload = [ordered]@{
+        mode = "plan"
+        server = $Server
+        remote_path = $RemotePath
+        branch = $Branch
+        base_url = $BaseUrl
+        local_verify_enabled = -not [bool]$SkipLocalVerify
+        smoke_enabled = -not [bool]$SkipSmoke
+        sudo_enabled = -not [bool]$NoSudo
+        ssh_key_configured = [bool]$SshKey
+        remote_script = $remoteScript
+    }
+    if ($Json) {
+        $payload | ConvertTo-Json -Depth 5
+    } else {
+        $payload
+    }
+    exit 0
+}
+
+$summary = [ordered]@{
+    mode = "release"
+    server = $Server
+    remote_path = $RemotePath
+    branch = $Branch
+    base_url = $BaseUrl
+    started_at = (Get-Date).ToString("o")
+    sudo_enabled = -not [bool]$NoSudo
+    ssh_key_configured = [bool]$SshKey
+    steps = @()
+}
+
+$summary.steps += Invoke-Step -Name "local-git-status" -Script {
+    $dirty = git status --porcelain
+    if ($dirty -and -not $AllowDirty) {
+        throw "Local worktree has uncommitted changes. Commit/stash or rerun with -AllowDirty."
+    }
+}
+if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+
+if (-not $SkipLocalVerify) {
+    $summary.steps += Invoke-Step -Name "local-diff-check" -Script { Invoke-CommandLine "git diff --check" }
+    if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+
+    $summary.steps += Invoke-Step -Name "backend-tests" -Script { Invoke-CommandLine "python -m unittest discover -s backend/tests" }
+    if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+
+    $summary.steps += Invoke-Step -Name "frontend-tests" -Script { Invoke-CommandLine "node --test frontend/app/*.test.cjs" }
+    if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+
+    $summary.steps += Invoke-Step -Name "frontend-build" -Script { Invoke-CommandLine "cd frontend; npm.cmd run build" }
+    if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+}
+
+$tempScript = New-TemporaryFile
+try {
+    Set-Content -LiteralPath $tempScript -Value $remoteScript -Encoding UTF8
+    $summary.steps += Invoke-Step -Name "server-release" -Script {
+        $remoteShell = if ($NoSudo) { "tr -d '\r' | sh -s" } else { "tr -d '\r' | sudo -n sh -s" }
+        $sshArgs = @()
+        if ($SshKey) {
+            $sshArgs += @("-i", $SshKey)
+        }
+        $sshArgs += @($Server, $remoteShell)
+        $releaseOutput = Get-Content -LiteralPath $tempScript | ssh @sshArgs 2>&1
+        $summaryLine = @($releaseOutput | Where-Object { $_ -like "FISORA_RELEASE_SUMMARY *" } | Select-Object -Last 1)
+        if ($summaryLine.Count) {
+            $summary.remote_summary = ($summaryLine[-1] -replace "^FISORA_RELEASE_SUMMARY ", "") | ConvertFrom-Json
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $tail = @($releaseOutput | Select-Object -Last 20) -join "`n"
+            throw "ssh release failed with exit code $LASTEXITCODE`n$tail"
+        }
+    }
+    if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+} finally {
+    Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+}
+
+$summary.finished_at = (Get-Date).ToString("o")
+if ($Json) {
+    $summary | ConvertTo-Json -Depth 6
+} else {
+    $summary
+}

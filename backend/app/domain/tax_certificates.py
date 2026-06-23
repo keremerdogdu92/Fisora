@@ -70,13 +70,35 @@ LABEL_ALIASES = {
         "ticaretunvani",
         "mukellefinunvani",
     ),
+    "legal_name": (
+        "adisoyadi",
+        "adsoyadi",
+    ),
+    "trade_name": (
+        "ticariunvani",
+        "ticaretunvani",
+    ),
     "tax_id": (
         "vergikimliknumarasi",
         "vergikimlikno",
+        "vergikimlik",
         "tckimliknumarasi",
         "tckimlikno",
+        "tckimlik",
         "vergino",
         "vkn",
+    ),
+    "vkn": (
+        "vergikimliknumarasi",
+        "vergikimlikno",
+        "vergikimlik",
+        "vkn",
+    ),
+    "tckn": (
+        "tckimliknumarasi",
+        "tckimlikno",
+        "tckimlik",
+        "tckn",
     ),
     "tax_office": (
         "bagliolduguvergidairesi",
@@ -147,6 +169,8 @@ def value_after_label(lines: list[str], field: str, *, max_lines: int = 2) -> st
             return inline_value
         values: list[str] = []
         for next_line in lines[index + 1 : index + 1 + max_lines]:
+            if normalize_key(next_line) in {"no", "numara", "adi", "koduveadi"}:
+                continue
             if is_label_line(next_line):
                 break
             values.append(next_line)
@@ -165,6 +189,28 @@ def inline_title_value(lines: list[str]) -> str:
             match = re.match(pattern, normalized, flags=re.IGNORECASE)
             if match:
                 return normalize_spaces(match.group(1))
+    return ""
+
+
+def inline_named_value(lines: list[str], field: str) -> str:
+    patterns = {
+        "legal_name": (
+            r"^\s*ad[Ä±i]\s+soyad[Ä±i]\s+(.+)$",
+            r"^\s*m[uÃ¼]kellefin\s+(.+)$",
+        ),
+        "trade_name": (
+            r"^\s*ticari\s+[uÃ¼]nvan[Ä±i]\s+(.+)$",
+            r"^\s*ticaret\s+[uÃ¼]nvan[Ä±i]\s+(.+)$",
+        ),
+    }.get(field, ())
+    for line in lines:
+        normalized = normalize_spaces(line)
+        for pattern in patterns:
+            match = re.match(pattern, normalized, flags=re.IGNORECASE)
+            if match:
+                value = normalize_spaces(match.group(1))
+                if value and not is_label_line(value):
+                    return value
     return ""
 
 
@@ -212,6 +258,10 @@ def first_tax_id(text: str) -> str:
     if not matches:
         return ""
     return next((value for value in matches if len(value) == 11), matches[0])
+
+
+def first_identifier_with_length(text: str, length: int) -> str:
+    return next((value for value in re.findall(r"\b(\d{10,11})\b", text) if len(value) == length), "")
 
 
 def identity_type_for(identifier: str) -> str:
@@ -277,10 +327,15 @@ def _looks_like_title_candidate(line: str) -> bool:
         return False
     if re.search(r"\b\d{6}\s*[-:]", line) or _looks_like_address(line) or _looks_like_tax_office(line):
         return False
-    blocked = ("vergi", "faaliyet", "gelir", "gib", "www", "http", "baskanligi", "turu")
+    blocked = ("vergi", "faaliyet", "gelir", "gib", "www", "http", "baskanligi", "turu", "tarihi")
     if any(token in key for token in blocked):
         return False
     return bool(re.search(r"[A-Za-zÄ°Ä±Ã‡Ã§ÄžÄŸÃ–Ã¶ÅžÅŸÃœÃ¼]", line)) and len(line.split()) >= 2
+
+
+def _looks_like_tax_type(line: str) -> bool:
+    key = normalize_key(line)
+    return "gelirvergisi" in key or "kurumlarvergisi" in key or key.endswith("vergisi")
 
 
 def gib_column_values(lines: list[str]) -> dict[str, str]:
@@ -318,13 +373,87 @@ def gib_column_values(lines: list[str]) -> dict[str, str]:
     }
 
 
+def gib_grid_values(lines: list[str]) -> dict[str, str]:
+    keys = {normalize_key(line) for line in lines}
+    if "mukellefin" not in keys or not {"adisoyadi", "ticaretunvani", "isyeriadresi"}.issubset(keys):
+        return {}
+
+    start_index = next((index for index, line in enumerate(lines) if normalize_key(line) == "mukellefin"), -1)
+    values = lines[start_index + 1 :] if start_index >= 0 else []
+    activity_index = next((index for index, line in enumerate(values) if re.search(r"\b\d{6}\s*[-:]", line)), len(values))
+    values = values[:activity_index]
+
+    legal_name = next((line for line in values if _looks_like_title_candidate(line)), "")
+    address = next((line for line in values if _looks_like_address(line)), "")
+    tax_type = next((line for line in values if _looks_like_tax_type(line)), "")
+    identifiers = [line for line in values if _line_is_tax_identifier(line)]
+    vkn = next((line for line in identifiers if len(line) == 10), "")
+    tckn = next((line for line in identifiers if len(line) == 11), "")
+    start_date = next((line for line in values if _line_is_date(line)), "")
+
+    trade_name = ""
+    if legal_name:
+        for line in values[values.index(legal_name) + 1 :]:
+            if line == address or line == tax_type or _line_is_tax_identifier(line) or _line_is_date(line):
+                break
+            if _looks_like_title_candidate(line):
+                trade_name = line
+                break
+
+    tax_office = ""
+    if tax_type and tax_type in values:
+        for line in values[values.index(tax_type) + 1 :]:
+            if _line_is_tax_identifier(line) or _line_is_date(line):
+                break
+            if line != tax_type and not _looks_like_tax_type(line) and not _looks_like_address(line):
+                tax_office = line
+                break
+    if not tax_office:
+        tax_office = next((line for line in values if _looks_like_tax_office(line)), "")
+
+    return {
+        "legal_name": legal_name,
+        "trade_name": trade_name,
+        "title": trade_name or legal_name,
+        "tax_office": tax_office,
+        "address": address,
+        "vkn": vkn,
+        "tckn": tckn,
+        "start_date": start_date,
+    }
+
+
 def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] = ()) -> TaxCertificateExtraction:
     lines = normalized_lines(text)
     joined_text = "\n".join(lines)
     column_values = gib_column_values(lines)
-    title = value_after_label(lines, "title", max_lines=1) or inline_title_value(lines) or column_values.get("title", "")
-    tax_id = first_tax_id(value_after_label(lines, "tax_id", max_lines=1)) or column_values.get("tax_identifier", "") or first_tax_id(joined_text)
-    tax_office = value_after_label(lines, "tax_office", max_lines=1) or column_values.get("tax_office", "")
+    grid_values = gib_grid_values(lines)
+    legal_name = (
+        value_after_label(lines, "legal_name", max_lines=1)
+        or inline_named_value(lines, "legal_name")
+        or grid_values.get("legal_name", "")
+    )
+    trade_name = (
+        value_after_label(lines, "trade_name", max_lines=1)
+        or inline_named_value(lines, "trade_name")
+        or grid_values.get("trade_name", "")
+    )
+    combined_title = value_after_label(lines, "title", max_lines=1) or inline_title_value(lines) or column_values.get("title", "")
+    title = trade_name or combined_title or legal_name or grid_values.get("title", "")
+    vkn = first_identifier_with_length(value_after_label(lines, "vkn", max_lines=2), 10) or grid_values.get("vkn", "")
+    tckn = first_identifier_with_length(value_after_label(lines, "tckn", max_lines=2), 11) or grid_values.get("tckn", "")
+    tax_id = first_tax_id(value_after_label(lines, "tax_id", max_lines=2)) or column_values.get("tax_identifier", "") or first_tax_id(joined_text)
+    if tax_id and len(tax_id) == 10 and not vkn:
+        vkn = tax_id
+    if tax_id and len(tax_id) == 11 and not tckn:
+        tckn = tax_id
+    if not vkn:
+        vkn = first_identifier_with_length(joined_text, 10)
+    if not tckn:
+        tckn = first_identifier_with_length(joined_text, 11)
+    tax_identifier = vkn or tckn or tax_id
+    identity_type = "tckn_vkn" if tckn and vkn else identity_type_for(tax_identifier)
+    tax_office = value_after_label(lines, "tax_office", max_lines=1) or grid_values.get("tax_office", "") or column_values.get("tax_office", "")
     activity_value = activity_value_from_nace_line(lines) or value_after_label(lines, "activity", max_lines=3) or inline_activity_value(lines)
     nace_code, activity_description = parse_activity(activity_value)
     activity_profile = build_activity_profile(
@@ -332,14 +461,16 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
         nace_code=nace_code,
     )
     raw_address = value_after_label(lines, "address", max_lines=4)
+    if grid_values.get("address") and not _looks_like_address(raw_address):
+        raw_address = grid_values["address"]
     if column_values.get("address") and not _looks_like_address(raw_address):
         raw_address = column_values["address"]
     address = clean_address(raw_address)
-    start_date = first_date(value_after_label(lines, "start_date", max_lines=1)) or first_date(joined_text)
+    start_date = first_date(value_after_label(lines, "start_date", max_lines=1)) or grid_values.get("start_date", "") or first_date(joined_text)
     addresses = (address,) if address else ()
     confidence = score_confidence(
         title=title,
-        tax_id=tax_id,
+        tax_id=tax_identifier,
         tax_office=tax_office,
         activity_description=activity_description,
         nace_code=nace_code,
@@ -347,16 +478,15 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
         start_date=start_date,
     )
     notes = tuple(dict.fromkeys((*extraction_notes, "fields_extracted" if confidence else "no_fields_extracted")))
-    identity_type = identity_type_for(tax_id)
     return TaxCertificateExtraction(
         title=title,
-        tax_id=tax_id,
-        tckn=tax_id if identity_type == "tckn" else "",
-        vkn=tax_id if identity_type == "vkn" else "",
+        tax_id=tax_identifier,
+        tckn=tckn,
+        vkn=vkn,
         identity_type=identity_type,
-        tax_identifier=tax_id,
-        legal_name=title,
-        trade_name="",
+        tax_identifier=tax_identifier,
+        legal_name=legal_name or title,
+        trade_name=trade_name,
         display_title=title,
         tax_office=tax_office,
         activity_description=activity_description,
@@ -446,6 +576,40 @@ def extract_tax_certificate_text(path: Path) -> tuple[str, tuple[str, ...]]:
     return "", ("unsupported_tax_certificate_file_type",)
 
 
+def merge_tax_certificate_extractions(primary: TaxCertificateExtraction, supplemental: TaxCertificateExtraction) -> TaxCertificateExtraction:
+    tckn = primary.tckn or supplemental.tckn
+    vkn = primary.vkn or supplemental.vkn
+    tax_identifier = vkn or primary.tax_identifier or supplemental.tax_identifier or tckn
+    identity_type = "tckn_vkn" if tckn and vkn else identity_type_for(tax_identifier)
+    activity_profile = primary.activity_profile if primary.activity_profile.confidence >= supplemental.activity_profile.confidence else supplemental.activity_profile
+    return TaxCertificateExtraction(
+        title=primary.title or supplemental.title,
+        tax_id=tax_identifier,
+        tckn=tckn,
+        vkn=vkn,
+        identity_type=identity_type,
+        tax_identifier=tax_identifier,
+        legal_name=primary.legal_name or supplemental.legal_name,
+        trade_name=primary.trade_name or supplemental.trade_name,
+        display_title=primary.display_title or supplemental.display_title,
+        tax_office=primary.tax_office or supplemental.tax_office,
+        activity_description=primary.activity_description or supplemental.activity_description,
+        nace_code=primary.nace_code or supplemental.nace_code,
+        workplace_addresses=primary.workplace_addresses or supplemental.workplace_addresses,
+        start_date=primary.start_date or supplemental.start_date,
+        activity_tags=primary.activity_tags or supplemental.activity_tags,
+        activity_profile=activity_profile,
+        confidence=max(primary.confidence, supplemental.confidence),
+        extraction_notes=tuple(dict.fromkeys((*primary.extraction_notes, *supplemental.extraction_notes))),
+    )
+
+
 def parse_tax_certificate_file(path: Path) -> TaxCertificateExtraction:
     text, notes = extract_tax_certificate_text(path)
-    return parse_tax_certificate_text(text, extraction_notes=notes)
+    extraction = parse_tax_certificate_text(text, extraction_notes=notes)
+    if path.suffix.lower() == ".pdf" and not extraction.vkn:
+        ocr_text, ocr_notes = ocr_pdf(path)
+        if ocr_text.strip():
+            supplemental = parse_tax_certificate_text(ocr_text, extraction_notes=ocr_notes)
+            return merge_tax_certificate_extractions(extraction, supplemental)
+    return extraction

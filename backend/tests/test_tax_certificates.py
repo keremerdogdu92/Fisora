@@ -21,7 +21,7 @@ except ModuleNotFoundError:
     app = None
 
 from app.domain.business_relevance import ActivityProfile
-from app.domain.tax_certificates import TaxCertificateExtraction, ocr_image, parse_tax_certificate_text
+from app.domain.tax_certificates import TaxCertificateExtraction, ocr_image, parse_tax_certificate_file, parse_tax_certificate_text
 
 
 class FakeCompletedProcess:
@@ -148,6 +148,108 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.tax_office, "MASLAK VERGI DAIRESI MUD.")
         self.assertEqual(extraction.workplace_addresses, ("SULTAN SELIM MAH. HUMEYRA SK. NO: 7/10 KAGITHANE / ISTANBUL",))
         self.assertEqual(extraction.nace_code, "477401")
+
+    def test_parse_tax_certificate_text_handles_grid_layout_with_separate_tckn_and_vkn(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            VERGI LEVHASI
+            ADI SOYADI
+            TICARET UNVANI
+            IS YERI ADRESI
+            VERGI TURU
+            VERGI
+            DAIRESI
+            VERGI KIMLIK
+            NO
+            TC KIMLIK NO
+            ISE BASLAMA
+            TARIHI
+            ANA FAALIYET
+            KODU VE ADI
+            MUKELLEFIN
+            OMER YAGCI
+            FEYZULLAH MAH. BAGDAT CAD. NO: 336 -338F MALTEPE/ ISTANBUL
+            YILLIK GELIR VERGISI
+            KUCUKYALI
+            9270740926
+            45661316282
+            04.01.2023
+            477401-TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI
+            """
+        )
+
+        self.assertEqual(extraction.legal_name, "OMER YAGCI")
+        self.assertEqual(extraction.trade_name, "")
+        self.assertEqual(extraction.display_title, "OMER YAGCI")
+        self.assertEqual(extraction.title, "OMER YAGCI")
+        self.assertEqual(extraction.vkn, "9270740926")
+        self.assertEqual(extraction.tckn, "45661316282")
+        self.assertEqual(extraction.tax_identifier, "9270740926")
+        self.assertEqual(extraction.tax_id, "9270740926")
+        self.assertEqual(extraction.identity_type, "tckn_vkn")
+        self.assertEqual(extraction.tax_office, "KUCUKYALI")
+        self.assertEqual(
+            extraction.workplace_addresses,
+            ("FEYZULLAH MAH. BAGDAT CAD. NO: 336 -338F MALTEPE/ ISTANBUL",),
+        )
+        self.assertEqual(extraction.start_date, "04.01.2023")
+        self.assertEqual(extraction.nace_code, "477401")
+
+    def test_parse_tax_certificate_text_prefers_trade_name_for_display_but_keeps_legal_name(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            VERGI LEVHASI
+            ADI SOYADI
+            AYSE YILMAZ
+            TICARET UNVANI
+            AYSE YILMAZ ISITME CIHAZLARI
+            VERGI KIMLIK NO
+            1234567890
+            TC KIMLIK NO
+            12345678901
+            """
+        )
+
+        self.assertEqual(extraction.legal_name, "AYSE YILMAZ")
+        self.assertEqual(extraction.trade_name, "AYSE YILMAZ ISITME CIHAZLARI")
+        self.assertEqual(extraction.display_title, "AYSE YILMAZ ISITME CIHAZLARI")
+        self.assertEqual(extraction.title, "AYSE YILMAZ ISITME CIHAZLARI")
+
+    def test_parse_tax_certificate_file_supplements_missing_vkn_from_pdf_ocr(self) -> None:
+        text_layer = """
+        VERGI LEVHASI
+        ADI SOYADI
+        TICARET UNVANI
+        IS YERI ADRESI
+        VERGI TURU
+        VERGI
+        DAIRESI
+        VERGI KIMLIK
+        NO
+        TC KIMLIK NO
+        ISE BASLAMA
+        TARIHI
+        ANA FAALIYET
+        KODU VE ADI
+        MUKELLEFIN
+        OMER YAGCI
+        FEYZULLAH MAH. BAGDAT CAD. NO: 336 -338F MALTEPE/ ISTANBUL
+        YILLIK GELIR VERGISI
+        KUCUKYALI
+        45661316282
+        04.01.2023
+        477401-TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI
+        """
+        ocr_layer = f"{text_layer}\n9270740926\n"
+
+        with patch("app.domain.tax_certificates.extract_pdf_text", return_value=(1, text_layer, ("pdf_text_layer",))):
+            with patch("app.domain.tax_certificates.ocr_pdf", return_value=(ocr_layer, ("ocr_pdf_rendered", "ocr_tesseract"))):
+                extraction = parse_tax_certificate_file(Path("omer-vergi-levhasi.pdf"))
+
+        self.assertEqual(extraction.tckn, "45661316282")
+        self.assertEqual(extraction.vkn, "9270740926")
+        self.assertEqual(extraction.tax_identifier, "9270740926")
+        self.assertIn("ocr_pdf_rendered", extraction.extraction_notes)
 
     def test_tax_certificate_parse_endpoint_returns_fields_without_storing_file(self) -> None:
         if TestClient is None or phase0 is None or app is None:

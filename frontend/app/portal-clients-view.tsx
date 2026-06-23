@@ -176,10 +176,19 @@ export function NewClientCard({
         aria-label="VKN"
         inputMode="numeric"
         maxLength={10}
-        onChange={(event) => setDraft({ ...draft, taxId: event.target.value })}
+        onChange={(event) => setDraft({ ...draft, vkn: event.target.value, taxId: event.target.value || draft.tckn })}
         pattern="[0-9]*"
         placeholder="VKN"
-        value={draft.taxId}
+        value={draft.vkn}
+      />
+      <input
+        aria-label="TCKN"
+        inputMode="numeric"
+        maxLength={11}
+        onChange={(event) => setDraft({ ...draft, tckn: event.target.value, taxId: draft.vkn || event.target.value })}
+        pattern="[0-9]*"
+        placeholder="TCKN"
+        value={draft.tckn}
       />
       <input
         aria-label="Faaliyet"
@@ -248,11 +257,11 @@ function NewClientStepper({
   taxCertificateFile: File | null;
   taxCertificateInputKey: number;
 }) {
-  const identityReady = Boolean(draft.title.trim() && draft.taxId.trim() && draft.activityDescription.trim());
+  const identityReady = Boolean(draft.title.trim() && (draft.vkn.trim() || draft.tckn.trim() || draft.taxId.trim()) && draft.activityDescription.trim());
   const chartReady = draft.chartAccounts.length > 0;
   const accessReady = Boolean(draft.portalUserId.trim() && portalPassword.trim());
   const canComplete = identityReady && chartReady && accessReady;
-  const showManualFields = Boolean(taxCertificateFile || draft.title || draft.taxId || draft.activityDescription);
+  const showManualFields = Boolean(taxCertificateFile || draft.title || draft.vkn || draft.tckn || draft.taxId || draft.activityDescription);
 
   return (
     <section className="new-client-card onboarding-stepper">
@@ -289,19 +298,46 @@ function NewClientStepper({
         {showManualFields ? (
           <div className="onboarding-fields">
             <input
-              aria-label="Unvan"
+              aria-label="Görünen unvan"
               onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-              placeholder="Unvan"
+              placeholder="Görünen unvan"
               value={draft.title}
+            />
+            <input
+              aria-label="Adı soyadı / yasal ad"
+              onChange={(event) => setDraft({ ...draft, legalName: event.target.value })}
+              placeholder="Adı soyadı / yasal ad"
+              value={draft.legalName}
+            />
+            <input
+              aria-label="Ticaret ünvanı"
+              onChange={(event) => setDraft({ ...draft, tradeName: event.target.value })}
+              placeholder="Ticaret ünvanı"
+              value={draft.tradeName}
             />
             <input
               aria-label="VKN"
               inputMode="numeric"
-              maxLength={11}
-              onChange={(event) => setDraft({ ...draft, taxId: event.target.value })}
+              maxLength={10}
+              onChange={(event) => setDraft({ ...draft, vkn: event.target.value, taxId: event.target.value || draft.tckn })}
               pattern="[0-9]*"
-              placeholder="VKN / TCKN"
-              value={draft.taxId}
+              placeholder="VKN"
+              value={draft.vkn}
+            />
+            <input
+              aria-label="TCKN"
+              inputMode="numeric"
+              maxLength={11}
+              onChange={(event) => setDraft({ ...draft, tckn: event.target.value, taxId: draft.vkn || event.target.value })}
+              pattern="[0-9]*"
+              placeholder="TCKN"
+              value={draft.tckn}
+            />
+            <input
+              aria-label="Vergi dairesi"
+              onChange={(event) => setDraft({ ...draft, taxOffice: event.target.value })}
+              placeholder="Vergi dairesi"
+              value={draft.taxOffice}
             />
             <input
               aria-label="Faaliyet"

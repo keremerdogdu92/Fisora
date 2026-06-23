@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
+  buildTaxCertificateParseStatus,
   buildPortalUserBootstrapPayload,
   createClientOnboardingPackage,
   createPortalInvite,
@@ -141,6 +142,14 @@ test("buildClientOnboardingPackagePayload builds a backend onboarding package", 
         client_id: "yeni-isitme-merkezi",
         title: "Yeni İşitme Merkezi",
         tax_id: "1234567890",
+        tckn: "",
+        vkn: "",
+        identity_type: "",
+        tax_identifier: "1234567890",
+        legal_name: "",
+        trade_name: "",
+        display_title: "Yeni İşitme Merkezi",
+        tax_office: "",
         activity_description: "İşitme cihazı satış ve servis",
         nace_code: "47.74",
         activity_tags: ["hearing_aid", "medical_retail", "retail_trade"],
@@ -173,6 +182,44 @@ test("buildClientOnboardingPackagePayload preserves extracted workplace addresse
   });
 
   assert.deepEqual(payload.client.workplace_addresses, ["Meclis Mah. Ataturk Cad. No: 10"]);
+});
+
+test("buildClientOnboardingPackagePayload preserves separated tax identity fields", () => {
+  const payload = buildClientOnboardingPackagePayload({
+    title: "Omer Yagci",
+    taxId: "9270740926",
+    tckn: "45661316282",
+    vkn: "9270740926",
+    identityType: "tckn_vkn",
+    taxIdentifier: "9270740926",
+    legalName: "Omer Yagci",
+    tradeName: "",
+    displayTitle: "Omer Yagci",
+    taxOffice: "Kucukyali",
+  });
+
+  assert.equal(payload.client.tax_id, "9270740926");
+  assert.equal(payload.client.tckn, "45661316282");
+  assert.equal(payload.client.vkn, "9270740926");
+  assert.equal(payload.client.identity_type, "tckn_vkn");
+  assert.equal(payload.client.tax_identifier, "9270740926");
+  assert.equal(payload.client.legal_name, "Omer Yagci");
+  assert.equal(payload.client.trade_name, "");
+  assert.equal(payload.client.display_title, "Omer Yagci");
+  assert.equal(payload.client.tax_office, "Kucukyali");
+});
+
+test("buildTaxCertificateParseStatus warns when TCKN is read but VKN is missing", () => {
+  const message = buildTaxCertificateParseStatus({
+    filledFields: ["unvan", "TCKN"],
+    confidence: 82,
+    profileSummary: "",
+    tckn: "45661316282",
+    vkn: "",
+  });
+
+  assert.match(message, /VKN okunamadı/);
+  assert.match(message, /kontrol edin/);
 });
 
 test("buildClientOnboardingPackagePayload includes parsed chart accounts for final onboarding", () => {

@@ -66,6 +66,14 @@ function buildClientOnboardingPackagePayload({
   clientId = "",
   title = "",
   taxId = "",
+  tckn = "",
+  vkn = "",
+  identityType = "",
+  taxIdentifier = "",
+  legalName = "",
+  tradeName = "",
+  displayTitle = "",
+  taxOffice = "",
   activityDescription = "",
   naceCode = "",
   activityTags,
@@ -79,11 +87,22 @@ function buildClientOnboardingPackagePayload({
   const normalizedClientId = String(clientId || slugifyClientId(normalizedTitle) || "yeni-mukellef").trim();
   const normalizedPortalUserId = String(portalUserId || `${normalizedClientId}-user`).trim();
   const normalizedChartAccounts = Array.isArray(chartAccounts) ? chartAccounts : [];
+  const normalizedTckn = String(tckn || "").trim();
+  const normalizedVkn = String(vkn || "").trim();
+  const normalizedTaxIdentifier = String(taxIdentifier || normalizedVkn || normalizedTckn || taxId || "").trim();
   return {
     client: {
       client_id: normalizedClientId,
       title: normalizedTitle || normalizedClientId,
-      tax_id: String(taxId || "").trim(),
+      tax_id: String(taxId || normalizedTaxIdentifier).trim(),
+      tckn: normalizedTckn,
+      vkn: normalizedVkn,
+      identity_type: String(identityType || (normalizedTckn && normalizedVkn ? "tckn_vkn" : normalizedVkn ? "vkn" : normalizedTckn ? "tckn" : "")).trim(),
+      tax_identifier: normalizedTaxIdentifier,
+      legal_name: String(legalName || "").trim(),
+      trade_name: String(tradeName || "").trim(),
+      display_title: String(displayTitle || normalizedTitle || "").trim(),
+      tax_office: String(taxOffice || "").trim(),
       activity_description: String(activityDescription || "").trim(),
       nace_code: String(naceCode || "").trim(),
       activity_tags: Array.isArray(activityTags) ? activityTags.map(String).map((value) => value.trim()).filter(Boolean) : [],
@@ -101,6 +120,21 @@ function buildClientOnboardingPackagePayload({
       },
     ],
   };
+}
+
+/**
+ * @param {{ filledFields?: string[], confidence?: number, profileSummary?: string, tckn?: string, vkn?: string }} options
+ */
+function buildTaxCertificateParseStatus({ filledFields = [], confidence = 0, profileSummary = "", tckn = "", vkn = "" } = {}) {
+  const fields = Array.isArray(filledFields) ? filledFields.filter(Boolean) : [];
+  const base = fields.length
+    ? `Vergi levhası okundu: ${fields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
+    : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
+  const warnings = [];
+  if (String(tckn || "").trim() && !String(vkn || "").trim()) {
+    warnings.push("VKN okunamadı, kontrol edin.");
+  }
+  return [base, profileSummary, ...warnings].filter(Boolean).join(" ");
 }
 
 async function responseErrorMessage(response, fallback) {
@@ -573,6 +607,7 @@ module.exports = {
   DEFAULT_UPLOAD_USER_ID,
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
+  buildTaxCertificateParseStatus,
   buildPortalUserBootstrapPayload,
   createClientOnboardingPackage,
   createPortalInvite,

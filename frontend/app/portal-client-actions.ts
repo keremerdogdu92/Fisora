@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import {
   buildClientOnboardingPackagePayload,
+  buildTaxCertificateParseStatus,
   createClientOnboardingPackage,
   createPortalInvite,
   parseChartAccountsFromBackend,
@@ -21,6 +22,14 @@ export function emptyNewClientDraft(): NewClientDraft {
     clientId: "",
     title: "",
     taxId: "",
+    tckn: "",
+    vkn: "",
+    identityType: "",
+    taxIdentifier: "",
+    legalName: "",
+    tradeName: "",
+    displayTitle: "",
+    taxOffice: "",
     activityDescription: "",
     naceCode: "",
     activityTags: [],
@@ -62,6 +71,10 @@ export async function createNewClientAction({
 }) {
   if (!newClientDraft.title.trim()) {
     setNewClientStatus("Mükellef adı gerekli.");
+    return;
+  }
+  if (!newClientDraft.vkn.trim() && !newClientDraft.tckn.trim() && !newClientDraft.taxId.trim()) {
+    setNewClientStatus("VKN veya TCKN gerekli.");
     return;
   }
   if (!newClientDraft.chartAccounts.length) {
@@ -149,8 +162,15 @@ export async function selectNewClientTaxCertificateAction({
       sessionToken: session?.sessionToken,
       file,
     });
-    const title = String(extraction?.title || "").trim();
-    const taxId = String(extraction?.tax_id || "").trim();
+    const title = String(extraction?.display_title || extraction?.title || "").trim();
+    const legalName = String(extraction?.legal_name || "").trim();
+    const tradeName = String(extraction?.trade_name || "").trim();
+    const tckn = String(extraction?.tckn || "").trim();
+    const vkn = String(extraction?.vkn || "").trim();
+    const identityType = String(extraction?.identity_type || "").trim();
+    const taxIdentifier = String(extraction?.tax_identifier || extraction?.tax_id || vkn || tckn || "").trim();
+    const taxId = String(extraction?.tax_id || taxIdentifier).trim();
+    const taxOffice = String(extraction?.tax_office || "").trim();
     const activityDescription = String(extraction?.activity_description || "").trim();
     const naceCode = String(extraction?.nace_code || "").trim();
     const activityTags = Array.isArray(extraction?.activity_tags)
@@ -167,6 +187,14 @@ export async function selectNewClientTaxCertificateAction({
       ...current,
       title: current.title.trim() || title,
       taxId: current.taxId.trim() || taxId,
+      tckn: current.tckn.trim() || tckn,
+      vkn: current.vkn.trim() || vkn,
+      identityType: current.identityType.trim() || identityType,
+      taxIdentifier: current.taxIdentifier.trim() || taxIdentifier,
+      legalName: current.legalName.trim() || legalName,
+      tradeName: current.tradeName.trim() || tradeName,
+      displayTitle: current.displayTitle.trim() || title,
+      taxOffice: current.taxOffice.trim() || taxOffice,
       activityDescription: current.activityDescription.trim() || activityDescription,
       naceCode: current.naceCode.trim() || naceCode,
       activityTags: current.activityTags.length ? current.activityTags : activityTags,
@@ -175,7 +203,9 @@ export async function selectNewClientTaxCertificateAction({
     }));
     const filledFields = [
       title ? "unvan" : "",
-      taxId ? "VKN" : "",
+      tckn ? "TCKN" : "",
+      vkn ? "VKN" : "",
+      taxOffice ? "vergi dairesi" : "",
       activityDescription || naceCode ? "faaliyet" : "",
       activityTags.length ? "faaliyet tag" : "",
       workplaceAddresses.length ? "adres" : "",
@@ -184,10 +214,7 @@ export async function selectNewClientTaxCertificateAction({
     const profileLabel = String(activityProfile.display_label || "").trim();
     const profileConfidence = Number(activityProfile.confidence || 0);
     const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
-    const note = filledFields.length
-      ? `Vergi levhası okundu: ${filledFields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
-      : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
-    setNewClientStatus(profileSummary ? `${note} ${profileSummary}` : note);
+    setNewClientStatus(buildTaxCertificateParseStatus({ filledFields, confidence, profileSummary, tckn, vkn }));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);

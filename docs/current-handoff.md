@@ -6,11 +6,10 @@ oturumdan devam etmek icin son durumu ozetler.
 ## Son Durum
 
 - Repo: `keremerdogdu92/Fisora`
-- Aktif branch: `main`
-- Son dogrulanan runtime deploy: aktif branch ucu, deploy sonunda `git rev-parse`
-  ile tekrar kontrol edilir.
-- Son deploy smoke: 2026-06-19, `/health` 200, readiness `ready=true`,
-  `pilot_sellable=true`, `production_ready=false`.
+- Aktif branch: `codex/server-ai-pipeline-trial`
+- Son dogrulanan runtime deploy: `307d964` (`codex/server-ai-pipeline-trial`).
+- Son deploy smoke: 2026-06-23, `/health` 200, readiness `ready=true`,
+  `pilot_sellable=true`, root route 200.
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq
@@ -33,7 +32,7 @@ sadece serverdaki bu dosyada tutulur.
 GitHub hesabi private repoya yetkili olmalidir. Aktif pilot branch'ini almak icin:
 
 ```bash
-git clone -b main https://github.com/keremerdogdu92/Fisora.git
+git clone -b codex/server-ai-pipeline-trial https://github.com/keremerdogdu92/Fisora.git
 cd Fisora
 ```
 
@@ -41,8 +40,8 @@ Zaten clone varsa:
 
 ```bash
 git fetch origin
-git checkout main
-git pull --ff-only
+git checkout codex/server-ai-pipeline-trial
+git pull --ff-only origin codex/server-ai-pipeline-trial
 ```
 
 ## Serverda Kaldigimiz Yer
@@ -72,15 +71,14 @@ Serverda son commit'i almak icin:
 ```bash
 cd /opt/fisora/app
 git fetch origin
-git checkout main
-git pull --ff-only origin main
+git checkout codex/server-ai-pipeline-trial
+git pull --ff-only origin codex/server-ai-pipeline-trial
 ```
 
 Config kontrolu ve deploy:
 
 ```bash
-sh deploy/scripts/fisora-prod.sh check
-sh deploy/scripts/fisora-prod.sh deploy
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -Branch codex/server-ai-pipeline-trial -BaseUrl http://185.184.208.188 -SkipLocalVerify -Json
 ```
 
 ## Env Kontrolu

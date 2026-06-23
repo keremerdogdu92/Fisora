@@ -7,6 +7,7 @@ import {
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   resolveApiBaseUrl,
+  sessionAuthErrorMessage,
   setPortalPassword as setBackendPortalPassword,
   uploadChartAccountsToBackend,
   uploadTaxCertificateToBackend,
@@ -131,7 +132,7 @@ export async function createNewClientAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Mükellef kaydedilemedi. ${message}`);
+    setNewClientStatus(`Mükellef kaydedilemedi. ${sessionAuthErrorMessage(message) || message}`);
   }
 }
 

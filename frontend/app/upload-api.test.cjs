@@ -10,6 +10,7 @@ const {
   createPortalInvite,
   ensureUploadWorkspace,
   loginWithPassword,
+  sessionAuthErrorMessage,
   pickUploadUser,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
@@ -295,6 +296,28 @@ test("createClientOnboardingPackage posts to the backend package endpoint", asyn
   assert.deepEqual(result, { workspace: { client: { client_id: "client-1" } } });
 });
 
+test("createClientOnboardingPackage keeps the mock user fallback when a session token is present", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ workspace: { client: { client_id: "client-1" } } }) };
+  };
+
+  await createClientOnboardingPackage({
+    apiBaseUrl: "http://localhost:8000",
+    client: { clientId: "client-1", title: "Client One", portalUserId: "client-one-user" },
+    sessionToken: "stale-session-token",
+    userId: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "stale-session-token",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+});
+
 test("parseTaxCertificateFromBackend posts the selected certificate for extraction", async () => {
   let request;
   const file = { name: "vergi-levhasi.pdf" };
@@ -502,6 +525,18 @@ test("loginWithPassword posts credentials and returns a backend session", async 
   assert.equal(result.userId, "mali-musavir");
 });
 
+test("sessionAuthErrorMessage translates stale backend sessions into a re-login prompt", () => {
+  assert.equal(
+    sessionAuthErrorMessage('{"valid":false,"reason":"session_not_found"}'),
+    "Oturum bulunamadı. Çıkış yapıp şifreyle tekrar giriş yapın.",
+  );
+  assert.equal(
+    sessionAuthErrorMessage('{"valid":false,"reason":"session_expired"}'),
+    "Oturum süresi doldu. Çıkış yapıp şifreyle tekrar giriş yapın.",
+  );
+  assert.equal(sessionAuthErrorMessage("plain backend error"), "");
+});
+
 test("createPortalInvite posts invite payload without sending email", async () => {
   let request;
   const fetchImpl = async (url, init) => {
@@ -664,6 +699,7 @@ test("storeReviewDecision posts statement line accountant decisions", async () =
   assert.deepEqual(request.init.headers, {
     "Content-Type": "application/json",
     "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
   });
   assert.deepEqual(JSON.parse(request.init.body), {
     client_id: "client-1",
@@ -763,6 +799,7 @@ test("resetTestData posts guarded accountant reset request", async () => {
   assert.deepEqual(request.init.headers, {
     "Content-Type": "application/json",
     "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
   });
   assert.deepEqual(JSON.parse(request.init.body), {
     confirmation: "TEMIZLE",

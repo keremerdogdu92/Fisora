@@ -148,6 +148,37 @@ async function responseErrorMessage(response, fallback) {
   }
 }
 
+function backendAuthHeaders({ sessionToken = "", userId = "", userHeader = "" } = {}) {
+  const headers = {};
+  const normalizedSessionToken = String(sessionToken || "").trim();
+  const normalizedUserId = String(userId || userHeader || "").trim();
+  if (normalizedSessionToken) headers["X-Fisora-Session"] = normalizedSessionToken;
+  if (normalizedUserId) headers["X-Fisora-User-Id"] = normalizedUserId;
+  return headers;
+}
+
+function sessionAuthErrorMessage(message) {
+  let reason = "";
+  try {
+    const parsed = JSON.parse(String(message || ""));
+    reason = String(parsed?.reason || parsed?.detail?.reason || "");
+  } catch {
+    const text = String(message || "");
+    const match = text.match(/"reason"\s*:\s*"([^"]+)"/);
+    reason = match?.[1] || "";
+  }
+  if (reason === "session_not_found") {
+    return "Oturum bulunamadı. Çıkış yapıp şifreyle tekrar giriş yapın.";
+  }
+  if (reason === "session_expired" || reason === "session_revoked") {
+    return "Oturum süresi doldu. Çıkış yapıp şifreyle tekrar giriş yapın.";
+  }
+  if (reason === "session_required") {
+    return "Bu işlem için şifreli oturum gerekli. Şifreyle tekrar giriş yapın.";
+  }
+  return "";
+}
+
 async function postJson({ apiBaseUrl, path, payload, headers = {}, fetchImpl = fetch }) {
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}${path}`, {
     method: "POST",
@@ -200,9 +231,7 @@ async function resetTestData({
       confirmation: String(confirmation || ""),
       delete_files: Boolean(deleteFiles),
     },
-    headers: sessionToken
-      ? { "X-Fisora-Session": String(sessionToken) }
-      : { "X-Fisora-User-Id": String(userId || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID },
+    headers: backendAuthHeaders({ sessionToken, userId: String(userId || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID }),
     fetchImpl,
   });
 }
@@ -289,11 +318,7 @@ async function createClientOnboardingPackage({
   userId = "",
   fetchImpl = fetch,
 }) {
-  const headers = sessionToken
-    ? { "X-Fisora-Session": String(sessionToken) }
-    : userId
-      ? { "X-Fisora-User-Id": String(userId) }
-      : {};
+  const headers = backendAuthHeaders({ sessionToken, userId });
   return postJson({
     apiBaseUrl,
     path: "/phase0/store/client-onboarding-package",
@@ -314,11 +339,7 @@ async function createPortalInvite({
   userHeader = "",
   fetchImpl = fetch,
 }) {
-  const headers = sessionToken
-    ? { "X-Fisora-Session": String(sessionToken) }
-    : userHeader
-      ? { "X-Fisora-User-Id": String(userHeader) }
-      : {};
+  const headers = backendAuthHeaders({ sessionToken, userHeader });
   return postJson({
     apiBaseUrl,
     path: "/phase0/store/auth/invite",
@@ -343,11 +364,7 @@ async function setPortalPassword({
   userHeader = "",
   fetchImpl = fetch,
 }) {
-  const headers = sessionToken
-    ? { "X-Fisora-Session": String(sessionToken) }
-    : userHeader
-      ? { "X-Fisora-User-Id": String(userHeader) }
-      : {};
+  const headers = backendAuthHeaders({ sessionToken, userHeader });
   return postJson({
     apiBaseUrl,
     path: "/phase0/store/auth/password",
@@ -375,7 +392,7 @@ async function uploadChartAccountsToBackend({
 
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/chart-accounts/upload`, {
     method: "POST",
-    headers: sessionToken ? { "X-Fisora-Session": String(sessionToken) } : userId ? { "X-Fisora-User-Id": String(userId) } : {},
+    headers: backendAuthHeaders({ sessionToken, userId }),
     body: formData,
   });
   if (!response.ok) {
@@ -411,7 +428,7 @@ async function uploadDocumentToBackend({
 
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/document-upload-multipart`, {
     method: "POST",
-    headers: sessionToken ? { "X-Fisora-Session": String(sessionToken) } : { "X-Fisora-User-Id": normalizedUserId },
+    headers: backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
     body: formData,
   });
   if (!response.ok) {
@@ -442,7 +459,7 @@ function uploadTaxCertificateToBackend({
 
   return fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/client-onboarding-attachment`, {
     method: "POST",
-    headers: sessionToken ? { "X-Fisora-Session": String(sessionToken) } : { "X-Fisora-User-Id": normalizedUserId },
+    headers: backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
     body: formData,
   }).then(async (response) => {
     if (!response.ok) {
@@ -593,7 +610,7 @@ async function storeReviewDecision({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(sessionToken ? { "X-Fisora-Session": String(sessionToken) } : { "X-Fisora-User-Id": normalizedUserId }),
+      ...backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
     },
     body: JSON.stringify(payload),
   });
@@ -605,6 +622,7 @@ async function storeReviewDecision({
 
 module.exports = {
   DEFAULT_UPLOAD_USER_ID,
+  backendAuthHeaders,
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
   buildTaxCertificateParseStatus,
@@ -619,6 +637,7 @@ module.exports = {
   requestStatementAiSuggestions,
   resetTestData,
   resolveApiBaseUrl,
+  sessionAuthErrorMessage,
   setPortalPassword,
   storeReviewDecision,
   uploadChartAccountsToBackend,

@@ -180,6 +180,7 @@ const workspaceRecord = {
 test("backendAuthHeaders prefers session tokens and falls back to the mock user header", () => {
   assert.deepEqual(backendAuthHeaders({ sessionToken: "session-1", userId: "mukellef-user" }), {
     "X-Fisora-Session": "session-1",
+    "X-Fisora-User-Id": "mukellef-user",
   });
   assert.deepEqual(backendAuthHeaders({ userId: "mukellef-user" }), {
     "X-Fisora-User-Id": "mukellef-user",
@@ -358,7 +359,10 @@ test("fetchAiCapacity loads the protected AI agent capacity endpoint with accoun
   assert.equal(capacity.agents[0].label, "Araştırma ajanı");
   assert.equal(requests[0].url, "http://localhost:8000/phase0/store/ai-capacity");
   assert.equal(requests[0].init.method, "GET");
-  assert.deepEqual(requests[0].init.headers, { "X-Fisora-Session": "session-1" });
+  assert.deepEqual(requests[0].init.headers, {
+    "X-Fisora-Session": "session-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
 });
 
 test("research API helpers use accountant auth and expected endpoints", async () => {

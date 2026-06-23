@@ -42,10 +42,11 @@ const DEFAULT_BACKEND_TIMEOUT_MS = 2500;
 
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
   const token = safeText(sessionToken).trim();
-  if (token) return { "X-Fisora-Session": token };
   const normalizedUserId = safeText(userId).trim();
-  if (normalizedUserId) return { "X-Fisora-User-Id": normalizedUserId };
-  return {};
+  return {
+    ...(token ? { "X-Fisora-Session": token } : {}),
+    ...(normalizedUserId ? { "X-Fisora-User-Id": normalizedUserId } : {}),
+  };
 }
 
 async function responseErrorMessage(response, fallback) {

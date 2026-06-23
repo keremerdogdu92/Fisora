@@ -33,3 +33,11 @@ test("client portal renders document list and preview side by side", () => {
   assert.doesNotMatch(clientView, /documentTab === "list"/);
   assert.doesNotMatch(clientView, /setDocumentTab\("preview"\)/);
 });
+
+test("client portal keeps upload full width above the two-column document workspace", () => {
+  const styles = readFileSync(join(__dirname, "styles.css"), "utf8");
+
+  assert.match(styles, /\.client-portal\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+  assert.match(styles, /\.client-document-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(320px,\s*0\.82fr\)\s+minmax\(420px,\s*1\.18fr\);/);
+  assert.match(styles, /\.upload-panel\s*\{[\s\S]*?width:\s*100%;/);
+});

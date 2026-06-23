@@ -488,14 +488,24 @@ button:disabled {
   align-items: start;
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(300px, 0.7fr) minmax(360px, 0.9fr) minmax(360px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.client-portal > *,
+.client-document-workspace > * {
+  min-width: 0;
+}
+
+.upload-panel {
+  width: 100%;
 }
 
 .client-document-workspace {
   align-items: start;
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
+  grid-template-columns: minmax(320px, 0.82fr) minmax(420px, 1.18fr);
+  width: 100%;
 }
 
 .panel {

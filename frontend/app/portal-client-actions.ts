@@ -79,11 +79,11 @@ export async function createNewClientAction({
     return;
   }
   if (!newClientDraft.chartAccounts.length) {
-    setNewClientStatus("Devam etmek iÃ§in hesap planÄ± yÃ¼kleyin.");
+    setNewClientStatus("Devam etmek için hesap planı yükleyin.");
     return;
   }
   if (!newClientDraft.portalUserId.trim() || !portalPassword.trim()) {
-    setNewClientStatus("Portal kullanÄ±cÄ± adÄ± ve geÃ§ici ÅŸifre gerekli.");
+    setNewClientStatus("Portal kullanıcı adı ve geçici şifre gerekli.");
     return;
   }
   const payload = buildClientOnboardingPackagePayload(newClientDraft);
@@ -239,7 +239,7 @@ export async function parseNewClientChartAccountsAction({
   if (!file) return;
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-  setNewClientStatus(`${file.name} hesap planÄ± okunuyor.`);
+  setNewClientStatus(`${file.name} hesap planı okunuyor.`);
   try {
     const result = await parseChartAccountsFromBackend({
       apiBaseUrl,
@@ -256,7 +256,7 @@ export async function parseNewClientChartAccountsAction({
     setNewClientStatus(`${file.name}: ${Number(result?.account_count || accounts.length)} hesap okundu.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Hesap planÄ± okunamadÄ±. ${message}`);
+    setNewClientStatus(`Hesap planı okunamadı. ${message}`);
   }
 }
 

@@ -7,6 +7,29 @@ function source(name) {
   return readFileSync(join(__dirname, name), "utf8");
 }
 
+const visibleCopyFiles = [
+  "layout.tsx",
+  "page.tsx",
+  "portal-app.tsx",
+  "portal-client-actions.ts",
+  "portal-client-view.tsx",
+  "portal-clients-view.tsx",
+  "portal-dashboard.js",
+  "portal-dashboard-view.tsx",
+  "portal-data-mappers.ts",
+  "portal-document-actions.ts",
+  "portal-documents-view.tsx",
+  "portal-formatters.ts",
+  "portal-review-actions.ts",
+  "portal-review-panels.tsx",
+  "portal-settings-view.tsx",
+  "portal-shell-components.tsx",
+  "portal-session.ts",
+  "portal-workspace-actions.ts",
+  "portal-workspace-view.tsx",
+  "workspace-api.js",
+];
+
 test("portal visible copy presents AI agent automation without internal implementation language", () => {
   const visibleSource = [
     source("layout.tsx"),
@@ -49,28 +72,27 @@ test("client onboarding labels portal user as the client email login", () => {
 });
 
 test("portal visible source does not contain mojibake Turkish copy", () => {
-  const visibleSource = [
-    source("page.tsx"),
-    source("portal-app.tsx"),
-    source("portal-client-view.tsx"),
-    source("portal-clients-view.tsx"),
-    source("portal-dashboard.js"),
-    source("portal-dashboard-view.tsx"),
-    source("portal-data-mappers.ts"),
-    source("portal-formatters.ts"),
-    source("portal-review-actions.ts"),
-    source("portal-settings-view.tsx"),
-    source("portal-shell-components.tsx"),
-    source("portal-session.ts"),
-    source("portal-workspace-actions.ts"),
-    source("portal-workspace-view.tsx"),
-    source("workspace-api.js"),
-  ].join("\n");
+  const visibleSource = visibleCopyFiles.map(source).join("\n");
 
-  assert.doesNotMatch(visibleSource, /(?:Ã.|Ä.|Å.|�)/);
+  assert.doesNotMatch(visibleSource, /(?:Ã|Ä|Å|�|ï¿½)/);
   assert.match(visibleSource, /Çalışma alanı boş/);
   assert.match(visibleSource, /Veri kaynağı/);
   assert.match(visibleSource, /Çıkış/);
   assert.match(visibleSource, /Mükellef takibi/);
   assert.match(visibleSource, /Yükleme ve kontrol sırası/);
+});
+
+test("document processing workbench keeps the journal review explicit", () => {
+  const reviewSource = source("portal-review-panels.tsx");
+  const stylesSource = source("styles.css");
+
+  assert.match(reviewSource, /safeHeaderValue/);
+  assert.match(reviewSource, /reviewWorkspaceTabs/);
+  assert.match(reviewSource, /Fiş özeti/);
+  assert.match(reviewSource, /Muhasebe fişi detayları/);
+  assert.match(reviewSource, /AI gerekçesi/);
+  assert.match(reviewSource, /Adaylar/);
+  assert.match(reviewSource, /Geçmiş/);
+  assert.match(stylesSource, /\.journal-workspace-tabs/);
+  assert.match(stylesSource, /\.journal-ledger/);
 });

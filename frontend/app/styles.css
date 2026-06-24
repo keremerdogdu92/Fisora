@@ -1064,8 +1064,8 @@ button:disabled {
 
 .review-split {
   display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(460px, 1.05fr) minmax(500px, 0.95fr);
+  gap: 12px;
+  grid-template-columns: minmax(560px, 1.16fr) minmax(430px, 0.84fr);
   min-width: 0;
 }
 
@@ -1082,7 +1082,7 @@ button:disabled {
 
 .journal-panel {
   background: #fff;
-  box-shadow: var(--shadow);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
 }
 
 .document-canvas {
@@ -1340,6 +1340,33 @@ button:disabled {
   margin-bottom: 10px;
 }
 
+.journal-summary-strip {
+  align-items: stretch;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.journal-summary-title {
+  background: var(--accent-soft);
+  border: 1px solid rgba(15, 118, 110, 0.28);
+  border-radius: 8px;
+  display: grid;
+  min-height: 64px;
+  padding: 10px;
+}
+
+.journal-summary-title span {
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.journal-summary-title strong {
+  align-self: end;
+  font-size: 0.95rem;
+}
+
 .draft-summary .info {
   background: var(--surface-muted);
   border: 1px solid var(--border);
@@ -1362,6 +1389,43 @@ button:disabled {
   line-height: 1.4;
   margin: 0 0 12px;
   padding: 10px 12px;
+}
+
+.journal-workspace-tabs {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+  margin: 0 -16px 12px;
+  overflow-x: auto;
+  padding: 0 16px 10px;
+}
+
+.journal-workspace-tabs button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  font-weight: 900;
+  min-height: 36px;
+  padding: 8px 10px;
+}
+
+.journal-workspace-tabs button.active {
+  background: var(--accent-soft);
+  border-color: rgba(15, 118, 110, 0.28);
+  color: var(--accent);
+}
+
+.journal-workspace-body {
+  display: grid;
+  gap: 12px;
+}
+
+.journal-tab-panel {
+  display: grid;
+  gap: 12px;
 }
 
 .accountant-explanation {
@@ -1387,12 +1451,12 @@ button:disabled {
   border-radius: 8px;
   display: grid;
   gap: 10px;
-  margin-bottom: 12px;
-  padding: 10px;
+  margin-bottom: 0;
+  padding: 12px;
 }
 
 .manual-draft-panel input {
-  min-width: 120px;
+  min-width: 0;
 }
 
 .accountant-guidance {
@@ -1476,7 +1540,7 @@ button:disabled {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 12px;
+  margin-bottom: 0;
 }
 
 .journal-meta.ai-meta {
@@ -1580,6 +1644,64 @@ button:disabled {
   overflow: auto;
 }
 
+.journal-ledger {
+  background: #fff;
+}
+
+.journal-ledger table {
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.journal-ledger th:nth-child(1),
+.journal-ledger td:nth-child(1) {
+  width: 25%;
+}
+
+.journal-ledger th:nth-child(2),
+.journal-ledger td:nth-child(2) {
+  width: 31%;
+}
+
+.journal-ledger th:nth-child(3),
+.journal-ledger td:nth-child(3),
+.journal-ledger th:nth-child(4),
+.journal-ledger td:nth-child(4) {
+  width: 17%;
+}
+
+.journal-ledger th:nth-child(5),
+.journal-ledger td:nth-child(5) {
+  text-align: center;
+  width: 10%;
+}
+
+.journal-ledger th {
+  background: #e8eef5;
+  position: sticky;
+  top: 0;
+}
+
+.journal-ledger td {
+  background: #fff;
+}
+
+.journal-ledger input {
+  background: #fbfdff;
+  border-color: var(--border-strong);
+  font-size: 0.78rem;
+  min-height: 34px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.journal-ledger td:nth-child(3) input,
+.journal-ledger td:nth-child(4) input {
+  padding-left: 4px;
+  padding-right: 4px;
+  text-align: right;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
@@ -1607,7 +1729,7 @@ tbody tr:last-child td {
 .decision-actions {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-top: 12px;
 }
 

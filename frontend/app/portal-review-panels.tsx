@@ -126,8 +126,24 @@ function accountingDirectionForDocument(document: PilotDocument) {
 function previewAuthHeaders(session: LocalSession | null | undefined, document?: PilotDocument): Record<string, string> {
   if (session?.sessionToken) return { "X-Fisora-Session": session.sessionToken };
   const userId = session?.userId || document?.uploadedBy || "";
-  return userId ? { "X-Fisora-User-Id": userId } : {};
+  const headerUserId = safeHeaderValue(userId);
+  return headerUserId ? { "X-Fisora-User-Id": headerUserId } : {};
 }
+
+function safeHeaderValue(value: string) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return /^[\x00-\xff]*$/.test(trimmed) ? trimmed : encodeURIComponent(trimmed);
+}
+
+type ReviewWorkspaceTab = "journal" | "reason" | "candidates" | "history";
+
+const reviewWorkspaceTabs: { id: ReviewWorkspaceTab; label: string }[] = [
+  { id: "journal", label: "Fiş" },
+  { id: "reason", label: "AI gerekçesi" },
+  { id: "candidates", label: "Adaylar" },
+  { id: "history", label: "Geçmiş" },
+];
 
 export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineEvent[] }) {
   return (
@@ -269,6 +285,8 @@ export function JournalPanel({
   setSelectedStatementLineNo: (value: number) => void;
   statementAiStatus: string;
 }) {
+  const [activeReviewTab, setActiveReviewTab] = useState<ReviewWorkspaceTab>("journal");
+
   if (!document) {
     return (
       <section className="panel review-panel">
@@ -284,17 +302,17 @@ export function JournalPanel({
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const accountingDirection = accountingDirectionForDocument(document);
   const isSales = accountingDirection === "sales";
-  const primaryAccountLabel = isStatement ? "Banka hesabÄ±" : isSales ? "Gelir hesabÄ±" : "Gider/stok hesabÄ±";
+  const primaryAccountLabel = isStatement ? "Banka hesabı" : isSales ? "Gelir hesabı" : "Gider/stok hesabı";
   const primaryAccountValue = isStatement ? document.selectedExpenseAccount : isSales ? (document.selectedRevenueAccount || "-") : document.selectedExpenseAccount;
-  const vatAccountLabel = isStatement ? "FiÅŸ KDV" : isSales ? "Hesaplanan KDV" : "Ä°ndirilecek KDV";
+  const vatAccountLabel = isStatement ? "Fiş KDV" : isSales ? "Hesaplanan KDV" : "İndirilecek KDV";
   const vatAccountValue = isSales
-    ? (document.selectedSalesVatAccount && document.selectedSalesVatAccount !== "-" ? document.selectedSalesVatAccount : "KDV satÄ±rÄ± yok")
+    ? (document.selectedSalesVatAccount && document.selectedSalesVatAccount !== "-" ? document.selectedSalesVatAccount : "KDV satırı yok")
     : (document.selectedPurchaseVatAccount || document.selectedVatAccount);
-  const counterpartyLabel = isStatement ? "KarÅŸÄ± hesap" : isSales ? "MÃ¼ÅŸteri cari" : "SatÄ±cÄ± cari";
+  const counterpartyLabel = isStatement ? "Karşı hesap" : isSales ? "Müşteri cari" : "Satıcı cari";
   const counterpartyValue = isSales
     ? (document.selectedCustomerAccount || document.suggestedCounterpartyAccount || document.selectedCounterpartyAccount)
     : (document.selectedCounterpartyAccount || document.suggestedCounterpartyAccount || "-");
-  const correctionAccountLabel = isStatement ? "Yeni iÅŸlem hesabÄ±" : isSales ? "Yeni gelir hesabÄ±" : "Yeni gider/stok hesabÄ±";
+  const correctionAccountLabel = isStatement ? "Yeni işlem hesabı" : isSales ? "Yeni gelir hesabı" : "Yeni gider/stok hesabı";
   const correctionAccountPlaceholder = isSales ? (document.selectedRevenueAccount || "") : document.selectedExpenseAccount;
   const candidateGroups = document.accountCandidates;
   const accountCandidateOptions = uniqueAccountCandidates(
@@ -333,117 +351,167 @@ export function JournalPanel({
       <div className="panel-heading">
         <div>
           <h2>Muhasebe fişi</h2>
-          <span>{document.clientName}</span>
+          <span>{document.clientName} için belge, fiş ve kontrol kararları</span>
         </div>
       </div>
-      <div className="draft-summary">
-        <Info label="Fiş durumu" value={formatDraftStatus(document.draftStatus)} />
+      <section className="draft-summary journal-summary-strip" aria-label="Fiş özeti">
+        <div className="journal-summary-title">
+          <span>Fiş özeti</span>
+          <strong>{formatDraftStatus(document.draftStatus)}</strong>
+        </div>
         <Info label="Borç toplamı" value={totals.debit.toFixed(2)} />
         <Info label="Alacak toplamı" value={totals.credit.toFixed(2)} />
         <Info label="Denge" value={activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"} />
-      </div>
+      </section>
       <p className="accountant-summary">
         {document.accountantSummary || (needsManualDraft ? "Fiş taslağı çıkarılamadı; manuel satır girerek belgeyi tamamlayın." : "Fiş taslağı kontrol için hazır.")}
       </p>
-      <div className="accountant-explanation">
-        <strong>AI muhasebe gerekÃ§esi</strong>
-        <p>{document.accountantExplanation || document.aiReason || document.accountantSummary || "-"}</p>
+      <div className="journal-workspace-tabs" role="tablist" aria-label="Muhasebe fişi çalışma sekmeleri">
+        {reviewWorkspaceTabs.map((tab) => (
+          <button
+            aria-selected={activeReviewTab === tab.id}
+            className={activeReviewTab === tab.id ? "active" : ""}
+            key={tab.id}
+            onClick={() => setActiveReviewTab(tab.id)}
+            role="tab"
+            type="button"
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
-      <LearningRuleCard document={document} />
-      <div className="journal-meta">
-        <Info label={primaryAccountLabel} value={primaryAccountValue} />
-        <Info label={vatAccountLabel} value={vatAccountValue} />
-        <Info label={counterpartyLabel} value={`${counterpartyValue} (${document.counterpartyConfidence})`} />
-      </div>
-      {isStatement ? (
-        <StatementReviewPanel
-          correctionDraft={correctionDraft}
-          document={document}
-          onRequestStatementAi={onRequestStatementAi}
-          onSaveStatementDecision={onSaveStatementDecision}
-          selectedStatementLineNo={selectedStatementLineNo}
-          setCorrectionDraft={setCorrectionDraft}
-          setSelectedStatementLineNo={setSelectedStatementLineNo}
-          statementAiStatus={statementAiStatus}
-        />
-      ) : null}
-      <ManualDraftEditor
-        activeDraftLines={activeDraftLines}
-        generatedDraftLines={generatedDraftLines}
-        needsManualDraft={needsManualDraft}
-        onAddLine={addManualDraftLine}
-        onRemoveLine={removeManualDraftLine}
-        onUpdateLine={setManualDraftLine}
-      />
-      <div className="correction-form">
-        {accountCandidateOptions.length ? (
-          <label>
-            <span>Hesap adaylari</span>
-            <select
-              onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
-              value=""
-            >
-              <option value="">Hesap plani adaylarindan sec</option>
-              {accountCandidateOptions.map((candidate) => (
-                <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
-              ))}
-            </select>
-          </label>
+      <div className="journal-workspace-body">
+        {activeReviewTab === "journal" ? (
+          <section className="journal-tab-panel" role="tabpanel">
+            <div className="statement-review-heading">
+              <div>
+                <h3>Muhasebe fişi detayları</h3>
+                <span>Fiş satırlarını, borç/alacak dengesini ve banka satırı kararlarını bu alanda kontrol edin.</span>
+              </div>
+            </div>
+            <div className="journal-meta">
+              <Info label={primaryAccountLabel} value={primaryAccountValue} />
+              <Info label={vatAccountLabel} value={vatAccountValue} />
+              <Info label={counterpartyLabel} value={`${counterpartyValue} (${document.counterpartyConfidence})`} />
+            </div>
+            {isStatement ? (
+              <StatementReviewPanel
+                correctionDraft={correctionDraft}
+                document={document}
+                onRequestStatementAi={onRequestStatementAi}
+                onSaveStatementDecision={onSaveStatementDecision}
+                selectedStatementLineNo={selectedStatementLineNo}
+                setCorrectionDraft={setCorrectionDraft}
+                setSelectedStatementLineNo={setSelectedStatementLineNo}
+                statementAiStatus={statementAiStatus}
+              />
+            ) : null}
+            <ManualDraftEditor
+              activeDraftLines={activeDraftLines}
+              generatedDraftLines={generatedDraftLines}
+              needsManualDraft={needsManualDraft}
+              onAddLine={addManualDraftLine}
+              onRemoveLine={removeManualDraftLine}
+              onUpdateLine={setManualDraftLine}
+            />
+          </section>
         ) : null}
-        {counterpartyCandidateOptions.length ? (
-          <label>
-            <span>Cari adaylari</span>
-            <select
-              onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
-              value=""
-            >
-              <option value="">Cari adaylarindan sec</option>
-              {counterpartyCandidateOptions.map((candidate) => (
-                <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
-              ))}
-            </select>
-          </label>
+        {activeReviewTab === "reason" ? (
+          <section className="journal-tab-panel" role="tabpanel">
+            <div className="accountant-explanation">
+              <strong>AI muhasebe gerekçesi</strong>
+              <p>{document.accountantExplanation || document.aiReason || document.accountantSummary || "-"}</p>
+            </div>
+            <LearningRuleCard document={document} />
+            <div className="accountant-guidance">
+              <details open>
+                <summary>Kararı etkileyen açıklamalar</summary>
+                <div className="ai-guidance compact">
+                  <ReasonCard label="Öneri gerekçesi" value={document.aiReason || document.accountantSummary || "-"} />
+                  <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
+                  <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
+                  <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
+                </div>
+              </details>
+            </div>
+          </section>
         ) : null}
-        <label>
-          <span>{correctionAccountLabel}</span>
-          <input
-            onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
-            placeholder={correctionAccountPlaceholder}
-            value={correctionDraft.accountCode}
-          />
-        </label>
-        <label>
-          <span>{isStatement ? "Yeni karşı hesap" : "Yeni cari"}</span>
-          <input
-            onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
-            placeholder={counterpartyValue}
-            value={correctionDraft.counterpartyCode}
-          />
-        </label>
-        <label className="wide">
-          <span>Müşavir açıklaması</span>
-          <textarea
-            onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
-            placeholder="Neden değiştirdiniz? Bu açıklama sonraki benzer belgelerde öğrenme sinyali olur."
-            rows={3}
-            value={correctionDraft.reason}
-          />
-        </label>
-      </div>
-      <div className="accountant-guidance">
-        <details>
-          <summary>Kararı etkileyen açıklamalar</summary>
-          <div className="ai-guidance compact">
-            <ReasonCard label="Öneri gerekçesi" value={document.aiReason || document.accountantSummary || "-"} />
-            <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
-            <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
-            <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
-          </div>
-        </details>
-        <details>
-          <summary>Teknik detay</summary>
-          <pre>{JSON.stringify(document.technicalDetails || {}, null, 2)}</pre>
-        </details>
+        {activeReviewTab === "candidates" ? (
+          <section className="journal-tab-panel" role="tabpanel">
+            <div className="statement-review-heading">
+              <div>
+                <h3>Hesap ve cari adayları</h3>
+                <span>Öneriyi değiştirmeden önce aday hesapları ve müşavir açıklamasını burada yönetin.</span>
+              </div>
+            </div>
+            <div className="correction-form">
+              {accountCandidateOptions.length ? (
+                <label>
+                  <span>Hesap adayları</span>
+                  <select
+                    onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
+                    value=""
+                  >
+                    <option value="">Hesap planı adaylarından seç</option>
+                    {accountCandidateOptions.map((candidate) => (
+                      <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {counterpartyCandidateOptions.length ? (
+                <label>
+                  <span>Cari adayları</span>
+                  <select
+                    onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
+                    value=""
+                  >
+                    <option value="">Cari adaylarından seç</option>
+                    {counterpartyCandidateOptions.map((candidate) => (
+                      <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <label>
+                <span>{correctionAccountLabel}</span>
+                <input
+                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
+                  placeholder={correctionAccountPlaceholder}
+                  value={correctionDraft.accountCode}
+                />
+              </label>
+              <label>
+                <span>{isStatement ? "Yeni karşı hesap" : "Yeni cari"}</span>
+                <input
+                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
+                  placeholder={counterpartyValue}
+                  value={correctionDraft.counterpartyCode}
+                />
+              </label>
+              <label className="wide">
+                <span>Müşavir açıklaması</span>
+                <textarea
+                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
+                  placeholder="Neden değiştirdiniz? Bu açıklama sonraki benzer belgelerde öğrenme sinyali olur."
+                  rows={3}
+                  value={correctionDraft.reason}
+                />
+              </label>
+            </div>
+          </section>
+        ) : null}
+        {activeReviewTab === "history" ? (
+          <section className="journal-tab-panel" role="tabpanel">
+            <DocumentPipelineTimeline events={document.pipelineEvents ?? []} />
+            <div className="accountant-guidance">
+              <details>
+                <summary>Teknik detay</summary>
+                <pre>{JSON.stringify(document.technicalDetails || {}, null, 2)}</pre>
+              </details>
+            </div>
+          </section>
+        ) : null}
       </div>
       <div className="decision-actions">
         <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
@@ -483,7 +551,7 @@ function ManualDraftEditor({
         </div>
         <button onClick={onAddLine} type="button">Satır ekle</button>
       </div>
-      <div className="table-wrap">
+      <div className="table-wrap journal-ledger">
         <table>
           <thead>
             <tr>

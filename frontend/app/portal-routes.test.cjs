@@ -43,7 +43,7 @@ test("same-domain portal paths open the correct private pilot screen", () => {
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",
-    visibleModes: ["accountant", "documents", "clients", "research", "exports", "settings"],
+    visibleModes: ["accountant", "documents", "clients", "research", "exports", "operations", "settings"],
   });
 });
 
@@ -54,9 +54,9 @@ test("accountant subpaths stay under the accountant link family", () => {
   assert.equal(portalConfigForPath("/portal/ayarlar").initialMode, "settings");
   assert.equal(portalConfigForPath("/portal/cikti").initialMode, "exports");
   assert.equal(portalConfigForPath("/portal/operasyon").initialMode, "operations");
-  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "documents", "clients", "research", "exports", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "documents", "clients", "research", "exports", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "documents", "clients", "research", "exports", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "documents", "clients", "research", "exports", "operations", "settings"]);
 });
 
 test("research knowledge hub is visible to accountant users", () => {

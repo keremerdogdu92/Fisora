@@ -1,11 +1,12 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { DocumentPreview, JournalPanel } from "./portal-review-panels";
-import { Info, Metric } from "./portal-shared";
 import type {
   CancellationRequest,
   CorrectionDraft,
   DashboardClientRow,
+  DocumentSegment,
   NewClientDraft,
   LocalSession,
   PilotClient,
@@ -31,6 +32,18 @@ const statusLabels: Record<PilotStatus, string> = {
 
 function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
+}
+
+function segmentForDocument(document: PilotDocument): DocumentSegment {
+  if (document.intakeCategory === "bank_statement") return "bank_statements";
+  if (document.intakeCategory === "special_document") return "other_documents";
+  if (document.intakeCategory === "purchase_invoice") return "purchase_invoices";
+  return "sales_invoices";
+}
+
+function documentMatchesSegment(document: PilotDocument, segment: DocumentSegment) {
+  if (segment === "invoices") return document.intakeCategory === "sales_invoice" || document.intakeCategory === "purchase_invoice";
+  return segmentForDocument(document) === segment;
 }
 
 export function AccountantWorkspace({
@@ -60,6 +73,7 @@ export function AccountantWorkspace({
   reviewFilter,
   selectedClient,
   selectedDocument,
+  selectedDocumentSegment,
   selectedStatementLineNo,
   session,
   setCorrectionDraft,
@@ -67,6 +81,7 @@ export function AccountantWorkspace({
   setReviewFilter,
   setSelectedClientId,
   setSelectedDocumentId,
+  setSelectedDocumentSegment,
   setSelectedStatementLineNo,
 }: {
   cancellationRequests: CancellationRequest[];
@@ -102,6 +117,7 @@ export function AccountantWorkspace({
   reviewFilter: ReviewFilter;
   selectedClient?: PilotClient;
   selectedDocument?: PilotDocument;
+  selectedDocumentSegment: DocumentSegment;
   selectedStatementLineNo: number;
   session: LocalSession | null;
   setCorrectionDraft: (value: CorrectionDraft) => void;
@@ -109,61 +125,64 @@ export function AccountantWorkspace({
   setReviewFilter: (value: ReviewFilter) => void;
   setSelectedClientId: (value: string) => void;
   setSelectedDocumentId: (value: string) => void;
+  setSelectedDocumentSegment: (value: DocumentSegment) => void;
   setSelectedStatementLineNo: (value: number) => void;
 }) {
+  const [documentQuery, setDocumentQuery] = useState("");
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
     : undefined;
+  const segmentOptions: { id: DocumentSegment; label: string }[] = [
+    { id: "invoices", label: "Faturalar" },
+    { id: "sales_invoices", label: "Satış" },
+    { id: "purchase_invoices", label: "Alış" },
+    { id: "bank_statements", label: "Ekstreler" },
+    { id: "other_documents", label: "Diğer" },
+  ];
+  const queueDocuments = useMemo(() => {
+    const query = documentQuery.trim().toLocaleLowerCase("tr-TR");
+    return allClientDocuments
+      .filter((document) => documentMatchesSegment(document, selectedDocumentSegment))
+      .filter((document) => {
+        if (reviewFilter === "all") return true;
+        if (reviewFilter === "cancel_requested") return document.status === "cancel_requested" || document.status === "post_export_correction_requested";
+        return document.status === reviewFilter;
+      })
+      .filter((document) => {
+        if (!query) return true;
+        return `${document.fileName} ${document.provider} ${document.amount} ${formatStatus(document.status)}`.toLocaleLowerCase("tr-TR").includes(query);
+      });
+  }, [allClientDocuments, documentQuery, reviewFilter, selectedDocumentSegment]);
   const navigationDocuments = selectedDocument && !documents.some((document) => document.id === selectedDocument.id)
-    ? allClientDocuments
+    ? queueDocuments
     : documents;
   const selectedDocumentPosition = selectedDocument
     ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
     : 0;
+  const safeDocumentPosition = Math.max(selectedDocumentPosition, 1);
+
+  function selectDocument(document: PilotDocument) {
+    setSelectedDocumentSegment(segmentForDocument(document));
+    setSelectedDocumentId(document.id);
+  }
 
   return (
     <section className="accountant-workspace">
-      <section className="office-dashboard" aria-label="Ofis durumu">
-        <Metric label="Mükellef" value={dashboardMetrics.totalClients} />
-        <Metric label="Belge yükleyen" value={dashboardMetrics.uploadedClients} />
-        <Metric label="Yüklemeyen" value={dashboardMetrics.notUploadedClients} />
-        <Metric label="Kontrol" value={dashboardMetrics.pendingReviewDocuments} />
-        <Metric label="Çıktı hazır" value={dashboardMetrics.exportReadyDocuments} />
-        <Metric label="Talep" value={dashboardMetrics.openCancellationRequests} />
-      </section>
-      <aside className="client-context-rail" aria-label="Seçili mükellef">
-        <div className="client-emblem">
-          <span>Mükellef</span>
-          <strong>{selectedClient?.clientName ?? "-"}</strong>
-          <small>{selectedClient?.taxId ?? "-"}</small>
-        </div>
-        <input
-          className="search-input"
-          onChange={(event) => onClientSearchChange(event.target.value)}
-          placeholder="Mükellef ara"
-          value={clientSearch}
-        />
-        <div className="client-list dashboard-client-list">
-          {clientRows.map((row) => (
-            <button
-              className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
-              key={row.clientId}
-              onClick={() => {
-                setSelectedClientId(row.clientId);
-                setSelectedDocumentId("");
-              }}
-              type="button"
-            >
-              <strong>{row.clientName}</strong>
-              <span>{row.status}</span>
-              <em>{row.documentCount} belge / {row.pendingReviewCount} kontrol / {row.exportReadyCount} hazır</em>
-            </button>
-          ))}
+      <aside className="document-queue-panel" aria-label="Belge kuyruğu">
+        <div className="queue-heading">
+          <div>
+            <h2>Belge Kuyruğu</h2>
+            <span>{queueDocuments.length} belge gösteriliyor</span>
+          </div>
+          <button className="icon-button" type="button" aria-label="Kuyruk filtreleri">⌁</button>
         </div>
         <label className="compact-field">
-          <span>Mükellef seç</span>
+          <span>Mükellef</span>
           <select
-            onChange={(event) => setSelectedClientId(event.target.value)}
+            onChange={(event) => {
+              setSelectedClientId(event.target.value);
+              setSelectedDocumentId("");
+            }}
             value={selectedClient?.clientId ?? ""}
           >
             {clients.map((client) => (
@@ -173,20 +192,58 @@ export function AccountantWorkspace({
             ))}
           </select>
         </label>
-        <div className="rail-stats">
-          <Info label="Belge" value={String(documents.length)} />
-          <Info label="Kontrol" value={String(documents.filter((document) => document.status === "review_required").length)} />
-          <Info label="İptal" value={String(cancellationRequests.length)} />
+        <input
+          className="search-input"
+          onChange={(event) => setDocumentQuery(event.target.value)}
+          placeholder="Ara (belge adı, tür, not...)"
+          value={documentQuery}
+        />
+        <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
+          {segmentOptions.map((option) => (
+            <button
+              aria-selected={selectedDocumentSegment === option.id}
+              className={selectedDocumentSegment === option.id ? "active" : ""}
+              key={option.id}
+              onClick={() => {
+                setSelectedDocumentSegment(option.id);
+                setSelectedDocumentId("");
+              }}
+              role="tab"
+              type="button"
+            >
+              <span>{option.label}</span>
+              <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
+            </button>
+          ))}
         </div>
-        {selectedDocument ? (
-          <div className="selected-document-summary">
-            <span>Açık belge</span>
-            <strong>{selectedDocument.fileName}</strong>
-            <small>{labelForIntakeCategory(selectedDocument.intakeCategory)} / {selectedDocument.provider} / {selectedDocument.amount}</small>
-            <span className={`status ${selectedDocument.status}`}>{formatStatus(selectedDocument.status)}</span>
-          </div>
-        ) : null}
-        <button className="primary full" onClick={onAddToBasket} type="button">Çıktı listesine ekle</button>
+        <label className="compact-field">
+          <span>Kontrol filtresi</span>
+          <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
+            <option value="review_required">Kontrol gerekli</option>
+            <option value="export_ready">Aktarıma hazır</option>
+            <option value="cancel_requested">İptal talepleri</option>
+            <option value="all">Tüm belgeler</option>
+          </select>
+        </label>
+        <div className="document-queue-list">
+          {queueDocuments.map((document) => (
+            <button
+              className={selectedDocument?.id === document.id ? "document-row active" : "document-row"}
+              key={document.id}
+              onClick={() => selectDocument(document)}
+              type="button"
+            >
+              <strong>{document.fileName}</strong>
+              <span>{labelForIntakeCategory(document.intakeCategory)} / {document.amount}</span>
+              <em>{formatStatus(document.status)}</em>
+            </button>
+          ))}
+          {!queueDocuments.length ? <p className="empty">Bu filtrede belge yok.</p> : null}
+        </div>
+        <div className="queue-stepper">
+          <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
+          <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+        </div>
         {selectedRequest ? (
           <div className="request-compact">
             <span>İptal/düzeltme talebi</span>
@@ -199,80 +256,20 @@ export function AccountantWorkspace({
         ) : null}
       </aside>
 
-      <section className="review-focus">
-        <div className="workbench-toolbar">
-          <div>
-            <span>Belge kontrolü</span>
-            <strong>{selectedDocument ? `${selectedDocumentPosition}/${navigationDocuments.length} ${selectedDocument.fileName}` : "Önce belge seçin."}</strong>
-          </div>
-          <div className="toolbar-controls">
-            <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
-              <option value="review_required">Kontrol gerekli</option>
-              <option value="export_ready">Aktarıma hazır</option>
-              <option value="cancel_requested">İptal talepleri</option>
-              <option value="all">Tüm belgeler</option>
-            </select>
-            <select
-              aria-label="Belge seç"
-              onChange={(event) => setSelectedDocumentId(event.target.value)}
-              value={selectedDocument?.id ?? ""}
-            >
-              <option value="">{documents.length ? "Belge seçin" : "Belge yok"}</option>
-              {documents.map((document) => (
-                <option key={document.id} value={document.id}>
-                  {document.fileName}
-                </option>
-              ))}
-            </select>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(selectedDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[selectedDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
-            <button className="primary" disabled={!selectedDocument} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
-          </div>
-        </div>
-
-        <div className="document-queue" aria-label="Mükellef evrakları">
-          {allClientDocuments.map((document) => (
-            <button
-              className={selectedDocument?.id === document.id ? "document-row active" : "document-row"}
-              key={document.id}
-              onClick={() => setSelectedDocumentId(document.id)}
-              type="button"
-            >
-              <strong>{document.fileName}</strong>
-              <span>{labelForIntakeCategory(document.intakeCategory)} / {document.amount}</span>
-              <em>{formatStatus(document.status)}</em>
-            </button>
-          ))}
-        </div>
-
-        {cancellationRequests.length && !selectedRequest ? (
-          <div className="request-strip">
-            <span>Açık talepler</span>
-            {cancellationRequests.map((request) => (
-              <button key={request.id} onClick={() => setSelectedDocumentId(request.documentId)} type="button">
-                {request.fileName}
-              </button>
-            ))}
-          </div>
-        ) : null}
-
-        <section className="review-split">
-          <DocumentPreview document={selectedDocument} session={session} />
-          <JournalPanel
-            correctionDraft={correctionDraft}
-            decisionStatus={decisionStatus}
-            document={selectedDocument}
-            onApproveAndNext={onApproveAndNext}
-            onRequestStatementAi={onRequestStatementAi}
-            onSaveDecision={onSaveDecision}
-            onSaveStatementDecision={onSaveStatementDecision}
-            selectedStatementLineNo={selectedStatementLineNo}
-            setCorrectionDraft={setCorrectionDraft}
-            setSelectedStatementLineNo={setSelectedStatementLineNo}
-            statementAiStatus={statementAiStatus}
-          />
-        </section>
-      </section>
+      <DocumentPreview document={selectedDocument} session={session} />
+      <JournalPanel
+        correctionDraft={correctionDraft}
+        decisionStatus={decisionStatus}
+        document={selectedDocument}
+        onApproveAndNext={onApproveAndNext}
+        onRequestStatementAi={onRequestStatementAi}
+        onSaveDecision={onSaveDecision}
+        onSaveStatementDecision={onSaveStatementDecision}
+        selectedStatementLineNo={selectedStatementLineNo}
+        setCorrectionDraft={setCorrectionDraft}
+        setSelectedStatementLineNo={setSelectedStatementLineNo}
+        statementAiStatus={statementAiStatus}
+      />
     </section>
   );
 }

@@ -136,11 +136,11 @@ function safeHeaderValue(value: string) {
   return /^[\x00-\xff]*$/.test(trimmed) ? trimmed : encodeURIComponent(trimmed);
 }
 
-type ReviewWorkspaceTab = "journal" | "reason" | "candidates" | "history";
+type ReviewWorkspaceTab = "summary" | "journal" | "candidates" | "history";
 
 const reviewWorkspaceTabs: { id: ReviewWorkspaceTab; label: string }[] = [
+  { id: "summary", label: "Özet" },
   { id: "journal", label: "Fiş" },
-  { id: "reason", label: "AI gerekçesi" },
   { id: "candidates", label: "Adaylar" },
   { id: "history", label: "Geçmiş" },
 ];
@@ -285,7 +285,7 @@ export function JournalPanel({
   setSelectedStatementLineNo: (value: number) => void;
   statementAiStatus: string;
 }) {
-  const [activeReviewTab, setActiveReviewTab] = useState<ReviewWorkspaceTab>("journal");
+  const [activeReviewTab, setActiveReviewTab] = useState<ReviewWorkspaceTab>("summary");
 
   if (!document) {
     return (
@@ -381,6 +381,28 @@ export function JournalPanel({
         ))}
       </div>
       <div className="journal-workspace-body">
+        {activeReviewTab === "summary" ? (
+          <section className="journal-tab-panel" role="tabpanel">
+            <div className="accountant-explanation">
+              <strong>AI muhasebe gerekçesi</strong>
+              <p>{document.accountantExplanation || document.aiReason || document.accountantSummary || "-"}</p>
+            </div>
+            <div className="statement-review-heading">
+              <div>
+                <h3>Fiş satırları</h3>
+                <span>Önerilen muhasebe fişini ve borç/alacak dengesini hızlıca kontrol edin.</span>
+              </div>
+            </div>
+            <ManualDraftEditor
+              activeDraftLines={activeDraftLines}
+              generatedDraftLines={generatedDraftLines}
+              needsManualDraft={needsManualDraft}
+              onAddLine={addManualDraftLine}
+              onRemoveLine={removeManualDraftLine}
+              onUpdateLine={setManualDraftLine}
+            />
+          </section>
+        ) : null}
         {activeReviewTab === "journal" ? (
           <section className="journal-tab-panel" role="tabpanel">
             <div className="statement-review-heading">
@@ -406,23 +428,6 @@ export function JournalPanel({
                 statementAiStatus={statementAiStatus}
               />
             ) : null}
-            <ManualDraftEditor
-              activeDraftLines={activeDraftLines}
-              generatedDraftLines={generatedDraftLines}
-              needsManualDraft={needsManualDraft}
-              onAddLine={addManualDraftLine}
-              onRemoveLine={removeManualDraftLine}
-              onUpdateLine={setManualDraftLine}
-            />
-          </section>
-        ) : null}
-        {activeReviewTab === "reason" ? (
-          <section className="journal-tab-panel" role="tabpanel">
-            <div className="accountant-explanation">
-              <strong>AI muhasebe gerekçesi</strong>
-              <p>{document.accountantExplanation || document.aiReason || document.accountantSummary || "-"}</p>
-            </div>
-            <LearningRuleCard document={document} />
             <div className="accountant-guidance">
               <details open>
                 <summary>Kararı etkileyen açıklamalar</summary>
@@ -434,6 +439,7 @@ export function JournalPanel({
                 </div>
               </details>
             </div>
+            <LearningRuleCard document={document} />
           </section>
         ) : null}
         {activeReviewTab === "candidates" ? (
@@ -513,14 +519,21 @@ export function JournalPanel({
           </section>
         ) : null}
       </div>
-      <div className="decision-actions">
-        <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
-        <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
-        <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
-        <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
-        <button onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
-      </div>
-      <p className="decision-status">{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</p>
+      <section className="document-decision-panel" aria-label="Belge değerlendirme">
+        <div className="statement-review-heading">
+          <div>
+            <h3>Belge değerlendirme</h3>
+            <span>{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</span>
+          </div>
+        </div>
+        <div className="decision-actions">
+          <button onClick={onApproveAndNext} type="button">Onayla ve çıktılara gönder</button>
+          <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
+          <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
+          <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
+          <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
+        </div>
+      </section>
     </section>
   );
 }

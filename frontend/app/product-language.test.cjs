@@ -88,11 +88,13 @@ test("document processing workbench keeps the journal review explicit", () => {
 
   assert.match(reviewSource, /safeHeaderValue/);
   assert.match(reviewSource, /reviewWorkspaceTabs/);
+  assert.match(reviewSource, /Özet/);
   assert.match(reviewSource, /Fiş özeti/);
   assert.match(reviewSource, /Muhasebe fişi detayları/);
-  assert.match(reviewSource, /AI gerekçesi/);
+  assert.match(reviewSource, /AI muhasebe gerekçesi/);
   assert.match(reviewSource, /Adaylar/);
   assert.match(reviewSource, /Geçmiş/);
+  assert.match(reviewSource, /Belge değerlendirme/);
   assert.match(stylesSource, /\.journal-workspace-tabs/);
   assert.match(stylesSource, /\.journal-ledger/);
 });

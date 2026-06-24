@@ -8,7 +8,7 @@ import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
 import { ResearchKnowledgeView } from "./portal-research-view";
 import { SettingsView } from "./portal-settings-view";
-import { ModeButton, PortalTopbarStatus, SelectedClientStrip } from "./shared/components";
+import { DocumentContextBar, PortalSidebar, PortalTopbarStatus } from "./shared/components";
 import { AccountantWorkspace } from "./portal-workspace-view";
 import {
   loginWithPassword,
@@ -406,34 +406,34 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   });
   const testDataReset = useTestDataReset({ loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session, setSelectedClientId, setSelectedDocumentId });
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
+  const showSidebar = visibleNavItems.length > 1;
+  const selectedDocumentDraftLines = selectedDocument ? journalDraftLinesForDocument(selectedDocument, selectedStatementLineNo) : [];
+  const selectedPeriodTitle = selectedPeriod ? new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(new Date(`${selectedPeriod}-01T00:00:00`)) : "";
 
   return (
-    <main className="private-shell portal-shell">
-      <header className="private-topbar">
-        <div>
-          <p className="eyebrow">Fisero</p>
-          <h1>{mode === "client" ? "Mükellef portalı" : activeNavItem?.label || "Müşavir çalışma alanı"}</h1>
-        </div>
+    <main className={showSidebar ? "private-shell portal-shell" : "private-shell portal-shell no-sidebar"}>
+      {showSidebar ? (
+        <PortalSidebar
+          activeDocumentSegment={selectedDocumentSegment} mode={mode} navItems={visibleNavItems} onExit={exitPortal}
+          onNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); }}
+          session={session}
+        />
+      ) : null}
+      <section className="portal-main-shell">
         <PortalTopbarStatus
           clientName={mode === "client" ? selectedClient?.clientName : undefined}
           localFallbackAllowed={localFallbackAllowed}
           onExit={exitPortal}
           session={session}
           source={source}
+          title={mode === "client" ? "Mükellef portalı" : mode === "documents" ? "Belge İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
         />
-      </header>
 
-      {visibleNavItems.length > 1 ? (
-        <nav className="portal-nav" aria-label="Portal ekranları">
-          {visibleNavItems.map((item: { mode: PilotMode; label: string; href: string }) => (
-            <ModeButton active={mode === item.mode} href={item.href} key={item.mode} label={item.label} />
-          ))}
-        </nav>
+      {mode === "documents" ? (
+        <DocumentContextBar client={selectedClient} draftLines={selectedDocumentDraftLines} period={selectedPeriodTitle} selectedDocument={selectedDocument} />
       ) : null}
 
-      {mode === "accountant" || mode === "client" || mode === "research" ? null : (
-        <SelectedClientStrip client={selectedClient} documents={clientDocuments} openCancellationCount={openCancellationRequests.length} />
-      )}
+      <div className="portal-route-content">
 
       {mode === "client" ? (
         <ClientPortal
@@ -506,7 +506,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           dashboardMetrics={dashboardMetrics}
           decisionStatus={decisionStatus}
           documents={activeReviewDocuments}
-          allClientDocuments={segmentedClientDocuments}
+          allClientDocuments={clientDocuments}
           newClientDraft={newClientDraft}
           newClientStatus={newClientStatus}
           newClientTaxCertificateFile={newClientTaxCertificateFile}
@@ -523,6 +523,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           reviewFilter={reviewFilter}
           selectedClient={selectedClient}
           selectedDocument={selectedDocument}
+          selectedDocumentSegment={selectedDocumentSegment}
           selectedStatementLineNo={selectedStatementLineNo}
           session={session}
           setCorrectionDraft={setCorrectionDraft}
@@ -533,6 +534,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
             setSelectedDocumentId("");
           }}
           setSelectedDocumentId={setSelectedDocumentId}
+          setSelectedDocumentSegment={setSelectedDocumentSegment}
           setSelectedStatementLineNo={setSelectedStatementLineNo}
         />
         </DocumentProcessingWorkspace>
@@ -606,6 +608,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       {mode === "operations" ? (
         <OperationsRouteView aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed} readinessView={readinessView} source={source} />
       ) : null}
+      </div>
+      </section>
     </main>
   );
 }

@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-fisora}
       POSTGRES_USER: ${POSTGRES_USER:-fisora}
@@ -26,6 +27,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - fisora_redis:/data
@@ -39,6 +41,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    restart: unless-stopped
     environment:
       FISORA_ENV: production
       FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
@@ -102,6 +105,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     environment:
       FISORA_ENV: production
@@ -155,6 +159,7 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         NEXT_PUBLIC_FISORA_API_BASE_URL: ${NEXT_PUBLIC_FISORA_API_BASE_URL:-/api}
+    restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
@@ -167,6 +172,7 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
+    restart: unless-stopped
     ports:
       - "${FISORA_HTTP_PORT:-80}:80"
     volumes:
@@ -181,6 +187,7 @@ services:
 
   backup:
     image: postgres:16-alpine
+    restart: unless-stopped
     command: ["/bin/sh", "/usr/local/bin/fisora-backup.sh"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}

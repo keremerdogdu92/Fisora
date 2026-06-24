@@ -7,9 +7,9 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy: `main` ucu; deploy sonunda `git rev-parse`
-  ile tekrar kontrol edilir.
-- Son deploy smoke: 2026-06-23, `/health` 200, readiness `ready=true`,
+- Son dogrulanan runtime deploy: `main` ucu `f121b66`; deploy sonunda
+  `git rev-parse` ile tekrar kontrol edildi.
+- Son deploy smoke: 2026-06-24, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`, root route 200.
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack

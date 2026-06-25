@@ -66,8 +66,8 @@ export function OperationsView({
   source: string;
 }) {
   const agents = aiCapacity?.agents ?? [];
-  const documentQueries = aiCapacity?.totals?.document_queries ?? 0;
-  const internetResearches = aiCapacity?.totals?.internet_researches ?? 0;
+  const documentQueries = aiCapacity?.totals?.document_queries ?? "Ölçülemiyor";
+  const internetResearches = aiCapacity?.totals?.internet_researches ?? "Ölçülemiyor";
   return (
     <section className="operations-grid">
       <div className="panel">

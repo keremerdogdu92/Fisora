@@ -237,10 +237,18 @@ export type AiCapacityAgentView = {
   daily_requests?: AiCapacityWindow;
   minute_tokens?: AiCapacityWindow;
   estimates?: {
-    document_queries?: number;
-    internet_researches?: number;
+    document_queries?: number | null;
+    internet_researches?: number | null;
     confidence?: string;
   };
+};
+
+export type AiCapacityEstimateView = {
+  estimate_mode?: "conservative" | string;
+  confidence?: "live" | "cached" | "partial" | "not_available" | string;
+  last_checked_at?: string;
+  reserve_percent?: number;
+  retry_multiplier?: number;
 };
 
 export type AiCapacityView = {
@@ -248,9 +256,10 @@ export type AiCapacityView = {
   status?: string;
   agents?: AiCapacityAgentView[];
   totals?: {
-    document_queries?: number;
-    internet_researches?: number;
+    document_queries?: number | null;
+    internet_researches?: number | null;
   };
+  estimate?: AiCapacityEstimateView;
 };
 
 export type ResearchSourceView = {

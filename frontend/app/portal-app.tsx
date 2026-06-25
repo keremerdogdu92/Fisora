@@ -489,12 +489,9 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
       {mode === "documents" ? (
         <DocumentProcessingWorkspace
-          selectedDocumentSegment={selectedDocumentSegment}
-          setSelectedDocumentSegment={(segment) => {
-            setSelectedDocumentSegment(segment);
-            setReviewFilter("review_required");
-            setSelectedDocumentId("");
-          }}
+          aiCapacity={aiCapacityQuery.data}
+          capacityError={aiCapacityQuery.isError}
+          capacityPending={aiCapacityQuery.isPending}
         >
         <AccountantWorkspace
           cancellationRequests={openCancellationRequests.filter((request) => request.clientId === selectedClient?.clientId)}

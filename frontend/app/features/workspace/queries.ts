@@ -68,5 +68,9 @@ export function useAiCapacityQuery({
         sessionToken: session?.sessionToken,
         userId,
       })) as AiCapacityView,
+    placeholderData: (previousData) => previousData,
+    refetchInterval: 5 * 60 * 1000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 }

@@ -65,6 +65,21 @@ test("operations page uses AI agent capacity language without plan wording", () 
   assert.doesNotMatch(operationsSource, /free tier|free|ücretsiz|API key|secret/i);
 });
 
+test("document processing shows passive AI agent capacity labels", () => {
+  const documentSource = source("portal-documents-view.tsx");
+  const queriesSource = source("features/workspace/queries.ts");
+  const operationsSource = source("portal-exports-view.tsx");
+
+  assert.match(documentSource, /AI kapasitesi/);
+  assert.match(documentSource, /Belge ajanı/);
+  assert.match(documentSource, /Araştırma ajanı/);
+  assert.match(documentSource, /yaklaşık/i);
+  assert.doesNotMatch(documentSource, /onClick|research\/refresh|yenile/i);
+  assert.match(queriesSource, /refetchInterval:\s*5 \* 60 \* 1000/);
+  assert.match(queriesSource, /refetchOnWindowFocus:\s*true/);
+  assert.match(operationsSource, /Ölçülemiyor/);
+});
+
 test("client onboarding labels portal user as the client email login", () => {
   const clientsSource = source("portal-clients-view.tsx");
 

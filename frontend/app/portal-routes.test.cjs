@@ -141,6 +141,9 @@ test("portal shell delegates session and review helpers to feature modules", () 
   assert.match(portalApp, /features\/documents/);
   assert.match(portalApp, /features\/export/);
   assert.match(portalApp, /features\/workspace/);
+  assert.match(portalApp, /aiCapacity=\{aiCapacityQuery\.data\}/);
+  assert.match(portalApp, /capacityPending=\{aiCapacityQuery\.isPending\}/);
+  assert.match(portalApp, /capacityError=\{aiCapacityQuery\.isError\}/);
   assert.ok(lineCount <= 620, `portal-app.tsx should stay below 620 lines, found ${lineCount}`);
   assert.doesNotMatch(portalApp, /function readStoredSession/);
   assert.doesNotMatch(portalApp, /function persistSession/);

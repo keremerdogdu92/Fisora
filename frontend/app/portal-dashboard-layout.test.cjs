@@ -55,3 +55,12 @@ test("dashboard metric grid follows the approved desktop tablet and mobile colum
   assert.match(styles, /\.metric\.with-icon/);
   assert.match(styles, /\.nav-symbol svg/);
 });
+
+test("tablet dashboard stacks charts before they can overflow the page", () => {
+  const styles = source("styles.css");
+
+  assert.match(
+    styles,
+    /@media \(max-width: 1080px\)[\s\S]*?\.dashboard-visual-grid\s*\{[\s\S]*?grid-template-columns:\s*1fr;/,
+  );
+});

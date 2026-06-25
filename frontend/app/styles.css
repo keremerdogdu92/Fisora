@@ -2562,6 +2562,12 @@ code {
   }
 }
 
+@media (max-width: 1080px) {
+  .dashboard-visual-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1020px) {
   .role-gateway,
   .role-card-grid,

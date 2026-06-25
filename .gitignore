@@ -30,3 +30,6 @@ deploy/production.env
 # OS/editor
 .DS_Store
 Thumbs.db
+
+# Isolated development worktrees
+.worktrees/

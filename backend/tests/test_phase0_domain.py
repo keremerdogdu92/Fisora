@@ -24,6 +24,7 @@ from app.domain.ai_capacity import (
     normalize_cerebras_rate_limit_headers,
     normalize_groq_rate_limit_headers,
     normalize_openrouter_key_payload,
+    normalize_tavily_usage_payload,
 )
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event, summarize_ai_usage
 from app.domain.openai_provider import ChatCompletionsAccountingProvider, GroqAccountingProvider, OpenAiAccountingProvider
@@ -201,8 +202,9 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(labels, ["Belge ajanı 1", "Belge ajanı 2", "Belge ajanı 3", "Araştırma ajanı"])
         self.assertTrue(research["configured"])
         self.assertEqual(research["status"], "ready")
-        self.assertGreaterEqual(payload["totals"]["document_queries"], 247)
-        self.assertGreaterEqual(payload["totals"]["internet_researches"], 1)
+        self.assertEqual(payload["totals"]["document_queries"], 92)
+        self.assertIsNone(payload["totals"]["internet_researches"])
+        self.assertEqual(payload["estimate"]["confidence"], "partial")
         public_text = str(payload).lower()
         self.assertNotIn("gsk-secret", public_text)
         self.assertNotIn("or-secret", public_text)
@@ -210,6 +212,61 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("sk-secret", public_text)
         self.assertNotIn("free", public_text)
         self.assertNotIn("ücretsiz", public_text)
+
+    def test_ai_capacity_reserves_retry_budget_for_documents(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_AI_PROVIDER_CHAIN": "groq",
+                "GROQ_API_KEY": "gsk-secret",
+                "FISORA_AI_MAX_PROVIDER_CALLS": "3",
+                "FISORA_AI_STATEMENT_MAX_PROVIDER_CALLS": "3",
+            },
+            provider_snapshots={
+                "groq": normalize_groq_rate_limit_headers(
+                    {"x-ratelimit-remaining-requests": "742"}
+                )
+            },
+        )
+
+        self.assertEqual(payload["totals"]["document_queries"], 92)
+        self.assertEqual(payload["estimate"]["estimate_mode"], "conservative")
+        self.assertEqual(payload["estimate"]["reserve_percent"], 25)
+        self.assertEqual(payload["estimate"]["retry_multiplier"], 2)
+
+    def test_tavily_usage_normalization_and_conservative_research_capacity(self) -> None:
+        snapshot = normalize_tavily_usage_payload(
+            {
+                "key": {"usage": 150, "limit": 1000},
+                "account": {"plan_usage": 500, "plan_limit": 15000},
+            }
+        )
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_RESEARCH_ENABLED": "true",
+                "FISORA_RESEARCH_PROVIDER": "tavily",
+                "TAVILY_API_KEY": "tvly-secret",
+            },
+            provider_snapshots={"tavily": snapshot},
+        )
+
+        self.assertEqual(snapshot["credit"]["remaining"], 850)
+        self.assertEqual(payload["totals"]["internet_researches"], 318)
+        self.assertEqual(payload["estimate"]["confidence"], "live")
+
+    def test_research_capacity_is_unknown_without_a_usage_snapshot(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_RESEARCH_ENABLED": "true",
+                "FISORA_RESEARCH_PROVIDER": "tavily",
+                "TAVILY_API_KEY": "tvly-secret",
+            },
+            provider_snapshots={},
+        )
+
+        research = next(agent for agent in payload["agents"] if agent["kind"] == "research")
+        self.assertIsNone(research["estimates"]["internet_researches"])
+        self.assertIsNone(payload["totals"]["internet_researches"])
+        self.assertEqual(payload["estimate"]["confidence"], "not_available")
 
     def test_ai_capacity_payload_does_not_mark_openrouter_key_as_research_ready(self) -> None:
         payload = ai_capacity_payload(
@@ -241,7 +298,8 @@ class Phase0DomainTests(unittest.TestCase):
         research = next(agent for agent in payload["agents"] if agent["kind"] == "research")
         self.assertTrue(research["configured"])
         self.assertEqual(research["status"], "ready")
-        self.assertEqual(payload["totals"]["internet_researches"], 2)
+        self.assertIsNone(payload["totals"]["internet_researches"])
+        self.assertEqual(payload["estimate"]["confidence"], "not_available")
         self.assertNotIn("tvly-secret", str(payload))
 
     def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:

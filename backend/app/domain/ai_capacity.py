@@ -14,6 +14,9 @@ PROVIDER_KEY_ENV = {
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
+CAPACITY_RESERVE_PERCENT = 25
+CAPACITY_RETRY_MULTIPLIER = 2
+TAVILY_CREDITS_PER_RESEARCH = 2
 
 
 def utc_now() -> str:
@@ -101,6 +104,23 @@ def normalize_openrouter_key_payload(payload: Mapping[str, object]) -> dict[str,
     }
 
 
+def normalize_tavily_usage_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    key = payload.get("key") if isinstance(payload.get("key"), Mapping) else {}
+    limit = _int_or_none(key.get("limit"))
+    usage = _int_or_none(key.get("usage"))
+    remaining = max(limit - usage, 0) if limit is not None and usage is not None else None
+    return {
+        "source": "usage_endpoint",
+        "credit": {
+            "limit": limit,
+            "used": usage,
+            "remaining": remaining,
+            "reset": "",
+        },
+        "last_checked_at": utc_now(),
+    }
+
+
 def _provider_chain(env: Mapping[str, str]) -> list[str]:
     chain = [name.strip().lower() for name in str(env.get("FISORA_AI_PROVIDER_CHAIN", "")).split(",") if name.strip()]
     provider_name = str(env.get("FISORA_AI_PROVIDER", "")).strip().lower()
@@ -135,15 +155,25 @@ def _requests_per_document(env: Mapping[str, str]) -> int:
     return max(values or [3])
 
 
-def _document_estimate(snapshot: Mapping[str, object] | None, *, requests_per_document: int) -> int:
+def _safe_capacity(remaining: int | None, *, units_per_item: int) -> int | None:
+    if remaining is None:
+        return None
+    reserved = remaining * (100 - CAPACITY_RESERVE_PERCENT)
+    return max(reserved // 100 // max(units_per_item, 1), 0)
+
+
+def _document_estimate(snapshot: Mapping[str, object] | None, *, requests_per_document: int) -> int | None:
     if not snapshot:
-        return 0
+        return None
     daily = snapshot.get("daily_requests")
     if isinstance(daily, Mapping):
         remaining = _int_or_none(daily.get("remaining"))
         if remaining is not None:
-            return max(remaining // max(requests_per_document, 1), 0)
-    return 0
+            return _safe_capacity(
+                remaining,
+                units_per_item=max(requests_per_document, 1) * CAPACITY_RETRY_MULTIPLIER,
+            )
+    return None
 
 
 def _agent_status(*, configured: bool, snapshot: Mapping[str, object] | None) -> str:
@@ -171,7 +201,10 @@ def looks_like_tavily_api_key(value: str) -> bool:
     return str(value or "").strip().startswith("tvly-")
 
 
-def _research_agent(env: Mapping[str, str]) -> dict[str, object]:
+def _research_agent(
+    env: Mapping[str, str],
+    snapshot: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     enabled = _research_enabled(env)
     provider = _research_provider(env)
     key_name = "TAVILY_API_KEY" if provider == "tavily" else "OPENAI_API_KEY"
@@ -183,7 +216,13 @@ def _research_agent(env: Mapping[str, str]) -> dict[str, object]:
     max_per_document = max(_int_or_none(env.get("FISORA_RESEARCH_MAX_PER_DOCUMENT", "1")) or 1, 1)
     if configured:
         status = "ready"
-        internet_researches = max_per_document
+        credit = snapshot.get("credit") if isinstance(snapshot, Mapping) else {}
+        remaining_credit = _int_or_none(credit.get("remaining")) if isinstance(credit, Mapping) else None
+        internet_researches = (
+            _safe_capacity(remaining_credit, units_per_item=TAVILY_CREDITS_PER_RESEARCH)
+            if provider == "tavily"
+            else None
+        )
     elif enabled and not supported:
         status = "configuration_error"
         internet_researches = 0
@@ -203,15 +242,58 @@ def _research_agent(env: Mapping[str, str]) -> dict[str, object]:
         "configured": configured,
         "status": status,
         "model": "tavily-search" if provider == "tavily" else str(env.get("FISORA_RESEARCH_MODEL") or "gpt-5.4-mini"),
-        "source": "server_config",
-        "last_checked_at": "",
+        "source": str((snapshot or {}).get("source") or "server_config"),
+        "last_checked_at": str((snapshot or {}).get("last_checked_at") or ""),
         "daily_requests": {"limit": None, "remaining": None, "reset": ""},
         "minute_tokens": {"limit": None, "remaining": None, "reset": ""},
         "estimates": {
             "document_queries": 0,
             "internet_researches": internet_researches,
-            "confidence": "configured" if configured else "not_available",
+            "confidence": (
+                "cached"
+                if snapshot and snapshot.get("status") == "cached"
+                else "live"
+                if internet_researches is not None
+                else "not_available"
+            ),
         },
+    }
+
+
+def _capacity_total(agents: list[dict[str, object]], *, field: str, kind: str) -> int | None:
+    values = [
+        agent["estimates"][field]
+        for agent in agents
+        if agent.get("kind") == kind
+        and isinstance(agent.get("estimates"), Mapping)
+        and isinstance(agent["estimates"].get(field), int)
+    ]
+    return sum(values) if values else None
+
+
+def _estimate_metadata(agents: list[dict[str, object]]) -> dict[str, object]:
+    configured = [agent for agent in agents if agent.get("configured")]
+    confidences = {
+        str(agent["estimates"].get("confidence") or "")
+        for agent in configured
+        if isinstance(agent.get("estimates"), Mapping)
+    }
+    measurable = [confidence for confidence in confidences if confidence in {"live", "cached", "header_based"}]
+    if not measurable:
+        confidence = "not_available"
+    elif "not_available" in confidences:
+        confidence = "partial"
+    elif "cached" in confidences:
+        confidence = "cached"
+    else:
+        confidence = "live"
+    checked = sorted(str(agent.get("last_checked_at") or "") for agent in configured if agent.get("last_checked_at"))
+    return {
+        "estimate_mode": "conservative",
+        "confidence": confidence,
+        "last_checked_at": checked[-1] if checked else "",
+        "reserve_percent": CAPACITY_RESERVE_PERCENT,
+        "retry_multiplier": CAPACITY_RETRY_MULTIPLIER,
     }
 
 
@@ -244,17 +326,25 @@ def ai_capacity_payload(
                 "estimates": {
                     "document_queries": document_queries,
                     "internet_researches": 0,
-                    "confidence": "header_based" if document_queries else "configured" if configured else "not_available",
+                    "confidence": (
+                        "cached"
+                        if snapshot.get("status") == "cached" and document_queries is not None
+                        else "header_based"
+                        if document_queries is not None
+                        else "not_available"
+                    ),
                 },
             }
         )
-    agents.append(_research_agent(env))
+    research_provider = _research_provider(env)
+    agents.append(_research_agent(env, snapshots.get(research_provider)))
     return {
         "generated_at": utc_now(),
         "status": "ok",
         "agents": agents,
         "totals": {
-            "document_queries": sum(int(agent["estimates"]["document_queries"]) for agent in agents),
-            "internet_researches": sum(int(agent["estimates"]["internet_researches"]) for agent in agents),
+            "document_queries": _capacity_total(agents, field="document_queries", kind="document"),
+            "internet_researches": _capacity_total(agents, field="internet_researches", kind="research"),
         },
+        "estimate": _estimate_metadata(agents),
     }

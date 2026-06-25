@@ -568,6 +568,177 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(login_old.status_code, 401)
         self.assertEqual(login_new.status_code, 200)
 
+    def test_accountant_can_replace_client_portal_login_and_password(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_bootstrap = os.environ.get("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        os.environ["FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED"] = "true"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/client",
+                    json={"client_id": "client-1", "title": "Client One", "has_chart_accounts": True},
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["*"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "old-user",
+                        "display_name": "Old User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/auth/password",
+                    json={"user_id": "old-user", "password": "EskiSifre123"},
+                )
+
+                update = client.post(
+                    "/phase0/store/client-portal-access",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={
+                        "client_id": "client-1",
+                        "old_user_id": "old-user",
+                        "new_user_id": "new-user",
+                        "display_name": "New User",
+                        "password": "YeniSifre123",
+                    },
+                )
+                old_login = client.post(
+                    "/phase0/store/auth/login",
+                    json={"user_id": "old-user", "password": "EskiSifre123"},
+                )
+                new_login = client.post(
+                    "/phase0/store/auth/login",
+                    json={"user_id": "new-user", "password": "YeniSifre123"},
+                )
+                workspace = client.get(
+                    "/phase0/store/workspace/client-1",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                )
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            if previous_bootstrap is None:
+                os.environ.pop("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED", None)
+            else:
+                os.environ["FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED"] = previous_bootstrap
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.json()["portal_user"]["user_id"], "new-user")
+        self.assertTrue(update.json()["old_user_removed"])
+        self.assertEqual(old_login.status_code, 401)
+        self.assertEqual(new_login.status_code, 200)
+        self.assertEqual([user["user_id"] for user in workspace.json()["portal_users"] if user["role"] == "client_user"], ["new-user"])
+
+    def test_accountant_can_delete_selected_client_documents_after_confirmation(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.persistence.workflow_store import JsonWorkflowStore
+
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                base = Path(temp_dir)
+                phase0.DEFAULT_STORE_PATH = base / "store.json"
+                stored_file = base / "documents" / "client-1" / "invoice.pdf"
+                stored_file.parent.mkdir(parents=True)
+                stored_file.write_bytes(b"pdf")
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/client",
+                    json={"client_id": "client-1", "title": "Client One", "has_chart_accounts": True},
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["*"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "client-user",
+                        "display_name": "Client User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                store = JsonWorkflowStore(phase0.DEFAULT_STORE_PATH)
+                store.save_uploaded_document(
+                    client_id="client-1",
+                    document={
+                        "document_id": "doc-1",
+                        "document_type": "invoice",
+                        "original_file_name": "invoice.pdf",
+                        "storage_path": str(stored_file),
+                        "status": "stored",
+                    },
+                )
+                store.save_simulation_result(
+                    client_id="client-1",
+                    document_ref="doc-1",
+                    result={"file_name": "invoice.pdf", "export_status": "review_required"},
+                )
+
+                missing_confirmation = client.post(
+                    "/phase0/store/documents/delete",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"client_id": "client-1", "document_refs": ["doc-1"], "confirmed": False},
+                )
+                forbidden = client.post(
+                    "/phase0/store/documents/delete",
+                    headers={"X-Fisora-User-Id": "client-user"},
+                    json={"client_id": "client-1", "document_refs": ["doc-1"], "confirmed": True},
+                )
+                deleted = client.post(
+                    "/phase0/store/documents/delete",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"client_id": "client-1", "document_refs": ["doc-1"], "confirmed": True},
+                )
+                workspace = client.get(
+                    "/phase0/store/workspace/client-1",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                )
+                stored_file_exists_after_delete = stored_file.exists()
+                workspace_payload = workspace.json()
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(missing_confirmation.status_code, 400)
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json()["deleted_document_refs"], ["doc-1"])
+        self.assertFalse(stored_file_exists_after_delete)
+        self.assertEqual(workspace_payload["uploaded_documents"], [])
+        self.assertEqual(workspace_payload["documents"], [])
+
     def test_admin_test_reset_preserves_accountant_password_and_removes_client_data(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

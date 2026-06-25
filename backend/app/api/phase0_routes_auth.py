@@ -9,6 +9,7 @@ from app.api.phase0_context import (
     default_export_path,
     get_workflow_store,
     password_bootstrap_enabled,
+    require_client_access,
     request_user_id,
     set_portal_session_cookie,
 )
@@ -20,6 +21,7 @@ from app.api.phase0_schemas import (
     AuthPasswordPayload,
     AuthPasswordResetConfirmPayload,
     AuthPasswordResetPayload,
+    ClientPortalAccessUpdatePayload,
     PortalAccessPayload,
     PortalUserPayload,
     TestDataResetPayload,
@@ -77,6 +79,46 @@ def store_auth_password(payload: AuthPasswordPayload) -> dict[str, object]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return get_workflow_store().set_auth_password(user_id=payload.user_id.strip(), password_hash=password_hash)
+
+
+@router.post("/store/client-portal-access")
+def store_client_portal_access(
+    payload: ClientPortalAccessUpdatePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    if not payload.client_id.strip():
+        raise HTTPException(status_code=400, detail="client_id is required")
+    if not payload.new_user_id.strip():
+        raise HTTPException(status_code=400, detail="new_user_id is required")
+    actor_user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    require_client_access(
+        client_id=payload.client_id.strip(),
+        user_id=actor_user_id,
+        allowed_roles=("accountant", "admin"),
+    )
+    store = get_workflow_store()
+    try:
+        result = store.replace_client_portal_user(
+            client_id=payload.client_id.strip(),
+            old_user_id=payload.old_user_id.strip(),
+            new_user_id=payload.new_user_id.strip(),
+            display_name=payload.display_name.strip(),
+        )
+        if payload.password.strip():
+            if build_auth_config().production_ready and not password_bootstrap_enabled():
+                raise HTTPException(status_code=403, detail={"allowed": False, "reason": "password_bootstrap_disabled"})
+            password_hash = create_password_hash(payload.password)
+            result["credential"] = store.set_auth_password(
+                user_id=payload.new_user_id.strip(),
+                password_hash=password_hash,
+            )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
 
 
 @router.post("/store/auth/login")

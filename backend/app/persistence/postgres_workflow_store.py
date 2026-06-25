@@ -127,6 +127,68 @@ class PostgresWorkflowStore:
     def get_portal_user(self, user_id: str) -> dict[str, Any] | None:
         return self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id)
 
+    def replace_client_portal_user(
+        self,
+        *,
+        client_id: str,
+        old_user_id: str,
+        new_user_id: str,
+        display_name: str = "",
+    ) -> dict[str, Any]:
+        normalized_client_id = client_id.strip()
+        normalized_old_user_id = old_user_id.strip()
+        normalized_new_user_id = new_user_id.strip()
+        if not normalized_client_id:
+            raise ValueError("client_id is required")
+        if not normalized_new_user_id:
+            raise ValueError("new_user_id is required")
+        if self._get_record(normalized_client_id, "client", normalized_client_id) is None:
+            raise ValueError("client not found")
+
+        timestamp = utc_now()
+        old_user = self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", normalized_old_user_id) if normalized_old_user_id else None
+        new_user = self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", normalized_new_user_id) or {}
+        allowed_client_ids = list(dict.fromkeys([*(new_user.get("allowed_client_ids") or []), normalized_client_id]))
+        portal_user = {
+            **new_user,
+            **build_portal_user_record(
+                user_id=normalized_new_user_id,
+                display_name=str(
+                    display_name
+                    or new_user.get("display_name")
+                    or (old_user or {}).get("display_name")
+                    or normalized_new_user_id
+                ),
+                role="client_user",
+                allowed_client_ids=allowed_client_ids,
+            ),
+            "updated_at": timestamp,
+        }
+        portal_user.setdefault("created_at", timestamp)
+        stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "portal_user", normalized_new_user_id, portal_user)
+
+        old_user_removed = False
+        if normalized_old_user_id and normalized_old_user_id != normalized_new_user_id and old_user:
+            remaining_allowed = [
+                existing_client_id
+                for existing_client_id in old_user.get("allowed_client_ids") or []
+                if existing_client_id != normalized_client_id
+            ]
+            if remaining_allowed:
+                old_user["allowed_client_ids"] = remaining_allowed
+                old_user["updated_at"] = timestamp
+                self._upsert_record(PORTAL_USERS_CLIENT_ID, "portal_user", normalized_old_user_id, old_user)
+            else:
+                self._delete_portal_user_with_auth(normalized_old_user_id)
+                old_user_removed = True
+        return {
+            "client_id": normalized_client_id,
+            "old_user_id": normalized_old_user_id,
+            "new_user_id": normalized_new_user_id,
+            "old_user_removed": old_user_removed,
+            "portal_user": stored,
+        }
+
     def verify_portal_access(self, *, client_id: str, user_id: str) -> dict[str, Any]:
         decision = decide_portal_access(
             portal_user=self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id),
@@ -568,6 +630,63 @@ class PostgresWorkflowStore:
             "deleted_document_refs": deleted_refs,
         }
 
+    def delete_client_documents(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str],
+        delete_files: bool = True,
+    ) -> dict[str, Any]:
+        normalized_client_id = client_id.strip()
+        refs = list(dict.fromkeys(str(ref or "").strip() for ref in document_refs if str(ref or "").strip()))
+        if not normalized_client_id:
+            raise ValueError("client_id is required")
+        deleted_refs: list[str] = []
+        deleted_file_count = 0
+        uploaded_rows = {
+            str(row["record_key"]): row["payload"]
+            for row in self._list_records("uploaded_document", client_id=normalized_client_id)
+            if str(row["record_key"]) in set(refs)
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                for document_ref in refs:
+                    uploaded = uploaded_rows.get(document_ref)
+                    if uploaded and delete_files:
+                        storage_path = Path(str(uploaded.get("storage_path") or ""))
+                        if storage_path.exists() and storage_path.is_file():
+                            storage_path.unlink()
+                            deleted_file_count += 1
+                    cursor.execute(
+                        """
+                        delete from workflow_records
+                        where tenant_id = %s
+                          and client_id = %s
+                          and record_type in ('uploaded_document', 'document')
+                          and record_key = %s
+                        """,
+                        (self.tenant_id, normalized_client_id, document_ref),
+                    )
+                    direct_deleted = cursor.rowcount
+                    cursor.execute(
+                        """
+                        delete from workflow_records
+                        where tenant_id = %s
+                          and client_id = %s
+                          and record_type in ('processing_job', 'document_pipeline_event')
+                          and payload->>'document_ref' = %s
+                        """,
+                        (self.tenant_id, normalized_client_id, document_ref),
+                    )
+                    if direct_deleted:
+                        deleted_refs.append(document_ref)
+        return {
+            "client_id": normalized_client_id,
+            "deleted_count": len(deleted_refs),
+            "deleted_document_refs": deleted_refs,
+            "deleted_file_count": deleted_file_count,
+        }
+
     def save_simulation_result(
         self,
         *,
@@ -780,6 +899,23 @@ class PostgresWorkflowStore:
         if not row:
             return None
         return {"client_id": row[0], "record_key": row[1], "payload": row[2]}
+
+    def _delete_portal_user_with_auth(self, user_id: str) -> None:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    delete from workflow_records
+                    where tenant_id = %s
+                      and client_id = %s
+                      and (
+                        (record_type in ('portal_user', 'auth_credential') and record_key = %s)
+                        or (record_type in ('auth_session', 'auth_token') and payload->>'user_id' = %s)
+                      )
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID, user_id, user_id),
+                )
 
     def _get_record_row(self, client_id: str, record_type: str, record_key: str) -> dict[str, Any] | None:
         self._ensure_tenant()

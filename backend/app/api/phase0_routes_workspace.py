@@ -12,6 +12,7 @@ from app.api.phase0_context import (
 )
 from app.api.phase0_schemas import (
     ChartAccountsStorePayload,
+    ClientDocumentsDeletePayload,
     ClientOnboardingPackagePayload,
     ClientProfilePayload,
 )
@@ -130,6 +131,21 @@ def store_workspace(
 ) -> dict[str, object]:
     return get_workspace_service().store_workspace(
         client_id=client_id,
+        x_fisora_user_id=x_fisora_user_id,
+        x_fisora_session=x_fisora_session,
+        fisora_session=fisora_session,
+    )
+
+
+@router.post("/store/documents/delete")
+def store_documents_delete(
+    payload: ClientDocumentsDeletePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_workspace_service().delete_client_documents(
+        payload,
         x_fisora_user_id=x_fisora_user_id,
         x_fisora_session=x_fisora_session,
         fisora_session=fisora_session,

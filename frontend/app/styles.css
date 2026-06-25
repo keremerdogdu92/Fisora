@@ -1177,6 +1177,10 @@ button:disabled {
   display: none;
 }
 
+.client-management-page .onboarding-panel > .settings-card {
+  display: grid;
+}
+
 .onboarding-stepper {
   gap: 12px;
 }
@@ -2511,6 +2515,69 @@ tbody tr:last-child td {
 }
 
 .danger-action:disabled {
+  background: #d1d5db;
+  border-color: #d1d5db;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.bulk-document-check,
+.client-document-delete-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.bulk-document-check {
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-transform: none;
+}
+
+.bulk-document-check.danger {
+  color: #7f1d1d;
+}
+
+.client-document-delete-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.client-document-delete-row {
+  border-bottom: 1px solid var(--border);
+  min-height: 42px;
+  padding: 8px 10px;
+}
+
+.client-document-delete-row:last-child {
+  border-bottom: 0;
+}
+
+.client-document-delete-row span {
+  color: var(--text);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+
+.client-document-delete-row small {
+  color: var(--muted);
+  font-size: 0.72rem;
+  grid-column: 2;
+}
+
+button.danger {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
+button.danger:disabled {
   background: #d1d5db;
   border-color: #d1d5db;
   color: #6b7280;

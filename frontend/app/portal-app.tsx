@@ -25,15 +25,7 @@ import {
   useAiCapacityQuery,
   usePilotReadinessQuery,
 } from "./features/workspace";
-import {
-  createInviteForSelectedClientAction,
-  createNewClientAction,
-  emptyNewClientDraft,
-  parseNewClientChartAccountsAction,
-  selectNewClientTaxCertificateAction,
-  setPasswordForSelectedClientAction,
-  uploadChartAccountsAction,
-} from "./features/clients";
+import { useClientManagementCommands } from "./features/clients";
 import {
   addLocalUploadsAction,
   useDocumentWorkflow,
@@ -58,7 +50,6 @@ import type {
   ExportMode,
   IntakeCategory,
   LocalSession,
-  NewClientDraft,
   PilotClient,
   PilotData,
   PilotMode,
@@ -114,14 +105,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     manualDraftLines: [],
     reason: "",
   });
-  const [newClientDraft, setNewClientDraft] = useState<NewClientDraft>(() => emptyNewClientDraft());
-  const [newClientTaxCertificateFile, setNewClientTaxCertificateFile] = useState<File | null>(null);
-  const [newClientTaxCertificateInputKey, setNewClientTaxCertificateInputKey] = useState(0);
-  const [newClientStatus, setNewClientStatus] = useState("");
-  const [chartUploadStatus, setChartUploadStatus] = useState("");
-  const [inviteStatus, setInviteStatus] = useState("");
-  const [portalPassword, setPortalPasswordDraft] = useState("");
-  const [portalPasswordStatus, setPortalPasswordStatus] = useState("");
   const readinessQuery = usePilotReadinessQuery();
   const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });
 
@@ -179,6 +162,39 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
+  const {
+    chartUploadStatus,
+    clientDocumentDeleteConfirmed,
+    clientDocumentDeleteStatus,
+    createInviteForSelectedClient,
+    createNewClient,
+    deleteSelectedClientDocuments,
+    inviteStatus,
+    newClientDraft,
+    newClientStatus,
+    newClientTaxCertificateFile,
+    newClientTaxCertificateInputKey,
+    parseNewClientChartAccounts,
+    portalPassword,
+    portalPasswordStatus,
+    portalUserIdDraft,
+    selectNewClientTaxCertificate,
+    selectedClientDocumentRefs,
+    setClientDocumentDeleteConfirmed,
+    setNewClientDraft,
+    setPortalPasswordDraft,
+    setPortalUserIdDraft,
+    setSelectedClientDocumentRefs,
+    setPasswordForSelectedClient,
+    updatePortalAccessForSelectedClient,
+    uploadChartAccounts,
+  } = useClientManagementCommands({
+    loginUserId,
+    refreshBackendPilotData: () => refreshBackendPilotData(),
+    selectedClient,
+    session,
+    setSelectedClientId,
+  });
   const clientDocuments = useMemo(() => {
     return data.documents.filter((document) => document.clientId === selectedClient?.clientId);
   }, [data.documents, selectedClient?.clientId]);
@@ -282,76 +298,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     logout();
     if (typeof window !== "undefined") window.location.assign("/");
   }
-
-  const createNewClient = () => {
-    void createNewClientAction({
-      loginUserId,
-      newClientDraft,
-      newClientTaxCertificateFile,
-      portalPassword,
-      refreshBackendPilotData: () => refreshBackendPilotData(),
-      session,
-      setNewClientDraft,
-      setNewClientStatus,
-      setNewClientTaxCertificateFile,
-      setNewClientTaxCertificateInputKey,
-      setPortalPasswordDraft,
-      setSelectedClientId,
-    });
-  };
-
-  const selectNewClientTaxCertificate = (file: File | null) => {
-    void selectNewClientTaxCertificateAction({
-      file,
-      loginUserId,
-      session,
-      setNewClientDraft,
-      setNewClientStatus,
-      setNewClientTaxCertificateFile,
-    });
-  };
-
-  const uploadChartAccounts = (files: FileList | null) => {
-    void uploadChartAccountsAction({
-      files,
-      loginUserId,
-      refreshBackendPilotData: () => refreshBackendPilotData(),
-      selectedClient,
-      session,
-      setChartUploadStatus,
-    });
-  };
-
-  const parseNewClientChartAccounts = (files: FileList | null) => {
-    void parseNewClientChartAccountsAction({
-      files,
-      loginUserId,
-      session,
-      setNewClientDraft,
-      setNewClientStatus,
-    });
-  };
-
-  const createInviteForSelectedClient = () => {
-    void createInviteForSelectedClientAction({
-      loginUserId,
-      refreshBackendPilotData: () => refreshBackendPilotData(),
-      selectedClient,
-      session,
-      setInviteStatus,
-    });
-  };
-
-  const setPasswordForSelectedClient = () => {
-    void setPasswordForSelectedClientAction({
-      loginUserId,
-      portalPassword,
-      selectedClient,
-      session,
-      setPortalPasswordDraft,
-      setPortalPasswordStatus,
-    });
-  };
 
   const addLocalUploads = (files: FileList | null) => {
     void addLocalUploadsAction({
@@ -541,9 +487,12 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         <ClientManagementView
           cancellationRequests={openCancellationRequests}
           chartUploadStatus={chartUploadStatus}
+          clientDocumentDeleteConfirmed={clientDocumentDeleteConfirmed}
+          clientDocumentDeleteStatus={clientDocumentDeleteStatus}
           clientRows={visibleDashboardClientRows}
           clients={filteredClients}
           clientSearch={clientSearch}
+          documents={clientDocuments}
           inviteStatus={inviteStatus}
           newClientDraft={newClientDraft}
           newClientStatus={newClientStatus}
@@ -553,14 +502,21 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onClientSearchChange={setClientSearch}
           onCreateInvite={createInviteForSelectedClient}
           onCreateNewClient={createNewClient}
+          onDeleteSelectedDocuments={deleteSelectedClientDocuments}
           onResolveCancellation={resolveCancellation}
           onSetPassword={setPasswordForSelectedClient}
+          onUpdatePortalAccess={updatePortalAccessForSelectedClient}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}
           portalPassword={portalPassword}
           portalPasswordStatus={portalPasswordStatus}
+          portalUserIdDraft={portalUserIdDraft}
           selectedClient={selectedClient}
+          selectedDocumentRefs={selectedClientDocumentRefs}
+          setClientDocumentDeleteConfirmed={setClientDocumentDeleteConfirmed}
           setNewClientDraft={setNewClientDraft}
           setPortalPassword={setPortalPasswordDraft}
+          setPortalUserIdDraft={setPortalUserIdDraft}
+          setSelectedDocumentRefs={setSelectedClientDocumentRefs}
           setSelectedClientId={(clientId) => {
             setSelectedClientId(clientId);
             setSelectedDocumentId("");

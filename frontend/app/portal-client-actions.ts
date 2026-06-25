@@ -4,11 +4,13 @@ import {
   buildTaxCertificateParseStatus,
   createClientOnboardingPackage,
   createPortalInvite,
+  deleteClientDocuments,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   resolveApiBaseUrl,
   sessionAuthErrorMessage,
   setPortalPassword as setBackendPortalPassword,
+  updateClientPortalAccess,
   uploadChartAccountsToBackend,
   uploadTaxCertificateToBackend,
 } from "./upload-api";
@@ -359,5 +361,101 @@ export async function setPasswordForSelectedClientAction({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setPortalPasswordStatus(`Sifre kurulumu tamamlanamadi. ${message}`);
+  }
+}
+
+export async function updatePortalAccessForSelectedClientAction({
+  loginUserId,
+  portalPassword,
+  portalUserIdDraft,
+  refreshBackendPilotData,
+  selectedClient,
+  session,
+  setPortalPasswordDraft,
+  setPortalPasswordStatus,
+}: {
+  loginUserId: string;
+  portalPassword: string;
+  portalUserIdDraft: string;
+  refreshBackendPilotData: () => Promise<boolean>;
+  selectedClient?: PilotClient;
+  session: LocalSession | null;
+  setPortalPasswordDraft: (password: string) => void;
+  setPortalPasswordStatus: (status: string) => void;
+}) {
+  if (!selectedClient) return;
+  const oldUserId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
+  const newUserId = portalUserIdDraft.trim();
+  if (!newUserId) {
+    setPortalPasswordStatus("Yeni üyelik adı gerekli.");
+    return;
+  }
+  setPortalPasswordStatus(`${selectedClient.clientName} üyeliği güncelleniyor...`);
+  try {
+    const result = await updateClientPortalAccess({
+      apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+      clientId: selectedClient.clientId,
+      oldUserId,
+      newUserId,
+      displayName: selectedClient.userLabel || selectedClient.clientName,
+      password: portalPassword,
+      sessionToken: session?.sessionToken,
+      userHeader: session?.userId || loginUserId.trim(),
+    });
+    const oldUserMessage = result.old_user_removed ? "Eski giriş kapatıldı." : "Eski giriş bu mükelleften kaldırıldı.";
+    setPortalPasswordStatus(`${newUserId} aktif. ${oldUserMessage}`);
+    setPortalPasswordDraft("");
+    await refreshBackendPilotData();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setPortalPasswordStatus(`Üyelik güncellenemedi. ${sessionAuthErrorMessage(message) || message}`);
+  }
+}
+
+export async function deleteSelectedClientDocumentsAction({
+  deleteConfirmed,
+  loginUserId,
+  refreshBackendPilotData,
+  selectedClient,
+  selectedDocumentRefs,
+  session,
+  setClientDocumentDeleteStatus,
+  setSelectedDocumentRefs,
+}: {
+  deleteConfirmed: boolean;
+  loginUserId: string;
+  refreshBackendPilotData: () => Promise<boolean>;
+  selectedClient?: PilotClient;
+  selectedDocumentRefs: string[];
+  session: LocalSession | null;
+  setClientDocumentDeleteStatus: (status: string) => void;
+  setSelectedDocumentRefs: (refs: string[]) => void;
+}) {
+  if (!selectedClient) return;
+  const refs = Array.from(new Set(selectedDocumentRefs.map((ref) => ref.trim()).filter(Boolean)));
+  if (!refs.length) {
+    setClientDocumentDeleteStatus("Silmek için en az bir belge seçin.");
+    return;
+  }
+  if (!deleteConfirmed) {
+    setClientDocumentDeleteStatus("Toplu silme için onay kutusunu işaretleyin.");
+    return;
+  }
+  setClientDocumentDeleteStatus(`${refs.length} belge siliniyor...`);
+  try {
+    const result = await deleteClientDocuments({
+      apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+      clientId: selectedClient.clientId,
+      documentRefs: refs,
+      deleteFiles: true,
+      sessionToken: session?.sessionToken,
+      userHeader: session?.userId || loginUserId.trim(),
+    });
+    setClientDocumentDeleteStatus(`${result.deleted_count ?? refs.length} belge silindi.`);
+    setSelectedDocumentRefs([]);
+    await refreshBackendPilotData();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setClientDocumentDeleteStatus(`Belgeler silinemedi. ${sessionAuthErrorMessage(message) || message}`);
   }
 }

@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.api.phase0_mappers import chart_account_from_payload, chart_account_payloads, client_profile_from_payload
-from app.api.phase0_schemas import ChartAccountsStorePayload, ClientOnboardingPackagePayload, ClientProfilePayload
+from app.api.phase0_schemas import ChartAccountsStorePayload, ClientDocumentsDeletePayload, ClientOnboardingPackagePayload, ClientProfilePayload
 from app.domain.business_relevance import check_client_onboarding
 from app.domain.chart_accounts import parse_chart_accounts
 
@@ -210,6 +210,36 @@ class WorkspaceService:
             user_id=self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         )
         return self.store.get_workspace(client_id)
+
+    def delete_client_documents(
+        self,
+        payload: ClientDocumentsDeletePayload,
+        *,
+        x_fisora_user_id: str | None,
+        x_fisora_session: str | None,
+        fisora_session: str | None,
+    ) -> dict[str, object]:
+        if not payload.confirmed:
+            raise HTTPException(status_code=400, detail={"allowed": False, "reason": "confirmation_required"})
+        normalized_client_id = payload.client_id.strip()
+        if not normalized_client_id:
+            raise HTTPException(status_code=400, detail="client_id is required")
+        document_refs = [ref.strip() for ref in payload.document_refs if ref.strip()]
+        if not document_refs:
+            raise HTTPException(status_code=400, detail="document_refs is required")
+        self.require_client_access(
+            client_id=normalized_client_id,
+            user_id=self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+            allowed_roles=("accountant", "admin"),
+        )
+        try:
+            return self.store.delete_client_documents(
+                client_id=normalized_client_id,
+                document_refs=document_refs,
+                delete_files=payload.delete_files,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def client_id_from_record(record: dict[str, object]) -> str:

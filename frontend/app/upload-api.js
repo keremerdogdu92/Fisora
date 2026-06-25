@@ -377,6 +377,57 @@ async function setPortalPassword({
   });
 }
 
+async function updateClientPortalAccess({
+  apiBaseUrl,
+  clientId,
+  oldUserId = "",
+  newUserId,
+  displayName = "",
+  password = "",
+  sessionToken = "",
+  userHeader = "",
+  fetchImpl = fetch,
+}) {
+  const headers = backendAuthHeaders({ sessionToken, userHeader });
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/client-portal-access",
+    payload: {
+      client_id: String(clientId || "").trim(),
+      old_user_id: String(oldUserId || "").trim(),
+      new_user_id: String(newUserId || "").trim(),
+      display_name: String(displayName || "").trim(),
+      password: String(password || ""),
+    },
+    headers,
+    fetchImpl,
+  });
+}
+
+async function deleteClientDocuments({
+  apiBaseUrl,
+  clientId,
+  documentRefs,
+  deleteFiles = true,
+  sessionToken = "",
+  userHeader = "",
+  fetchImpl = fetch,
+}) {
+  const headers = backendAuthHeaders({ sessionToken, userHeader });
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/documents/delete",
+    payload: {
+      client_id: String(clientId || "").trim(),
+      document_refs: Array.isArray(documentRefs) ? documentRefs.map((ref) => String(ref || "").trim()).filter(Boolean) : [],
+      confirmed: true,
+      delete_files: Boolean(deleteFiles),
+    },
+    headers,
+    fetchImpl,
+  });
+}
+
 async function uploadChartAccountsToBackend({
   apiBaseUrl,
   clientId,
@@ -629,6 +680,7 @@ module.exports = {
   buildPortalUserBootstrapPayload,
   createClientOnboardingPackage,
   createPortalInvite,
+  deleteClientDocuments,
   ensureUploadWorkspace,
   loginWithPassword,
   parseChartAccountsFromBackend,
@@ -640,6 +692,7 @@ module.exports = {
   sessionAuthErrorMessage,
   setPortalPassword,
   storeReviewDecision,
+  updateClientPortalAccess,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
   uploadDocumentsToBackend,

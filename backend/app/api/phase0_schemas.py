@@ -300,6 +300,14 @@ class AuthPasswordPayload(BaseModel):
     password: str
 
 
+class ClientPortalAccessUpdatePayload(BaseModel):
+    client_id: str
+    old_user_id: str = ""
+    new_user_id: str
+    display_name: str = ""
+    password: str = ""
+
+
 class AuthLoginPayload(BaseModel):
     user_id: str
     password: str
@@ -340,6 +348,13 @@ class TestDataResetPayload(BaseModel):
 
 
 class DocumentRetentionRunPayload(BaseModel):
+    delete_files: bool = True
+
+
+class ClientDocumentsDeletePayload(BaseModel):
+    client_id: str
+    document_refs: list[str] = Field(default_factory=list)
+    confirmed: bool = False
     delete_files: bool = True
 
 

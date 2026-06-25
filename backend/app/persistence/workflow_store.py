@@ -133,6 +133,72 @@ class JsonWorkflowStore:
         record = data["portal_users"].get(user_id)
         return deepcopy(record) if record else None
 
+    def replace_client_portal_user(
+        self,
+        *,
+        client_id: str,
+        old_user_id: str,
+        new_user_id: str,
+        display_name: str = "",
+    ) -> dict[str, Any]:
+        normalized_client_id = client_id.strip()
+        normalized_new_user_id = new_user_id.strip()
+        normalized_old_user_id = old_user_id.strip()
+        if not normalized_client_id:
+            raise ValueError("client_id is required")
+        if not normalized_new_user_id:
+            raise ValueError("new_user_id is required")
+        data = self._read()
+        if normalized_client_id not in data["clients"]:
+            raise ValueError("client not found")
+
+        timestamp = utc_now()
+        old_user = data["portal_users"].get(normalized_old_user_id) if normalized_old_user_id else None
+        new_user = data["portal_users"].get(normalized_new_user_id) or {}
+        existing_allowed = list(new_user.get("allowed_client_ids") or [])
+        allowed_client_ids = list(dict.fromkeys([*existing_allowed, normalized_client_id]))
+        fallback_display_name = str(
+            display_name
+            or new_user.get("display_name")
+            or (old_user or {}).get("display_name")
+            or normalized_new_user_id
+        )
+        record = {
+            **new_user,
+            **build_portal_user_record(
+                user_id=normalized_new_user_id,
+                display_name=fallback_display_name,
+                role="client_user",
+                allowed_client_ids=allowed_client_ids,
+            ),
+            "updated_at": timestamp,
+        }
+        record.setdefault("created_at", timestamp)
+        data["portal_users"][normalized_new_user_id] = record
+
+        old_user_removed = False
+        if normalized_old_user_id and normalized_old_user_id != normalized_new_user_id and old_user:
+            remaining_allowed = [
+                existing_client_id
+                for existing_client_id in old_user.get("allowed_client_ids") or []
+                if existing_client_id != normalized_client_id
+            ]
+            if remaining_allowed:
+                old_user["allowed_client_ids"] = remaining_allowed
+                old_user["updated_at"] = timestamp
+            else:
+                self._remove_portal_user_auth_records(data, normalized_old_user_id)
+                data["portal_users"].pop(normalized_old_user_id, None)
+                old_user_removed = True
+        self._write(data)
+        return {
+            "client_id": normalized_client_id,
+            "old_user_id": normalized_old_user_id,
+            "new_user_id": normalized_new_user_id,
+            "old_user_removed": old_user_removed,
+            "portal_user": deepcopy(record),
+        }
+
     def verify_portal_access(self, *, client_id: str, user_id: str) -> dict[str, Any]:
         data = self._read()
         decision = decide_portal_access(
@@ -573,6 +639,51 @@ class JsonWorkflowStore:
             "deleted_document_refs": deleted_refs,
         }
 
+    def delete_client_documents(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str],
+        delete_files: bool = True,
+    ) -> dict[str, Any]:
+        normalized_client_id = client_id.strip()
+        refs = list(dict.fromkeys(str(ref or "").strip() for ref in document_refs if str(ref or "").strip()))
+        if not normalized_client_id:
+            raise ValueError("client_id is required")
+        data = self._read()
+        deleted_refs: list[str] = []
+        deleted_file_count = 0
+        for document_ref in refs:
+            document_key = self._document_key(normalized_client_id, document_ref)
+            uploaded = data["uploaded_documents"].pop(document_key, None)
+            processed = data["documents"].pop(document_key, None)
+            if uploaded and delete_files:
+                storage_path = Path(str(uploaded.get("storage_path") or ""))
+                if storage_path.exists() and storage_path.is_file():
+                    storage_path.unlink()
+                    deleted_file_count += 1
+            if uploaded or processed:
+                deleted_refs.append(document_ref)
+        if deleted_refs:
+            deleted_set = set(deleted_refs)
+            data["processing_jobs"] = [
+                job
+                for job in data["processing_jobs"]
+                if not (job.get("client_id") == normalized_client_id and str(job.get("document_ref") or "") in deleted_set)
+            ]
+            data["document_pipeline_events"] = [
+                event
+                for event in data["document_pipeline_events"]
+                if not (event.get("client_id") == normalized_client_id and str(event.get("document_ref") or "") in deleted_set)
+            ]
+            self._write(data)
+        return {
+            "client_id": normalized_client_id,
+            "deleted_count": len(deleted_refs),
+            "deleted_document_refs": deleted_refs,
+            "deleted_file_count": deleted_file_count,
+        }
+
     def save_simulation_result(
         self,
         *,
@@ -803,6 +914,20 @@ class JsonWorkflowStore:
     @staticmethod
     def _document_key(client_id: str, document_ref: str) -> str:
         return f"{client_id}:{document_ref}"
+
+    @staticmethod
+    def _remove_portal_user_auth_records(data: dict[str, Any], user_id: str) -> None:
+        data["auth_credentials"].pop(user_id, None)
+        data["auth_sessions"] = {
+            token_hash: session
+            for token_hash, session in data["auth_sessions"].items()
+            if session.get("user_id") != user_id
+        }
+        data["auth_tokens"] = {
+            token_hash: token
+            for token_hash, token in data["auth_tokens"].items()
+            if token.get("user_id") != user_id
+        }
 
 
 def _clear_directory_contents(path: Path) -> int:

@@ -8,6 +8,7 @@ const {
   buildPortalUserBootstrapPayload,
   createClientOnboardingPackage,
   createPortalInvite,
+  deleteClientDocuments,
   ensureUploadWorkspace,
   loginWithPassword,
   sessionAuthErrorMessage,
@@ -19,6 +20,7 @@ const {
   resolveApiBaseUrl,
   setPortalPassword,
   storeReviewDecision,
+  updateClientPortalAccess,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
   uploadDocumentsToBackend,
@@ -595,6 +597,73 @@ test("setPortalPassword posts password bootstrap payload", async () => {
     password: "GizliSifre123",
   });
   assert.deepEqual(result, { has_password: true });
+});
+
+test("updateClientPortalAccess posts single-login portal changes", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ portal_user: { user_id: "new-user" }, old_user_removed: true }) };
+  };
+
+  const result = await updateClientPortalAccess({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    oldUserId: "old-user",
+    newUserId: "new-user",
+    displayName: "New User",
+    password: "YeniSifre123",
+    sessionToken: "session-token-1",
+    userHeader: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/client-portal-access");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    client_id: "client-1",
+    old_user_id: "old-user",
+    new_user_id: "new-user",
+    display_name: "New User",
+    password: "YeniSifre123",
+  });
+  assert.deepEqual(result, { portal_user: { user_id: "new-user" }, old_user_removed: true });
+});
+
+test("deleteClientDocuments posts confirmed bulk document deletion", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ deleted_count: 2, deleted_document_refs: ["doc-1", "doc-2"] }) };
+  };
+
+  const result = await deleteClientDocuments({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    documentRefs: ["doc-1", "doc-2"],
+    deleteFiles: true,
+    sessionToken: "session-token-1",
+    userHeader: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/documents/delete");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    client_id: "client-1",
+    document_refs: ["doc-1", "doc-2"],
+    confirmed: true,
+    delete_files: true,
+  });
+  assert.deepEqual(result, { deleted_count: 2, deleted_document_refs: ["doc-1", "doc-2"] });
 });
 
 test("requestStatementAiSuggestions posts structured statement lines", async () => {

@@ -229,6 +229,92 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(denied["reason"], "client_not_onboarded")
         self.assertEqual(workspace["portal_users"][0]["user_id"], "mukellef-user")
 
+    def test_json_store_replaces_client_portal_user_as_single_login(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.upsert_portal_user(
+                user_id="old-user",
+                display_name="Old User",
+                role="client_user",
+                allowed_client_ids=["client-1"],
+            )
+            store.set_auth_password(user_id="old-user", password_hash="old-hash")
+
+            result = store.replace_client_portal_user(
+                client_id="client-1",
+                old_user_id="old-user",
+                new_user_id="new-user",
+                display_name="New User",
+            )
+            workspace = store.get_workspace("client-1")
+            old_password = store.get_auth_password_hash(user_id="old-user")
+            old_access = store.verify_portal_access(client_id="client-1", user_id="old-user")
+            new_access = store.verify_portal_access(client_id="client-1", user_id="new-user")
+
+            self.assertEqual(result["portal_user"]["user_id"], "new-user")
+            self.assertTrue(result["old_user_removed"])
+            self.assertEqual(old_password, "")
+            self.assertFalse(old_access["allowed"])
+            self.assertTrue(new_access["allowed"])
+            self.assertEqual([user["user_id"] for user in workspace["portal_users"]], ["new-user"])
+
+    def test_json_store_deletes_selected_documents_and_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            stored_file = base / "documents" / "client-1" / "invoice.pdf"
+            stored_file.parent.mkdir(parents=True)
+            stored_file.write_bytes(b"pdf")
+            store = JsonWorkflowStore(base / "phase0_store.json")
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_type": "invoice",
+                    "original_file_name": "invoice.pdf",
+                    "storage_path": str(stored_file),
+                    "status": "stored",
+                },
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="doc-1",
+                result={"file_name": "invoice.pdf", "export_status": "review_required"},
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="invoice",
+                parser_kind="invoice_pdf",
+            )
+            store.record_document_pipeline_event(
+                client_id="client-1",
+                document_ref="doc-1",
+                step="uploaded",
+                status="ok",
+                message_tr="Belge yuklendi.",
+                debug_code="uploaded",
+            )
+
+            summary = store.delete_client_documents(
+                client_id="client-1",
+                document_refs=["doc-1"],
+                delete_files=True,
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(summary["deleted_count"], 1)
+        self.assertEqual(summary["deleted_document_refs"], ["doc-1"])
+        self.assertFalse(stored_file.exists())
+        self.assertEqual(workspace["uploaded_documents"], [])
+        self.assertEqual(workspace["documents"], [])
+        self.assertEqual(workspace["processing_jobs"], [])
+        self.assertEqual(workspace["document_pipeline_events"], [])
+
     def test_json_store_reset_test_data_preserves_accountant_login_and_deletes_client_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

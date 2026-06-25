@@ -1,13 +1,16 @@
 "use client";
 
-import type { CancellationRequest, DashboardClientRow, NewClientDraft, PilotClient } from "./portal-types";
+import type { CancellationRequest, DashboardClientRow, NewClientDraft, PilotClient, PilotDocument } from "./portal-types";
 
 export function ClientManagementView({
   cancellationRequests,
   chartUploadStatus,
+  clientDocumentDeleteConfirmed,
+  clientDocumentDeleteStatus,
   clientRows,
   clients,
   clientSearch,
+  documents,
   inviteStatus,
   newClientDraft,
   newClientStatus,
@@ -17,21 +20,31 @@ export function ClientManagementView({
   onClientSearchChange,
   onCreateInvite,
   onCreateNewClient,
+  onDeleteSelectedDocuments,
   onResolveCancellation,
   onSetPassword,
+  onUpdatePortalAccess,
   onTaxCertificateFileChange,
   portalPassword,
   portalPasswordStatus,
+  portalUserIdDraft,
   selectedClient,
+  selectedDocumentRefs,
+  setClientDocumentDeleteConfirmed,
   setNewClientDraft,
   setPortalPassword,
+  setPortalUserIdDraft,
+  setSelectedDocumentRefs,
   setSelectedClientId,
 }: {
   cancellationRequests: CancellationRequest[];
   chartUploadStatus: string;
+  clientDocumentDeleteConfirmed: boolean;
+  clientDocumentDeleteStatus: string;
   clientRows: DashboardClientRow[];
   clients: PilotClient[];
   clientSearch: string;
+  documents: PilotDocument[];
   inviteStatus: string;
   newClientDraft: NewClientDraft;
   newClientStatus: string;
@@ -41,16 +54,37 @@ export function ClientManagementView({
   onClientSearchChange: (value: string) => void;
   onCreateInvite: () => void | Promise<void>;
   onCreateNewClient: () => void | Promise<void>;
+  onDeleteSelectedDocuments: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onSetPassword: () => void | Promise<void>;
+  onUpdatePortalAccess: () => void | Promise<void>;
   onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
   portalPassword: string;
   portalPasswordStatus: string;
+  portalUserIdDraft: string;
   selectedClient?: PilotClient;
+  selectedDocumentRefs: string[];
+  setClientDocumentDeleteConfirmed: (value: boolean) => void;
   setNewClientDraft: (value: NewClientDraft) => void;
   setPortalPassword: (value: string) => void;
+  setPortalUserIdDraft: (value: string) => void;
+  setSelectedDocumentRefs: (value: string[]) => void;
   setSelectedClientId: (value: string) => void;
 }) {
+  const selectedDocumentRefSet = new Set(selectedDocumentRefs);
+  const selectableDocumentRefs = documents.map((document) => document.originalDocumentRef || document.id).filter(Boolean);
+  const allDocumentsSelected = Boolean(selectableDocumentRefs.length && selectableDocumentRefs.every((ref) => selectedDocumentRefSet.has(ref)));
+  const toggleDocument = (documentRef: string, checked: boolean) => {
+    if (checked) {
+      setSelectedDocumentRefs(Array.from(new Set([...selectedDocumentRefs, documentRef])));
+      return;
+    }
+    setSelectedDocumentRefs(selectedDocumentRefs.filter((ref) => ref !== documentRef));
+  };
+  const toggleAllDocuments = (checked: boolean) => {
+    setSelectedDocumentRefs(checked ? selectableDocumentRefs : []);
+  };
+
   return (
     <section className="client-management-page">
       <section className="panel">
@@ -109,6 +143,12 @@ export function ClientManagementView({
           <span>Portal erişimi</span>
           <strong>{selectedClient?.portalUserId ?? "-"}</strong>
           <div className="inline-actions">
+            <input
+              aria-label="Mükellef üyelik adı"
+              onChange={(event) => setPortalUserIdDraft(event.target.value)}
+              placeholder="Üyelik adı / e-posta"
+              value={portalUserIdDraft}
+            />
             <button onClick={onCreateInvite} type="button">Davet tokeni oluştur</button>
             <input
               aria-label="Portal şifresi"
@@ -118,9 +158,56 @@ export function ClientManagementView({
               value={portalPassword}
             />
             <button className="primary" onClick={onSetPassword} type="button">Şifre kur</button>
+            <button className="primary" onClick={onUpdatePortalAccess} type="button">Üyelik güncelle</button>
           </div>
           {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
           {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
+        </div>
+        <div className="settings-card">
+          <span>Mükellef belgeleri</span>
+          <strong>{selectedClient?.clientName ?? "-"}</strong>
+          <label className="bulk-document-check">
+            <input
+              checked={allDocumentsSelected}
+              disabled={!selectableDocumentRefs.length}
+              onChange={(event) => toggleAllDocuments(event.target.checked)}
+              type="checkbox"
+            />
+            Tüm belgeleri seç
+          </label>
+          <div className="client-document-delete-list">
+            {documents.length ? documents.map((document) => {
+              const documentRef = document.originalDocumentRef || document.id;
+              return (
+                <label className="client-document-delete-row" key={document.id}>
+                  <input
+                    checked={selectedDocumentRefSet.has(documentRef)}
+                    onChange={(event) => toggleDocument(documentRef, event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>{document.fileName}</span>
+                  <small>{document.status}</small>
+                </label>
+              );
+            }) : <p className="empty">Belge yok.</p>}
+          </div>
+          <label className="bulk-document-check danger">
+            <input
+              checked={clientDocumentDeleteConfirmed}
+              onChange={(event) => setClientDocumentDeleteConfirmed(event.target.checked)}
+              type="checkbox"
+            />
+            Seçili belgelerin dosyalarıyla birlikte silineceğini onaylıyorum
+          </label>
+          <button
+            className="danger"
+            disabled={!selectedDocumentRefs.length}
+            onClick={onDeleteSelectedDocuments}
+            type="button"
+          >
+            Seçili belgeleri sil
+          </button>
+          {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
         </div>
       </section>
       <section className="panel">

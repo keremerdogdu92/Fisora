@@ -2312,6 +2312,31 @@ tbody tr:last-child td {
   gap: 16px;
 }
 
+.document-capacity-strip {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  gap: 6px 12px;
+  justify-content: flex-end;
+  min-height: 24px;
+}
+
+.document-capacity-strip span:not(:first-child) {
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+
+.document-capacity-strip strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.document-capacity-strip small {
+  color: var(--muted);
+}
+
 .dashboard-visual-grid,
 .client-management-page {
   display: grid;
@@ -2576,6 +2601,17 @@ code {
   .document-context-bar {
     margin: 10px 0;
     width: auto;
+  }
+
+  .document-capacity-strip {
+    align-items: flex-start;
+    display: grid;
+    justify-content: stretch;
+  }
+
+  .document-capacity-strip span:not(:first-child) {
+    border-left: 0;
+    padding-left: 0;
   }
 
   .portal-nav,

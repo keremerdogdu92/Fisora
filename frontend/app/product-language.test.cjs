@@ -69,6 +69,7 @@ test("document processing shows passive AI agent capacity labels", () => {
   const documentSource = source("portal-documents-view.tsx");
   const queriesSource = source("features/workspace/queries.ts");
   const operationsSource = source("portal-exports-view.tsx");
+  const stylesSource = source("styles.css");
 
   assert.match(documentSource, /AI kapasitesi/);
   assert.match(documentSource, /Belge ajanı/);
@@ -78,6 +79,8 @@ test("document processing shows passive AI agent capacity labels", () => {
   assert.match(queriesSource, /refetchInterval:\s*5 \* 60 \* 1000/);
   assert.match(queriesSource, /refetchOnWindowFocus:\s*true/);
   assert.match(operationsSource, /Ölçülemiyor/);
+  assert.match(stylesSource, /\.document-capacity-strip\s*\{/);
+  assert.match(stylesSource, /@media \(max-width: 720px\)/);
 });
 
 test("client onboarding labels portal user as the client email login", () => {

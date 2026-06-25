@@ -7,7 +7,7 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy: `main` ucu `8b97618`; deploy sonunda
+- Son dogrulanan runtime deploy: `main` ucu `846ecd4`; deploy sonunda
   `git rev-parse` ile tekrar kontrol edildi.
 - Son deploy smoke: 2026-06-25, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root ve tum `/portal/*` kontrol rotalari 200.
@@ -17,6 +17,9 @@ oturumdan devam etmek icin son durumu ozetler.
 - Musavir dashboard metrikleri kompakt ikonlu kartlara tasindi; desktop 6
   sutun, tablet 3x2, mobil 2x3 duzeni ve sol menu ikonlari canlida
   dogrulanacak runtime kapsamindadir.
+- Belge isleme ekrani altta genis belge listesi, ustte belge onizleme ve
+  muhasebe fisi olacak sekilde yenilendi. Teknik pipeline varsayilan kapali,
+  sol menu daraltilabilir; canli `/portal/belgeler` rotasinda dogrulandi.
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
 - Demo provider: Groq

@@ -268,6 +268,19 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIsNone(payload["totals"]["internet_researches"])
         self.assertEqual(payload["estimate"]["confidence"], "not_available")
 
+    def test_unconfigured_document_provider_snapshot_does_not_inflate_capacity(self) -> None:
+        payload = ai_capacity_payload(
+            env={"FISORA_AI_PROVIDER_CHAIN": "groq"},
+            provider_snapshots={
+                "groq": normalize_groq_rate_limit_headers(
+                    {"x-ratelimit-remaining-requests": "742"}
+                )
+            },
+        )
+
+        self.assertIsNone(payload["totals"]["document_queries"])
+        self.assertEqual(payload["estimate"]["confidence"], "not_available")
+
     def test_ai_capacity_payload_does_not_mark_openrouter_key_as_research_ready(self) -> None:
         payload = ai_capacity_payload(
             env={

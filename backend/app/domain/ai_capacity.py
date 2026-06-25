@@ -309,7 +309,11 @@ def ai_capacity_payload(
         snapshot = snapshots.get(provider) or {}
         key_name = PROVIDER_KEY_ENV.get(provider, "")
         configured = bool(key_name and str(env.get(key_name, "")).strip() and _provider_model(provider, env).strip())
-        document_queries = _document_estimate(snapshot, requests_per_document=requests_per_document)
+        document_queries = (
+            _document_estimate(snapshot, requests_per_document=requests_per_document)
+            if configured
+            else None
+        )
         agents.append(
             {
                 "kind": "document",

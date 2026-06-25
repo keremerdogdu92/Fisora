@@ -86,6 +86,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
   const [clientSearch, setClientSearch] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [session, setSession] = useState<LocalSession | null>(null);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
@@ -357,11 +358,12 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const selectedPeriodTitle = selectedPeriod ? new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(new Date(`${selectedPeriod}-01T00:00:00`)) : "";
 
   return (
-    <main className={showSidebar ? "private-shell portal-shell" : "private-shell portal-shell no-sidebar"}>
+    <main className={showSidebar ? `private-shell portal-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}` : "private-shell portal-shell no-sidebar"}>
       {showSidebar ? (
         <PortalSidebar
-          activeDocumentSegment={selectedDocumentSegment} mode={mode} navItems={visibleNavItems} onExit={exitPortal}
+          activeDocumentSegment={selectedDocumentSegment} collapsed={sidebarCollapsed} mode={mode} navItems={visibleNavItems} onExit={exitPortal}
           onNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); }}
+          onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
           session={session}
         />
       ) : null}
@@ -370,7 +372,9 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           clientName={mode === "client" ? selectedClient?.clientName : undefined}
           localFallbackAllowed={localFallbackAllowed}
           onExit={exitPortal}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
           session={session}
+          showSidebarToggle={showSidebar}
           source={source}
           title={mode === "client" ? "Mükellef portalı" : mode === "documents" ? "Belge İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
         />

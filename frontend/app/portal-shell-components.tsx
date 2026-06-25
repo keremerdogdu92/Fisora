@@ -84,28 +84,40 @@ function isSidebarItemActive(item: (typeof sidebarItems)[number], mode: PilotMod
 
 export function PortalSidebar({
   activeDocumentSegment,
+  collapsed,
   mode,
   navItems,
   onExit,
   onNavigate,
+  onToggleCollapse,
   session,
 }: {
   activeDocumentSegment: DocumentSegment;
+  collapsed: boolean;
   mode: PilotMode;
   navItems: PortalNavItem[];
   onExit: () => void;
   onNavigate: (mode: PilotMode, segment?: DocumentSegment) => void;
+  onToggleCollapse: () => void;
   session: LocalSession | null;
 }) {
   const allowedModes = new Set(navItems.map((item) => item.mode));
   return (
-    <aside className="portal-sidebar" aria-label="Müşavir menüsü">
+    <aside className={collapsed ? "portal-sidebar collapsed" : "portal-sidebar"} aria-label="Müşavir menüsü">
       <div className="portal-brand">
         <span className="brand-mark">F</span>
         <div>
           <strong>Fisero</strong>
           <small>Özel Muhasebe Operasyon Portalı</small>
         </div>
+        <button
+          aria-label={collapsed ? "Menüyü genişlet" : "Menüyü daralt"}
+          className="sidebar-collapse-button"
+          onClick={onToggleCollapse}
+          type="button"
+        >
+          {collapsed ? "›" : "‹"}
+        </button>
       </div>
       <nav className="portal-sidebar-nav" aria-label="Portal ekranları">
         {sidebarItems.filter((item) => allowedModes.has(item.mode)).map((item) => {
@@ -144,21 +156,27 @@ export function PortalTopbarStatus({
   clientName,
   localFallbackAllowed,
   onExit,
+  onToggleSidebar,
   session,
+  showSidebarToggle,
   source,
   title,
 }: {
   clientName?: string;
   localFallbackAllowed: boolean;
   onExit: () => void;
+  onToggleSidebar?: () => void;
   session: LocalSession | null;
+  showSidebarToggle?: boolean;
   source: string;
   title: string;
 }) {
   return (
     <header className="portal-topbar" aria-label="Portal üst çubuğu">
       <div className="portal-title-block">
-        <button className="topbar-menu" type="button" aria-label="Menüyü daralt">☰</button>
+        {showSidebarToggle ? (
+          <button className="topbar-menu" onClick={onToggleSidebar} type="button" aria-label="Menüyü daralt">☰</button>
+        ) : null}
         <h1>{title}</h1>
       </div>
       <div className="portal-topbar-actions">

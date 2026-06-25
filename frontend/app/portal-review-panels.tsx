@@ -255,7 +255,6 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
           </div>
         )}
       </div>
-      <DocumentPipelineTimeline events={document.pipelineEvents ?? []} />
     </section>
   );
 }

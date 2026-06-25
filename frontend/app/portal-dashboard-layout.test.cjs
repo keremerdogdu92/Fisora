@@ -37,6 +37,36 @@ test("sidebar uses semantic icons instead of two-letter navigation badges", () =
   assert.doesNotMatch(shell, /\{item\.symbol\}/);
 });
 
+test("portal sidebar can collapse so document review has more workspace width", () => {
+  const portalApp = source("portal-app.tsx");
+  const shell = source("portal-shell-components.tsx");
+  const styles = source("styles.css");
+
+  assert.match(portalApp, /const \[sidebarCollapsed, setSidebarCollapsed\] = useState\(false\);/);
+  assert.match(portalApp, /sidebar-collapsed/);
+  assert.match(portalApp, /collapsed=\{sidebarCollapsed\}/);
+  assert.match(portalApp, /onToggleCollapse=\{\(\) => setSidebarCollapsed\(\(current\) => !current\)\}/);
+  assert.match(shell, /aria-label=\{collapsed \? "Menüyü genişlet" : "Menüyü daralt"\}/);
+  assert.match(shell, /className=\{collapsed \? "portal-sidebar collapsed" : "portal-sidebar"\}/);
+  assert.match(styles, /\.portal-shell\.sidebar-collapsed\s*\{[\s\S]*?grid-template-columns:\s*76px minmax\(0,\s*1fr\);/);
+  assert.match(styles, /\.portal-sidebar\.collapsed \.sidebar-link span:not\(\.nav-symbol\)/);
+});
+
+test("document processing workspace uses the approved bottom-list review layout", () => {
+  const workspace = source("portal-workspace-view.tsx");
+  const styles = source("styles.css");
+
+  assert.match(workspace, /className="document-review-toolbar"/);
+  assert.match(workspace, /className="document-review-main"/);
+  assert.match(workspace, /className="bottom-document-queue"/);
+  assert.match(workspace, /Belge listesi/);
+  assert.match(workspace, /<DocumentPreview document=\{selectedDocument\} session=\{session\} \/>[\s\S]*<JournalPanel/);
+  assert.doesNotMatch(workspace, /<aside className="document-queue-panel"/);
+  assert.match(styles, /\.accountant-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+  assert.match(styles, /\.document-review-main\s*\{[\s\S]*?grid-template-columns:\s*minmax\(560px,\s*1\.05fr\) minmax\(480px,\s*0\.95fr\);/);
+  assert.match(styles, /\.bottom-document-queue\s*\{/);
+});
+
 test("dashboard metric grid follows the approved desktop tablet and mobile columns", () => {
   const styles = source("styles.css");
 

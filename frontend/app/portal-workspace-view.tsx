@@ -1,14 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { DocumentPreview, JournalPanel } from "./portal-review-panels";
+import { DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import type {
   CancellationRequest,
   CorrectionDraft,
   DashboardClientRow,
   DocumentSegment,
-  NewClientDraft,
   LocalSession,
+  NewClientDraft,
   PilotClient,
   PilotDocument,
   PilotStatus,
@@ -128,6 +128,19 @@ export function AccountantWorkspace({
   setSelectedDocumentSegment: (value: DocumentSegment) => void;
   setSelectedStatementLineNo: (value: number) => void;
 }) {
+  void clientSearch;
+  void clientRows;
+  void dashboardMetrics;
+  void newClientDraft;
+  void newClientStatus;
+  void newClientTaxCertificateFile;
+  void newClientTaxCertificateInputKey;
+  void onAddToBasket;
+  void onClientSearchChange;
+  void onCreateNewClient;
+  void onTaxCertificateFileChange;
+  void setNewClientDraft;
+
   const [documentQuery, setDocumentQuery] = useState("");
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
@@ -168,14 +181,7 @@ export function AccountantWorkspace({
 
   return (
     <section className="accountant-workspace">
-      <aside className="document-queue-panel" aria-label="Belge kuyruğu">
-        <div className="queue-heading">
-          <div>
-            <h2>Belge Kuyruğu</h2>
-            <span>{queueDocuments.length} belge gösteriliyor</span>
-          </div>
-          <button className="icon-button" type="button" aria-label="Kuyruk filtreleri">⌁</button>
-        </div>
+      <section className="document-review-toolbar" aria-label="Belge kontrol araçları">
         <label className="compact-field">
           <span>Mükellef</span>
           <select
@@ -192,12 +198,6 @@ export function AccountantWorkspace({
             ))}
           </select>
         </label>
-        <input
-          className="search-input"
-          onChange={(event) => setDocumentQuery(event.target.value)}
-          placeholder="Ara (belge adı, tür, not...)"
-          value={documentQuery}
-        />
         <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
           {segmentOptions.map((option) => (
             <button
@@ -225,51 +225,96 @@ export function AccountantWorkspace({
             <option value="all">Tüm belgeler</option>
           </select>
         </label>
-        <div className="document-queue-list">
-          {queueDocuments.map((document) => (
-            <button
-              className={selectedDocument?.id === document.id ? "document-row active" : "document-row"}
-              key={document.id}
-              onClick={() => selectDocument(document)}
-              type="button"
-            >
-              <strong>{document.fileName}</strong>
-              <span>{labelForIntakeCategory(document.intakeCategory)} / {document.amount}</span>
-              <em>{formatStatus(document.status)}</em>
-            </button>
-          ))}
-          {!queueDocuments.length ? <p className="empty">Bu filtrede belge yok.</p> : null}
-        </div>
+        <label className="compact-field">
+          <span>Ara</span>
+          <input
+            className="search-input"
+            onChange={(event) => setDocumentQuery(event.target.value)}
+            placeholder="Belge adı, tür, tutar..."
+            value={documentQuery}
+          />
+        </label>
         <div className="queue-stepper">
+          <span>{selectedDocument ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
           <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
           <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
         </div>
-        {selectedRequest ? (
-          <div className="request-compact">
-            <span>İptal/düzeltme talebi</span>
-            <p>{selectedRequest.reason}</p>
-            <div className="inline-actions">
+      </section>
+
+      <details className="debug-accordion">
+        <summary>
+          <span>Teknik açıklama ve pipeline</span>
+          <strong>Debug için aç</strong>
+        </summary>
+        <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
+      </details>
+
+      <section className="document-review-main">
+        <DocumentPreview document={selectedDocument} session={session} />
+        <JournalPanel
+          correctionDraft={correctionDraft}
+          decisionStatus={decisionStatus}
+          document={selectedDocument}
+          onApproveAndNext={onApproveAndNext}
+          onRequestStatementAi={onRequestStatementAi}
+          onSaveDecision={onSaveDecision}
+          onSaveStatementDecision={onSaveStatementDecision}
+          selectedStatementLineNo={selectedStatementLineNo}
+          setCorrectionDraft={setCorrectionDraft}
+          setSelectedStatementLineNo={setSelectedStatementLineNo}
+          statementAiStatus={statementAiStatus}
+        />
+      </section>
+
+      <section className="bottom-document-queue" aria-label="Belge listesi">
+        <div className="bottom-queue-heading">
+          <div>
+            <h2>Belge listesi</h2>
+            <span>{queueDocuments.length} belge gösteriliyor. Aktif belge üstte açık kalır.</span>
+          </div>
+          {selectedRequest ? (
+            <div className="request-strip">
+              <span>İptal/düzeltme talebi: {selectedRequest.reason}</span>
               <button onClick={() => onResolveCancellation(selectedRequest.id, "approved")} type="button">Kabul</button>
               <button onClick={() => onResolveCancellation(selectedRequest.id, "rejected")} type="button">Red</button>
             </div>
+          ) : null}
+        </div>
+        <div className="bottom-queue-table">
+          <div className="bottom-queue-row header">
+            <div>Belge</div>
+            <div>Tür</div>
+            <div>Tutar</div>
+            <div>Durum</div>
+            <div>Aksiyon</div>
           </div>
-        ) : null}
-      </aside>
-
-      <DocumentPreview document={selectedDocument} session={session} />
-      <JournalPanel
-        correctionDraft={correctionDraft}
-        decisionStatus={decisionStatus}
-        document={selectedDocument}
-        onApproveAndNext={onApproveAndNext}
-        onRequestStatementAi={onRequestStatementAi}
-        onSaveDecision={onSaveDecision}
-        onSaveStatementDecision={onSaveStatementDecision}
-        selectedStatementLineNo={selectedStatementLineNo}
-        setCorrectionDraft={setCorrectionDraft}
-        setSelectedStatementLineNo={setSelectedStatementLineNo}
-        statementAiStatus={statementAiStatus}
-      />
+          {queueDocuments.map((document) => {
+            const isActive = selectedDocument?.id === document.id;
+            return (
+              <div className={isActive ? "bottom-queue-row active" : "bottom-queue-row"} key={document.id}>
+                <button className="bottom-queue-document" onClick={() => selectDocument(document)} type="button">
+                  <strong>{document.fileName}</strong>
+                  <span>{document.uploadedAt}</span>
+                </button>
+                <div>{labelForIntakeCategory(document.intakeCategory)}</div>
+                <div>{document.amount || "-"}</div>
+                <div><em>{formatStatus(document.status)}</em></div>
+                <div className="bottom-queue-actions">
+                  {isActive ? (
+                    <>
+                      <button onClick={() => void onApproveAndNext()} type="button">Onayla</button>
+                      <button onClick={() => void onSaveDecision("approve_with_changes")} type="button">Düzelt</button>
+                    </>
+                  ) : (
+                    <button onClick={() => selectDocument(document)} type="button">Aç</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {!queueDocuments.length ? <p className="empty">Bu filtrede belge yok.</p> : null}
+        </div>
+      </section>
     </section>
   );
 }

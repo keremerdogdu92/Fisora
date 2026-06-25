@@ -5,6 +5,9 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -16,11 +19,12 @@ from app.domain.auth_policy import auth_status_payload, build_auth_config
 try:
     from fastapi.testclient import TestClient
 
-    from app.api import phase0
+    from app.api import phase0, phase0_routes_operations
     from app.main import app
 except ModuleNotFoundError:
     TestClient = None
     phase0 = None
+    phase0_routes_operations = None
     app = None
 
 
@@ -383,6 +387,137 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertNotIn("sk-secret", public_text)
         self.assertNotIn("free", public_text)
         self.assertNotIn("ücretsiz", public_text)
+
+    def test_ai_capacity_endpoint_refreshes_and_caches_tavily_usage(self) -> None:
+        if TestClient is None or phase0 is None or phase0_routes_operations is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        previous_env = {
+            key: os.environ.get(key)
+            for key in (
+                "FISORA_RESEARCH_ENABLED",
+                "FISORA_RESEARCH_PROVIDER",
+                "TAVILY_API_KEY",
+            )
+        }
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        os.environ["FISORA_RESEARCH_ENABLED"] = "true"
+        os.environ["FISORA_RESEARCH_PROVIDER"] = "tavily"
+        os.environ["TAVILY_API_KEY"] = "tvly-secret"
+        usage_response = Mock()
+        usage_response.json.return_value = {
+            "key": {"usage": 150, "limit": 1000},
+            "account": {"plan_usage": 500, "plan_limit": 15000},
+        }
+        usage_response.raise_for_status.return_value = None
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["*"],
+                    },
+                )
+                with patch.object(phase0_routes_operations.httpx, "get", return_value=usage_response) as http_get:
+                    first = client.get(
+                        "/phase0/store/ai-capacity",
+                        headers={"X-Fisora-User-Id": "mali-musavir"},
+                    )
+                    second = client.get(
+                        "/phase0/store/ai-capacity",
+                        headers={"X-Fisora-User-Id": "mali-musavir"},
+                    )
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(first.json()["totals"]["internet_researches"], 318)
+        self.assertEqual(first.json()["estimate"]["confidence"], "live")
+        http_get.assert_called_once_with(
+            "https://api.tavily.com/usage",
+            headers={"Authorization": "Bearer tvly-secret"},
+            timeout=2.0,
+        )
+        self.assertNotIn("tvly-secret", str(first.json()))
+
+    def test_ai_capacity_endpoint_uses_cached_tavily_usage_when_refresh_fails(self) -> None:
+        if TestClient is None or phase0 is None or phase0_routes_operations is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        previous_env = {
+            key: os.environ.get(key)
+            for key in (
+                "FISORA_RESEARCH_ENABLED",
+                "FISORA_RESEARCH_PROVIDER",
+                "TAVILY_API_KEY",
+            )
+        }
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        os.environ["FISORA_RESEARCH_ENABLED"] = "true"
+        os.environ["FISORA_RESEARCH_PROVIDER"] = "tavily"
+        os.environ["TAVILY_API_KEY"] = "tvly-secret"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["*"],
+                    },
+                )
+                phase0_routes_operations.get_workflow_store().record_ai_capacity_snapshot(
+                    provider="tavily",
+                    snapshot={
+                        "source": "usage_endpoint",
+                        "credit": {"limit": 1000, "used": 150, "remaining": 850, "reset": ""},
+                        "last_checked_at": "2026-06-24T00:00:00+00:00",
+                    },
+                )
+                with patch.object(
+                    phase0_routes_operations.httpx,
+                    "get",
+                    side_effect=httpx.ConnectError("usage unavailable"),
+                ):
+                    response = client.get(
+                        "/phase0/store/ai-capacity",
+                        headers={"X-Fisora-User-Id": "mali-musavir"},
+                    )
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["totals"]["internet_researches"], 318)
+        self.assertEqual(response.json()["estimate"]["confidence"], "cached")
 
     def test_invite_accept_and_password_reset_flow(self) -> None:
         if TestClient is None or phase0 is None or app is None:

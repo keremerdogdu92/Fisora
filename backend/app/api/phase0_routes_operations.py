@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Cookie, Header, HTTPException
@@ -15,7 +16,11 @@ from app.api.phase0_context import (
     request_user_id,
     require_client_access,
 )
-from app.domain.ai_capacity import ai_capacity_payload, normalize_openrouter_key_payload
+from app.domain.ai_capacity import (
+    ai_capacity_payload,
+    normalize_openrouter_key_payload,
+    normalize_tavily_usage_payload,
+)
 from app.api.phase0_schemas import OperationEventPayload
 from app.domain.operation_monitoring import summarize_operation_health
 from app.domain.production_readiness import production_readiness_payload
@@ -23,6 +28,8 @@ from app.domain.production_readiness import production_readiness_payload
 
 router = APIRouter()
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
+TAVILY_USAGE_URL = "https://api.tavily.com/usage"
+CAPACITY_SNAPSHOT_TTL = timedelta(minutes=10)
 
 
 @router.get("/store/system/readiness")
@@ -56,10 +63,34 @@ def _require_accountant_or_admin(
     return {"allowed": True, "role": role, "user_id": user_id}
 
 
-def _refresh_openrouter_snapshot(store: object) -> dict[str, object] | None:
+def _snapshot_is_fresh(snapshot: dict[str, object] | None) -> bool:
+    if not snapshot:
+        return False
+    checked_at = str(snapshot.get("last_checked_at") or "").strip()
+    if not checked_at:
+        return False
+    try:
+        parsed = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return datetime.now(UTC) - parsed <= CAPACITY_SNAPSHOT_TTL
+
+
+def _cached_snapshot(snapshot: dict[str, object] | None) -> dict[str, object] | None:
+    return {**snapshot, "status": "cached"} if snapshot else None
+
+
+def _refresh_openrouter_snapshot(
+    store: object,
+    existing: dict[str, object] | None,
+) -> dict[str, object] | None:
     api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key.startswith("sk-or-"):
-        return None
+        return existing
+    if _snapshot_is_fresh(existing):
+        return existing
     try:
         response = httpx.get(
             OPENROUTER_KEY_URL,
@@ -68,10 +99,36 @@ def _refresh_openrouter_snapshot(store: object) -> dict[str, object] | None:
         )
         response.raise_for_status()
     except Exception:
-        return None
+        return _cached_snapshot(existing)
     snapshot = normalize_openrouter_key_payload(response.json())
     if hasattr(store, "record_ai_capacity_snapshot"):
         store.record_ai_capacity_snapshot(provider="openrouter", snapshot=snapshot)
+    return snapshot
+
+
+def _refresh_tavily_snapshot(
+    store: object,
+    existing: dict[str, object] | None,
+) -> dict[str, object] | None:
+    research_enabled = os.environ.get("FISORA_RESEARCH_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+    provider = os.environ.get("FISORA_RESEARCH_PROVIDER", "openai").strip().lower()
+    api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not research_enabled or provider != "tavily" or not api_key.startswith("tvly-"):
+        return existing
+    if _snapshot_is_fresh(existing):
+        return existing
+    try:
+        response = httpx.get(
+            TAVILY_USAGE_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=2.0,
+        )
+        response.raise_for_status()
+    except Exception:
+        return _cached_snapshot(existing)
+    snapshot = normalize_tavily_usage_payload(response.json())
+    if hasattr(store, "record_ai_capacity_snapshot"):
+        store.record_ai_capacity_snapshot(provider="tavily", snapshot=snapshot)
     return snapshot
 
 
@@ -88,9 +145,12 @@ def store_ai_capacity(
     )
     store = get_workflow_store()
     snapshots = store.latest_ai_capacity_snapshots() if hasattr(store, "latest_ai_capacity_snapshots") else {}
-    openrouter_snapshot = _refresh_openrouter_snapshot(store)
+    openrouter_snapshot = _refresh_openrouter_snapshot(store, snapshots.get("openrouter"))
     if openrouter_snapshot:
         snapshots = {**snapshots, "openrouter": openrouter_snapshot}
+    tavily_snapshot = _refresh_tavily_snapshot(store, snapshots.get("tavily"))
+    if tavily_snapshot:
+        snapshots = {**snapshots, "tavily": tavily_snapshot}
     return ai_capacity_payload(env=os.environ, provider_snapshots=snapshots)
 
 

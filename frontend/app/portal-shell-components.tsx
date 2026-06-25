@@ -1,3 +1,15 @@
+import {
+  Activity,
+  BookOpen,
+  CircleCheckBig,
+  FileText,
+  Files,
+  Landmark,
+  LayoutDashboard,
+  Settings,
+  Users,
+  type LucideIcon,
+} from "lucide-react";
 import { Info } from "./portal-shared";
 import { roleLabels } from "./portal-session";
 import type { DocumentSegment, DraftLine, LocalSession, PilotClient, PilotDocument, PilotMode, PilotStatus, PortalNavItem } from "./portal-types";
@@ -16,17 +28,17 @@ const sidebarItems: {
   mode: PilotMode;
   segment?: DocumentSegment;
   fallbackHref: string;
-  symbol: string;
+  icon: LucideIcon;
 }[] = [
-  { key: "workspace", label: "Çalışma Alanı", mode: "accountant", fallbackHref: "/portal/musavir", symbol: "CA" },
-  { key: "clients", label: "Mükellefler", mode: "clients", fallbackHref: "/portal/mukellefler", symbol: "MK" },
-  { key: "documents", label: "Belgeler", mode: "documents", segment: "invoices", fallbackHref: "/portal/belgeler", symbol: "BL" },
-  { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", fallbackHref: "/portal/belgeler", symbol: "BK" },
-  { key: "other", label: "Diğer Belgeler", mode: "documents", segment: "other_documents", fallbackHref: "/portal/belgeler", symbol: "DB" },
-  { key: "exports", label: "Çıktı / Kontroller", mode: "exports", fallbackHref: "/portal/cikti", symbol: "CK" },
-  { key: "research", label: "Bilgi Havuzu", mode: "research", fallbackHref: "/portal/bilgi-havuzu", symbol: "BH" },
-  { key: "operations", label: "Operasyon", mode: "operations", fallbackHref: "/portal/operasyon", symbol: "OP" },
-  { key: "settings", label: "Ayarlar", mode: "settings", fallbackHref: "/portal/ayarlar", symbol: "AY" },
+  { key: "workspace", label: "Çalışma Alanı", mode: "accountant", fallbackHref: "/portal/musavir", icon: LayoutDashboard },
+  { key: "clients", label: "Mükellefler", mode: "clients", fallbackHref: "/portal/mukellefler", icon: Users },
+  { key: "documents", label: "Belgeler", mode: "documents", segment: "invoices", fallbackHref: "/portal/belgeler", icon: FileText },
+  { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", fallbackHref: "/portal/belgeler", icon: Landmark },
+  { key: "other", label: "Diğer Belgeler", mode: "documents", segment: "other_documents", fallbackHref: "/portal/belgeler", icon: Files },
+  { key: "exports", label: "Çıktı / Kontroller", mode: "exports", fallbackHref: "/portal/cikti", icon: CircleCheckBig },
+  { key: "research", label: "Bilgi Havuzu", mode: "research", fallbackHref: "/portal/bilgi-havuzu", icon: BookOpen },
+  { key: "operations", label: "Operasyon", mode: "operations", fallbackHref: "/portal/operasyon", icon: Activity },
+  { key: "settings", label: "Ayarlar", mode: "settings", fallbackHref: "/portal/ayarlar", icon: Settings },
 ];
 
 const statusLabels: Record<PilotStatus, string> = {
@@ -96,18 +108,23 @@ export function PortalSidebar({
         </div>
       </div>
       <nav className="portal-sidebar-nav" aria-label="Portal ekranları">
-        {sidebarItems.filter((item) => allowedModes.has(item.mode)).map((item) => (
-          <button
-            aria-current={isSidebarItemActive(item, mode, activeDocumentSegment) ? "page" : undefined}
-            className={isSidebarItemActive(item, mode, activeDocumentSegment) ? "sidebar-link active" : "sidebar-link"}
-            key={item.key}
-            onClick={() => onNavigate(item.mode, item.segment)}
-            type="button"
-          >
-            <span className="nav-symbol">{item.symbol}</span>
-            <span>{item.label}</span>
-          </button>
-        ))}
+        {sidebarItems.filter((item) => allowedModes.has(item.mode)).map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              aria-current={isSidebarItemActive(item, mode, activeDocumentSegment) ? "page" : undefined}
+              className={isSidebarItemActive(item, mode, activeDocumentSegment) ? "sidebar-link active" : "sidebar-link"}
+              key={item.key}
+              onClick={() => onNavigate(item.mode, item.segment)}
+              type="button"
+            >
+              <span className="nav-symbol">
+                <Icon aria-hidden="true" />
+              </span>
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
       </nav>
       <div className="sidebar-footer">
         <div className="sidebar-user">

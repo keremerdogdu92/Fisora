@@ -1,10 +1,26 @@
+import type { LucideIcon } from "lucide-react";
 import type { ChartRow } from "./portal-types";
 
-export function Metric({ label, value }: { label: string; value: number | string }) {
+export function Metric({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon?: LucideIcon;
+  label: string;
+  value: number | string;
+}) {
   return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className={Icon ? "metric with-icon" : "metric"}>
+      {Icon ? (
+        <span className="metric-icon" aria-hidden="true">
+          <Icon />
+        </span>
+      ) : null}
+      <div className="metric-copy">
+        <span>{label}</span>
+        <strong>{value}</strong>
+      </div>
     </div>
   );
 }

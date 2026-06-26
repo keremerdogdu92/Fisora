@@ -11,6 +11,14 @@ oturumdan devam etmek icin son durumu ozetler.
   `git rev-parse` ile tekrar kontrol edildi.
 - Son deploy smoke: 2026-06-25, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root ve tum `/portal/*` kontrol rotalari 200.
+- UI/UX remediation deploy: 2026-06-26, `main` ucu `86000c7`.
+  Release orchestrator `smoke=ok`, `/health` 200, readiness `ready=true`,
+  `pilot_sellable=true` dondu.
+- Canli UI smoke: `http://185.184.208.188/portal/belgeler`,
+  `/portal/mukellefler`, `/portal/bilgi-havuzu` dolu render oldu; Next error
+  overlay yok, console error/warn yok, desktop overflow `0px`.
+  `/portal/mukellefler` yeni onboarding adimlari ve blocked-reason metniyle
+  render oldu; `Yardim` topbar dialog'u canlida acildi.
 - Belge isleme sayfasinda temkinli `Belge ajani` ve `Arastirma ajani`
   kapasite gostergesi canlida dogrulandi. Tavily usage snapshot'i 10 dakika
   cache edilir; hesap iki deneme ve yuzde 25 operasyon rezervi kullanir.

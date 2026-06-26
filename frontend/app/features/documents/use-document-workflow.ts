@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { documentsForProcessing } from "../../portal-dashboard";
-import { isCancelStatus } from "../../portal-formatters";
 import type { DocumentSegment, PilotDocument, ReviewFilter } from "../../portal-types";
+import {
+  reviewFilteredDocuments,
+  selectedDocumentFromState,
+} from "./document-workflow-model";
 
 export function useDocumentWorkflow({
   allDocuments,
@@ -30,24 +33,19 @@ export function useDocumentWorkflow({
   }, [allDocuments, selectedClientId, selectedDocumentSegment]);
 
   const visibleReviewDocuments = useMemo(() => {
-    if (reviewFilter === "all") return clientDocuments;
-    if (reviewFilter === "cancel_requested") {
-      return clientDocuments.filter((document) => isCancelStatus(document.status));
-    }
-    return clientDocuments.filter((document) => document.status === reviewFilter);
+    return reviewFilteredDocuments({ documents: clientDocuments, reviewFilter }) as PilotDocument[];
   }, [clientDocuments, reviewFilter]);
 
   const visibleProcessingDocuments = useMemo(() => {
-    if (reviewFilter === "all") return segmentedClientDocuments;
-    if (reviewFilter === "cancel_requested") {
-      return segmentedClientDocuments.filter((document) => isCancelStatus(document.status));
-    }
-    return segmentedClientDocuments.filter((document) => document.status === reviewFilter);
+    return reviewFilteredDocuments({ documents: segmentedClientDocuments, reviewFilter }) as PilotDocument[];
   }, [reviewFilter, segmentedClientDocuments]);
 
   const activeReviewDocuments = mode === "documents" ? visibleProcessingDocuments : visibleReviewDocuments;
-  const selectedDocumentSource = mode === "documents" ? segmentedClientDocuments : activeReviewDocuments;
-  const selectedDocument = selectedDocumentSource.find((document) => document.id === selectedDocumentId);
+  const selectedDocument = selectedDocumentFromState({
+    clientDocuments,
+    selectedDocumentId,
+    selectedDocumentSegment,
+  }) as PilotDocument | undefined;
   const selectedStatementLineKey = selectedDocument?.statementLines.map((line) => line.line_no).join("|") ?? "";
 
   useEffect(() => {

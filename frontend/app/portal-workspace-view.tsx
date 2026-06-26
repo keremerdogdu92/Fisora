@@ -1,6 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  documentMatchesSegment,
+  nextDocumentSelection,
+} from "./features/documents/document-workflow-model";
 import { DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import type {
   CancellationRequest,
@@ -32,18 +36,6 @@ const statusLabels: Record<PilotStatus, string> = {
 
 function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
-}
-
-function segmentForDocument(document: PilotDocument): DocumentSegment {
-  if (document.intakeCategory === "bank_statement") return "bank_statements";
-  if (document.intakeCategory === "special_document") return "other_documents";
-  if (document.intakeCategory === "purchase_invoice") return "purchase_invoices";
-  return "sales_invoices";
-}
-
-function documentMatchesSegment(document: PilotDocument, segment: DocumentSegment) {
-  if (segment === "invoices") return document.intakeCategory === "sales_invoice" || document.intakeCategory === "purchase_invoice";
-  return segmentForDocument(document) === segment;
 }
 
 export function AccountantWorkspace({
@@ -175,8 +167,9 @@ export function AccountantWorkspace({
   const safeDocumentPosition = Math.max(selectedDocumentPosition, 1);
 
   function selectDocument(document: PilotDocument) {
-    setSelectedDocumentSegment(segmentForDocument(document));
-    setSelectedDocumentId(document.id);
+    const nextSelection = nextDocumentSelection(document);
+    setSelectedDocumentSegment(nextSelection.selectedDocumentSegment);
+    setSelectedDocumentId(nextSelection.selectedDocumentId);
   }
 
   return (

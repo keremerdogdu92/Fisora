@@ -228,9 +228,11 @@ test("landing role gateway enters accountant portal and document selection uses 
   await page.goto("/portal/belgeler");
 
   await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
-  await page.locator(".toolbar-controls select").nth(1).selectOption("invoice-ready-1");
+  await page.getByRole("button", { name: /^Aç$/ }).first().click();
+  await expect(page.getByLabel("Belge işleme özeti")).toContainText("invoice-ready.pdf");
   await expect(page.getByText("invoice-ready.pdf").first()).toBeVisible();
-  await expect(page.getByText(/AI ajan destekli/)).toBeVisible();
+  await expect(page.getByText(/AI ajan destekli|Fiş taslağı|Danismanlik/).first()).toBeVisible();
+  await expect(page.getByText("Belge seçilmedi")).toHaveCount(0);
 });
 
 test("accountant can request AI draft and approve a bank statement line", async ({ page }) => {

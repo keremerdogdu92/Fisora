@@ -101,3 +101,17 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(mobileOverflow).toBeLessThanOrEqual(0);
 });
+
+test("workspace backend failure does not stay as loading copy", async ({ page }) => {
+  await page.route("**/phase0/store/clients", async (route) => {
+    await route.fulfill({ status: 404, body: "not found" });
+  });
+  await page.route("**/phase0/store/system/readiness", async (route) => {
+    await route.fulfill({ json: readyForRealDataPayload });
+  });
+
+  await page.goto("/portal/musavir");
+
+  await expect(page.getByText(/Backend okunamadı|Yerel çalışma verisi|Çalışma alanı boş/).first()).toBeVisible();
+  await expect(page.getByText("Çalışma alanı yükleniyor")).toHaveCount(0);
+});

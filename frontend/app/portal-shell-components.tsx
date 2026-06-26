@@ -168,7 +168,7 @@ export function PortalTopbarStatus({
   onToggleSidebar?: () => void;
   session: LocalSession | null;
   showSidebarToggle?: boolean;
-  source: string;
+  source: { label: string; status: string; detail: string };
   title: string;
 }) {
   return (
@@ -186,9 +186,10 @@ export function PortalTopbarStatus({
           <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalı"}</span>
           <strong>{clientName || session?.userId || "Oturum yok"}</strong>
         </div>
-        <div className="pilot-source compact">
+        <div className={`pilot-source compact ${source.status}`}>
           <span>Veri kaynağı</span>
-          <strong>{source}</strong>
+          <strong>{source.label}</strong>
+          <small>{source.detail}</small>
         </div>
         <button className="secondary compact-exit" onClick={onExit} type="button">
           Çıkış

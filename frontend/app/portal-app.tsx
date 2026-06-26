@@ -63,12 +63,47 @@ import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
 import { journalDraftLinesForDocument, useReviewCommands } from "./features/review";
 
+type WorkspaceSourceState = {
+  label: string;
+  status: "loading" | "backend" | "empty" | "fallback" | "error";
+  detail: string;
+};
+
 export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
   return (
     <PilotQueryProvider>
       <FisoraPortalContent routeKey={routeKey} />
     </PilotQueryProvider>
   );
+}
+
+function workspaceSourceState(payload: PilotData, nextSource: string): WorkspaceSourceState {
+  if (nextSource === "Backend okunamadı") {
+    return {
+      label: "Backend okunamadı",
+      status: "error",
+      detail: "Oturum veya sunucu yanıtı gerekli. Lütfen tekrar giriş yapın.",
+    };
+  }
+  if (nextSource === "Yerel çalışma verisi") {
+    return {
+      label: nextSource,
+      status: "fallback",
+      detail: "Backend okunamadı; yerel çalışma verisi gösteriliyor.",
+    };
+  }
+  if (!payload.clients.length) {
+    return {
+      label: nextSource || "Çalışma alanı boş",
+      status: "empty",
+      detail: "Sunucu yanıt verdi, mükellef bulunamadı.",
+    };
+  }
+  return {
+    label: nextSource || "Çalışma alanı",
+    status: "backend",
+    detail: "Sunucu çalışma alanı kullanılıyor.",
+  };
 }
 
 function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
@@ -78,7 +113,11 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     portalConfig.visibleModes.includes(item.mode),
   );
   const [data, setData] = useState<PilotData>(emptyPilotData);
-  const [source, setSource] = useState("Çalışma alanı yükleniyor");
+  const [source, setSource] = useState<WorkspaceSourceState>({
+    label: "Çalışma alanı yükleniyor",
+    status: "loading",
+    detail: "Sunucu çalışma alanı okunuyor.",
+  });
   const [readinessPayload, setReadinessPayload] = useState<Record<string, unknown> | null>(null);
   const [localFallbackAllowed, setLocalFallbackAllowed] = useState(false);
   const [mode, setModeState] = useState<PilotMode>(portalConfig.initialMode as PilotMode);
@@ -111,7 +150,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
   function applyPilotData(payload: PilotData, nextSource: string) {
     setData(payload);
-    setSource(nextSource);
+    setSource(workspaceSourceState(payload, nextSource));
     setSelectedClientId((current) =>
       current && payload.clients.some((client) => client.clientId === current)
         ? current
@@ -545,7 +584,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           setLoginPassword={setLoginPassword}
           setLoginRole={setLoginRole}
           setLoginUserId={setLoginUserId}
-          source={source}
+          source={source.label}
           {...testDataReset}
         />
       ) : null}
@@ -565,7 +604,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       ) : null}
 
       {mode === "operations" ? (
-        <OperationsRouteView aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed} readinessView={readinessView} source={source} />
+        <OperationsRouteView aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed} readinessView={readinessView} source={source.label} />
       ) : null}
       </div>
       </section>

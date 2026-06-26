@@ -84,7 +84,7 @@ export async function loadInitialPilotData({
   await refreshBackendReadiness({ setReadinessPayload, shouldCancel });
   if (await refreshBackendPilotData({ applyPilotData, defaultUserId, session, shouldCancel })) return;
   if (!allowLocalFallback) {
-    if (!shouldCancel()) applyPilotData(emptyPilotData, "Çalışma alanı boş");
+    if (!shouldCancel()) applyPilotData(emptyPilotData, "Backend okunamadı");
     return;
   }
   const paths = ["/local-pilot-data.json", "/local-workspace-data.json", "/local-review-data.json"];

@@ -128,3 +128,18 @@ test("topbar notification and help actions open visible panels", async ({ page }
   await page.getByRole("button", { name: /Yardım/ }).click();
   await expect(page.getByRole("dialog", { name: /Yardım/ })).toBeVisible();
 });
+
+test("mobile portal starts with content visible and opens menu as drawer", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/portal/belgeler");
+
+  await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
+  await expect(page.getByLabel("Belge işleme özeti")).toBeVisible();
+
+  await page.getByRole("button", { name: /Menüyü aç/ }).click();
+  await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "true");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
+});

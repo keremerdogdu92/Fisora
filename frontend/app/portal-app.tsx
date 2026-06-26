@@ -63,11 +63,7 @@ import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
 import { journalDraftLinesForDocument, useReviewCommands } from "./features/review";
 
-type WorkspaceSourceState = {
-  label: string;
-  status: "loading" | "backend" | "empty" | "fallback" | "error";
-  detail: string;
-};
+type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
 
 export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
   return (
@@ -126,6 +122,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
   const [clientSearch, setClientSearch] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [session, setSession] = useState<LocalSession | null>(null);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
@@ -400,8 +397,10 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     <main className={showSidebar ? `private-shell portal-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}` : "private-shell portal-shell no-sidebar"}>
       {showSidebar ? (
         <PortalSidebar
-          activeDocumentSegment={selectedDocumentSegment} collapsed={sidebarCollapsed} mode={mode} navItems={visibleNavItems} onExit={exitPortal}
-          onNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); }}
+          activeDocumentSegment={selectedDocumentSegment} collapsed={sidebarCollapsed} mobileOpen={mobileSidebarOpen} mode={mode} navItems={visibleNavItems}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
+          onExit={exitPortal}
+          onNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); setMobileSidebarOpen(false); }}
           onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
           session={session}
         />
@@ -411,7 +410,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           clientName={mode === "client" ? selectedClient?.clientName : undefined}
           localFallbackAllowed={localFallbackAllowed}
           onExit={exitPortal}
-          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onToggleSidebar={() => setMobileSidebarOpen((current) => !current)}
           session={session}
           showSidebarToggle={showSidebar}
           source={source}

@@ -86,8 +86,10 @@ function isSidebarItemActive(item: (typeof sidebarItems)[number], mode: PilotMod
 export function PortalSidebar({
   activeDocumentSegment,
   collapsed,
+  mobileOpen,
   mode,
   navItems,
+  onCloseMobile,
   onExit,
   onNavigate,
   onToggleCollapse,
@@ -95,16 +97,31 @@ export function PortalSidebar({
 }: {
   activeDocumentSegment: DocumentSegment;
   collapsed: boolean;
+  mobileOpen: boolean;
   mode: PilotMode;
   navItems: PortalNavItem[];
+  onCloseMobile: () => void;
   onExit: () => void;
   onNavigate: (mode: PilotMode, segment?: DocumentSegment) => void;
   onToggleCollapse: () => void;
   session: LocalSession | null;
 }) {
   const allowedModes = new Set(navItems.map((item) => item.mode));
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onCloseMobile();
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileOpen, onCloseMobile]);
+
   return (
-    <aside className={collapsed ? "portal-sidebar collapsed" : "portal-sidebar"} aria-label="Müşavir menüsü">
+    <aside
+      className={collapsed ? "portal-sidebar collapsed" : "portal-sidebar"}
+      aria-label="Müşavir menüsü"
+      data-mobile-open={mobileOpen ? "true" : "false"}
+    >
       <div className="portal-brand">
         <span className="brand-mark">F</span>
         <div>
@@ -119,6 +136,9 @@ export function PortalSidebar({
         >
           {collapsed ? "›" : "‹"}
         </button>
+        <button className="sidebar-mobile-close" onClick={onCloseMobile} type="button" aria-label="Menüyü kapat">
+          x
+        </button>
       </div>
       <nav className="portal-sidebar-nav" aria-label="Portal ekranları">
         {sidebarItems.filter((item) => allowedModes.has(item.mode)).map((item) => {
@@ -128,7 +148,10 @@ export function PortalSidebar({
               aria-current={isSidebarItemActive(item, mode, activeDocumentSegment) ? "page" : undefined}
               className={isSidebarItemActive(item, mode, activeDocumentSegment) ? "sidebar-link active" : "sidebar-link"}
               key={item.key}
-              onClick={() => onNavigate(item.mode, item.segment)}
+              onClick={() => {
+                onNavigate(item.mode, item.segment);
+                onCloseMobile();
+              }}
               type="button"
             >
               <span className="nav-symbol">
@@ -187,7 +210,7 @@ export function PortalTopbarStatus({
     <header className="portal-topbar" aria-label="Portal üst çubuğu">
       <div className="portal-title-block">
         {showSidebarToggle ? (
-          <button className="topbar-menu" onClick={onToggleSidebar} type="button" aria-label="Menüyü daralt">☰</button>
+          <button className="topbar-menu" onClick={onToggleSidebar} type="button" aria-label="Menüyü aç">☰</button>
         ) : null}
         <h1>{title}</h1>
       </div>

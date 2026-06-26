@@ -21,6 +21,9 @@ frontend/public/local-review-data.json
 frontend/public/local-workspace-data.json
 frontend/public/local-pilot-data.json
 
+# Local UI audit evidence can include real customer identifiers.
+docs/ui/audit-*/live-server/
+
 # Secrets and local config
 .env
 .env.*

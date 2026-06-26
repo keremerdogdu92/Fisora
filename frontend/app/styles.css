@@ -56,6 +56,15 @@ button:disabled {
   opacity: 0.55;
 }
 
+:where(button, a, input, select, textarea, summary):focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.42);
+  outline-offset: 2px;
+}
+
+:where(button, .button-like, .sidebar-link, .topbar-action, .topbar-menu, .sidebar-collapse-button, .mode-tab) {
+  min-height: 44px;
+}
+
 .private-shell {
   margin: 0;
   max-width: none;
@@ -474,6 +483,37 @@ button:disabled {
   margin-left: 5px;
   min-width: 20px;
   padding: 0 5px;
+}
+
+.topbar-popover {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 14px;
+  position: absolute;
+  right: 18px;
+  top: 76px;
+  z-index: 30;
+}
+
+.topbar-popover > button {
+  float: right;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.topbar-popover strong {
+  display: block;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+}
+
+.topbar-popover p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
 }
 
 .portal-title-block h1 {

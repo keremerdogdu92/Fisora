@@ -115,3 +115,16 @@ test("workspace backend failure does not stay as loading copy", async ({ page })
   await expect(page.getByText(/Backend okunamadı|Yerel çalışma verisi|Çalışma alanı boş/).first()).toBeVisible();
   await expect(page.getByText("Çalışma alanı yükleniyor")).toHaveCount(0);
 });
+
+test("topbar notification and help actions open visible panels", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.goto("/portal/musavir");
+
+  await page.getByRole("button", { name: /Bildirimler/ }).click();
+  await expect(page.getByRole("dialog", { name: /Bildirimler/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: /Bildirimler/ })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Yardım/ }).click();
+  await expect(page.getByRole("dialog", { name: /Yardım/ })).toBeVisible();
+});

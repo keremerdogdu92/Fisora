@@ -104,3 +104,11 @@ test("tablet dashboard stacks charts before they can overflow the page", () => {
     /@media \(max-width: 1080px\)[\s\S]*?\.dashboard-visual-grid\s*\{[\s\S]*?grid-template-columns:\s*1fr;/,
   );
 });
+
+test("global controls have focus-visible and minimum target contracts", () => {
+  const styles = source("styles.css");
+
+  assert.match(styles, /:where\(button,\s*a,\s*input,\s*select,\s*textarea,\s*summary\):focus-visible/);
+  assert.match(styles, /min-height:\s*44px/);
+  assert.match(styles, /\.topbar-popover/);
+});

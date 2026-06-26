@@ -10,6 +10,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Info } from "./portal-shared";
 import { roleLabels } from "./portal-session";
 import type { DocumentSegment, DraftLine, LocalSession, PilotClient, PilotDocument, PilotMode, PilotStatus, PortalNavItem } from "./portal-types";
@@ -171,6 +172,17 @@ export function PortalTopbarStatus({
   source: { label: string; status: string; detail: string };
   title: string;
 }) {
+  const [activePanel, setActivePanel] = useState<"notifications" | "help" | null>(null);
+
+  useEffect(() => {
+    if (!activePanel) return;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setActivePanel(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [activePanel]);
+
   return (
     <header className="portal-topbar" aria-label="Portal üst çubuğu">
       <div className="portal-title-block">
@@ -180,8 +192,8 @@ export function PortalTopbarStatus({
         <h1>{title}</h1>
       </div>
       <div className="portal-topbar-actions">
-        <button className="topbar-action" type="button">Bildirimler <strong>3</strong></button>
-        <button className="topbar-action" type="button">Yardım</button>
+        <button className="topbar-action" onClick={() => setActivePanel("notifications")} type="button">Bildirimler <strong>3</strong></button>
+        <button className="topbar-action" onClick={() => setActivePanel("help")} type="button">Yardım</button>
         <div className="topbar-user">
           <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalı"}</span>
           <strong>{clientName || session?.userId || "Oturum yok"}</strong>
@@ -195,6 +207,22 @@ export function PortalTopbarStatus({
           Çıkış
         </button>
       </div>
+      {activePanel ? (
+        <div className="topbar-popover" role="dialog" aria-label={activePanel === "notifications" ? "Bildirimler" : "Yardım"}>
+          <button aria-label="Paneli kapat" onClick={() => setActivePanel(null)} type="button">x</button>
+          {activePanel === "notifications" ? (
+            <div>
+              <strong>Bildirimler</strong>
+              <p>Kontrol bekleyen belgeler ve çıktı blokajları belge listesinde gerekçeleriyle gösterilir.</p>
+            </div>
+          ) : (
+            <div>
+              <strong>Yardım</strong>
+              <p>Belge listesinde satırı açın, fiş taslağını kontrol edin, sonra onay veya düzeltme kararı verin.</p>
+            </div>
+          )}
+        </div>
+      ) : null}
     </header>
   );
 }

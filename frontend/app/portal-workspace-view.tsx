@@ -5,6 +5,7 @@ import {
   documentMatchesSegment,
   nextDocumentSelection,
 } from "./features/documents/document-workflow-model";
+import { reviewReasonLabel } from "./portal-normalization";
 import { DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import type {
   CancellationRequest,
@@ -297,7 +298,21 @@ export function AccountantWorkspace({
                 </button>
                 <div>{labelForIntakeCategory(document.intakeCategory)}</div>
                 <div>{document.amount || "-"}</div>
-                <div><em>{formatStatus(document.status)}</em></div>
+                <div>
+                  <em>{formatStatus(document.status)}</em>
+                  {document.reviewReasons.length ? (
+                    <div className="review-reason-chips" aria-label="Kontrol gerekçeleri">
+                      {document.reviewReasons.slice(0, 3).map((reason) => (
+                        <span key={reason}>{reviewReasonLabel(reason)}</span>
+                      ))}
+                      {document.reviewReasons.length > 3 ? <span>+{document.reviewReasons.length - 3}</span> : null}
+                    </div>
+                  ) : document.status === "review_required" ? (
+                    <div className="review-reason-chips" aria-label="Kontrol gerekçeleri">
+                      <span>Ek kontrol gerekli</span>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="bottom-queue-actions">
                   {isActive ? (
                     <>

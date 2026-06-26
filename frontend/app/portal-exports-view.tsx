@@ -1,7 +1,9 @@
+import { groupedReviewReasons } from "./portal-normalization";
 import { Info, Metric } from "./portal-shared";
-import type { AiCapacityAgentView, AiCapacityView, ExportBasketItem, ExportMode, PilotData, PilotReadinessView } from "./portal-types";
+import type { AiCapacityAgentView, AiCapacityView, ExportBasketItem, ExportMode, PilotData, PilotDocument, PilotReadinessView } from "./portal-types";
 
 export function ExportBasketView({
+  documents,
   exportBasket,
   exportMode,
   exportStatus,
@@ -9,6 +11,7 @@ export function ExportBasketView({
   periodLabel,
   setExportMode,
 }: {
+  documents: PilotDocument[];
   exportBasket: ExportBasketItem[];
   exportMode: ExportMode;
   exportStatus: string;
@@ -17,6 +20,8 @@ export function ExportBasketView({
   setExportMode: (value: ExportMode) => void;
 }) {
   const totalDocuments = exportBasket.reduce((sum, item) => sum + item.documentCount, 0);
+  const pendingReviewDocuments = documents.filter((document) => document.status === "review_required");
+  const reviewReasonGroups = groupedReviewReasons(pendingReviewDocuments);
   return (
     <section className="panel export-workspace">
       <div className="panel-heading">
@@ -45,6 +50,22 @@ export function ExportBasketView({
             </span>
           </div>
         ))}
+        {!exportBasket.length && pendingReviewDocuments.length ? (
+          <div className="basket-row blocked-export-row">
+            <div>
+              <strong>Çıktı hazır değil</strong>
+              <span>Önce kontrol bekleyen belgeleri ve onboarding eksiklerini tamamlayın.</span>
+              {reviewReasonGroups.length ? (
+                <div className="review-breakdown-list">
+                  {reviewReasonGroups.slice(0, 4).map((group) => (
+                    <span key={group.code}>{group.label}: {group.count}</span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <span className="status review_required">Kontrol gerekli</span>
+          </div>
+        ) : null}
       </div>
       <button className="primary" onClick={onMarkPackaged} type="button">Çıktı seçimini hazırla</button>
       <p className="decision-status">{exportStatus || "Ay kapanışı tek tık hedefi için çıktı sepeti şimdiden ayrı tutuldu."}</p>

@@ -27,6 +27,32 @@ function agentSourceLabel(value) {
   return "Muhasebe motoru + AI ajan";
 }
 
+const REVIEW_REASON_LABELS = {
+  mixed_vat_manual_review: "KDV ayrımı kontrolü",
+  counterparty_title_token_overlap: "Cari eşleşme kontrolü",
+  onboarding_missing_activity_or_nace: "Mükellef onboarding eksiği",
+  onboarding_missing_workplace_addresses: "İşyeri adresi eksiği",
+  export_blocked_until_review: "Müşavir onayı gerekli",
+  statement_review_required: "Ekstre satırı kontrolü",
+  tax_payment_review: "Vergi ödemesi kontrolü",
+};
+
+function reviewReasonLabel(code) {
+  return REVIEW_REASON_LABELS[safeText(code)] || "Ek kontrol gerekli";
+}
+
+function groupedReviewReasons(documents) {
+  const counts = new Map();
+  for (const document of documents || []) {
+    for (const code of document.reviewReasons || []) {
+      counts.set(code, (counts.get(code) || 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([code, count]) => ({ code, label: reviewReasonLabel(code), count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "tr"));
+}
+
 function normalizeStatementLines(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item, index) => {
@@ -129,6 +155,7 @@ function periodFromDate(value, fallback = "2026-06") {
 
 module.exports = {
   agentSourceLabel,
+  groupedReviewReasons,
   normalizeRulePrompt,
   normalizeStatementAiSuggestions,
   normalizeStatementEntries,
@@ -136,6 +163,7 @@ module.exports = {
   normalizeStatus,
   parseDateParts,
   periodFromDate,
+  reviewReasonLabel,
   safeList,
   safeNumber,
   safeRecord,

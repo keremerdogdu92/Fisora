@@ -6,8 +6,9 @@ import {
   Users,
   UserX,
 } from "lucide-react";
+import { groupedReviewReasons } from "./portal-normalization";
 import { ChartBars, Metric } from "./portal-shared";
-import type { ChartRow, DashboardClientRow } from "./portal-types";
+import type { ChartRow, DashboardClientRow, PilotDocument } from "./portal-types";
 
 type DashboardMetrics = {
   totalClients: number;
@@ -21,6 +22,7 @@ type DashboardMetrics = {
 export function AccountantDashboard({
   clientRows,
   dashboardMetrics,
+  documents,
   funnelRows,
   intakeDistribution,
   onClientSelect,
@@ -29,12 +31,17 @@ export function AccountantDashboard({
 }: {
   clientRows: DashboardClientRow[];
   dashboardMetrics: DashboardMetrics;
+  documents: PilotDocument[];
   funnelRows: ChartRow[];
   intakeDistribution: ChartRow[];
   onClientSelect: (clientId: string) => void;
   selectedClientId: string;
   uploadTrackingRows: ChartRow[];
 }) {
+  const reviewReasonGroups = groupedReviewReasons(
+    documents.filter((document) => document.status === "review_required"),
+  );
+
   return (
     <section className="accountant-dashboard-page">
       <section className="office-dashboard" aria-label="Ofis durumu">
@@ -50,6 +57,19 @@ export function AccountantDashboard({
         <ChartBars title="Durum hunisi" rows={funnelRows} />
         <ChartBars title="Yükleme takibi" rows={uploadTrackingRows} />
       </section>
+      {reviewReasonGroups.length ? (
+        <section className="panel review-breakdown" aria-label="Kontrol bekleyen belge kırılımı">
+          <div className="section-heading">
+            <span>Kontrol bekleyenlerin nedeni</span>
+            <strong>{dashboardMetrics.pendingReviewDocuments} belge aksiyon bekliyor</strong>
+          </div>
+          <div className="review-breakdown-list">
+            {reviewReasonGroups.slice(0, 4).map((group) => (
+              <span key={group.code}>{group.label}: {group.count}</span>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <section className="panel">
         <div className="section-heading">
           <span>Mükellef takibi</span>

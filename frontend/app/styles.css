@@ -1284,6 +1284,41 @@ button:disabled {
   gap: 6px;
 }
 
+.review-reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.review-reason-chips span {
+  background: var(--amber-soft);
+  border: 1px solid rgba(183, 121, 31, 0.26);
+  border-radius: 999px;
+  color: var(--amber);
+  font-size: 0.7rem;
+  font-weight: 900;
+  line-height: 1.2;
+  padding: 3px 7px;
+}
+
+.review-breakdown-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.review-breakdown-list span {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 850;
+  padding: 8px 10px;
+}
+
 .bottom-queue-actions button {
   background: #fff;
   border: 1px solid var(--border);

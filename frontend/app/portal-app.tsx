@@ -426,6 +426,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         <AccountantDashboard
           clientRows={visibleDashboardClientRows}
           dashboardMetrics={dashboardMetrics}
+          documents={data.documents}
           funnelRows={funnelRows}
           intakeDistribution={intakeDistribution}
           onClientSelect={(clientId) => {
@@ -553,6 +554,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
       {mode === "exports" ? (
         <ExportBasketRouteView
+          documents={data.documents}
           exportBasket={data.exportBasket}
           exportMode={exportMode}
           exportStatus={exportStatus}

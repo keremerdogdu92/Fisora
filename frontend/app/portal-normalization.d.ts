@@ -70,7 +70,14 @@ export type NormalizedRulePrompt = {
   officeConsistentDecisionCount: number;
 };
 
+export type ReviewReasonGroup = {
+  code: string;
+  label: string;
+  count: number;
+};
+
 export function agentSourceLabel(value: string): string;
+export function groupedReviewReasons(documents: Array<{ reviewReasons?: string[] }>): ReviewReasonGroup[];
 export function normalizeRulePrompt(value: unknown): NormalizedRulePrompt;
 export function normalizeStatementAiSuggestions(value: unknown): NormalizedStatementAiSuggestion[];
 export function normalizeStatementEntries(value: unknown): NormalizedStatementEntry[];
@@ -78,6 +85,7 @@ export function normalizeStatementLines(value: unknown): NormalizedStatementLine
 export function normalizeStatus(value?: string): NormalizedPilotStatus;
 export function parseDateParts(value: string): { year: string; month: string } | null;
 export function periodFromDate(value: string, fallback?: string): string;
+export function reviewReasonLabel(code: string): string;
 export function safeList(value: unknown): string[];
 export function safeNumber(value: unknown, fallback?: number): number;
 export function safeRecord(value: unknown): Record<string, unknown>;

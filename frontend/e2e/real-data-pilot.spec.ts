@@ -85,6 +85,7 @@ const pilotWorkspace = {
           { account_code: "191.01", description: "KDV", debit: "200.00", credit: "0.00" },
           { account_code: "320.01", description: "Tedarikci", debit: "0.00", credit: "1200.00" },
         ],
+        review_reason_codes: ["mixed_vat_manual_review", "counterparty_title_token_overlap"],
       },
     },
     {
@@ -232,6 +233,8 @@ test("landing role gateway enters accountant portal and document selection uses 
   await expect(page.getByLabel("Belge işleme özeti")).toContainText("invoice-ready.pdf");
   await expect(page.getByText("invoice-ready.pdf").first()).toBeVisible();
   await expect(page.getByText(/AI ajan destekli|Fiş taslağı|Danismanlik/).first()).toBeVisible();
+  await expect(page.getByText("KDV ayrımı kontrolü").first()).toBeVisible();
+  await expect(page.getByText("Cari eşleşme kontrolü").first()).toBeVisible();
   await expect(page.getByText("Belge seçilmedi")).toHaveCount(0);
 });
 

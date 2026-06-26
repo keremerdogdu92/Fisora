@@ -3,12 +3,14 @@ const { test } = require("node:test");
 
 const {
   agentSourceLabel,
+  groupedReviewReasons,
   normalizeRulePrompt,
   normalizeStatementAiSuggestions,
   normalizeStatementEntries,
   normalizeStatementLines,
   normalizeStatus,
   periodFromDate,
+  reviewReasonLabel,
   safeText,
 } = require("./portal-normalization");
 
@@ -89,4 +91,23 @@ test("portal normalization helpers preserve statement entries, AI suggestions, a
     officeDistinctClientCount: 0,
     officeConsistentDecisionCount: 4,
   });
+});
+
+test("review reason labels are accountant-readable Turkish copy", () => {
+  assert.equal(reviewReasonLabel("mixed_vat_manual_review"), "KDV ayrımı kontrolü");
+  assert.equal(reviewReasonLabel("counterparty_title_token_overlap"), "Cari eşleşme kontrolü");
+  assert.equal(reviewReasonLabel("onboarding_missing_activity_or_nace"), "Mükellef onboarding eksiği");
+  assert.equal(reviewReasonLabel("unknown_backend_code"), "Ek kontrol gerekli");
+
+  assert.deepEqual(
+    groupedReviewReasons([
+      { reviewReasons: ["mixed_vat_manual_review", "counterparty_title_token_overlap"] },
+      { reviewReasons: ["mixed_vat_manual_review", "onboarding_missing_activity_or_nace"] },
+    ]),
+    [
+      { code: "mixed_vat_manual_review", label: "KDV ayrımı kontrolü", count: 2 },
+      { code: "counterparty_title_token_overlap", label: "Cari eşleşme kontrolü", count: 1 },
+      { code: "onboarding_missing_activity_or_nace", label: "Mükellef onboarding eksiği", count: 1 },
+    ],
+  );
 });

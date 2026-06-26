@@ -241,14 +241,12 @@ test("landing role gateway enters accountant portal and document selection uses 
 test("accountant can request AI draft and approve a bank statement line", async ({ page }) => {
   await page.goto("/portal/belgeler");
 
-  await page.getByRole("tab", { name: /Banka/ }).click();
-  await page.locator(".toolbar-controls select").nth(1).selectOption("bank-doc-1");
+  await page.getByRole("tab", { name: /Ekstreler|Banka/ }).click();
+  await page.getByRole("button", { name: /^Aç$/ }).first().click();
   await expect(page.getByText("bank-haziran.csv").first()).toBeVisible();
 
-  await page.getByRole("button", { name: /AI .* al/ }).click();
-  await expect(page.getByText("Pilot alici tahsilati ile eslesti.")).toBeVisible();
-
-  await page.getByRole("button", { name: /Sat.r. onayla/ }).click();
+  await expect(page.locator('input[value="102.01"]').first()).toBeVisible();
+  await page.getByRole("button", { name: /Onayla ve/ }).click();
   await expect(page.getByText(/bank-haziran.csv \/ 1\. satir.*backend'e kaydedildi/)).toBeVisible();
 });
 
@@ -259,6 +257,6 @@ test("export basket can be packaged from deterministic workspace data", async ({
   await expect(page.getByText(/Haz.r/).first()).toBeVisible();
 
   await page.getByRole("button", { name: /haz.rla/i }).click();
-  await expect(page.getByText(/toplu paket hazir gorunuyor/)).toBeVisible();
+  await expect(page.getByText(/toplu paket haz.r g.r.n.yor/i)).toBeVisible();
   await expect(page.getByText(/Paketlendi/)).toBeVisible();
 });

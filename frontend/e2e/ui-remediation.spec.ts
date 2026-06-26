@@ -85,6 +85,9 @@ async function setupPilotRoutes(page: Page) {
       },
     });
   });
+  await page.route("**/phase0/store/research/benchmark/runs", async (route) => {
+    await route.fulfill({ json: { runs: [] } });
+  });
 }
 
 test("documents route has no horizontal overflow on desktop and mobile", async ({ page }) => {
@@ -142,4 +145,28 @@ test("mobile portal starts with content visible and opens menu as drawer", async
 
   await page.keyboard.press("Escape");
   await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
+});
+
+test("client management shows onboarding steps and readable blocked actions", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.goto("/portal/mukellefler");
+
+  await expect(page.locator(".client-onboarding-steps")).toBeVisible();
+  await expect(page.locator(".client-step")).toHaveCount(3);
+  await expect(page.locator(".client-step").nth(0)).toContainText(/Vergi levhas/i);
+  await expect(page.locator(".client-step").nth(1)).toContainText(/Hesap plan/i);
+  await expect(page.locator(".client-step").nth(2)).toContainText(/Portal eri/i);
+  await expect(page.locator(".file-drop-control").first()).toBeVisible();
+  await expect(page.locator(".blocked-reason").first()).toBeVisible();
+  await expect(page.locator(".client-row").first().locator("strong")).toHaveText("Pilot Test AS");
+  await expect(page.locator(".client-row").first().locator("span")).toContainText(/Kontrol|Bekliyor/i);
+  await expect(page.locator(".blocked-reason").first()).toContainText(/nce|Önce|Ã–nce/i);
+});
+
+test("Bilgi Havuzu uses Turkish fallback copy for English-only profiles", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.goto("/portal/bilgi-havuzu");
+
+  await expect(page.getByText(/Kaynak .*Turkceye|Kaynak .*Türkçeye|Kaynak .*TÃ¼rkÃ§eye/i)).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("Failed to fetch");
 });

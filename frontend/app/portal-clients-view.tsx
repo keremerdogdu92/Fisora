@@ -74,6 +74,7 @@ export function ClientManagementView({
   const selectedDocumentRefSet = new Set(selectedDocumentRefs);
   const selectableDocumentRefs = documents.map((document) => document.originalDocumentRef || document.id).filter(Boolean);
   const allDocumentsSelected = Boolean(selectableDocumentRefs.length && selectableDocumentRefs.every((ref) => selectedDocumentRefSet.has(ref)));
+  const hasSelectedClient = Boolean(selectedClient);
   const toggleDocument = (documentRef: string, checked: boolean) => {
     if (checked) {
       setSelectedDocumentRefs(Array.from(new Set([...selectedDocumentRefs, documentRef])));
@@ -129,14 +130,17 @@ export function ClientManagementView({
         <div className="settings-card">
           <span>Hesap planı import</span>
           <strong>{selectedClient?.clientName ?? "-"}</strong>
-          <label className="upload-dropzone compact-upload">
+          <label className="file-drop-control compact-upload">
             <input
               accept=".csv,.xlsx,.xlsm"
+              disabled={!hasSelectedClient}
               onChange={(event) => onChartFileSelected(event.target.files)}
               type="file"
             />
-            CSV/XLSX hesap planı seç
+            <span>Dosya seç</span>
+            <small>CSV/XLSX hesap planı</small>
           </label>
+          {!hasSelectedClient ? <small className="blocked-reason">Önce mükellef seçin.</small> : null}
           {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
         </div>
         <div className="settings-card">
@@ -366,12 +370,13 @@ function NewClientStepper({
         <span className={accessReady ? "done" : chartReady ? "active" : ""}>3 Portal erişimi</span>
       </div>
 
-      <section className={identityReady ? "onboarding-step done" : "onboarding-step active"}>
+      <section className="client-onboarding-steps" aria-label="Mükellef onboarding adımları">
+        <article className={`client-step ${identityReady ? "onboarding-step done" : "onboarding-step active"}`}>
         <div>
           <span>1. Vergi levhası</span>
           <strong>Önce belgeyi yükleyin, alanları otomatik dolduralım</strong>
         </div>
-        <label className="tax-certificate-upload">
+        <label className="file-drop-control">
           <span>Vergi levhası</span>
           <input
             accept=".pdf,.jpg,.jpeg,.png"
@@ -380,7 +385,7 @@ function NewClientStepper({
             onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
             type="file"
           />
-          <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
+          <small>{taxCertificateFile?.name ?? "PDF, XML, XLSX veya CSV"}</small>
         </label>
         {showManualFields ? (
           <div className="onboarding-fields">
@@ -447,14 +452,14 @@ function NewClientStepper({
             ))}
           </div>
         ) : null}
-      </section>
+        </article>
 
-      <section className={chartReady ? "onboarding-step done" : identityReady ? "onboarding-step active" : "onboarding-step locked"}>
+        <article className={`client-step ${chartReady ? "onboarding-step done" : identityReady ? "onboarding-step active" : "onboarding-step locked"}`}>
         <div>
           <span>2. Hesap planı</span>
           <strong>{chartReady ? `${draft.chartAccountFileName} yüklendi` : "Hesap planı zorunlu"}</strong>
         </div>
-        <label className="tax-certificate-upload">
+        <label className="file-drop-control">
           <span>CSV/XLSX hesap planı</span>
           <input
             accept=".csv,.xlsx,.xlsm"
@@ -464,9 +469,10 @@ function NewClientStepper({
           />
           <small>{chartReady ? `${draft.chartAccounts.length} hesap okundu` : "Hesap planı yüklenmeden devam edilmez"}</small>
         </label>
-      </section>
+        {!identityReady ? <small className="blocked-reason">Önce vergi levhası yükleyin.</small> : null}
+        </article>
 
-      <section className={accessReady ? "onboarding-step done" : chartReady ? "onboarding-step active" : "onboarding-step locked"}>
+        <article className={`client-step ${accessReady ? "onboarding-step done" : chartReady ? "onboarding-step active" : "onboarding-step locked"}`}>
         <div>
           <span>3. Portal erişimi</span>
           <strong>Mükellef kullanıcı adı ve geçici şifre</strong>
@@ -488,6 +494,8 @@ function NewClientStepper({
             value={portalPassword}
           />
         </div>
+        {!chartReady ? <small className="blocked-reason">Önce hesap planı yükleyin.</small> : null}
+        </article>
       </section>
 
       <button className="primary full" disabled={!canComplete} onClick={onCreate} type="button">Mükellefi oluştur</button>

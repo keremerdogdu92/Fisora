@@ -15,6 +15,12 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function turkishResearchSummary(profile) {
+  const summaryTr = safeText(profile?.summary_tr ?? profile?.summaryTr);
+  if (summaryTr) return summaryTr;
+  return "Kaynak özeti Türkçeye çevrilmemiş. Detay panelinde ham kaynak metni incelenebilir.";
+}
+
 function normalizeAccountCandidate(candidate) {
   return {
     code: safeText(candidate?.code),
@@ -605,4 +611,5 @@ module.exports = {
   overrideResearchProfile,
   refreshResearchProfile,
   runResearchBenchmark,
+  turkishResearchSummary,
 };

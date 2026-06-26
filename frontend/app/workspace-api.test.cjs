@@ -12,6 +12,7 @@ const {
   overrideResearchProfile,
   refreshResearchProfile,
   runResearchBenchmark,
+  turkishResearchSummary,
 } = require("./workspace-api");
 
 const clientRecord = {
@@ -186,6 +187,17 @@ test("backendAuthHeaders prefers session tokens and falls back to the mock user 
     "X-Fisora-User-Id": "mukellef-user",
   });
   assert.deepEqual(backendAuthHeaders({}), {});
+});
+
+test("research profile summaries expose Turkish-safe fallback text", () => {
+  assert.equal(
+    turkishResearchSummary({ summary_tr: "Türkçe özet hazır.", summary: "English summary." }),
+    "Türkçe özet hazır.",
+  );
+  assert.equal(
+    turkishResearchSummary({ summary: "English summary." }),
+    "Kaynak özeti Türkçeye çevrilmemiş. Detay panelinde ham kaynak metni incelenebilir.",
+  );
 });
 
 test("normalizeBackendWorkspaces maps backend workspace records into portal data", () => {

@@ -10,6 +10,7 @@ import {
   overrideResearchProfile,
   refreshResearchProfile,
   runResearchBenchmark,
+  turkishResearchSummary,
 } from "./workspace-api";
 
 type ResearchPayload = {
@@ -131,8 +132,8 @@ export function ResearchKnowledgeView({
       .then(() => {
         if (!cancelled) setStatus("");
       })
-      .catch((error) => {
-        if (!cancelled) setStatus(error instanceof Error ? error.message : "Bilgi havuzu okunamadı.");
+      .catch(() => {
+        if (!cancelled) setStatus("Bilgi havuzu sunucudan okunamadı. Yenile düğmesiyle tekrar deneyin.");
       });
     return () => {
       cancelled = true;
@@ -140,39 +141,51 @@ export function ResearchKnowledgeView({
   }, [apiBaseUrl, session?.sessionToken, session?.userId, loginUserId]);
 
   async function submitRefresh(payload: ResearchPayload) {
-    setStatus("Araştırma yenileniyor.");
-    await refreshResearchProfile({ apiBaseUrl, payload, ...auth });
-    await loadResearchData();
-    setStatus("Araştırma profili yenilendi.");
+    setStatus("İşlem çalışıyor.");
+    try {
+      await refreshResearchProfile({ apiBaseUrl, payload, ...auth });
+      await loadResearchData();
+      setStatus("Bilgi havuzu güncellendi.");
+    } catch {
+      setStatus("İşlem tamamlanamadı. Sunucu yanıtını operasyon ekranından kontrol edin.");
+    }
   }
 
   async function submitOverride() {
     if (!selectedProfile) return;
-    setStatus("Ofis geneli override kaydediliyor.");
-    await overrideResearchProfile({
-      apiBaseUrl,
-      payload: {
-        kind: selectedProfile.kind || "brand",
-        key: selectedProfile.key,
-        summary_tr: overrideSummary || selectedProfile.summary_tr || selectedProfile.summary || "",
-        category_tags: (overrideCategory || categorySummary(selectedProfile))
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
-        account_treatment: selectedProfile.account_treatment || "",
-        confidence: 100,
-      },
-      ...auth,
-    });
-    await loadResearchData();
-    setStatus("Override kaydedildi.");
+    setStatus("İşlem çalışıyor.");
+    try {
+      await overrideResearchProfile({
+        apiBaseUrl,
+        payload: {
+          kind: selectedProfile.kind || "brand",
+          key: selectedProfile.key,
+          summary_tr: overrideSummary || selectedProfile.summary_tr || selectedProfile.summary || "",
+          category_tags: (overrideCategory || categorySummary(selectedProfile))
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean),
+          account_treatment: selectedProfile.account_treatment || "",
+          confidence: 100,
+        },
+        ...auth,
+      });
+      await loadResearchData();
+      setStatus("Bilgi havuzu güncellendi.");
+    } catch {
+      setStatus("İşlem tamamlanamadı. Sunucu yanıtını operasyon ekranından kontrol edin.");
+    }
   }
 
   async function submitBenchmark() {
-    setStatus("Benchmark çalışıyor.");
-    await runResearchBenchmark({ apiBaseUrl, ...auth });
-    await loadResearchData();
-    setStatus("Benchmark tamamlandı.");
+    setStatus("İşlem çalışıyor.");
+    try {
+      await runResearchBenchmark({ apiBaseUrl, ...auth });
+      await loadResearchData();
+      setStatus("Bilgi havuzu güncellendi.");
+    } catch {
+      setStatus("İşlem tamamlanamadı. Sunucu yanıtını operasyon ekranından kontrol edin.");
+    }
   }
 
   const sortedBenchmarkRuns = useMemo(() => sortBenchmarkRuns(benchmarkRuns), [benchmarkRuns]);
@@ -192,7 +205,7 @@ export function ResearchKnowledgeView({
           <Metric label="Profil" value={profiles.length} />
           <Metric label="Benchmark" value={benchmarkRuns.length} />
         </div>
-        <p className="decision-status">{status || "Yeni belgelerde güvenli research sinyali kullanılır; export kapısı yine müşavir kontrolündedir."}</p>
+        <p className={status.includes("okunamadı") || status.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>{status || "Yeni belgelerde güvenli research sinyali kullanılır; export kapısı yine müşavir kontrolündedir."}</p>
       </div>
 
       <div className="panel">
@@ -207,7 +220,7 @@ export function ResearchKnowledgeView({
             >
               <div>
                 <strong>{profile.key}</strong>
-                <span>{profile.summary || profile.summary_tr || categorySummary(profile) || "Özet yok"}</span>
+                <span>{turkishResearchSummary(profile)}</span>
               </div>
               <span className="status export_ready">{formatConfidence(profileResearchConfidence(profile))}</span>
             </button>

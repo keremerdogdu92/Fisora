@@ -168,69 +168,75 @@ export function AccountantWorkspace({
 
   function selectDocument(document: PilotDocument) {
     const nextSelection = nextDocumentSelection(document);
-    setSelectedDocumentSegment(nextSelection.selectedDocumentSegment);
+    setSelectedDocumentSegment(nextSelection.selectedDocumentSegment as DocumentSegment);
     setSelectedDocumentId(nextSelection.selectedDocumentId);
   }
 
   return (
     <section className="accountant-workspace">
       <section className="document-review-toolbar" aria-label="Belge kontrol araçları">
-        <label className="compact-field">
-          <span>Mükellef</span>
-          <select
-            onChange={(event) => {
-              setSelectedClientId(event.target.value);
-              setSelectedDocumentId("");
-            }}
-            value={selectedClient?.clientId ?? ""}
-          >
-            {clients.map((client) => (
-              <option key={client.clientId} value={client.clientId}>
-                {client.clientName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
-          {segmentOptions.map((option) => (
-            <button
-              aria-selected={selectedDocumentSegment === option.id}
-              className={selectedDocumentSegment === option.id ? "active" : ""}
-              key={option.id}
-              onClick={() => {
-                setSelectedDocumentSegment(option.id);
+        <div className="document-review-toolbar-fields">
+          <label className="compact-field">
+            <span>Mükellef</span>
+            <select
+              onChange={(event) => {
+                setSelectedClientId(event.target.value);
                 setSelectedDocumentId("");
               }}
-              role="tab"
-              type="button"
+              value={selectedClient?.clientId ?? ""}
             >
-              <span>{option.label}</span>
-              <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
-            </button>
-          ))}
+              {clients.map((client) => (
+                <option key={client.clientId} value={client.clientId}>
+                  {client.clientName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="compact-field">
+            <span>Kontrol filtresi</span>
+            <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
+              <option value="review_required">Kontrol gerekli</option>
+              <option value="export_ready">Aktarıma hazır</option>
+              <option value="cancel_requested">İptal talepleri</option>
+              <option value="all">Tüm belgeler</option>
+            </select>
+          </label>
+          <label className="compact-field">
+            <span>Ara</span>
+            <input
+              className="search-input"
+              onChange={(event) => setDocumentQuery(event.target.value)}
+              placeholder="Belge adı, tür, tutar..."
+              value={documentQuery}
+            />
+          </label>
         </div>
-        <label className="compact-field">
-          <span>Kontrol filtresi</span>
-          <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
-            <option value="review_required">Kontrol gerekli</option>
-            <option value="export_ready">Aktarıma hazır</option>
-            <option value="cancel_requested">İptal talepleri</option>
-            <option value="all">Tüm belgeler</option>
-          </select>
-        </label>
-        <label className="compact-field">
-          <span>Ara</span>
-          <input
-            className="search-input"
-            onChange={(event) => setDocumentQuery(event.target.value)}
-            placeholder="Belge adı, tür, tutar..."
-            value={documentQuery}
-          />
-        </label>
-        <div className="queue-stepper">
-          <span>{selectedDocument ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
-          <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
-          <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+        <div className="document-review-toolbar-tabs">
+          <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
+            {segmentOptions.map((option) => (
+              <button
+                aria-selected={selectedDocumentSegment === option.id}
+                className={selectedDocumentSegment === option.id ? "active" : ""}
+                key={option.id}
+                onClick={() => {
+                  setSelectedDocumentSegment(option.id);
+                  setSelectedDocumentId("");
+                }}
+                role="tab"
+                type="button"
+              >
+                <span>{option.label}</span>
+                <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="document-review-toolbar-stepper">
+          <div className="queue-stepper">
+            <span>{selectedDocument ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
+            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
+            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+          </div>
         </div>
       </section>
 

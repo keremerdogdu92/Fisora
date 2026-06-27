@@ -56,6 +56,31 @@ function Invoke-CommandLine {
     }
 }
 
+function Invoke-Git {
+    param([string[]]$GitArgs)
+    $output = & git @GitArgs 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw (($output | Out-String).Trim())
+    }
+    return $output
+}
+
+function Assert-OriginParity {
+    param([string]$Branch)
+
+    Invoke-Git -GitArgs @("fetch", "--quiet", "origin", $Branch) | Out-Null
+    $counts = ((Invoke-Git -GitArgs @("rev-list", "--left-right", "--count", "HEAD...origin/$Branch")) | Select-Object -First 1).Trim()
+    $parts = $counts -split "\s+"
+    $ahead = [int]$parts[0]
+    $behind = [int]$parts[1]
+    if ($ahead -gt 0) {
+        throw "Local branch origin/$Branch'den ahead; once publish calistir."
+    }
+    if ($behind -gt 0) {
+        throw "Local branch origin/$Branch'den behind; once local branch'i guncelle."
+    }
+}
+
 function New-RemoteScript {
     param(
         [string]$RemotePath,
@@ -147,6 +172,11 @@ $summary.steps += Invoke-Step -Name "local-git-status" -Script {
     if ($dirty -and -not $AllowDirty) {
         throw "Local worktree has uncommitted changes. Commit/stash or rerun with -AllowDirty."
     }
+}
+if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
+
+$summary.steps += Invoke-Step -Name "origin-parity" -Script {
+    Assert-OriginParity -Branch $Branch
 }
 if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }
 

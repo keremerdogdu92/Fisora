@@ -22,7 +22,14 @@ frontend/public/local-workspace-data.json
 frontend/public/local-pilot-data.json
 
 # Local UI audit evidence can include real customer identifiers.
+docs/ui/
 docs/ui/audit-*/live-server/
+
+# Local Superpowers working files and obsolete plan drafts.
+.superpowers/
+docs/superpowers/plans/2026-06-23-portal-ui-turkish-encoding-redesign.md
+docs/superpowers/plans/2026-06-25-dashboard-metric-cards-sidebar-icons.md
+docs/superpowers/plans/2026-06-26-fisero-ui-ux-remediation.md
 
 # Secrets and local config
 .env

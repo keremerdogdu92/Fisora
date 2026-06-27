@@ -79,10 +79,23 @@ sh deploy/scripts/fisora-prod.sh smoke
 
 ## Gunluk Operasyon Komutlari
 
+GitHub'a sessiz publish:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-publish.ps1 -Branch main -Json
+```
+
 Tek komutla local dogrulama, server deploy ve live health/readiness kontrolu:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -Branch main -Json
+```
+
+Kisa gunluk akis:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-publish.ps1 -Branch main -Json
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -Branch main -Json
 ```
 
 Daha hizli bir server-only release icin local test/build atlanabilir:

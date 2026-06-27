@@ -7,10 +7,14 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy: `main` ucu `846ecd4`; deploy sonunda
+- Son dogrulanan runtime deploy: `main` ucu `cd7772c`; deploy sonunda
   `git rev-parse` ile tekrar kontrol edildi.
-- Son deploy smoke: 2026-06-25, `/health` 200, readiness `ready=true`,
+- Son deploy smoke: 2026-06-27, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root ve tum `/portal/*` kontrol rotalari 200.
+- KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,
+  `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`
+  kaydi, pipeline'a `vat_split_classified`, musavir onayina
+  `vat_split_review_saved` olayi eklendi.
 - UI/UX remediation deploy: 2026-06-26, `main` ucu `86000c7`.
   Release orchestrator `smoke=ok`, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true` dondu.

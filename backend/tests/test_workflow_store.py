@@ -1070,6 +1070,71 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(workspace["documents"][0]["export_status"], "review_required")
         self.assertEqual(workspace["documents"][0]["review_reason_codes"], ["parser_output_required"])
 
+    def test_processing_worker_persists_vat_split_review_record_for_pdf_invoice(self) -> None:
+        sample_path = (
+            ROOT
+            / "private_samples"
+            / "real_pilot"
+            / "firma-3"
+            / "invoices"
+            / "sales"
+            / "einvoice.1a78033e-af6d-498e-8252-28c5b9132ccb.IF02026000000013.pdf"
+        )
+        if not sample_path.exists():
+            self.skipTest("private pilot invoice sample missing")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Isitme Merkezi",
+                    "tax_id": "21106530840",
+                    "activity_description": "isitme cihazi satis ve servis",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "600.01", "normalized_account_code": "600.01", "account_name": "Yurt ici satislar", "is_detail_account": True},
+                    {"raw_account_code": "391.01", "normalized_account_code": "391.01", "account_name": "Hesaplanan KDV", "is_detail_account": True},
+                    {"raw_account_code": "120.01", "normalized_account_code": "120.01", "account_name": "Alicilar", "is_detail_account": True},
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "pdf-doc",
+                    "document_ref": "pdf-doc",
+                    "document_type": "invoice",
+                    "original_file_name": sample_path.name,
+                    "storage_path": str(sample_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="invoice",
+                parser_kind=parser_kind_for_document_type("invoice"),
+                intake_category="sales_invoice",
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(result["vat_split_review"]["status"], "exact")
+        self.assertEqual(result["vat_split_review"]["lines"][0]["taxable_amount"], "15999.90")
+        self.assertEqual(result["vat_split_review"]["similarity_key"], "vat_split:exact:20:vat_split_gross_total_validated")
+        self.assertTrue(result["vat_split_review"]["learning_candidate"])
+        self.assertIn("vat_split_classified", [event["step"] for event in workspace["document_pipeline_events"]])
+
     def test_processing_worker_parses_xml_invoice_and_runs_simulation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "rexton.xml"

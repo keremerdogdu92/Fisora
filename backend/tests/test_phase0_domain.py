@@ -59,11 +59,12 @@ from app.domain.journal_entries import (
     build_sales_entry,
     money,
 )
-from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount, resolve_payable_total
+from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount, parse_pdf_invoice, resolve_payable_total
 from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, StatementAiSuggestionRequest, suggest_statement_lines
 from app.domain.statement_lines import StatementLine
+from app.domain.vat_split_learning import build_vat_split_review_record, vat_split_review_payload
 from app.domain.workspace_exports import build_workspace_export_package, export_candidates_from_workspace
 
 
@@ -716,6 +717,195 @@ class Phase0DomainTests(unittest.TestCase):
         lines = extract_invoice_lines_from_text(text)
 
         self.assertEqual(lines[0].description, "SLIM TAPER")
+
+    def test_pdf_vat_split_extracts_real_pilot_table_and_summary_evidence(self) -> None:
+        cases = [
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "6200031354_20D2026000003801.pdf",
+                (("1", "795.75", "7.96"), ("20", "116.58", "23.32")),
+                "912.33",
+                "31.28",
+                "943.61",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "1640731289_AAA2026000001303.pdf",
+                (("0", "344390.64", "0.00"),),
+                "344390.64",
+                "0.00",
+                "344390.64",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "1640731289_AAA2026000001222.pdf",
+                (("20", "94447.80", "18889.56"),),
+                "94447.80",
+                "18889.56",
+                "113337.36",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "1640731289_AAA2026000001172.pdf",
+                (("0", "13660.00", "0.00"), ("20", "2500.20", "500.04")),
+                "16160.20",
+                "500.04",
+                "16660.24",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "purchases" / "30007700894_EFR2026000010819.pdf",
+                (("20", "248.33", "49.67"),),
+                "248.33",
+                "49.67",
+                "298.00",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "purchases" / "9860008925_YKA2026002672767.pdf",
+                (("20", "322.08", "64.42"),),
+                "322.08",
+                "64.42",
+                "386.50",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "sales" / "16973036588_VEÇHİYE YÜRÜKCÜ_AAR2026000000002.pdf",
+                (("0", "28000.00", "0.00"),),
+                "28000.00",
+                "0.00",
+                "28000.00",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "1061386125_AVQ2026000000026.pdf",
+                (("10", "3090.90", "309.09"),),
+                "3090.90",
+                "309.09",
+                "3399.99",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "sales" / "46633788588_MELAHAT BİLGİÇ_AAF2026000000004.pdf",
+                (("0", "51000.00", "0.00"), ("20", "2500.00", "500.00")),
+                "53500.00",
+                "500.00",
+                "54000.00",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "purchases" / "44513097980_WOO2026000000033.pdf",
+                (("0", "105.01", "0.00"), ("10", "146.12", "14.61")),
+                "251.13",
+                "14.61",
+                "265.74",
+            ),
+            (
+                ROOT
+                / "private_samples"
+                / "real_pilot"
+                / "firma-3"
+                / "invoices"
+                / "sales"
+                / "einvoice.1a78033e-af6d-498e-8252-28c5b9132ccb.IF02026000000013.pdf",
+                (("20", "15999.90", "3199.98"),),
+                "15999.90",
+                "3199.98",
+                "19199.88",
+            ),
+        ]
+        for path, expected_lines, goods_total, vat_total, payable_total in cases:
+            if not path.exists():
+                self.skipTest(f"private pilot invoice sample missing: {path}")
+
+            invoice = parse_pdf_invoice(path)
+
+            self.assertEqual(invoice.vat_split_status, "exact", path.name)
+            self.assertEqual(
+                tuple((line.rate, line.taxable_amount, line.tax_amount) for line in invoice.vat_split_lines),
+                expected_lines,
+                path.name,
+            )
+            self.assertEqual(invoice.goods_services_total, goods_total, path.name)
+            self.assertEqual(invoice.vat_total, vat_total, path.name)
+            self.assertEqual(invoice.payable_total, payable_total, path.name)
+
+    def test_pdf_vat_split_derives_vat_when_invoice_total_has_non_vat_amounts(self) -> None:
+        cases = [
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "purchases" / "4810577635_AS02026000752460.pdf",
+                (("20", "580.81", "116.16"),),
+                "580.81",
+                "116.16",
+                "700.00",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "purchases" / "7350150917_AFM2026051201795.pdf",
+                (("20", "546.40", "109.28"),),
+                "546.40",
+                "109.28",
+                "899.90",
+            ),
+            (
+                ROOT / "private_samples" / "real_pilot" / "firma-1" / "invoices" / "purchases" / "8590380323_GB22026004259480.pdf",
+                (("20", "191.30", "38.26"),),
+                "191.30",
+                "38.26",
+                "275.75",
+            ),
+            (
+                Path.home()
+                / "Downloads"
+                / "einvoice.517717e1-f2c4-44ea-81c3-a1678faa754b.VP12026000173542.pdf",
+                (("10", "110.22", "11.02"),),
+                "110.22",
+                "11.02",
+                "121.00",
+            ),
+        ]
+        for path, expected_lines, goods_total, vat_total, payable_total in cases:
+            if not path.exists():
+                self.skipTest(f"private pilot invoice sample missing: {path}")
+
+            invoice = parse_pdf_invoice(path)
+
+            self.assertEqual(invoice.vat_split_status, "derived", path.name)
+            self.assertEqual(
+                tuple((line.rate, line.taxable_amount, line.tax_amount) for line in invoice.vat_split_lines),
+                expected_lines,
+                path.name,
+            )
+            self.assertEqual(invoice.goods_services_total, goods_total, path.name)
+            self.assertEqual(invoice.vat_total, vat_total, path.name)
+            self.assertEqual(invoice.payable_total, payable_total, path.name)
+
+    def test_vat_split_review_record_keeps_layout_evidence_for_future_rules(self) -> None:
+        exact_path = (
+            ROOT
+            / "private_samples"
+            / "real_pilot"
+            / "firma-3"
+            / "invoices"
+            / "sales"
+            / "einvoice.1a78033e-af6d-498e-8252-28c5b9132ccb.IF02026000000013.pdf"
+        )
+        derived_path = (
+            ROOT
+            / "private_samples"
+            / "real_pilot"
+            / "firma-1"
+            / "invoices"
+            / "purchases"
+            / "4810577635_AS02026000752460.pdf"
+        )
+        if not exact_path.exists() or not derived_path.exists():
+            self.skipTest("private pilot invoice sample missing")
+
+        exact_record = build_vat_split_review_record(parse_pdf_invoice(exact_path), document_ref="doc-exact")
+        derived_record = build_vat_split_review_record(parse_pdf_invoice(derived_path), document_ref="doc-derived")
+
+        self.assertFalse(exact_record.requires_accountant_review)
+        self.assertEqual(exact_record.confidence, "exact_total_validated")
+        self.assertEqual(exact_record.similarity_key, "vat_split:exact:20:vat_split_gross_total_validated")
+        self.assertEqual(exact_record.lines[0].taxable_amount, "15999.90")
+        self.assertTrue(exact_record.learning_candidate)
+        self.assertFalse(exact_record.automation_candidate)
+
+        self.assertFalse(derived_record.requires_accountant_review)
+        self.assertEqual(derived_record.confidence, "vat_amounts_validated_non_vat_total")
+        self.assertEqual(derived_record.review_reason_codes, ("vat_split_non_vat_total",))
+        self.assertEqual(derived_record.lines[0].tax_amount, "116.16")
+        self.assertEqual(vat_split_review_payload(derived_record)["status"], "derived")
 
     def test_pdf_invoice_route_returns_notes_tuple_for_journal_candidate(self) -> None:
         route, notes = build_route(

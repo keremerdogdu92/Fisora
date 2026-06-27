@@ -9,6 +9,7 @@ from pathlib import Path
 
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text, invoice_line_hints
+from app.domain.vat_splits import VatSplitLine, extract_pdf_vat_split
 
 
 DATE_RE = re.compile(r"(?<!\d)([0-3]?\d)\s*[./-]\s*([01]?\d)\s*[./-]\s*(20\d{2})(?!\d)")
@@ -100,6 +101,9 @@ class ParsedInvoice:
     accounting_direction: str = "uncertain"
     direction_confidence: int = 0
     direction_evidence: tuple[str, ...] = ()
+    vat_split_status: str = ""
+    vat_split_lines: tuple[VatSplitLine, ...] = ()
+    vat_split_evidence: tuple[str, ...] = ()
 
 
 def extract_pdf_text(path: Path) -> tuple[int, str, tuple[str, ...]]:
@@ -474,6 +478,16 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         key: extract_label_amount(text, labels)
         for key, labels in TOTAL_LABELS.items()
     }
+    vat_split = extract_pdf_vat_split(path)
+    if vat_split.status in {"exact", "derived"}:
+        if vat_split.total_taxable_amount:
+            parsed_totals["goods_services_total"] = vat_split.total_taxable_amount
+        if vat_split.total_tax_amount:
+            parsed_totals["vat_total"] = vat_split.total_tax_amount
+        if vat_split.tax_inclusive_total:
+            parsed_totals["tax_inclusive_total"] = vat_split.tax_inclusive_total
+        if vat_split.payable_total:
+            parsed_totals["payable_total"] = vat_split.payable_total
     payable_total, payable_notes = resolve_payable_total(parsed_totals)
     parsed_identity = {
         "invoice_no": extract_invoice_no(text) or edge_summary.invoice_no,
@@ -514,6 +528,9 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         recipient_tax_id=recipient_tax_id,
         invoice_type_code=invoice_type,
         is_return_invoice=normalize_for_search(invoice_type) in {"iade", "return"},
+        vat_split_status=vat_split.status,
+        vat_split_lines=vat_split.lines,
+        vat_split_evidence=vat_split.evidence,
     )
 
 

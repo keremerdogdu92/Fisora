@@ -42,6 +42,7 @@ from app.domain.statement_ai_suggestions import (
 )
 from app.domain.statement_journal_entries import build_statement_entry_records, statement_entry_payload
 from app.domain.statement_lines import enrich_statement_lines_with_counterparties, parse_statement_file
+from app.domain.vat_split_learning import build_vat_split_review_record, vat_split_review_payload
 from app.domain.xml_invoices import parse_xml_invoice
 
 
@@ -235,6 +236,20 @@ def _serializable_simulation(
         "draft_lines",
     ):
         data[key] = list(data[key])
+    vat_review = build_vat_split_review_record(invoice, document_ref=invoice.file_name)
+    if vat_review.status != "unavailable":
+        data["vat_split_status"] = vat_review.status
+        data["vat_split_lines"] = [asdict(line) for line in vat_review.lines]
+        data["vat_split_evidence"] = list(vat_review.evidence)
+        data["vat_split_review"] = vat_split_review_payload(vat_review)
+        if vat_review.requires_accountant_review:
+            data["review_reason_codes"] = list(
+                dict.fromkeys((*data.get("review_reason_codes", []), *vat_review.review_reason_codes))
+            )
+            data["risk_flags"] = list(dict.fromkeys((*data.get("risk_flags", []), "vat_split_review_required")))
+            data["simulated_status"] = "review_required"
+            data["export_status"] = "review_required"
+            data["export_gate_reason"] = "KDV oran/matrah ayrimi musavir kontrolu gerektiriyor."
     return _with_review_summary(data)
 
 
@@ -352,6 +367,7 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "parse_notes": list(result.get("parse_notes") or []),
         "review_reason_codes": list(result.get("review_reason_codes") or []),
         "risk_flags": list(result.get("risk_flags") or []),
+        "vat_split_review": result.get("vat_split_review") if isinstance(result.get("vat_split_review"), dict) else {},
         "ai_provider": str(result.get("ai_classification_provider") or ""),
         "ai_skipped_reason": str(result.get("ai_classification_skipped_reason") or ""),
         "ai_reason": str(result.get("ai_classification_reason") or ""),
@@ -901,6 +917,22 @@ def process_next_job_once(
                     "vat_rates": list(result.get("vat_rates") or []),
                     "vat_total": str(result.get("vat_total") or ""),
                     "payable_total": str(result.get("payable_total") or ""),
+                },
+            )
+        vat_split_review = result.get("vat_split_review") if isinstance(result.get("vat_split_review"), dict) else {}
+        if vat_split_review:
+            requires_vat_review = bool(vat_split_review.get("requires_accountant_review"))
+            pipeline_event(
+                "vat_split_classified",
+                "warning" if requires_vat_review else "ok",
+                "KDV ayrimi guven sinifina alindi.",
+                "vat_split_classified",
+                {
+                    "status": str(vat_split_review.get("status") or ""),
+                    "confidence": str(vat_split_review.get("confidence") or ""),
+                    "similarity_key": str(vat_split_review.get("similarity_key") or ""),
+                    "requires_accountant_review": requires_vat_review,
+                    "review_reason_codes": list(vat_split_review.get("review_reason_codes") or []),
                 },
             )
         if result.get("accountant_explanation_tr"):

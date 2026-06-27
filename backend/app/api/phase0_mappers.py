@@ -32,6 +32,7 @@ from app.domain.openai_provider import (
 from app.domain.pdf_invoices import ParsedInvoice
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.statement_lines import StatementLine
+from app.domain.vat_splits import VatSplitLine
 
 
 def client_profile_from_payload(payload: ClientProfilePayload) -> ClientProfile:
@@ -123,6 +124,18 @@ def parsed_invoice_from_payload(payload: InvoicePayload) -> ParsedInvoice:
         recipient_tax_id=payload.recipient_tax_id,
         invoice_type_code=payload.invoice_type_code,
         is_return_invoice=payload.is_return_invoice,
+        vat_split_status=payload.vat_split_status,
+        vat_split_lines=tuple(
+            VatSplitLine(
+                rate=line.rate,
+                taxable_amount=line.taxable_amount,
+                tax_amount=line.tax_amount,
+                source=line.source,
+                evidence=tuple(line.evidence),
+            )
+            for line in payload.vat_split_lines
+        ),
+        vat_split_evidence=tuple(payload.vat_split_evidence),
     )
 
 

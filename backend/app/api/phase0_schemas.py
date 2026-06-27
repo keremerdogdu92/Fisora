@@ -69,6 +69,14 @@ class AccountSelectionPayload(BaseModel):
     account_candidates: dict[str, object] = Field(default_factory=dict)
 
 
+class VatSplitLinePayload(BaseModel):
+    rate: str = ""
+    taxable_amount: str = ""
+    tax_amount: str = ""
+    source: str = ""
+    evidence: list[str] = Field(default_factory=list)
+
+
 class InvoicePayload(BaseModel):
     file_name: str
     provider_hint: str = ""
@@ -97,6 +105,9 @@ class InvoicePayload(BaseModel):
     recipient_tax_id: str = ""
     invoice_type_code: str = ""
     is_return_invoice: bool = False
+    vat_split_status: str = ""
+    vat_split_lines: list[VatSplitLinePayload] = Field(default_factory=list)
+    vat_split_evidence: list[str] = Field(default_factory=list)
 
 
 class CounterpartyMatchPayload(BaseModel):
@@ -243,6 +254,7 @@ class ReviewDecisionPayload(BaseModel):
     prior_consistent_approval_count: int = 0
     statement_line_no: int = 0
     draft_lines: list[JournalLinePayload] = Field(default_factory=list)
+    vat_split_review: dict[str, object] = Field(default_factory=dict)
 
 
 class ExportCandidatePayload(BaseModel):

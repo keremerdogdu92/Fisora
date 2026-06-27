@@ -121,6 +121,50 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(workspace["learning_events"][0]["client_id"], "client-1")
         self.assertEqual(workspace["operation_events"][0]["event_type"], "review_decision_saved")
 
+    def test_review_service_persists_vat_split_review_in_learning_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={
+                    "file_name": "fatura.pdf",
+                    "export_status": "review_required",
+                    "vat_split_review": {"status": "needs_review"},
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="fatura.pdf",
+                        action="approve_with_changes",
+                        reviewer="mali-musavir",
+                        category="vat_split_pattern",
+                        reason="KDV ayrimi musavir tarafindan onaylandi.",
+                        vat_split_review={
+                            "schema_version": "vat_split_review.v1",
+                            "status": "derived",
+                            "similarity_key": "vat_split:derived:20:vat_split_gross_total_not_vat_only",
+                            "lines": [{"rate": "20", "taxable_amount": "580.81", "tax_amount": "116.16"}],
+                        },
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(workspace["learning_events"][0]["vat_split_review"]["status"], "derived")
+        self.assertEqual(workspace["learning_events"][0]["vat_split_review"]["lines"][0]["tax_amount"], "116.16")
+        self.assertIn("vat_split_review_saved", [event["step"] for event in workspace["document_pipeline_events"]])
+
     def test_review_service_records_journal_edit_save_and_export_pipeline_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")

@@ -43,7 +43,7 @@ class ReviewService:
             decision,
             prior_consistent_approval_count=payload.prior_consistent_approval_count,
         )
-        return {
+        event_payload = {
             "document_ref": event.document_ref,
             "scope": event.scope,
             "action": event.action,
@@ -54,6 +54,9 @@ class ReviewService:
             "automation_candidate": event.automation_candidate,
             "statement_line_no": event.statement_line_no,
         }
+        if payload.vat_split_review:
+            event_payload["vat_split_review"] = payload.vat_split_review
+        return event_payload
 
     def store_review_decision(self, *, payload: StoredReviewDecisionPayload, user_id: str | None) -> dict[str, object]:
         if not payload.client_id.strip():
@@ -97,6 +100,20 @@ class ReviewService:
                     "corrected_counterparty_code": payload.decision.corrected_counterparty_code,
                     "statement_line_no": payload.decision.statement_line_no,
                     "draft_line_count": len(payload.decision.draft_lines),
+                },
+            )
+        if payload.decision.vat_split_review:
+            self.store.record_document_pipeline_event(
+                client_id=payload.client_id,
+                document_ref=document_ref,
+                step="vat_split_review_saved",
+                status="ok",
+                message_tr="KDV ayrimi musavir tarafindan kaydedildi.",
+                debug_code="vat_split_review_saved",
+                details={
+                    "status": str(payload.decision.vat_split_review.get("status") or ""),
+                    "similarity_key": str(payload.decision.vat_split_review.get("similarity_key") or ""),
+                    "line_count": len(payload.decision.vat_split_review.get("lines") or []),
                 },
             )
         corrected_document = saved.get("corrected_document") if isinstance(saved, dict) else None

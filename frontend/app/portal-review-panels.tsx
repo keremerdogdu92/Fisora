@@ -123,6 +123,22 @@ function accountingDirectionForDocument(document: PilotDocument) {
   return "";
 }
 
+function directionLabel(direction: string) {
+  if (direction === "sales") return "Satış";
+  if (direction === "purchase") return "Alış";
+  return direction || "-";
+}
+
+function uploadDirectionForDocument(document: PilotDocument) {
+  if (document.intakeCategory === "sales_invoice") return "sales";
+  if (document.intakeCategory === "purchase_invoice") return "purchase";
+  return "";
+}
+
+function hasPendingDirectionConflict(document: PilotDocument) {
+  return document.directionConflict?.status === "needs_review";
+}
+
 function previewAuthHeaders(session: LocalSession | null | undefined, document?: PilotDocument): Record<string, string> {
   if (session?.sessionToken) return { "X-Fisora-Session": session.sessionToken };
   const userId = session?.userId || document?.uploadedBy || "";
@@ -300,6 +316,8 @@ export function JournalPanel({
   const needsManualDraft = !generatedDraftLines.length || document.draftStatus === "manual_draft_required";
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const accountingDirection = accountingDirectionForDocument(document);
+  const uploadDirection = uploadDirectionForDocument(document);
+  const pendingDirectionConflict = hasPendingDirectionConflict(document);
   const isSales = accountingDirection === "sales";
   const primaryAccountLabel = isStatement ? "Banka hesabı" : isSales ? "Gelir hesabı" : "Gider/stok hesabı";
   const primaryAccountValue = isStatement ? document.selectedExpenseAccount : isSales ? (document.selectedRevenueAccount || "-") : document.selectedExpenseAccount;
@@ -365,6 +383,11 @@ export function JournalPanel({
       <p className="accountant-summary">
         {document.accountantSummary || (needsManualDraft ? "Fiş taslağı çıkarılamadı; manuel satır girerek belgeyi tamamlayın." : "Fiş taslağı kontrol için hazır.")}
       </p>
+      <div className="review-reason-chips" aria-label="Belge yön bilgisi">
+        <span>Yükleme: {directionLabel(uploadDirection)}</span>
+        <span>Mükellef açısından: {directionLabel(accountingDirection)}</span>
+        {pendingDirectionConflict ? <span>Yön çakışması</span> : null}
+      </div>
       <div className="journal-workspace-tabs" role="tablist" aria-label="Muhasebe fişi çalışma sekmeleri">
         {reviewWorkspaceTabs.map((tab) => (
           <button
@@ -525,13 +548,26 @@ export function JournalPanel({
             <span>{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</span>
           </div>
         </div>
-        <div className="decision-actions">
-          <button onClick={onApproveAndNext} type="button">Onayla ve çıktılara gönder</button>
-          <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
-          <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
-          <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
-          <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
-        </div>
+        {pendingDirectionConflict ? (
+          <>
+            <div className="accountant-guidance">
+              <strong>Yön çakışması</strong>
+              <p>{document.directionConflict?.questionTr || "Yükleme yönü ile mükellef açısından tespit edilen yön çakışıyor."}</p>
+            </div>
+            <div className="decision-actions">
+              <button onClick={() => onSaveDecision("accept_detected_direction")} type="button">Sistemin tespit ettiği yöne geçir</button>
+              <button onClick={() => onSaveDecision("keep_upload_direction")} type="button">Yükleme tarafı doğru</button>
+            </div>
+          </>
+        ) : (
+          <div className="decision-actions">
+            <button onClick={onApproveAndNext} type="button">Onayla ve çıktılara gönder</button>
+            <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
+            <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
+            <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
+            <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
+          </div>
+        )}
       </section>
     </section>
   );

@@ -753,6 +753,62 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["export_status"], "export_ready")
         self.assertEqual(len(export_build.package.entries), 1)
 
+    def test_json_store_resolves_direction_conflict_without_export_approval(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="wrong-sales-upload.xml",
+                result={
+                    "file_name": "wrong-sales-upload.xml",
+                    "simulated_status": "review_required",
+                    "export_status": "review_required",
+                    "review_reason_codes": ["direction_conflict_review"],
+                    "risk_flags": [],
+                    "is_balanced": True,
+                    "accounting_direction": "purchase",
+                    "direction_conflict": {
+                        "status": "needs_review",
+                        "intake_direction": "sales",
+                        "detected_direction": "purchase",
+                        "confidence": 95,
+                        "evidence": ["client_tax_id_matches_recipient"],
+                        "question_tr": "Bu belge Satıştan yüklendi; sistem mükellef açısından Alış olarak tespit etti. Alış yönüne geçirilsin mi?",
+                    },
+                    "draft_lines": [
+                        {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.01", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+
+            store.save_review_decision(
+                client_id="client-1",
+                decision={
+                    "document_ref": "wrong-sales-upload.xml",
+                    "action": "accept_detected_direction",
+                    "reviewer": "mali-musavir",
+                    "reason": "Sistem yonu dogru.",
+                },
+                learning_event={
+                    "document_ref": "wrong-sales-upload.xml",
+                    "scope": "client_rule",
+                    "action": "accept_detected_direction",
+                    "category": "direction_conflict",
+                    "reason": "Sistem yonu dogru.",
+                    "automation_candidate": False,
+                },
+            )
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(result["accounting_direction"], "purchase")
+        self.assertEqual(result["direction_conflict"]["status"], "resolved")
+        self.assertEqual(result["direction_conflict"]["resolved_direction"], "purchase")
+        self.assertEqual(result["direction_conflict"]["resolution"], "accepted_detected_direction")
+        self.assertEqual(result["export_status"], "review_required")
+        self.assertNotIn("direction_conflict_review", result["review_reason_codes"])
+
     def test_json_store_applies_manual_draft_lines_from_review_decision(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

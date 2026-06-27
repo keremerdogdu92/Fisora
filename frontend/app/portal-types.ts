@@ -135,6 +135,7 @@ export type PilotDocument = {
   technicalDetails: Record<string, unknown>;
   pipelineEvents: DocumentPipelineEvent[];
   accountingDirection?: string;
+  directionConflict?: DirectionConflict;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedCounterpartyAccount: string;
@@ -241,6 +242,17 @@ export type AiCapacityAgentView = {
     internet_researches?: number | null;
     confidence?: string;
   };
+};
+
+export type DirectionConflict = {
+  status: string;
+  intakeDirection: string;
+  detectedDirection: string;
+  confidence: number;
+  evidence: string[];
+  questionTr: string;
+  resolution?: string;
+  resolvedDirection?: string;
 };
 
 export type AiCapacityEstimateView = {

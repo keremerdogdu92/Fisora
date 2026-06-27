@@ -13,6 +13,7 @@ REJECTED_EXPORT_ACTIONS = {
     "business_out_of_scope",
 }
 REVIEW_REQUIRED_ACTIONS = {"wrong_account", "wrong_counterparty", "review_required"}
+DIRECTION_CONFLICT_ACTIONS = {"accept_detected_direction", "keep_upload_direction"}
 
 
 def apply_review_decision_to_document(
@@ -36,8 +37,17 @@ def apply_review_decision_to_document(
     reason = str(decision.get("reason") or learning_event.get("reason") or "").strip()
     statement_line_no = _positive_int(decision.get("statement_line_no") or learning_event.get("statement_line_no"))
     manual_draft_lines = _manual_draft_lines(decision.get("draft_lines"))
+    direction_conflict_resolved = False
 
-    if manual_draft_lines:
+    if action in DIRECTION_CONFLICT_ACTIONS:
+        direction_conflict_resolved = _apply_direction_conflict_decision(
+            result,
+            action=action,
+            reviewer=reviewer,
+            reason=reason,
+            reviewed_at=reviewed_at,
+        )
+    elif manual_draft_lines:
         result["draft_lines"] = manual_draft_lines
         total_debit, total_credit = _draft_totals(manual_draft_lines)
         is_balanced = total_debit == total_credit and total_debit > Decimal("0")
@@ -99,7 +109,11 @@ def apply_review_decision_to_document(
     result["accountant_reviewed_at"] = reviewed_at
     result["accountant_reviewed_by"] = reviewer
 
-    if statement_line_no:
+    if direction_conflict_resolved:
+        result["accountant_export_override"] = False
+        result["export_status"] = "review_required"
+        updated["export_status"] = "review_required"
+    elif statement_line_no:
         _roll_up_statement_review_status(updated, result)
     elif action in APPROVED_EXPORT_ACTIONS and bool(result.get("is_balanced", False)):
         result["accountant_export_override"] = True
@@ -121,6 +135,49 @@ def apply_review_decision_to_document(
     updated["result"] = result
     updated["updated_at"] = reviewed_at
     return updated
+
+
+def _apply_direction_conflict_decision(
+    result: dict[str, Any],
+    *,
+    action: str,
+    reviewer: str,
+    reason: str,
+    reviewed_at: str,
+) -> bool:
+    conflict = result.get("direction_conflict")
+    if not isinstance(conflict, dict) or conflict.get("status") != "needs_review":
+        return False
+    intake_direction = str(conflict.get("intake_direction") or "")
+    detected_direction = str(conflict.get("detected_direction") or "")
+    if action == "accept_detected_direction":
+        resolved_direction = detected_direction
+        resolution = "accepted_detected_direction"
+    else:
+        resolved_direction = intake_direction
+        resolution = "kept_upload_direction"
+        result["draft_status"] = "manual_draft_required"
+        result["accountant_summary"] = "Yükleme yönü doğru kabul edildi; fiş taslağı müşavir kontrolüyle tamamlanmalı."
+    if resolved_direction in {"sales", "purchase"}:
+        result["accounting_direction"] = resolved_direction
+    updated_conflict = deepcopy(conflict)
+    updated_conflict.update(
+        {
+            "status": "resolved",
+            "resolution": resolution,
+            "resolved_direction": resolved_direction,
+            "resolved_by": reviewer,
+            "resolved_at": reviewed_at,
+            "resolution_reason": reason,
+        }
+    )
+    result["direction_conflict"] = updated_conflict
+    result["review_reason_codes"] = [
+        reason_code
+        for reason_code in result.get("review_reason_codes", [])
+        if str(reason_code) != "direction_conflict_review"
+    ]
+    return True
 
 
 def _positive_int(value: object) -> int:

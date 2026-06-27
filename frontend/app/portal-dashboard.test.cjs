@@ -90,6 +90,29 @@ test("documentsForProcessing filters by client and accountant document segment",
   );
 });
 
+test("documentsForProcessing keeps pending direction conflicts in the upload segment", () => {
+  const conflictedDocuments = [
+    {
+      id: "sales-upload-detected-purchase",
+      clientId: "client-1",
+      status: "review_required",
+      intakeCategory: "sales_invoice",
+      accountingDirection: "purchase",
+      directionConflict: { status: "needs_review" },
+      uploadedAt: "2026-06-08T13:00:00Z",
+    },
+  ];
+
+  assert.deepEqual(
+    documentsForProcessing({ documents: conflictedDocuments, clientId: "client-1", segment: "sales_invoices" }).map((document) => document.id),
+    ["sales-upload-detected-purchase"],
+  );
+  assert.deepEqual(
+    documentsForProcessing({ documents: conflictedDocuments, clientId: "client-1", segment: "purchase_invoices" }).map((document) => document.id),
+    [],
+  );
+});
+
 test("buildClientCancellationViewModel keeps cancellation actions bound to a selected document", () => {
   assert.equal(typeof buildClientCancellationViewModel, "function");
 

@@ -129,6 +129,7 @@ class SimulatedInvoiceResult:
     accounting_direction: str = "purchase"
     direction_confidence: int = 0
     direction_evidence: tuple[str, ...] = ()
+    direction_conflict: dict[str, object] = field(default_factory=dict)
     accountant_explanation_tr: str = ""
     account_candidates: dict[str, tuple[dict[str, str], ...]] | None = None
 
@@ -455,6 +456,44 @@ def infer_accounting_direction(
     return "purchase", 55, ("purchase_fallback",)
 
 
+def _direction_label_tr(direction: str) -> str:
+    if direction == "sales":
+        return "Satış"
+    if direction == "purchase":
+        return "Alış"
+    return direction
+
+
+def _direction_conflict_payload(
+    *,
+    intended_direction: str | None,
+    detected_direction: str,
+    confidence: int,
+    evidence: tuple[str, ...],
+) -> dict[str, object]:
+    intended = _normalize_intended_direction(intended_direction)
+    if intended not in {"sales", "purchase"} or detected_direction not in {"sales", "purchase"}:
+        return {}
+    if intended == detected_direction:
+        return {}
+    strong_identity_evidence = any(str(item).startswith("client_tax_id_matches_") for item in evidence)
+    if confidence < 80 and not strong_identity_evidence:
+        return {}
+    intake_label = _direction_label_tr(intended)
+    detected_label = _direction_label_tr(detected_direction)
+    return {
+        "status": "needs_review",
+        "intake_direction": intended,
+        "detected_direction": detected_direction,
+        "confidence": confidence,
+        "evidence": list(evidence),
+        "question_tr": (
+            f"Bu belge {intake_label}tan yüklendi; sistem mükellef açısından "
+            f"{detected_label} olarak tespit etti. {detected_label} yönüne geçirilsin mi?"
+        ),
+    }
+
+
 def _counterparty_creation_suggestion(direction: str, selection: AccountSelection) -> tuple[str, dict[str, object]]:
     if direction == "sales":
         suggested = selection.next_customer_account or selection.customer_account
@@ -775,6 +814,12 @@ def simulate_invoice(
         client_profile,
         intended_direction=intended_direction,
     )
+    direction_conflict = _direction_conflict_payload(
+        intended_direction=intended_direction,
+        detected_direction=direction,
+        confidence=direction_confidence,
+        evidence=direction_evidence,
+    )
     suggested_counterparty, counterparty_creation_suggestion = _counterparty_creation_suggestion(direction, selection)
     supplier_account = (
         counterparty_match.account_code
@@ -996,7 +1041,8 @@ def simulate_invoice(
             onboarding_reasons = tuple(f"onboarding_missing_{field}" for field in onboarding.missing_fields)
     else:
         onboarding_reasons = ("onboarding_missing_client_profile",)
-    all_reasons = tuple(dict.fromkeys((*reasons, *counterparty_reasons, *onboarding_reasons)))
+    direction_reasons = ("direction_conflict_review",) if direction_conflict else ()
+    all_reasons = tuple(dict.fromkeys((*reasons, *counterparty_reasons, *onboarding_reasons, *direction_reasons)))
 
     export_status = decide_export_status(
         is_balanced=entry.is_balanced if entry else False,
@@ -1103,6 +1149,7 @@ def simulate_invoice(
         accounting_direction=direction,
         direction_confidence=direction_confidence,
         direction_evidence=direction_evidence,
+        direction_conflict=direction_conflict,
         accountant_explanation_tr=accountant_explanation,
         account_candidates=selection.account_candidates,
     )
@@ -1180,6 +1227,7 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "accounting_direction",
         "direction_confidence",
         "direction_evidence",
+        "direction_conflict",
         "counterparty_match_code",
         "counterparty_match_confidence",
         "counterparty_match_reason",
@@ -1266,6 +1314,7 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "accountingDirection": result.accounting_direction,
                     "directionConfidence": result.direction_confidence,
                     "directionEvidence": list(result.direction_evidence),
+                    "directionConflict": result.direction_conflict,
                     "productLineHint": result.product_line_hint,
                     "productCategory": result.product_category,
                     "productConfidence": result.product_confidence,

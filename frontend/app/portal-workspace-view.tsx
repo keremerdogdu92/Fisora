@@ -315,10 +315,14 @@ export function AccountantWorkspace({
                 </div>
                 <div className="bottom-queue-actions">
                   {isActive ? (
-                    <>
-                      <button onClick={() => void onApproveAndNext()} type="button">Onayla</button>
-                      <button onClick={() => void onSaveDecision("approve_with_changes")} type="button">Düzelt</button>
-                    </>
+                    document.directionConflict?.status === "needs_review" ? (
+                      <button disabled type="button">Önce yönü yanıtla</button>
+                    ) : (
+                      <>
+                        <button onClick={() => void onApproveAndNext()} type="button">Onayla</button>
+                        <button onClick={() => void onSaveDecision("approve_with_changes")} type="button">Düzelt</button>
+                      </>
+                    )
                   ) : (
                     <button onClick={() => selectDocument(document)} type="button">Aç</button>
                   )}

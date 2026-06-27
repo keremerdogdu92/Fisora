@@ -17,6 +17,8 @@ ReviewAction = Literal[
     "wrong_account",
     "review_required",
     "suggest_for_similar",
+    "accept_detected_direction",
+    "keep_upload_direction",
 ]
 
 

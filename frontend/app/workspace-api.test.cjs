@@ -281,6 +281,64 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   });
 });
 
+test("processed backend documents keep upload stamp and expose direction conflict separately", () => {
+  const workspace = {
+    client: clientRecord,
+    portal_users: workspaceRecord.portal_users,
+    uploaded_documents: [
+      {
+        client_id: "client-1",
+        document_ref: "sales-upload-detected-purchase",
+        original_file_name: "istisna-sales-upload.pdf",
+        content_type: "application/pdf",
+        document_type: "invoice",
+        intake_category: "sales_invoice",
+        period: "2026-05",
+        status: "stored",
+        uploaded_by: "mukellef-user",
+        created_at: "2026-06-07T10:00:00Z",
+      },
+    ],
+    documents: [
+      {
+        client_id: "client-1",
+        document_ref: "sales-upload-detected-purchase",
+        export_status: "review_required",
+        result: {
+          file_name: "istisna-sales-upload.pdf",
+          invoice_type: "ISTISNA",
+          accounting_direction: "purchase",
+          direction_conflict: {
+            status: "needs_review",
+            intake_direction: "sales",
+            detected_direction: "purchase",
+            confidence: 95,
+            evidence: ["client_tax_id_matches_recipient"],
+            question_tr: "Bu belge Satıştan yüklendi; sistem mükellef açısından Alış olarak tespit etti. Alış yönüne geçirilsin mi?",
+          },
+        },
+      },
+    ],
+  };
+
+  const data = normalizeBackendWorkspaces({
+    clients: [clientRecord],
+    workspaces: [workspace],
+    source: "test",
+  });
+
+  assert.equal(data.documents[0].intakeCategory, "sales_invoice");
+  assert.equal(data.documents[0].accountingDirection, "purchase");
+  assert.deepEqual(data.documents[0].directionConflict, {
+    status: "needs_review",
+    intakeDirection: "sales",
+    detectedDirection: "purchase",
+    confidence: 95,
+    evidence: ["client_tax_id_matches_recipient"],
+    questionTr: "Bu belge Satıştan yüklendi; sistem mükellef açısından Alış olarak tespit etti. Alış yönüne geçirilsin mi?",
+  });
+});
+
 test("fetchBackendPilotData loads clients then each allowed workspace", async () => {
   const requests = [];
   const fetchImpl = async (url, init = {}) => {

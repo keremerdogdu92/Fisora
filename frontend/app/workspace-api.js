@@ -44,6 +44,25 @@ function normalizeAccountCandidates(value) {
   };
 }
 
+function normalizeDirectionConflict(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const status = safeText(source.status);
+  if (!status) return {};
+  const conflict = {
+    status,
+    intakeDirection: safeText(source.intake_direction || source.intakeDirection),
+    detectedDirection: safeText(source.detected_direction || source.detectedDirection),
+    confidence: safeNumber(source.confidence),
+    evidence: safeList(source.evidence).map(String),
+    questionTr: safeText(source.question_tr || source.questionTr),
+  };
+  const resolution = safeText(source.resolution);
+  const resolvedDirection = safeText(source.resolved_direction || source.resolvedDirection);
+  if (resolution) conflict.resolution = resolution;
+  if (resolvedDirection) conflict.resolvedDirection = resolvedDirection;
+  return conflict;
+}
+
 const DEFAULT_BACKEND_TIMEOUT_MS = 2500;
 
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
@@ -336,13 +355,14 @@ function processedBackendDocument(document, workspace, client) {
   const documentRef = safeText(document?.document_ref || result.file_name || document?.id);
   const uploadedDocument = safeList(workspace?.uploaded_documents).find((item) => safeText(item?.document_ref) === documentRef) || {};
   const originalDocumentRef = safeText(uploadedDocument?.document_ref || documentRef);
+  const intakeSource = uploadedDocument?.intake_category || result.intake_category || document?.intake_category || result.invoice_type || document?.document_type;
   return {
     id: documentRef,
     clientId: client.clientId,
     clientName: client.clientName,
     fileName: safeText(result.file_name || document?.document_ref, documentRef),
     documentType: safeText(result.invoice_type || document?.document_type, "invoice"),
-    intakeCategory: intakeCategoryForBackendDocument(result.invoice_type || document?.document_type || result.intake_category),
+    intakeCategory: intakeCategoryForBackendDocument(intakeSource),
     period: safeText(uploadedDocument?.period || result.period || document?.period) || periodFromDate(safeText(result.issue_date || document?.created_at || document?.updated_at)),
     uploadedAt: safeText(document?.created_at || document?.updated_at),
     uploadedBy: client.userLabel,
@@ -372,7 +392,8 @@ function processedBackendDocument(document, workspace, client) {
     accountantExplanation: safeText(result.accountant_explanation_tr || result.ai_explanation_tr || result.accountant_summary),
     technicalDetails: result.technical_details && typeof result.technical_details === "object" ? result.technical_details : {},
     pipelineEvents: pipelineEventsForDocument(workspace, documentRef, originalDocumentRef),
-    accountingDirection: safeText(result.accounting_direction || directionForBackendDocument(result.invoice_type || document?.document_type || result.intake_category)),
+    accountingDirection: safeText(result.accounting_direction || directionForBackendDocument(intakeSource)),
+    directionConflict: normalizeDirectionConflict(result.direction_conflict),
     selectedExpenseAccount: safeText(result.selected_expense_account, "-"),
     selectedVatAccount: safeText(result.selected_vat_account, "-"),
     selectedCounterpartyAccount: safeText(result.selected_supplier_account || result.counterparty_match_code, "-"),
@@ -438,6 +459,7 @@ function pendingBackendDocument(document, workspace, client) {
     technicalDetails: {},
     pipelineEvents: pipelineEventsForDocument(workspace, documentRef, documentRef),
     accountingDirection: directionForBackendDocument(document?.intake_category || job.intake_category || documentType),
+    directionConflict: {},
     selectedExpenseAccount: "-",
     selectedVatAccount: "-",
     selectedCounterpartyAccount: "-",

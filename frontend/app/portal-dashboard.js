@@ -85,6 +85,11 @@ function intakeSegmentForDocument(document) {
 function processingSegmentForDocument(document) {
   const intakeCategory = String(document?.intakeCategory || document?.intake_category || "");
   const accountingDirection = String(document?.accountingDirection || document?.accounting_direction || "");
+  const directionConflictStatus = String(document?.directionConflict?.status || document?.direction_conflict?.status || "");
+  if (directionConflictStatus === "needs_review") {
+    if (intakeCategory === "sales_invoice") return "sales_invoices";
+    if (intakeCategory === "purchase_invoice") return "purchase_invoices";
+  }
   if (accountingDirection === "sales" || intakeCategory === "sales_invoice") return "sales_invoices";
   if (accountingDirection === "purchase" || intakeCategory === "purchase_invoice") return "purchase_invoices";
   if (INTAKE_INVOICE_ALIASES.has(intakeCategory) || INVOICE_INTAKES.has(intakeCategory)) return "invoices";

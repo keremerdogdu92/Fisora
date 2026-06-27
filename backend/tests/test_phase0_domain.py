@@ -1292,6 +1292,103 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_vat_account, "191.20")
         self.assertIn("client_tax_id_matches_recipient", result.direction_evidence)
 
+    def test_safe_direction_conflict_requires_accountant_question(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="wrong-sales-upload.xml",
+            provider_hint="Tedarikci Firma",
+            page_count=0,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="ABC2026000000002",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            issuer_title="Tedarikci Firma",
+            issuer_tax_id="9999999999",
+            recipient_title="Isitme Merkezi A",
+            recipient_tax_id="1234567890",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, intended_direction="sales_invoice")
+
+        self.assertEqual(result.accounting_direction, "purchase")
+        self.assertEqual(result.direction_conflict["status"], "needs_review")
+        self.assertEqual(result.direction_conflict["intake_direction"], "sales")
+        self.assertEqual(result.direction_conflict["detected_direction"], "purchase")
+        self.assertIn("Alış yönüne geçirilsin mi?", result.direction_conflict["question_tr"])
+        self.assertIn("direction_conflict_review", result.review_reason_codes)
+        self.assertEqual(result.export_status, "review_required")
+
+    def test_low_confidence_direction_difference_does_not_open_conflict_question(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="weak-sales-upload.pdf",
+            provider_hint="Tedarikci Firma",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=900,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="ABC2026000000003",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999",),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, intended_direction="sales_invoice")
+
+        self.assertEqual(result.accounting_direction, "purchase")
+        self.assertLess(result.direction_confidence, 80)
+        self.assertEqual(result.direction_conflict, {})
+        self.assertNotIn("direction_conflict_review", result.review_reason_codes)
+
     def test_select_accounts_prefers_deep_rate_specific_chart_accounts(self) -> None:
         accounts = [
             ChartAccount("191", "191", "Indirilecek KDV", False),

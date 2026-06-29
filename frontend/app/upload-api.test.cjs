@@ -780,6 +780,8 @@ test("storeReviewDecision posts statement line accountant decisions", async () =
       corrected_counterparty_code: "320.01.040",
       category: "",
       reason: "Cari müşavir tarafından seçildi.",
+      accountant_note: "",
+      rule_instruction: "",
       apply_to_similar: false,
       prior_consistent_approval_count: 0,
       statement_line_no: 3,
@@ -813,6 +815,38 @@ test("storeReviewDecision includes manual journal draft lines when provided", as
     { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00" },
     { account_code: "320.01.001", description: "Cari", debit: "0.00", credit: "100.00" },
   ]);
+});
+
+test("storeReviewDecision binds draft corrections to accountant note and rule instruction", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ learning_event: { scope: "client_rule" } }) };
+  };
+
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "rexton.pdf",
+    action: "approve_with_changes",
+    reviewer: "mali-musavir",
+    correctedAccountCode: "153.01",
+    reason: "Fiş satırını stok hesabına aldım.",
+    accountantNote: "Rexton RLi 20 işitme cihazıdır; stok olarak izlenmeli.",
+    ruleInstruction: "Benzer Rexton RLi 20 satırlarında stok hesabını öner.",
+    draftLines: [
+      { account_code: "153.01", description: "Cihaz stoku", debit: "100.00", credit: "0.00" },
+      { account_code: "320.01", description: "Satıcı", debit: "0.00", credit: "100.00" },
+    ],
+    fetchImpl,
+  });
+
+  const decision = JSON.parse(request.init.body).decision;
+  assert.equal(decision.reason, "Fiş satırını stok hesabına aldım.");
+  assert.equal(decision.accountant_note, "Rexton RLi 20 işitme cihazıdır; stok olarak izlenmeli.");
+  assert.equal(decision.rule_instruction, "Benzer Rexton RLi 20 satırlarında stok hesabını öner.");
+  assert.deepEqual(decision.draft_lines.map((line) => line.account_code), ["153.01", "320.01"]);
 });
 
 test("storeReviewDecision marks one-click rule requests as apply-to-similar", async () => {

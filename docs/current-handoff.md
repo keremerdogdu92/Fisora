@@ -15,6 +15,15 @@ oturumdan devam etmek icin son durumu ozetler.
   `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`
   kaydi, pipeline'a `vat_split_classified`, musavir onayina
   `vat_split_review_saved` olayi eklendi.
+- 2026-06-29 hesap plani ve AI karar kapisi release'i hazirlandi:
+  kesin KDV/hukuki kurallar AI tarafindan ezilmez; AI yalniz belirsiz satir,
+  zayif hesap adayi veya marka/model-only aciklamalarda devreye girer.
+  Tavily/global research sadece AI veya statik siniflandirma urunu
+  anlayamadiginda calisir ve ayni ifade sonraki mukelleflerde cache'ten gelir.
+- Muhasebe fisi UX'i guncellendi: `/portal/belgeler` ekraninda fis satirlari
+  en onde duzenlenir; `Karar ve gerekce` sureci fisin altinda ikincil alanda
+  kalir. `Duzeltme notu` ve `Kural talimati`, fis satiri/hesap-cari
+  duzeltmesiyle ayni review payload'inda kaydedilir.
 - UI/UX remediation deploy: 2026-06-26, `main` ucu `86000c7`.
   Release orchestrator `smoke=ok`, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true` dondu.

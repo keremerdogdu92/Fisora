@@ -2355,6 +2355,47 @@ button:disabled {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.decision-chain-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.decision-chain-panel details {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.decision-chain-panel summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.decision-chain-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.decision-chain-steps .info {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  min-height: 62px;
+  padding: 10px;
+}
+
+.decision-chain-steps .info strong {
+  font-size: 0.88rem;
+  text-align: left;
+}
+
 .correction-form {
   display: grid;
   gap: 10px;
@@ -3094,6 +3135,7 @@ code {
   .ai-guidance,
   .journal-meta,
   .learning-rule-meta,
+  .decision-chain-steps,
   .decision-actions,
   .statement-grid,
   .statement-detail-meta,

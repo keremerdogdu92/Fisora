@@ -30,6 +30,8 @@ class ReviewDecision:
     corrected_counterparty_code: str = ""
     category: str = ""
     reason: str = ""
+    accountant_note: str = ""
+    rule_instruction: str = ""
     apply_to_similar: bool = False
     statement_line_no: int = 0
 
@@ -43,6 +45,8 @@ class LearningEvent:
     corrected_account_code: str
     corrected_counterparty_code: str
     reason: str
+    accountant_note: str
+    rule_instruction: str
     automation_candidate: bool
     statement_line_no: int = 0
 
@@ -67,6 +71,8 @@ def build_learning_event(decision: ReviewDecision, *, prior_consistent_approval_
         corrected_account_code=decision.corrected_account_code,
         corrected_counterparty_code=decision.corrected_counterparty_code,
         reason=decision.reason,
+        accountant_note=decision.accountant_note,
+        rule_instruction=decision.rule_instruction,
         automation_candidate=automation_candidate,
         statement_line_no=decision.statement_line_no,
     )

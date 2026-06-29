@@ -155,9 +155,9 @@ function safeHeaderValue(value: string) {
 type ReviewWorkspaceTab = "summary" | "journal" | "candidates" | "history";
 
 const reviewWorkspaceTabs: { id: ReviewWorkspaceTab; label: string }[] = [
-  { id: "summary", label: "Özet" },
-  { id: "journal", label: "Fiş" },
-  { id: "candidates", label: "Adaylar" },
+  { id: "summary", label: "Karar ve gerekçe" },
+  { id: "journal", label: "Hesap detayı" },
+  { id: "candidates", label: "Düzeltme" },
   { id: "history", label: "Geçmiş" },
 ];
 
@@ -371,9 +371,9 @@ export function JournalPanel({
           <span>{document.clientName} için belge, fiş ve kontrol kararları</span>
         </div>
       </div>
-      <section className="draft-summary journal-summary-strip" aria-label="Fiş özeti">
+      <section className="draft-summary journal-summary-strip" aria-label="Fiş durumu">
         <div className="journal-summary-title">
-          <span>Fiş özeti</span>
+          <span>Fiş durumu</span>
           <strong>{formatDraftStatus(document.draftStatus)}</strong>
         </div>
         <Info label="Borç toplamı" value={totals.debit.toFixed(2)} />
@@ -388,6 +388,14 @@ export function JournalPanel({
         <span>Mükellef açısından: {directionLabel(accountingDirection)}</span>
         {pendingDirectionConflict ? <span>Yön çakışması</span> : null}
       </div>
+      <ManualDraftEditor
+        activeDraftLines={activeDraftLines}
+        generatedDraftLines={generatedDraftLines}
+        needsManualDraft={needsManualDraft}
+        onAddLine={addManualDraftLine}
+        onRemoveLine={removeManualDraftLine}
+        onUpdateLine={setManualDraftLine}
+      />
       <div className="journal-workspace-tabs" role="tablist" aria-label="Muhasebe fişi çalışma sekmeleri">
         {reviewWorkspaceTabs.map((tab) => (
           <button
@@ -405,24 +413,7 @@ export function JournalPanel({
       <div className="journal-workspace-body">
         {activeReviewTab === "summary" ? (
           <section className="journal-tab-panel" role="tabpanel">
-            <div className="accountant-explanation">
-              <strong>AI muhasebe gerekçesi</strong>
-              <p>{document.accountantExplanation || document.aiReason || document.accountantSummary || "-"}</p>
-            </div>
-            <div className="statement-review-heading">
-              <div>
-                <h3>Fiş satırları</h3>
-                <span>Önerilen muhasebe fişini ve borç/alacak dengesini hızlıca kontrol edin.</span>
-              </div>
-            </div>
-            <ManualDraftEditor
-              activeDraftLines={activeDraftLines}
-              generatedDraftLines={generatedDraftLines}
-              needsManualDraft={needsManualDraft}
-              onAddLine={addManualDraftLine}
-              onRemoveLine={removeManualDraftLine}
-              onUpdateLine={setManualDraftLine}
-            />
+            <DecisionChainPanel document={document} />
           </section>
         ) : null}
         {activeReviewTab === "journal" ? (
@@ -450,26 +441,14 @@ export function JournalPanel({
                 statementAiStatus={statementAiStatus}
               />
             ) : null}
-            <div className="accountant-guidance">
-              <details open>
-                <summary>Kararı etkileyen açıklamalar</summary>
-                <div className="ai-guidance compact">
-                  <ReasonCard label="Öneri gerekçesi" value={document.aiReason || document.accountantSummary || "-"} />
-                  <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
-                  <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
-                  <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
-                </div>
-              </details>
-            </div>
-            <LearningRuleCard document={document} />
           </section>
         ) : null}
         {activeReviewTab === "candidates" ? (
           <section className="journal-tab-panel" role="tabpanel">
             <div className="statement-review-heading">
               <div>
-                <h3>Hesap ve cari adayları</h3>
-                <span>Öneriyi değiştirmeden önce aday hesapları ve müşavir açıklamasını burada yönetin.</span>
+                <h3>Düzeltme ve not</h3>
+                <span>Fiş satırı, hesap/cari değişikliği ve müşavir açıklaması aynı kararda birlikte kaydedilir.</span>
               </div>
             </div>
             <div className="correction-form">
@@ -518,12 +497,21 @@ export function JournalPanel({
                 />
               </label>
               <label className="wide">
-                <span>Müşavir açıklaması</span>
+                <span>Düzeltme notu</span>
                 <textarea
                   onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
-                  placeholder="Neden değiştirdiniz? Bu açıklama sonraki benzer belgelerde öğrenme sinyali olur."
+                  placeholder="Bu fişte neyi neden değiştirdiniz?"
                   rows={3}
                   value={correctionDraft.reason}
+                />
+              </label>
+              <label className="wide">
+                <span>Kural talimatı</span>
+                <textarea
+                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, ruleInstruction: event.target.value })}
+                  placeholder="Benzer belgelerde nasıl önerilsin? Kural olarak kullan seçilirse aday kural bu metinden oluşur."
+                  rows={2}
+                  value={correctionDraft.ruleInstruction}
                 />
               </label>
             </div>
@@ -569,6 +557,43 @@ export function JournalPanel({
           </div>
         )}
       </section>
+    </section>
+  );
+}
+
+function DecisionChainPanel({ document }: { document: PilotDocument }) {
+  const aiStatus = document.aiProvider && document.aiProvider !== "-" ? document.aiProvider : "Gerekmedi";
+  const researchStatus = document.reviewReasons.includes("research_low_confidence")
+    || document.reviewReasons.includes("research_source_rejected")
+    ? "Kontrol"
+    : "Gerekmedi";
+  const learningStatus = document.rulePrompt.show || document.learningRuleSourceSummary
+    ? "Aday var"
+    : "Yok";
+  return (
+    <section className="decision-chain-panel" aria-label="Karar ve gerekçe">
+      <div className="statement-review-heading">
+        <div>
+          <h3>Karar ve gerekçe</h3>
+          <span>Fiş satırları doğruysa bu bölümü açmadan devam edebilirsiniz.</span>
+        </div>
+      </div>
+      <div className="decision-chain-steps">
+        <Info label="Kural" value={document.deterministicSummary || "Statik kontrol"} />
+        <Info label="AI" value={aiStatus} />
+        <Info label="Araştırma" value={researchStatus} />
+        <Info label="Müşavir öğrenmesi" value={learningStatus} />
+      </div>
+      <details>
+        <summary>Kararı etkileyen açıklamaları göster</summary>
+        <div className="ai-guidance compact">
+          <ReasonCard label="AI muhasebe gerekçesi" value={document.accountantExplanation || document.aiReason || document.accountantSummary || "-"} />
+          <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
+          <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
+          <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
+        </div>
+      </details>
+      <LearningRuleCard document={document} />
     </section>
   );
 }

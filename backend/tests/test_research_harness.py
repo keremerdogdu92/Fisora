@@ -21,6 +21,7 @@ from app.domain.research_harness import (
     sanitize_research_query,
     source_policy_accepts,
 )
+from app.domain.ai_classification import AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
 from app.persistence.workflow_store import JsonWorkflowStore
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
@@ -44,6 +45,18 @@ class FakeResearchProvider:
     def research(self, query: ResearchQuery) -> dict[str, object]:
         self.queries.append(query)
         return self.payload
+
+
+class FakeProductProvider:
+    provider_name = "fake_llm"
+
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.requests: list[AiClassificationRequest] = []
+
+    def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
+        self.requests.append(request)
+        return self.response
 
 
 class FakeResponse:
@@ -163,6 +176,28 @@ class ResearchHarnessTests(unittest.TestCase):
             )
 
         self.assertEqual(profile["brand_summary"], "Sampuan markasi.")
+        self.assertEqual(provider.queries, [])
+
+    def test_research_harness_uses_full_product_phrase_cache_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_brand_research_profile(
+                brand_name="ZX Sonic Pro 9",
+                profile={
+                    "display_name": "ZX Sonic Pro 9",
+                    "summary_tr": "Daha once arastirilmis model.",
+                    "common_product_categories": ["isitme_cihazi"],
+                    "research_confidence": 88,
+                    "accounting_impact_confidence": 90,
+                    "evidence": [{"url": "https://manufacturer.example/zx-sonic-pro-9", "summary_tr": "Uretici sayfasi."}],
+                },
+            )
+            provider = FakeResearchProvider({"display_name": "Should Not Call", "confidence": 99})
+            harness = ResearchHarness(store=store, provider=provider, policy=ResearchPolicy(enabled=True))
+
+            profile = harness.research_brand(raw_line="ZX Sonic Pro 9", supplier_hint="Medikal")
+
+        self.assertEqual(profile["display_name"], "ZX Sonic Pro 9")
         self.assertEqual(provider.queries, [])
 
     def test_research_harness_can_bypass_cache_for_forced_refresh(self) -> None:
@@ -603,7 +638,58 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(len(provider.queries), 1)
         self.assertEqual(result["product_category"], "isitme_cihazi")
         self.assertEqual(result["business_relevance_account_treatment"], "stock_or_cogs")
+        self.assertEqual(result["selected_expense_account"], "153.01")
+        self.assertEqual(result["draft_lines"][0]["account_code"], "153.01")
         self.assertEqual(result["research_profile"]["accounting_impact_confidence"], 90)
+
+    def test_worker_uses_ai_research_query_before_raw_invoice_line(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "ai-query.xml"
+            write_invoice_xml(xml_path, line_name="ZX Sonic Pro 9 bundle extra text", supplier_name="Medikal Tedarik")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            queue_invoice(store, xml_path)
+            product_provider = FakeProductProvider(
+                {
+                    "category": "bilinmeyen",
+                    "confidence": 45,
+                    "reason": "Model net degil, arastirma gerekir.",
+                    "evidence": ["ai:uncertain"],
+                    "suggested_account_code": "",
+                    "suggested_counterparty_code": "",
+                    "risk_flags": ["accountant_review_required"],
+                    "account_reason": "",
+                    "product_identity": "ZX Sonic Pro 9",
+                    "needs_research": True,
+                    "research_query": "ZX Sonic Pro 9",
+                }
+            )
+            classifier = StaticFirstClassifier(
+                provider=product_provider,
+                policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+            )
+            research_provider = FakeResearchProvider(
+                {
+                    "display_name": "ZX Sonic Pro 9",
+                    "summary_tr": "Uretici sayfasina gore isitme cihazi modelidir.",
+                    "common_product_categories": ["isitme_cihazi"],
+                    "account_treatment": "stock_or_cogs",
+                    "research_confidence": 85,
+                    "accounting_impact_confidence": 90,
+                    "evidence": [{"url": "https://manufacturer.example/zx-sonic-pro-9", "summary_tr": "Uretici sayfasi."}],
+                }
+            )
+
+            process_queued_documents(
+                store,
+                product_classifier=classifier,
+                research_runtime={"provider": research_provider, "policy": ResearchPolicy(enabled=True, confidence_threshold=70)},
+            )
+            result = store.get_workspace("client-1")["documents"][0]["result"]
+
+        self.assertEqual(len(product_provider.requests), 1)
+        self.assertEqual(len(research_provider.queries), 1)
+        self.assertEqual(research_provider.queries[0].search_text, "ZX Sonic Pro 9")
+        self.assertEqual(result["research_profile"]["display_name"], "ZX Sonic Pro 9")
 
 
 if __name__ == "__main__":

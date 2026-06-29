@@ -8,7 +8,12 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 | --- | --- | --- | --- |
 | Faz 1 | done | Dogru kimlik, yon tespiti ve musavir gerekcesi | TCKN/VKN ayrimi, fatura yonu, iade dislama, UI yon bazli panel |
 | Faz 2 | done | Hesap plani, KDV ve cari onerisi | 600/391, 153 veya 7xx/191, %0/3065, yeni 120/320 cari onerisi |
-| Faz 3 | in_progress | Ortak bilgi havuzu ve operasyonel gorunurluk | Pilot provider Tavily; otomatik research sadece belirsiz faturalarda calisir |
+| Faz 3 | done | Ortak bilgi havuzu ve operasyonel gorunurluk | AI research query, global cache ve Tavily siniri baglandi |
+| Faz 4 | done | Research sonucu ile fis kararini yeniden kurma | Dusuk guven export'u acmaz, ama dengeli review taslagi korunur |
+| Faz 5 | done | Karisik KDV satir ayrimi | Cihaz %0/3065 kalir, aksesuar/pil satiri KDV'li kalabilir |
+| Faz 6 | done | Dogal dil musavir kural adayi | Not ve kural talimati review payload'ina baglandi |
+| Faz 7 | done | Portal karar zinciri gorunurlugu | Fis satirlari onde, karar/gerekce ve duzeltme notu alt akis oldu |
+| Faz 8 | next | Cok mukellefli gercek belge matrisi | Canli deneme ve private sample matrix ile genisletilecek |
 
 ## Kararlar
 
@@ -48,20 +53,63 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 
 ## Faz 3 Uygulama Notlari
 
-- Durum: partial_done.
+- Durum: done.
 - Uygulandi:
   - Mevcut NACE research cache'i worker tarafinda kullanilmaya devam ediyor.
   - Ortak marka cache modulu eklendi: cache hit varsa researcher cagrilmiyor; Blendax gibi genel marka icin statik profil uretilebiliyor.
   - JSON ve Postgres store marka research profilini save/get edebiliyor.
   - Pipeline teknik timeline structured payload ile yeni karar adimlarini tasiyor.
-- Acik isler:
-  - Tavily research provider pilotta belirsiz faturalara otomatik baglandi; canli env ve server readiness deploy oncesi ayrica dogrulanacak.
-  - Marka/model ayrimini satir parser'ina baglama.
-  - Mustavir geri bildirimiyle NACE/marka aciklamasi duzeltme arayuzu.
-  - AI provider/model kalitesi icin ayni gercekci belge, ekstre ve research case setini model-model benchmark etme; secimi maliyet, JSON uyumu, dogruluk ve mustavir is yuku etkisine gore yapma.
-  - Bilgi Havuzu benchmark ekranini netlestirme: mevcut hali research cache kalitesini olcer; bos cache veya eksik profil durumunda sonucun neden dusuk/0 gorundugunu mustavire debug dili kullanmadan anlatma.
+  - AI once marka/model icin soruluyor; AI `needs_research` derse Tavily/global research katmani devreye giriyor.
+  - Research bir belge icin sinirli calisir ve ayni marka/model/global ifade tekrar geldiyse cache sonucu kullanilir.
+  - Research profili muhasebe etkisi guvenini de tasir; dusuk guven export'u acmaz.
+
+## 2026-06-29 Hesap Plani ve AI Karar Kapisi
+
+- Kesin muhasebe kurallari AI tarafindan ezilmeyecek:
+  - Isitme cihazi satisi her zaman `%0 / 3065` kabul edilir.
+  - Isitme cihazi satisi KDV'li gelirse otomatik duzeltilmis kabul edilmez; `hearing_device_vat_should_be_zero` gerekcesiyle mustavir incelemesine duser.
+  - Yeni cari acilacaksa kod sira numarasi yerine `120.<VKN/TCKN>` veya `320.<VKN/TCKN>` olarak onerilir.
+- Satir bazli hesap plani secimi firma hesap planina gore yapilacak:
+  - Pil, kalip ve montaj kit alislari stok tarafinda kalir ve `153` alt hesap adaylari icinden en uygun detay hesaba iner.
+  - Kargo/nakliye satirlari stok maliyetine yazilmaz; `760/770/740` icindeki kargo gideri detay hesabi aranir.
+  - Arac kiralama, HGS ve benzeri arac giderleri genel kira hesabina sapmadan ilgili `760` alt hesabina inmeye calisir.
+- AI'in devreye girme sirasi:
+  - Once kanuni/kesin kural.
+  - Sonra cari eslesme ve VKN/TCKN kurali.
+  - Sonra satir siniflandirma ve hesap plani aday skoru.
+  - AI sadece belirsizlik varsa devreye girer: dusuk siniflandirma guveni, birden fazla makul hesap adayi, zayif faaliyet eslesmesi, `hizmet bedeli` gibi belirsiz satirlar.
+  - AI da dusuk guven verirse veya hesap ailesiyle celisirse belge mustavir incelemesinde kalir.
+- AI sonucunun sinirlari:
+  - AI yeni hesap kodu uydurmayacak; sadece mevcut hesap/cari adaylari icinden sececek.
+  - AI stok/gider/KKEG gibi hesap ailesi korumasini ezemeyecek. Ornegin stok olmasi gereken pil/kalip icin `770` onerirse onerisi reddedilecek.
+  - `>=85` guven: kesin kurallara ve hesap ailesine aykirilik yoksa taslaga uygulanabilir.
+  - `70-84` guven: ekranda onerilir, mustavir onayi gerekir.
+  - `<70` guven: otomatik uygulanmaz, inceleme gerekir.
+- Marka/model ve internet arastirmasi karari:
+  - Fatura satirinda aciklama yok, sadece marka/model varsa once statik marka/model kurallari ve AI siniflandirma calisir.
+  - Bunlar urunun ne oldugunu anlayamazsa veya dusuk guven uretirse research katmani devreye girer.
+  - Pilot research provider Tavily'dir; OpenAI web research sonraki iterasyon olarak kodda korunur.
+  - Research sadece belirsiz faturalarda otomatik calisir; bilinen/yuksek guvenli satirlar tekrar internet arastirmasi yapmaz.
+  - Research ciktisi `marka`, `urun kategorisi`, `muhasebe etkisi`, `research_confidence` ve `accounting_impact_confidence` olarak ayrilacak.
+  - Research sonucu da kanuni kurallari ve hesap ailesi korumasini ezemez; dusuk kaynak veya dusuk muhasebe etkisi guveni review sebebidir.
+- NACE arastirmasi karari:
+  - Mükellef profilinde NACE var ama faaliyet etiketi yoksa NACE research cache'i profilin faaliyet etiketlerini zenginlestirmek icin kullanilir.
+  - NACE research tek basina fise export izni vermez; sadece faaliyet baglami ve uygunluk kararini guclendirir.
+  - Mustavir geri bildirimiyle NACE/marka aciklamasi duzeltme arayuzu acik is olarak kalir.
 
 ## Sonraki Faz Notlari
 
-- Model duzeyi marka/model ayrimi ilk uc faz disinda kalir.
-- Mevcut belgeleri otomatik yeniden isleme ilk uc faz disinda kalir. Sonraki faz: secili belgeyi yeniden isle.
+- Canli denemeden sonra Faz 8 icin cok mukellefli matrix genisletilecek: isitme cihazi, genel perakende, hizmet, gida, insaat ve medikal benzeri profiller.
+- Mevcut belgeleri otomatik yeniden isleme henuz kapali. Sonraki faz: secili belgeyi yeniden isle.
+- Bilgi Havuzu benchmark ekranini netlestirme acik kalir: bos cache veya eksik profil durumunda sonucun neden dusuk/0 gorundugunu mustavire debug dili kullanmadan anlatmaliyiz.
+
+## 2026-06-29 Release Ozeti
+
+- Hard rule sirasi netlesti: kanuni/KDV kural, cari eslesme, hesap plani adaylari, AI, research, musavir ogrenmesi.
+- AI kapi mantigi eklendi: kesin kurali ezmez, hesap kodu uydurmaz, dusuk guvende research veya review ister.
+- Hesap ailesi guardrail eklendi: stok olmasi gereken satir gider hesabina, satis geliri gider hesabina kayamaz.
+- Review required olsa bile temel tutarlar ve yon varsa dengeli muhasebe fis taslagi olusturulur.
+- Tavily/global research sadece belirsiz marka/model veya zayif siniflandirma durumunda calisir; sonuc cache'e yazilir.
+- Karisik KDV icin cihaz satiri %0/3065 kalabilirken pil, aksesuar veya sarj aleti KDV'li satir olarak ayrilabilir.
+- Musavir duzeltmesi artik fis satirlari, hesap/cari secimi, duzeltme notu ve kural talimatini ayni karar payload'inda tasir.
+- Portalda muhasebe fisi birinci siraya alindi; karar zinciri ve nedenler fis dogruysa bakilmasi gerekmeyen ikincil bolume indi.

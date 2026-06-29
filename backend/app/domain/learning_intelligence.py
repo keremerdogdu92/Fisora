@@ -5,6 +5,8 @@ import re
 import unicodedata
 from typing import Any, Iterable
 
+from app.domain.natural_language_rule_builder import build_natural_language_rule_candidate
+
 
 APPROVAL_ACTIONS = {"approve", "approve_with_changes", "suggest_for_similar"}
 GLOBAL_TEMPLATE_INTENTS = {
@@ -158,6 +160,18 @@ def enrich_learning_event(
             ),
         }
     )
+    accountant_note = str(decision.get("accountant_note") or event.get("accountant_note") or "").strip()
+    rule_instruction = str(decision.get("rule_instruction") or event.get("rule_instruction") or "").strip()
+    if accountant_note or rule_instruction:
+        enriched["accountant_note"] = accountant_note
+        enriched["rule_instruction"] = rule_instruction
+        enriched["natural_language_rule_candidate"] = build_natural_language_rule_candidate(
+            accountant_note=accountant_note,
+            rule_instruction=rule_instruction,
+            product_line_hint=str(result.get("product_line_hint") or result.get("provider_hint") or ""),
+            category=str(event.get("category") or decision.get("category") or result.get("product_category") or ""),
+            corrected_account_code=str(event.get("corrected_account_code") or decision.get("corrected_account_code") or ""),
+        )
     client_count = _consistent_count(enriched, prior_learning_events, client_scoped=True)
     office_events = [*prior_learning_events, enriched]
     office_count = _consistent_count(enriched, prior_learning_events, client_scoped=False)

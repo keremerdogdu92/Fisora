@@ -14,6 +14,7 @@ from app.domain.brand_research import normalize_brand_name
 from app.domain.ai_capacity import looks_like_openai_api_key
 from app.domain.business_relevance import account_treatment_for_category, classify_product_line
 from app.domain.nace_research import normalize_nace_code
+from app.domain.product_research_cache import normalize_product_research_key
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
@@ -309,11 +310,13 @@ class ResearchHarness:
             supplier_hint=supplier_hint,
             activity_context=activity_context,
         )
-        key = query.search_text.split(" ")[0] if query.search_text else query.key
+        key = normalize_product_research_key(query.search_text or query.key)
+        fallback_key = normalize_product_research_key(query.key)
         if hasattr(self.store, "get_brand_research_profile"):
-            cached = self.store.get_brand_research_profile(key)
-            if cached and (cached.get("override") or not bypass_cache):
-                return normalize_research_profile(kind="brand", key=key, payload=cached)
+            for candidate_key in tuple(dict.fromkeys(item for item in (key, fallback_key) if item)):
+                cached = self.store.get_brand_research_profile(candidate_key)
+                if cached and (cached.get("override") or not bypass_cache):
+                    return normalize_research_profile(kind="brand", key=candidate_key, payload=cached)
         return self._research_and_store(query=query, key=key)
 
     def _research_and_store(self, *, query: ResearchQuery, key: str) -> dict[str, Any]:

@@ -36,6 +36,8 @@ class ReviewService:
             corrected_counterparty_code=payload.corrected_counterparty_code,
             category=payload.category,
             reason=payload.reason,
+            accountant_note=payload.accountant_note,
+            rule_instruction=payload.rule_instruction,
             apply_to_similar=payload.apply_to_similar,
             statement_line_no=payload.statement_line_no,
         )
@@ -51,6 +53,8 @@ class ReviewService:
             "corrected_account_code": event.corrected_account_code,
             "corrected_counterparty_code": event.corrected_counterparty_code,
             "reason": event.reason,
+            "accountant_note": event.accountant_note,
+            "rule_instruction": event.rule_instruction,
             "automation_candidate": event.automation_candidate,
             "statement_line_no": event.statement_line_no,
         }

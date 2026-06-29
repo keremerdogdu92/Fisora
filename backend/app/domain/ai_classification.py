@@ -76,6 +76,9 @@ class AiClassificationRequest:
                     "suggested_counterparty_code",
                     "risk_flags",
                     "account_reason",
+                    "product_identity",
+                    "needs_research",
+                    "research_query",
                 ],
                 "properties": {
                     "category": {"type": "string", "enum": list(self.allowed_categories)},
@@ -92,6 +95,9 @@ class AiClassificationRequest:
                     },
                     "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                     "account_reason": {"type": "string", "maxLength": 240},
+                    "product_identity": {"type": "string", "maxLength": 160},
+                    "needs_research": {"type": "boolean"},
+                    "research_query": {"type": "string", "maxLength": 160},
                 },
                 "additionalProperties": False,
             },
@@ -108,6 +114,9 @@ class AiProviderClassification:
     suggested_counterparty_code: str = ""
     risk_flags: tuple[str, ...] = ()
     account_reason: str = ""
+    product_identity: str = ""
+    needs_research: bool = False
+    research_query: str = ""
 
 
 @dataclass(frozen=True)
@@ -122,6 +131,9 @@ class AiClassificationResult:
     suggested_counterparty_code: str = ""
     risk_flags: tuple[str, ...] = ()
     account_reason: str = ""
+    product_identity: str = ""
+    needs_research: bool = False
+    research_query: str = ""
 
 
 class ProductClassifier(Protocol):
@@ -181,6 +193,9 @@ def _validate_provider_payload(payload: dict[str, Any], request: AiClassificatio
         suggested_counterparty_code=_validated_suggestion(payload.get("suggested_counterparty_code"), request.context.counterparty_candidates),
         risk_flags=risk_flags,
         account_reason=str(payload.get("account_reason") or "").strip()[:240],
+        product_identity=str(payload.get("product_identity") or "").strip()[:160],
+        needs_research=bool(payload.get("needs_research")),
+        research_query=str(payload.get("research_query") or "").strip()[:160],
     )
 
 
@@ -295,6 +310,9 @@ class StaticFirstClassifier:
             suggested_counterparty_code=provider_result.suggested_counterparty_code,
             risk_flags=provider_result.risk_flags,
             account_reason=provider_result.account_reason,
+            product_identity=provider_result.product_identity,
+            needs_research=provider_result.needs_research,
+            research_query=provider_result.research_query,
         )
 
 

@@ -25,6 +25,7 @@ class LearnedPostingRule:
     normalized_terms: tuple[str, ...] = ()
     source_summary: str = ""
     rule_prompt: dict[str, object] | None = None
+    natural_language_rule_candidate: dict[str, object] | None = None
 
 
 def rule_from_learning_event(event: LearningEvent) -> LearnedPostingRule:
@@ -53,6 +54,9 @@ def rule_from_event_payload(event: dict[str, object]) -> LearnedPostingRule:
         normalized_terms=tuple(str(term) for term in event.get("normalized_terms") or () if str(term).strip()),
         source_summary=str(event.get("learning_rule_source_summary") or ""),
         rule_prompt=event.get("rule_prompt") if isinstance(event.get("rule_prompt"), dict) else None,
+        natural_language_rule_candidate=(
+            event.get("natural_language_rule_candidate") if isinstance(event.get("natural_language_rule_candidate"), dict) else None
+        ),
     )
 
 
@@ -93,6 +97,12 @@ def _select_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingR
     scored: list[tuple[int, LearnedPostingRule]] = []
     for rule in rules:
         if rule.action not in allowed_actions:
+            continue
+        if (
+            rule.natural_language_rule_candidate
+            and rule.natural_language_rule_candidate.get("requires_review")
+            and rule.action != "suggest_for_similar"
+        ):
             continue
         if not rule.corrected_account_code and not rule.corrected_counterparty_code:
             continue

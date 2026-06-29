@@ -141,6 +141,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     counterpartyCode: "",
     manualDraftLines: [],
     reason: "",
+    ruleInstruction: "",
   });
   const readinessQuery = usePilotReadinessQuery();
   const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });

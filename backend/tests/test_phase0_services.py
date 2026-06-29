@@ -165,6 +165,50 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(workspace["learning_events"][0]["vat_split_review"]["lines"][0]["tax_amount"], "116.16")
         self.assertIn("vat_split_review_saved", [event["step"] for event in workspace["document_pipeline_events"]])
 
+    def test_review_service_stores_accountant_note_rule_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="rexton.pdf",
+                result={
+                    "file_name": "rexton.pdf",
+                    "export_status": "review_required",
+                    "product_line_hint": "Rexton RLi 20",
+                    "product_category": "bilinmeyen",
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="rexton.pdf",
+                        action="approve_with_changes",
+                        reviewer="mali-musavir",
+                        corrected_account_code="153.01",
+                        category="",
+                        reason="Fişi bu hesapla kaydettim.",
+                        accountant_note="Rexton RLi 20 isitme cihazidir, stok olarak izleyelim.",
+                        rule_instruction="Benzer Rexton RLi 20 satirlarinda aday kural olarak oner.",
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        candidate = workspace["learning_events"][0]["natural_language_rule_candidate"]
+        self.assertEqual(candidate["scope"], "global_product_phrase")
+        self.assertEqual(candidate["match_phrase"], "rexton rli 20")
+        self.assertEqual(candidate["suggested_account_code"], "153.01")
+        self.assertTrue(candidate["requires_review"])
+
     def test_review_service_records_journal_edit_save_and_export_pipeline_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")

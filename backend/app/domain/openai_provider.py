@@ -55,7 +55,11 @@ class OpenAiAccountingProvider:
             instructions=(
                 "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
                 "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
+                "Internet aramasi yapma veya kaynak biliyormus gibi davranma. "
+                "Egitiminden biliyorsan marka/modelin urun kategorisini soyle. "
+                "Emin degilsen needs_research=true ve kisa research_query don. "
                 "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
+                "Kanuni KDV ve hesap ailesi kurallarini ezme. "
                 "Export izni verme; bu cikti sadece mustavir review taslagidir."
             ),
             user_payload=payload,

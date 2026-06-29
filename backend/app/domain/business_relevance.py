@@ -35,6 +35,7 @@ GENERAL_EXPENSE_CATEGORIES = {
     "internet",
     "kira",
     "kargo",
+    "arac_kiralama",
 }
 
 HEARING_CENTER_CATEGORIES = {
@@ -94,6 +95,9 @@ PRODUCT_RULES: tuple[tuple[str, str, int], ...] = (
     ("isitme cihazi", "isitme_cihazi", 94),
     ("pil", "isitme_cihazi_pili", 72),
     ("battery", "isitme_cihazi_pili", 72),
+    ("kalip", "isitme_cihazi_pili", 72),
+    ("kalib", "isitme_cihazi_pili", 72),
+    ("montaj kit", "isitme_cihazi_pili", 72),
     ("kolaysoft", "e_fatura_hizmeti", 94),
     ("kolay soft", "e_fatura_hizmeti", 94),
     ("qnb efinans", "e_fatura_hizmeti", 94),
@@ -103,6 +107,7 @@ PRODUCT_RULES: tuple[tuple[str, str, int], ...] = (
     ("hosting", "bulut_yazilim_hizmeti", 82),
     ("elektrik", "elektrik", 90),
     ("internet", "internet", 88),
+    ("arac kiralama", "arac_kiralama", 88),
     ("kira", "kira", 85),
     ("kargo", "kargo", 85),
     ("sampuan", "kisisel_bakim_kozmetik", 94),

@@ -43,7 +43,7 @@ test("portal visible copy presents AI agent automation without internal implemen
   assert.match(visibleSource, /AI ajan destekli fiş taslağı/);
   assert.match(visibleSource, /Otomasyon adayı/);
   assert.match(visibleSource, /Güven düzeyi/);
-  assert.match(visibleSource, /Öneri gerekçesi/);
+  assert.match(visibleSource, /Düzeltme notu/);
 
   assert.doesNotMatch(
     visibleSource,
@@ -103,16 +103,24 @@ test("portal visible source does not contain mojibake Turkish copy", () => {
 test("document processing workbench keeps the journal review explicit", () => {
   const reviewSource = source("portal-review-panels.tsx");
   const stylesSource = source("styles.css");
+  const draftEditorIndex = reviewSource.indexOf("<ManualDraftEditor");
+  const decisionChainIndex = reviewSource.indexOf("<DecisionChainPanel");
 
   assert.match(reviewSource, /safeHeaderValue/);
   assert.match(reviewSource, /reviewWorkspaceTabs/);
-  assert.match(reviewSource, /Özet/);
-  assert.match(reviewSource, /Fiş özeti/);
+  assert.notEqual(draftEditorIndex, -1);
+  assert.notEqual(decisionChainIndex, -1);
+  assert.ok(draftEditorIndex < decisionChainIndex, "journal line editor should appear before decision chain details");
+  assert.match(reviewSource, /Karar ve gerekçe/);
+  assert.match(reviewSource, /Düzeltme notu/);
+  assert.match(reviewSource, /Kural talimatı/);
+  assert.match(stylesSource, /\.decision-chain-panel/);
+  assert.match(reviewSource, /Fiş durumu/);
   assert.match(reviewSource, /Muhasebe fişi detayları/);
   assert.match(reviewSource, /AI muhasebe gerekçesi/);
-  assert.match(reviewSource, /Adaylar/);
+  assert.match(reviewSource, /Düzeltme/);
   assert.match(reviewSource, /Geçmiş/);
-  assert.match(reviewSource, /Belge değerlendirme/);
+  assert.match(reviewSource, /Kararı etkileyen açıklamaları göster/);
   assert.match(stylesSource, /\.journal-workspace-tabs/);
   assert.match(stylesSource, /\.journal-ledger/);
 });

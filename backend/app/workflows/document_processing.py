@@ -28,6 +28,7 @@ from app.domain.openai_provider import (
     OpenAiAccountingProvider,
 )
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
+from app.domain.product_research_cache import normalize_product_research_key
 from app.domain.research_harness import (
     ResearchHarness,
     apply_research_to_result,
@@ -207,6 +208,7 @@ def _serializable_simulation(
     *,
     product_classifier: ProductClassifier | None = None,
     intended_direction: str | None = None,
+    classification_override: ProductClassification | None = None,
 ) -> dict[str, Any]:
     accounts = _chart_accounts(workspace)
     profile = _client_profile(workspace)
@@ -219,6 +221,7 @@ def _serializable_simulation(
         product_classifier or StaticFirstClassifier(),
         processing_mode="ai_assisted_draft" if product_classifier else "controlled_automation",
         intended_direction=intended_direction,
+        classification_override=classification_override,
     )
     result = apply_learning_rules(
         result,
@@ -405,6 +408,8 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
 
 def _research_candidate_from_result(result: dict[str, Any], document: dict[str, Any]) -> str:
     for value in (
+        result.get("ai_research_query"),
+        result.get("ai_product_identity"),
         result.get("product_line_hint"),
         document.get("original_file_name"),
     ):
@@ -464,6 +469,64 @@ def _apply_research_accounting_effect(
     updated["business_relevance_account_treatment"] = relevance.account_treatment
     updated["business_relevance_requires_review"] = relevance.requires_accountant_review
     return updated
+
+
+def _research_classification_from_profile(result: dict[str, Any], profile: dict[str, Any]) -> ProductClassification | None:
+    category = str(profile.get("product_category") or "").strip()
+    if not category:
+        return None
+    confidence = int(profile.get("accounting_impact_confidence") or profile.get("research_confidence") or 0)
+    return ProductClassification(
+        raw_line=str(result.get("product_line_hint") or profile.get("display_name") or ""),
+        category=category,
+        confidence=confidence,
+        evidence=("research_profile",),
+    )
+
+
+def _preserve_ai_fields(rebuilt: dict[str, Any], original: dict[str, Any]) -> dict[str, Any]:
+    preserved = dict(rebuilt)
+    for key in (
+        "ai_classification_used",
+        "ai_classification_provider",
+        "ai_classification_skipped_reason",
+        "ai_classification_reason",
+        "ai_estimated_input_chars",
+        "ai_suggested_account_code",
+        "ai_suggested_counterparty_code",
+        "ai_risk_flags",
+        "ai_account_reason",
+        "ai_gate_reason",
+        "ai_product_identity",
+        "ai_research_requested",
+        "ai_research_query",
+    ):
+        if key in original:
+            preserved[key] = original[key]
+    return _with_review_summary(preserved)
+
+
+def _rebuild_result_with_research(
+    result: dict[str, Any],
+    *,
+    document: dict[str, Any],
+    job: dict[str, Any],
+    workspace: dict[str, Any],
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    classification = _research_classification_from_profile(result, profile)
+    path = _stored_path(document)
+    if classification is None or path is None:
+        return _apply_research_accounting_effect(result, profile, client_profile=_client_profile(workspace))
+    document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
+    invoice = _parse_invoice_document(path, document_type)
+    rebuilt = _serializable_simulation(
+        invoice,
+        workspace,
+        intended_direction=str(document.get("intake_category") or job.get("intake_category") or ""),
+        classification_override=classification,
+    )
+    return _preserve_ai_fields(rebuilt, result)
 
 
 def _parse_invoice_document(path: Path, document_type: str) -> ParsedInvoice:
@@ -992,7 +1055,7 @@ def process_next_job_once(
                     supplier_hint=str(result.get("provider_hint") or ""),
                     activity_context=activity_context,
                 )
-                cache_key = query.search_text.split(" ")[0] if query.search_text else query.key
+                cache_key = normalize_product_research_key(query.search_text or query.key)
                 cached = store.get_brand_research_profile(cache_key) if hasattr(store, "get_brand_research_profile") else None
                 pipeline_event(
                     "research_cache_hit" if cached else "research_started",
@@ -1023,10 +1086,12 @@ def process_next_job_once(
                         input_chars=len(query.search_text) + len(query.supplier_hint) + len(query.activity_context),
                     )
                 threshold = int(getattr(effective_research_runtime.get("policy"), "confidence_threshold", 70))
-                result = _apply_research_accounting_effect(
+                result = _rebuild_result_with_research(
                     result,
-                    profile,
-                    client_profile=_client_profile(workspace),
+                    document=document,
+                    job=job,
+                    workspace=workspace,
+                    profile=profile,
                 )
                 result = apply_research_to_result(result, profile, confidence_threshold=threshold)
                 confidence = int(profile.get("research_confidence") or profile.get("confidence") or 0)

@@ -250,6 +250,8 @@ class ReviewDecisionPayload(BaseModel):
     corrected_counterparty_code: str = ""
     category: str = ""
     reason: str = ""
+    accountant_note: str = ""
+    rule_instruction: str = ""
     apply_to_similar: bool = False
     prior_consistent_approval_count: int = 0
     statement_line_no: int = 0

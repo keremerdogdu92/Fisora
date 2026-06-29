@@ -425,6 +425,7 @@ export type CorrectionDraft = {
   counterpartyCode: string;
   manualDraftLines: DraftLine[];
   reason: string;
+  ruleInstruction: string;
 };
 
 export type NewClientDraft = {

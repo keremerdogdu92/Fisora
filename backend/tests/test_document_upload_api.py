@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -163,6 +164,108 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["processing_job"]["intake_category"], "purchase_invoice")
         self.assertEqual([job["status"] for job in workspace["processing_jobs"]], ["queued", "queued"])
         self.assertIn("reprocess_queued", [event["step"] for event in workspace["document_pipeline_events"]])
+
+    def test_client_reprocess_reloads_tax_certificate_nace_and_processes_documents(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.domain.research_harness import ResearchPolicy
+        from app.domain.tax_certificates import TaxCertificateExtraction
+
+        class FakeNaceProvider:
+            provider_name = "fake_nace_research"
+
+            def research(self, query):
+                return {
+                    "display_name": "47.74.01 Tibbi ve ortopedik urunlerin perakende ticareti",
+                    "summary_tr": "Isitme cihazi ve tibbi urun perakende faaliyeti.",
+                    "activity_tags": ["hearing_aid", "medical_retail"],
+                    "source_urls": ["https://ec.europa.eu/eurostat/web/nace/overview"],
+                    "confidence": 88,
+                    "research_confidence": 88,
+                    "accounting_impact_confidence": 90,
+                }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            client.post(
+                "/phase0/store/client-onboarding-attachment",
+                data={
+                    "client_id": "client-1",
+                    "attachment_type": "tax_certificate",
+                    "uploaded_by": "mali-musavir",
+                    "uploaded_by_user_id": "mali-musavir",
+                },
+                files={"file": ("vergi-levhasi.pdf", b"fake-pdf", "application/pdf")},
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            )
+            document = client.post(
+                "/phase0/store/document-upload",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "client-1",
+                    "document_type": "special_document",
+                    "intake_category": "special_document",
+                    "file_name": "eski-belge.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZXNraS1iZWxnZQ==",
+                },
+            ).json()
+            client.post("/phase0/store/processing-run", json={"max_jobs": 5})
+
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                return_value=TaxCertificateExtraction(
+                    title="Demo Mukellef",
+                    tax_id="1111111111",
+                    vkn="1111111111",
+                    tax_office="Kadikoy",
+                    activity_description="Tibbi ve ortopedik urunlerin perakende ticareti",
+                    nace_code="477401",
+                    workplace_addresses=("Istanbul",),
+                    confidence=95,
+                ),
+                create=True,
+            ):
+                with patch(
+                    "app.services.document_service.build_research_runtime_from_env",
+                    return_value={"provider": FakeNaceProvider(), "policy": ResearchPolicy(enabled=True)},
+                    create=True,
+                ):
+                    response = client.post(
+                        "/phase0/store/client-reprocess",
+                        headers={"X-Fisora-User-Id": "mali-musavir"},
+                        json={"client_id": "client-1", "max_jobs": 5},
+                    )
+            workspace = client.get(
+                "/phase0/store/workspace/client-1",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["queued_document_count"], 1)
+        self.assertGreaterEqual(payload["processing_summary"]["completed_count"], payload["queued_document_count"])
+        self.assertEqual(payload["tax_certificate"]["nace_code"], "477401")
+        self.assertEqual(payload["nace_research_profile"]["activity_tags"], ["hearing_aid", "medical_retail"])
+        self.assertEqual(workspace["client"]["profile"]["nace_code"], "477401")
+        self.assertEqual(workspace["client"]["profile"]["activity_tags"], ["hearing_aid", "medical_retail"])
+        self.assertEqual(workspace["processing_jobs"][-1]["document_ref"], document["document_ref"])
+        self.assertEqual(workspace["processing_jobs"][-1]["status"], "completed")
 
     def test_onboarding_attachment_does_not_create_processing_job(self) -> None:
         if TestClient is None or phase0 is None or app is None:
@@ -651,11 +754,15 @@ class DocumentUploadApiTests(unittest.TestCase):
                 "/phase0/store/workspace/client-1",
                 headers={"X-Fisora-User-Id": "mali-musavir"},
             ).json()
+            raw_chart_path_exists = Path(workspace["onboarding_attachments"][0]["storage_path"]).exists()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["account_count"], 2)
         self.assertEqual(workspace["chart_accounts"]["account_count"], 2)
         self.assertEqual(workspace["chart_accounts"]["accounts"][0]["normalized_account_code"], "320.01")
+        self.assertEqual(workspace["onboarding_attachments"][0]["attachment_type"], "chart_accounts")
+        self.assertEqual(workspace["onboarding_attachments"][0]["original_file_name"], "hesap-plani.csv")
+        self.assertTrue(raw_chart_path_exists)
 
     def test_chart_accounts_parse_endpoint_returns_accounts_without_creating_client(self) -> None:
         if TestClient is None or phase0 is None or app is None:

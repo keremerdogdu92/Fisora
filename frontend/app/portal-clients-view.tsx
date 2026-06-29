@@ -5,6 +5,7 @@ import type { CancellationRequest, DashboardClientRow, NewClientDraft, PilotClie
 export function ClientManagementView({
   cancellationRequests,
   chartUploadStatus,
+  clientReprocessStatus,
   clientDocumentDeleteConfirmed,
   clientDocumentDeleteStatus,
   clientRows,
@@ -17,10 +18,12 @@ export function ClientManagementView({
   newClientTaxCertificateFile,
   newClientTaxCertificateInputKey,
   onChartFileSelected,
+  onExistingChartFileSelected,
   onClientSearchChange,
   onCreateInvite,
   onCreateNewClient,
   onDeleteSelectedDocuments,
+  onReprocessSelectedClient,
   onResolveCancellation,
   onSetPassword,
   onUpdatePortalAccess,
@@ -39,6 +42,7 @@ export function ClientManagementView({
 }: {
   cancellationRequests: CancellationRequest[];
   chartUploadStatus: string;
+  clientReprocessStatus: string;
   clientDocumentDeleteConfirmed: boolean;
   clientDocumentDeleteStatus: string;
   clientRows: DashboardClientRow[];
@@ -51,10 +55,12 @@ export function ClientManagementView({
   newClientTaxCertificateFile: File | null;
   newClientTaxCertificateInputKey: number;
   onChartFileSelected: (files: FileList | null) => void | Promise<void>;
+  onExistingChartFileSelected: (files: FileList | null) => void | Promise<void>;
   onClientSearchChange: (value: string) => void;
   onCreateInvite: () => void | Promise<void>;
   onCreateNewClient: () => void | Promise<void>;
   onDeleteSelectedDocuments: () => void | Promise<void>;
+  onReprocessSelectedClient: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onSetPassword: () => void | Promise<void>;
   onUpdatePortalAccess: () => void | Promise<void>;
@@ -134,7 +140,7 @@ export function ClientManagementView({
             <input
               accept=".csv,.xlsx,.xlsm"
               disabled={!hasSelectedClient}
-              onChange={(event) => onChartFileSelected(event.target.files)}
+              onChange={(event) => onExistingChartFileSelected(event.target.files)}
               type="file"
             />
             <span>Dosya seç</span>
@@ -195,6 +201,14 @@ export function ClientManagementView({
               );
             }) : <p className="empty">Belge yok.</p>}
           </div>
+          <button
+            disabled={!hasSelectedClient}
+            onClick={onReprocessSelectedClient}
+            type="button"
+          >
+            Mükellefi yeniden işle
+          </button>
+          {clientReprocessStatus ? <p className="decision-status">{clientReprocessStatus}</p> : null}
           <label className="bulk-document-check danger">
             <input
               checked={clientDocumentDeleteConfirmed}

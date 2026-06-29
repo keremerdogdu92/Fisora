@@ -16,6 +16,7 @@ const {
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   requestStatementAiSuggestions,
+  reprocessClient,
   reprocessDocument,
   resetTestData,
   resolveApiBaseUrl,
@@ -904,6 +905,36 @@ test("reprocessDocument posts an existing document back to the processing queue"
     document_ref: "fatura.pdf",
   });
   assert.deepEqual(result, { processing_job: { status: "queued" } });
+});
+
+test("reprocessClient posts selected client for immediate reprocessing", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ queued_document_count: 3, processing_summary: { completed_count: 3 } }) };
+  };
+
+  const result = await reprocessClient({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    maxJobs: 25,
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/client-reprocess");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    client_id: "client-1",
+    max_jobs: 25,
+  });
+  assert.equal(result.queued_document_count, 3);
 });
 
 test("resetTestData posts guarded accountant reset request", async () => {

@@ -701,6 +701,32 @@ async function reprocessDocument({
   return response.json();
 }
 
+async function reprocessClient({
+  apiBaseUrl,
+  clientId,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  maxJobs = 50,
+  fetchImpl = fetch,
+}) {
+  const normalizedUserId = userId || DEFAULT_UPLOAD_USER_ID;
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/client-reprocess`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
+    },
+    body: JSON.stringify({
+      client_id: String(clientId || ""),
+      max_jobs: Number(maxJobs || 50),
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `client reprocess failed with ${response.status}`));
+  }
+  return response.json();
+}
+
 module.exports = {
   DEFAULT_UPLOAD_USER_ID,
   backendAuthHeaders,
@@ -717,6 +743,7 @@ module.exports = {
   parseTaxCertificateFromBackend,
   pickUploadUser,
   requestStatementAiSuggestions,
+  reprocessClient,
   reprocessDocument,
   resetTestData,
   resolveApiBaseUrl,

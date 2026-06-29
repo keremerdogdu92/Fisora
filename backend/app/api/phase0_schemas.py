@@ -311,6 +311,11 @@ class DocumentReprocessPayload(BaseModel):
     document_ref: str
 
 
+class ClientReprocessPayload(BaseModel):
+    client_id: str
+    max_jobs: int = 50
+
+
 class PortalAccessPayload(BaseModel):
     client_id: str
     user_id: str

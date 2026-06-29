@@ -201,9 +201,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
   const {
-    chartUploadStatus,
-    clientDocumentDeleteConfirmed,
-    clientDocumentDeleteStatus,
+    chartUploadStatus, clientDocumentDeleteConfirmed, clientDocumentDeleteStatus, clientReprocessStatus,
     createInviteForSelectedClient,
     createNewClient,
     deleteSelectedClientDocuments,
@@ -215,7 +213,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     parseNewClientChartAccounts,
     portalPassword,
     portalPasswordStatus,
-    portalUserIdDraft,
+    portalUserIdDraft, reprocessSelectedClient,
     selectNewClientTaxCertificate,
     selectedClientDocumentRefs,
     setClientDocumentDeleteConfirmed,
@@ -532,9 +530,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       {mode === "clients" ? (
         <ClientManagementView
           cancellationRequests={openCancellationRequests}
-          chartUploadStatus={chartUploadStatus}
-          clientDocumentDeleteConfirmed={clientDocumentDeleteConfirmed}
-          clientDocumentDeleteStatus={clientDocumentDeleteStatus}
+          chartUploadStatus={chartUploadStatus} clientDocumentDeleteConfirmed={clientDocumentDeleteConfirmed} clientDocumentDeleteStatus={clientDocumentDeleteStatus}
           clientRows={visibleDashboardClientRows}
           clients={filteredClients}
           clientSearch={clientSearch}
@@ -545,10 +541,11 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           newClientTaxCertificateFile={newClientTaxCertificateFile}
           newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
           onChartFileSelected={parseNewClientChartAccounts}
+          onExistingChartFileSelected={uploadChartAccounts}
           onClientSearchChange={setClientSearch}
           onCreateInvite={createInviteForSelectedClient}
           onCreateNewClient={createNewClient}
-          onDeleteSelectedDocuments={deleteSelectedClientDocuments}
+          onDeleteSelectedDocuments={deleteSelectedClientDocuments} onReprocessSelectedClient={reprocessSelectedClient}
           onResolveCancellation={resolveCancellation}
           onSetPassword={setPasswordForSelectedClient}
           onUpdatePortalAccess={updatePortalAccessForSelectedClient}
@@ -556,7 +553,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           portalPassword={portalPassword}
           portalPasswordStatus={portalPasswordStatus}
           portalUserIdDraft={portalUserIdDraft}
-          selectedClient={selectedClient}
+          selectedClient={selectedClient} clientReprocessStatus={clientReprocessStatus}
           selectedDocumentRefs={selectedClientDocumentRefs}
           setClientDocumentDeleteConfirmed={setClientDocumentDeleteConfirmed}
           setNewClientDraft={setNewClientDraft}

@@ -11,6 +11,7 @@ from app.api.phase0_mappers import chart_account_from_payload, chart_account_pay
 from app.api.phase0_schemas import ChartAccountsStorePayload, ClientDocumentsDeletePayload, ClientOnboardingPackagePayload, ClientProfilePayload
 from app.domain.business_relevance import check_client_onboarding
 from app.domain.chart_accounts import parse_chart_accounts
+from app.domain.document_uploads import store_document_content
 
 
 OperationRecorder = Callable[..., dict[str, object]]
@@ -26,9 +27,11 @@ class WorkspaceService:
         record_operation_event: OperationRecorder,
         require_client_access: AccessChecker,
         request_user_id: UserIdResolver,
+        document_storage_path: Path | None = None,
         chart_account_parser: Callable[[Path], object] = parse_chart_accounts,
     ) -> None:
         self.store = store
+        self.document_storage_path = document_storage_path or Path("exports/documents")
         self.record_operation_event = record_operation_event
         self.require_client_access = require_client_access
         self.request_user_id = request_user_id
@@ -105,15 +108,38 @@ class WorkspaceService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         accounts = [asdict(account) for account in parsed_accounts]
         stored = self.store.replace_chart_accounts(client_id=normalized_client_id, accounts=accounts)
+        raw_document = store_document_content(
+            base_dir=self.document_storage_path,
+            client_id=normalized_client_id,
+            file_name=original_name,
+            document_type="special_document",
+            intake_category="special_document",
+            uploaded_by=self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session) or "mali-musavir",
+            content=file_path.read_bytes(),
+            retention_days=365,
+        )
+        raw_payload = asdict(raw_document)
+        raw_payload.update(
+            {
+                "attachment_ref": raw_payload.get("document_id", ""),
+                "attachment_type": "chart_accounts",
+                "parsed_account_count": len(accounts),
+            }
+        )
+        attachment = self.store.save_onboarding_attachment(client_id=normalized_client_id, attachment=raw_payload)
         self.record_operation_event(
             store=self.store,
             client_id=normalized_client_id,
             event_type="chart_accounts_uploaded",
             status="ok" if accounts else "warning",
             message="Hesap plani import edildi.",
-            metadata={"file_name": original_name, "account_count": len(accounts)},
+            metadata={
+                "file_name": original_name,
+                "account_count": len(accounts),
+                "raw_attachment_ref": attachment["attachment_ref"],
+            },
         )
-        return {**stored, "file_name": original_name}
+        return {**stored, "file_name": original_name, "raw_attachment": attachment}
 
     def parse_chart_accounts_upload(self, *, original_name: str, file_path: Path) -> dict[str, object]:
         suffix = Path(original_name).suffix.lower()

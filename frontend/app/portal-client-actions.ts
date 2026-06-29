@@ -7,6 +7,7 @@ import {
   deleteClientDocuments,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
+  reprocessClient,
   resolveApiBaseUrl,
   sessionAuthErrorMessage,
   setPortalPassword as setBackendPortalPassword,
@@ -47,12 +48,14 @@ export function emptyNewClientDraft(): NewClientDraft {
 
 export async function createNewClientAction({
   loginUserId,
+  newClientChartAccountsFile,
   newClientDraft,
   newClientTaxCertificateFile,
   portalPassword,
   refreshBackendPilotData,
   session,
   setNewClientDraft,
+  setNewClientChartAccountsFile,
   setNewClientStatus,
   setNewClientTaxCertificateFile,
   setNewClientTaxCertificateInputKey,
@@ -62,10 +65,12 @@ export async function createNewClientAction({
   loginUserId: string;
   newClientDraft: NewClientDraft;
   newClientTaxCertificateFile: File | null;
+  newClientChartAccountsFile: File | null;
   portalPassword: string;
   refreshBackendPilotData: () => Promise<boolean>;
   session: LocalSession | null;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
+  setNewClientChartAccountsFile: (file: File | null) => void;
   setNewClientStatus: (status: string) => void;
   setNewClientTaxCertificateFile: (file: File | null) => void;
   setNewClientTaxCertificateInputKey: Dispatch<SetStateAction<number>>;
@@ -101,6 +106,16 @@ export async function createNewClientAction({
       userId: actingUserId,
     });
     setSelectedClientId(payload.client.client_id);
+    if (newClientChartAccountsFile) {
+      setNewClientStatus("Mükellef kaydedildi. Hesap planı ham dosyası saklanıyor.");
+      await uploadChartAccountsToBackend({
+        apiBaseUrl,
+        clientId: payload.client.client_id,
+        userId: actingUserId,
+        sessionToken: session?.sessionToken,
+        file: newClientChartAccountsFile,
+      });
+    }
     let certificateStatus = "";
     if (taxCertificateFile) {
       setNewClientStatus("Mükellef kaydedildi. Vergi levhası yükleniyor.");
@@ -127,6 +142,7 @@ export async function createNewClientAction({
       userHeader: actingUserId,
     });
     setNewClientDraft(emptyNewClientDraft());
+    setNewClientChartAccountsFile(null);
     setPortalPasswordDraft("");
     setNewClientTaxCertificateFile(null);
     setNewClientTaxCertificateInputKey((current) => current + 1);
@@ -228,17 +244,20 @@ export async function parseNewClientChartAccountsAction({
   files,
   loginUserId,
   session,
+  setNewClientChartAccountsFile,
   setNewClientDraft,
   setNewClientStatus,
 }: {
   files: FileList | null;
   loginUserId: string;
   session: LocalSession | null;
+  setNewClientChartAccountsFile: (file: File | null) => void;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
   setNewClientStatus: (status: string) => void;
 }) {
   const file = files?.[0];
   if (!file) return;
+  setNewClientChartAccountsFile(file);
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
   setNewClientStatus(`${file.name} hesap planı okunuyor.`);
@@ -361,6 +380,40 @@ export async function setPasswordForSelectedClientAction({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setPortalPasswordStatus(`Sifre kurulumu tamamlanamadi. ${message}`);
+  }
+}
+
+export async function reprocessSelectedClientAction({
+  loginUserId,
+  refreshBackendPilotData,
+  selectedClient,
+  session,
+  setClientReprocessStatus,
+}: {
+  loginUserId: string;
+  refreshBackendPilotData: () => Promise<boolean>;
+  selectedClient?: PilotClient;
+  session: LocalSession | null;
+  setClientReprocessStatus: (status: string) => void;
+}) {
+  if (!selectedClient) return;
+  const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+  setClientReprocessStatus(`${selectedClient.clientName}: vergi levhası, NACE ve belgeler yeniden işleniyor.`);
+  try {
+    const result = await reprocessClient({
+      apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+      clientId: selectedClient.clientId,
+      userId: actingUserId,
+      sessionToken: session?.sessionToken,
+      maxJobs: 100,
+    });
+    const queued = Number(result?.queued_document_count || 0);
+    const completed = Number(result?.processing_summary?.completed_count || 0);
+    setClientReprocessStatus(`${selectedClient.clientName}: ${queued} belge kuyruğa alındı, ${completed} işlem tamamlandı.`);
+    await refreshBackendPilotData();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setClientReprocessStatus(`${selectedClient.clientName}: yeniden işleme tamamlanamadı. ${message}`);
   }
 }
 

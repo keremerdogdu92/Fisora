@@ -12,7 +12,7 @@ import httpx
 
 from app.domain.brand_research import normalize_brand_name
 from app.domain.ai_capacity import looks_like_openai_api_key
-from app.domain.business_relevance import account_treatment_for_category, classify_product_line
+from app.domain.business_relevance import account_treatment_for_category, build_activity_profile, classify_product_line
 from app.domain.nace_research import normalize_nace_code
 from app.domain.product_research_cache import normalize_product_research_key
 
@@ -319,6 +319,28 @@ class ResearchHarness:
                     return normalize_research_profile(kind="brand", key=candidate_key, payload=cached)
         return self._research_and_store(query=query, key=key)
 
+    def research_nace(
+        self,
+        *,
+        nace_code: str,
+        activity_context: str = "",
+        bypass_cache: bool = False,
+    ) -> dict[str, Any]:
+        key = normalize_nace_code(nace_code)
+        if not key:
+            return normalize_research_profile(kind="nace", key="", payload={})
+        if hasattr(self.store, "get_nace_research_profile"):
+            cached = self.store.get_nace_research_profile(key)
+            if cached and (cached.get("override") or not bypass_cache):
+                return normalize_research_profile(kind="nace", key=key, payload=cached)
+        query = ResearchQuery(
+            kind="nace",
+            key=key,
+            search_text=f"NACE {key} faaliyet kodu kapsamı",
+            activity_context=_sanitize_text(activity_context),
+        )
+        return self._research_and_store(query=query, key=key)
+
     def _research_and_store(self, *, query: ResearchQuery, key: str) -> dict[str, Any]:
         if not self.policy.enabled or self.provider is None or self.call_count >= self.policy.max_per_document:
             return normalize_research_profile(kind=query.kind, key=key, payload={})
@@ -412,6 +434,16 @@ class TavilySearchResearchProvider:
 
 
 def _tavily_search_text(query: ResearchQuery) -> str:
+    if query.kind == "nace":
+        return " ".join(
+            part
+            for part in (
+                query.search_text,
+                query.activity_context,
+                "NACE Rev.2 official activity classification scope business expenses",
+            )
+            if str(part).strip()
+        )
     parts = [
         query.search_text,
         query.supplier_hint,
@@ -437,6 +469,29 @@ def _tavily_payload_to_research_profile(query: ResearchQuery, payload: dict[str,
         )
     answer = str(payload.get("answer") or "").strip()
     accepted_evidence = [item for item in evidence if source_policy_accepts(str(item.get("url") or ""))]
+    if query.kind == "nace":
+        activity_profile = build_activity_profile(
+            activity_description=" ".join(part for part in (query.activity_context, answer) if part),
+            nace_code=query.key,
+        )
+        research_confidence = 85 if answer and accepted_evidence else 75 if accepted_evidence else 40
+        return {
+            "display_name": query.key,
+            "activity_title": answer.split(".")[0].strip() if answer else query.activity_context,
+            "scope_summary": answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else ""),
+            "summary_tr": answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else ""),
+            "included_goods_services": [],
+            "likely_business_expenses": [],
+            "unlikely_or_personal_items": [],
+            "bank_statement_hints": [],
+            "activity_tags": list(activity_profile.activity_tags),
+            "source_urls": [str(item.get("url") or "") for item in accepted_evidence],
+            "confidence": research_confidence,
+            "research_confidence": research_confidence,
+            "accounting_impact_confidence": 90 if activity_profile.activity_tags else 60,
+            "evidence": evidence,
+            "source_policy": query.source_policy,
+        }
     category = _infer_category_from_research(query=query, answer=answer, evidence=evidence)
     categories = [category] if category else []
     account_treatment = account_treatment_for_category(category) if category else ""

@@ -10,7 +10,7 @@ from app.api.phase0_context import (
     get_document_service,
     request_user_id,
 )
-from app.api.phase0_schemas import DocumentReprocessPayload, DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
+from app.api.phase0_schemas import ClientReprocessPayload, DocumentReprocessPayload, DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
 from app.domain.document_uploads import decode_base64_content
 from app.workflows.document_processing import process_queued_documents
 
@@ -98,6 +98,20 @@ def store_document_reprocess(
         client_id=payload.client_id,
         document_ref=payload.document_ref,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+
+
+@router.post("/store/client-reprocess")
+def store_client_reprocess(
+    payload: ClientReprocessPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_document_service().store_client_reprocess(
+        client_id=payload.client_id,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+        max_jobs=payload.max_jobs,
     )
 
 

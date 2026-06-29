@@ -3,12 +3,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict
 import mimetypes
+from os import environ
 from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
+from app.domain.business_relevance import ClientProfile, check_client_onboarding
 from app.domain.document_uploads import store_document_content
+from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
+from app.domain.tax_certificates import parse_tax_certificate_file
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
 
@@ -301,6 +305,178 @@ class DocumentService:
             "document_ref": normalized_ref,
             "processing_job": job,
         }
+
+    def store_client_reprocess(
+        self,
+        *,
+        client_id: str,
+        user_id: str | None,
+        max_jobs: int = 50,
+    ) -> dict[str, object]:
+        normalized_client_id = client_id.strip()
+        if not normalized_client_id:
+            raise HTTPException(status_code=400, detail="client_id is required")
+        self.require_client_access(
+            client_id=normalized_client_id,
+            user_id=user_id,
+            allowed_roles=("accountant", "admin"),
+        )
+        workspace = self.store.get_workspace(normalized_client_id)
+        tax_certificate = self._reparse_latest_tax_certificate(workspace)
+        nace_profile: dict[str, object] = {}
+        if tax_certificate:
+            nace_profile = self._research_nace_for_tax_certificate(tax_certificate)
+            self._update_client_from_tax_certificate(
+                client_id=normalized_client_id,
+                workspace=workspace,
+                tax_certificate=tax_certificate,
+                nace_profile=nace_profile,
+            )
+        queued_jobs = []
+        for document in workspace.get("uploaded_documents", []):
+            document_ref = str(document.get("document_ref") or document.get("document_id") or "").strip()
+            if not document_ref:
+                continue
+            document_type = str(document.get("document_type") or "invoice")
+            job = self.store.create_processing_job(
+                client_id=normalized_client_id,
+                document_ref=document_ref,
+                document_type=document_type,
+                parser_kind=parser_kind_for_document_type(document_type),
+                intake_category=str(document.get("intake_category") or ""),
+            )
+            queued_jobs.append(job)
+            self.store.record_document_pipeline_event(
+                client_id=normalized_client_id,
+                document_ref=document_ref,
+                step="client_reprocess_queued",
+                status="info",
+                message_tr="Mükellef bazlı yeniden işlemeyle belge yeni motor kuyruğuna alındı.",
+                debug_code="client_reprocess_queued",
+                details={"job_id": str(job.get("id") or "")},
+            )
+        processing_summary = process_queued_documents(self.store, max_jobs=max(max_jobs, len(queued_jobs)))
+        self.record_operation_event(
+            store=self.store,
+            client_id=normalized_client_id,
+            event_type="client_reprocess",
+            status="ok" if not processing_summary.get("failed_count") else "warning",
+            message="Mükellef vergi levhası, NACE ve belgeleri yeni motorla yeniden işlendi.",
+            metadata={
+                "queued_document_count": len(queued_jobs),
+                "processed_count": processing_summary.get("processed_count", 0),
+                "tax_certificate_reparsed": bool(tax_certificate),
+                "nace_researched": bool(nace_profile),
+            },
+        )
+        return {
+            "client_id": normalized_client_id,
+            "queued_document_count": len(queued_jobs),
+            "queued_jobs": queued_jobs,
+            "processing_summary": processing_summary,
+            "tax_certificate": tax_certificate or {},
+            "nace_research_profile": nace_profile,
+        }
+
+    def _reparse_latest_tax_certificate(self, workspace: dict[str, Any]) -> dict[str, object]:
+        attachments = [
+            attachment
+            for attachment in workspace.get("onboarding_attachments", [])
+            if str(attachment.get("attachment_type") or "") == "tax_certificate"
+        ]
+        if not attachments:
+            return {}
+        latest = sorted(attachments, key=lambda item: str(item.get("created_at") or item.get("updated_at") or ""))[-1]
+        path = Path(str(latest.get("storage_path") or ""))
+        if not path.exists() or not path.is_file():
+            return {}
+        return parse_tax_certificate_file(path).to_payload()
+
+    def _research_nace_for_tax_certificate(self, tax_certificate: dict[str, object]) -> dict[str, object]:
+        nace_code = str(tax_certificate.get("nace_code") or "").strip()
+        if not nace_code:
+            return {}
+        runtime = build_research_runtime_from_env(environ)
+        if not runtime:
+            return {}
+        harness = ResearchHarness(
+            store=self.store,
+            provider=runtime.get("provider"),  # type: ignore[arg-type]
+            policy=runtime.get("policy"),  # type: ignore[arg-type]
+        )
+        return harness.research_nace(
+            nace_code=nace_code,
+            activity_context=str(tax_certificate.get("activity_description") or ""),
+            bypass_cache=True,
+        )
+
+    def _update_client_from_tax_certificate(
+        self,
+        *,
+        client_id: str,
+        workspace: dict[str, Any],
+        tax_certificate: dict[str, object],
+        nace_profile: dict[str, object],
+    ) -> None:
+        client = workspace.get("client") or {}
+        current = dict(client.get("profile") or {})
+        activity_tags = [
+            str(tag).strip()
+            for tag in (
+                nace_profile.get("activity_tags")
+                or tax_certificate.get("activity_tags")
+                or current.get("activity_tags")
+                or []
+            )
+            if str(tag).strip()
+        ]
+        updated = {
+            **current,
+            "client_id": current.get("client_id") or client_id,
+            "title": tax_certificate.get("display_title") or tax_certificate.get("title") or current.get("title") or "",
+            "tax_id": tax_certificate.get("tax_id") or current.get("tax_id") or "",
+            "tckn": tax_certificate.get("tckn") or current.get("tckn") or "",
+            "vkn": tax_certificate.get("vkn") or current.get("vkn") or "",
+            "identity_type": tax_certificate.get("identity_type") or current.get("identity_type") or "",
+            "tax_identifier": tax_certificate.get("tax_identifier") or current.get("tax_identifier") or current.get("tax_id") or "",
+            "legal_name": tax_certificate.get("legal_name") or current.get("legal_name") or "",
+            "trade_name": tax_certificate.get("trade_name") or current.get("trade_name") or "",
+            "display_title": tax_certificate.get("display_title") or current.get("display_title") or "",
+            "tax_office": tax_certificate.get("tax_office") or current.get("tax_office") or "",
+            "activity_description": tax_certificate.get("activity_description") or current.get("activity_description") or "",
+            "nace_code": tax_certificate.get("nace_code") or current.get("nace_code") or "",
+            "activity_tags": activity_tags,
+            "activity_profile": tax_certificate.get("activity_profile") or current.get("activity_profile") or {},
+            "workplace_addresses": tax_certificate.get("workplace_addresses") or current.get("workplace_addresses") or [],
+            "has_chart_accounts": bool(current.get("has_chart_accounts") or (workspace.get("chart_accounts") or {}).get("account_count")),
+        }
+        if nace_profile:
+            updated["nace_research_profile"] = nace_profile
+        onboarding = check_client_onboarding(
+            ClientProfile(
+                client_id=str(updated.get("client_id") or ""),
+                title=str(updated.get("title") or ""),
+                tax_id=str(updated.get("tax_id") or ""),
+                tckn=str(updated.get("tckn") or ""),
+                vkn=str(updated.get("vkn") or ""),
+                identity_type=str(updated.get("identity_type") or ""),
+                tax_identifier=str(updated.get("tax_identifier") or ""),
+                legal_name=str(updated.get("legal_name") or ""),
+                trade_name=str(updated.get("trade_name") or ""),
+                display_title=str(updated.get("display_title") or updated.get("title") or ""),
+                tax_office=str(updated.get("tax_office") or ""),
+                activity_description=str(updated.get("activity_description") or ""),
+                nace_code=str(updated.get("nace_code") or ""),
+                activity_tags=tuple(activity_tags),
+                workplace_addresses=tuple(updated.get("workplace_addresses") or []),
+                has_chart_accounts=bool(updated.get("has_chart_accounts")),
+            )
+        )
+        self.store.upsert_client(
+            client_id=client_id,
+            profile=updated,
+            onboarding={"is_ready": onboarding.is_ready, "missing_fields": list(onboarding.missing_fields)},
+        )
 
     def store_processing_jobs(self, *, client_id: str, user_id: str | None) -> dict[str, object]:
         if not client_id.strip():

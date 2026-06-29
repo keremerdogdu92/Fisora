@@ -8,6 +8,7 @@ import {
   deleteSelectedClientDocumentsAction,
   emptyNewClientDraft,
   parseNewClientChartAccountsAction,
+  reprocessSelectedClientAction,
   selectNewClientTaxCertificateAction,
   setPasswordForSelectedClientAction,
   updatePortalAccessForSelectedClientAction,
@@ -28,6 +29,7 @@ export function useClientManagementCommands({
   setSelectedClientId: (clientId: string) => void;
 }) {
   const [newClientDraft, setNewClientDraft] = useState<NewClientDraft>(() => emptyNewClientDraft());
+  const [newClientChartAccountsFile, setNewClientChartAccountsFile] = useState<File | null>(null);
   const [newClientTaxCertificateFile, setNewClientTaxCertificateFile] = useState<File | null>(null);
   const [newClientTaxCertificateInputKey, setNewClientTaxCertificateInputKey] = useState(0);
   const [newClientStatus, setNewClientStatus] = useState("");
@@ -38,6 +40,7 @@ export function useClientManagementCommands({
   const [portalPasswordStatus, setPortalPasswordStatus] = useState("");
   const [clientDocumentDeleteConfirmed, setClientDocumentDeleteConfirmed] = useState(false);
   const [clientDocumentDeleteStatus, setClientDocumentDeleteStatus] = useState("");
+  const [clientReprocessStatus, setClientReprocessStatus] = useState("");
   const [selectedClientDocumentRefs, setSelectedClientDocumentRefs] = useState<string[]>([]);
 
   useEffect(() => {
@@ -50,12 +53,14 @@ export function useClientManagementCommands({
   const createNewClient = () => {
     void createNewClientAction({
       loginUserId,
+      newClientChartAccountsFile,
       newClientDraft,
       newClientTaxCertificateFile,
       portalPassword,
       refreshBackendPilotData,
       session,
       setNewClientDraft,
+      setNewClientChartAccountsFile,
       setNewClientStatus,
       setNewClientTaxCertificateFile,
       setNewClientTaxCertificateInputKey,
@@ -91,8 +96,19 @@ export function useClientManagementCommands({
       files,
       loginUserId,
       session,
+      setNewClientChartAccountsFile,
       setNewClientDraft,
       setNewClientStatus,
+    });
+  };
+
+  const reprocessSelectedClient = () => {
+    void reprocessSelectedClientAction({
+      loginUserId,
+      refreshBackendPilotData,
+      selectedClient,
+      session,
+      setClientReprocessStatus,
     });
   };
 
@@ -147,6 +163,7 @@ export function useClientManagementCommands({
     chartUploadStatus,
     clientDocumentDeleteConfirmed,
     clientDocumentDeleteStatus,
+    clientReprocessStatus,
     createInviteForSelectedClient,
     createNewClient,
     deleteSelectedClientDocuments,
@@ -167,6 +184,7 @@ export function useClientManagementCommands({
     setPortalUserIdDraft,
     setSelectedClientDocumentRefs,
     setPasswordForSelectedClient,
+    reprocessSelectedClient,
     updatePortalAccessForSelectedClient,
     uploadChartAccounts,
   };

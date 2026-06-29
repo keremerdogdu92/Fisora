@@ -87,6 +87,7 @@ test("client onboarding labels portal user as the client email login", () => {
   const clientsSource = source("portal-clients-view.tsx");
 
   assert.match(clientsSource, /Mükellef e-posta \/ giriş kullanıcı adı/);
+  assert.match(clientsSource, /Mükellefi yeniden işle/);
 });
 
 test("portal visible source does not contain mojibake Turkish copy", () => {

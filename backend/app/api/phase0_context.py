@@ -58,6 +58,7 @@ def get_workflow_store():
 def get_workspace_service() -> WorkspaceService:
     return WorkspaceService(
         store=get_workflow_store(),
+        document_storage_path=default_document_storage_path(),
         record_operation_event=record_operation_event,
         require_client_access=require_client_access,
         request_user_id=request_user_id,

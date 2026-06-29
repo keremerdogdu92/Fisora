@@ -306,6 +306,11 @@ class DocumentUploadPayload(BaseModel):
     retention_policy_days: int = 90
 
 
+class DocumentReprocessPayload(BaseModel):
+    client_id: str
+    document_ref: str
+
+
 class PortalAccessPayload(BaseModel):
     client_id: str
     user_id: str

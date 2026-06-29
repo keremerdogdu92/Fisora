@@ -280,6 +280,7 @@ export function JournalPanel({
   decisionStatus,
   document,
   onApproveAndNext,
+  onReprocessDocument,
   onRequestStatementAi,
   onSaveDecision,
   onSaveStatementDecision,
@@ -292,6 +293,7 @@ export function JournalPanel({
   decisionStatus: string;
   document?: PilotDocument;
   onApproveAndNext: () => void | Promise<void>;
+  onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onSaveDecision: (action: string) => void | Promise<void>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
@@ -553,6 +555,7 @@ export function JournalPanel({
             <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
             <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
             <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
+            <button onClick={onReprocessDocument} type="button">Yeniden işle</button>
             <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
           </div>
         )}

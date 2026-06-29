@@ -289,7 +289,7 @@ def build_mixed_vat_purchase_entry(
         entry_date=entry_date,
         description=f"Karisik KDV alis faturasi {document_ref or ''}".strip(),
         lines=tuple(lines),
-        risk_flags=("mixed_vat_manual_review",),
+        risk_flags=(),
     )
 
 
@@ -325,7 +325,7 @@ def build_mixed_vat_sales_entry(
             ),
             *revenue_and_vat_lines,
         ),
-        risk_flags=("mixed_vat_accountant_review",),
+        risk_flags=(),
     )
 
 

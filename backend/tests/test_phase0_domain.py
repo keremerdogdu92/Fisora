@@ -36,7 +36,7 @@ from app.domain.business_relevance import (
     decide_export_status,
 )
 from app.domain.chart_accounts import ChartAccount
-from app.domain.counterparty_matching import match_counterparty
+from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
 from app.domain.export_adapters import get_export_adapter, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
 from app.domain.exporters import export_universal_journal_csv, export_zirve_trial_csv
@@ -639,14 +639,14 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertTrue(all(entry.is_balanced for entry in entries))
 
-    def test_mixed_vat_purchase_entry_is_balanced_and_flagged(self) -> None:
+    def test_mixed_vat_purchase_entry_is_balanced_without_review_flag(self) -> None:
         entry = build_mixed_vat_purchase_entry(
             entry_date="2026-05-04",
             items=(("770.01", money("108.00"), Decimal("0.08")), ("770.02", money("120.00"), Decimal("0.20"))),
         )
 
         self.assertTrue(entry.is_balanced)
-        self.assertIn("mixed_vat_manual_review", entry.risk_flags)
+        self.assertEqual(entry.risk_flags, ())
 
     def test_universal_journal_export(self) -> None:
         entry = build_purchase_entry(
@@ -1887,7 +1887,79 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.draft_lines[2]["account_code"], "391.10")
         self.assertEqual(result.draft_lines[3]["account_code"], "600.20")
         self.assertEqual(result.draft_lines[4]["account_code"], "391.20")
-        self.assertIn("mixed_vat_accountant_review", result.review_reason_codes)
+        self.assertNotIn("mixed_vat_accountant_review", result.review_reason_codes)
+
+    def test_solved_mixed_vat_purchase_can_be_export_ready(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="mixed-purchase.pdf",
+            provider_hint="Tedarikci A",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="MP2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("10", "20"),
+            goods_services_total="2000.00",
+            vat_total="300.00",
+            special_tax_total="",
+            tax_inclusive_total="2300.00",
+            payable_total="2300.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kargo hizmeti", "Kargo hizmeti"),
+            line_item_details=(
+                InvoiceLine(raw_text="Kargo hizmeti 1100,00", description="Kargo hizmeti", amount_hint="1100,00"),
+                InvoiceLine(raw_text="Kargo hizmeti 1200,00", description="Kargo hizmeti", amount_hint="1200,00"),
+            ),
+            issuer_title="Tedarikci A",
+            issuer_tax_id="9999999999",
+            recipient_title="Isitme Merkezi A",
+            recipient_tax_id="1234567890",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+            account_candidates={
+                "purchase_vat": (
+                    {"code": "191.10", "name": "Indirilecek KDV %10", "reason": ""},
+                    {"code": "191.20", "name": "Indirilecek KDV %20", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve servis",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        counterparty = CounterpartyMatch(
+            account_code="320.01",
+            account_name="Tedarikci A",
+            confidence=95,
+            match_reason="tax_id",
+            requires_review=False,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, counterparty)
+
+        self.assertEqual(result.draft_entry_type, "mixed_vat_purchase")
+        self.assertTrue(result.is_balanced)
+        self.assertEqual(result.export_status, "export_ready")
+        self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)
 
     def test_mixed_device_and_battery_sales_keeps_device_zero_and_battery_taxable(self) -> None:
         invoice = ParsedInvoice(

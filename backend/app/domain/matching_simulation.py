@@ -1123,7 +1123,7 @@ def simulate_invoice(
             reasons = tuple(dict.fromkeys((*reasons, *entry.risk_flags)))
             selected_revenue_account = mixed_items[-1][0]
             selected_sales_vat_account = mixed_items[-1][3]
-            draft_quality = "mixed_vat_sales_review"
+            draft_quality = "mixed_vat_sales_ready" if not reasons else "mixed_vat_sales_review"
         else:
             entry = _gross_sales_review_entry(
                 invoice,
@@ -1168,7 +1168,7 @@ def simulate_invoice(
             )
             reasons = tuple(dict.fromkeys((*reasons, *entry.risk_flags)))
             selected_purchase_vat_account = mixed_items[-1][3]
-            draft_quality = "mixed_vat_purchase_review"
+            draft_quality = "mixed_vat_purchase_ready" if not reasons else "mixed_vat_purchase_review"
         else:
             entry = _gross_review_entry(invoice, selection, supplier_account)
             draft_quality = "gross_balanced_needs_vat_split"

@@ -16,6 +16,7 @@ const {
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   requestStatementAiSuggestions,
+  reprocessDocument,
   resetTestData,
   resolveApiBaseUrl,
   setPortalPassword,
@@ -873,6 +874,36 @@ test("storeReviewDecision marks one-click rule requests as apply-to-similar", as
   assert.equal(request.url, "http://localhost:8000/phase0/store/review-decision");
   assert.equal(JSON.parse(request.init.body).decision.apply_to_similar, true);
   assert.equal(JSON.parse(request.init.body).decision.action, "suggest_for_similar");
+});
+
+test("reprocessDocument posts an existing document back to the processing queue", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ processing_job: { status: "queued" } }) };
+  };
+
+  const result = await reprocessDocument({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    documentRef: "fatura.pdf",
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/document-reprocess");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    client_id: "client-1",
+    document_ref: "fatura.pdf",
+  });
+  assert.deepEqual(result, { processing_job: { status: "queued" } });
 });
 
 test("resetTestData posts guarded accountant reset request", async () => {

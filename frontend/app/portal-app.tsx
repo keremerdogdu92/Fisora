@@ -370,6 +370,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   });
   const {
     approveSelectedAndMoveNext,
+    reprocessSelectedDocument,
     requestStatementAiForSelectedDocument,
     saveDecision,
     saveStatementLineDecision,
@@ -503,6 +504,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onCreateNewClient={createNewClient}
           onClientSearchChange={setClientSearch}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}
+          onReprocessDocument={reprocessSelectedDocument}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
           onResolveCancellation={resolveCancellation}
           onSaveDecision={saveDecision}

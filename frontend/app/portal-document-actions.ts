@@ -9,6 +9,7 @@ import {
   ensureUploadWorkspace,
   pickUploadUser,
   requestStatementAiSuggestions,
+  reprocessDocument,
   resolveApiBaseUrl,
   storeReviewDecision,
   uploadDocumentsToBackend,
@@ -364,5 +365,38 @@ export async function saveDecisionAction({
         ? `${selectedDocument.fileName}: ${label} lokal uygulandi; backend kaydi tamamlanamadi. ${message}`
         : `${selectedDocument.fileName}: ${label} backend'e kaydedilemedi; serverda kalici karar olusmadi. ${message}`,
     );
+  }
+}
+
+export async function reprocessSelectedDocumentAction({
+  loginUserId,
+  refreshBackendPilotData,
+  selectedDocument,
+  session,
+  setDecisionStatus,
+}: {
+  loginUserId: string;
+  refreshBackendPilotData: () => Promise<boolean>;
+  selectedDocument?: PilotDocument;
+  session: LocalSession | null;
+  setDecisionStatus: (status: string) => void;
+}) {
+  if (!selectedDocument) return;
+  const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim() || "mali-musavir";
+  const documentRef = selectedDocument.originalDocumentRef || selectedDocument.id;
+  setDecisionStatus(`${selectedDocument.fileName}: yeni motorla yeniden isleme aliniyor.`);
+  try {
+    await reprocessDocument({
+      apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+      clientId: selectedDocument.clientId,
+      documentRef,
+      userId: reviewer,
+      sessionToken: session?.sessionToken,
+    });
+    setDecisionStatus(`${selectedDocument.fileName}: yeniden isleme kuyruguna alindi.`);
+    await refreshBackendPilotData();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setDecisionStatus(`${selectedDocument.fileName}: yeniden isleme baslatilamadi. ${message}`);
   }
 }

@@ -675,6 +675,32 @@ async function storeReviewDecision({
   return response.json();
 }
 
+async function reprocessDocument({
+  apiBaseUrl,
+  clientId,
+  documentRef,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  const normalizedUserId = userId || DEFAULT_UPLOAD_USER_ID;
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/document-reprocess`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
+    },
+    body: JSON.stringify({
+      client_id: String(clientId || ""),
+      document_ref: String(documentRef || ""),
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `document reprocess failed with ${response.status}`));
+  }
+  return response.json();
+}
+
 module.exports = {
   DEFAULT_UPLOAD_USER_ID,
   backendAuthHeaders,
@@ -691,6 +717,7 @@ module.exports = {
   parseTaxCertificateFromBackend,
   pickUploadUser,
   requestStatementAiSuggestions,
+  reprocessDocument,
   resetTestData,
   resolveApiBaseUrl,
   sessionAuthErrorMessage,

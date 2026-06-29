@@ -114,6 +114,56 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["document_ref"], upload["document_ref"])
         self.assertEqual([event["step"] for event in payload["events"]], ["uploaded", "file_preview_ready"])
 
+    def test_document_reprocess_queues_existing_uploaded_document(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZmF0dXJh",
+                },
+            ).json()
+
+            response = client.post(
+                "/phase0/store/document-reprocess",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={"client_id": "client-1", "document_ref": upload["document_ref"]},
+            )
+            workspace = client.get(
+                "/phase0/store/workspace/client-1",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["document_ref"], upload["document_ref"])
+        self.assertEqual(payload["processing_job"]["status"], "queued")
+        self.assertEqual(payload["processing_job"]["intake_category"], "purchase_invoice")
+        self.assertEqual([job["status"] for job in workspace["processing_jobs"]], ["queued", "queued"])
+        self.assertIn("reprocess_queued", [event["step"] for event in workspace["document_pipeline_events"]])
+
     def test_onboarding_attachment_does_not_create_processing_job(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
+  reprocessSelectedDocumentAction,
   requestStatementAiForSelectedDocumentAction,
   saveDecisionAction,
   saveStatementLineDecisionAction,
@@ -114,6 +115,22 @@ export function useReviewCommands({
     ],
   );
 
+  const reprocessSelectedDocument = useCallback(() => {
+    return reprocessSelectedDocumentAction({
+      loginUserId,
+      refreshBackendPilotData,
+      selectedDocument,
+      session,
+      setDecisionStatus,
+    });
+  }, [
+    loginUserId,
+    refreshBackendPilotData,
+    selectedDocument,
+    session,
+    setDecisionStatus,
+  ]);
+
   const approveSelectedAndMoveNext = useCallback(async () => {
     if (!selectedDocument) return;
     const selectedLineIndex = selectedDocument.statementLines.findIndex(
@@ -142,6 +159,7 @@ export function useReviewCommands({
 
   return {
     approveSelectedAndMoveNext,
+    reprocessSelectedDocument,
     requestStatementAiForSelectedDocument,
     saveDecision,
     saveStatementLineDecision,

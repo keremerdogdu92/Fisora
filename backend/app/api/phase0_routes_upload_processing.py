@@ -10,7 +10,7 @@ from app.api.phase0_context import (
     get_document_service,
     request_user_id,
 )
-from app.api.phase0_schemas import DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
+from app.api.phase0_schemas import DocumentReprocessPayload, DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
 from app.domain.document_uploads import decode_base64_content
 from app.workflows.document_processing import process_queued_documents
 
@@ -85,6 +85,20 @@ def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[s
 @router.post("/store/processing/run")
 def store_processing_run(payload: ProcessingRunPayload) -> dict[str, object]:
     return get_document_service().store_processing_run(max_jobs=payload.max_jobs)
+
+
+@router.post("/store/document-reprocess")
+def store_document_reprocess(
+    payload: DocumentReprocessPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_document_service().store_document_reprocess(
+        client_id=payload.client_id,
+        document_ref=payload.document_ref,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
 
 
 @router.get("/store/processing-jobs/{client_id}")

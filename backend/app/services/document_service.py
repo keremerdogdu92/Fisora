@@ -251,6 +251,57 @@ class DocumentService:
         )
         return summary
 
+    def store_document_reprocess(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        user_id: str | None,
+    ) -> dict[str, object]:
+        normalized_client_id = client_id.strip()
+        normalized_ref = document_ref.strip()
+        if not normalized_client_id or not normalized_ref:
+            raise HTTPException(status_code=400, detail="client_id and document_ref are required")
+        self.require_client_access(client_id=normalized_client_id, user_id=user_id)
+        workspace = self.store.get_workspace(normalized_client_id)
+        document = next(
+            (
+                item
+                for item in workspace.get("uploaded_documents", [])
+                if str(item.get("document_ref") or item.get("document_id") or item.get("original_file_name")) == normalized_ref
+            ),
+            None,
+        )
+        if not document:
+            raise HTTPException(status_code=404, detail="uploaded document not found")
+        document_type = str(document.get("document_type") or "invoice")
+        intake_category = str(document.get("intake_category") or "")
+        job = self.store.create_processing_job(
+            client_id=normalized_client_id,
+            document_ref=normalized_ref,
+            document_type=document_type,
+            parser_kind=parser_kind_for_document_type(document_type),
+            intake_category=intake_category,
+        )
+        self.store.record_document_pipeline_event(
+            client_id=normalized_client_id,
+            document_ref=normalized_ref,
+            step="reprocess_queued",
+            status="info",
+            message_tr="Belge yeni motorla yeniden isleme kuyruguna alindi.",
+            debug_code="manual_reprocess_queued",
+            details={
+                "job_id": str(job.get("id") or ""),
+                "document_type": document_type,
+                "intake_category": intake_category,
+            },
+        )
+        return {
+            "client_id": normalized_client_id,
+            "document_ref": normalized_ref,
+            "processing_job": job,
+        }
+
     def store_processing_jobs(self, *, client_id: str, user_id: str | None) -> dict[str, object]:
         if not client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required")

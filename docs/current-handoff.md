@@ -7,15 +7,16 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy: `main` ucu `cd7772c`; deploy sonunda
-  `git rev-parse` ile tekrar kontrol edildi.
-- Son deploy smoke: 2026-06-27, `/health` 200, readiness `ready=true`,
+- Son dogrulanan runtime deploy: `main` ucu `85ac6e0`; release script
+  `before_commit=961d041`, `after_commit=85ac6e0`, `smoke=ok`,
+  `/health` 200, readiness 200, `ready=true`, `pilot_sellable=true` dondu.
+- Son deploy smoke: 2026-06-29, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root ve tum `/portal/*` kontrol rotalari 200.
 - KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,
   `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`
   kaydi, pipeline'a `vat_split_classified`, musavir onayina
   `vat_split_review_saved` olayi eklendi.
-- 2026-06-29 hesap plani ve AI karar kapisi release'i hazirlandi:
+- 2026-06-29 hesap plani ve AI karar kapisi release'i canliya alindi:
   kesin KDV/hukuki kurallar AI tarafindan ezilmez; AI yalniz belirsiz satir,
   zayif hesap adayi veya marka/model-only aciklamalarda devreye girer.
   Tavily/global research sadece AI veya statik siniflandirma urunu

@@ -7,9 +7,10 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime deploy: `main` ucu `85ac6e0`; release script
-  `before_commit=961d041`, `after_commit=85ac6e0`, `smoke=ok`,
-  `/health` 200, readiness 200, `ready=true`, `pilot_sellable=true` dondu.
+- Son dogrulanan runtime kod release'i: `85ac6e0`; handoff-only sync
+  sonrasinda sunucu tekrar `origin/main` ile esitlenir. Kod release scripti
+  `before_commit=961d041`, `after_commit=85ac6e0`, `smoke=ok`, `/health`
+  200, readiness 200, `ready=true`, `pilot_sellable=true` dondu.
 - Son deploy smoke: 2026-06-29, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root ve tum `/portal/*` kontrol rotalari 200.
 - KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,

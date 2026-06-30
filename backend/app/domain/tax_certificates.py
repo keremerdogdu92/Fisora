@@ -287,6 +287,14 @@ def ocr_psm_candidates() -> tuple[str, ...]:
     return values or ("6", "1", "12")
 
 
+OCR_ROI_BOXES: tuple[tuple[str, tuple[float, float, float, float]], ...] = (
+    ("identity", (0.62, 0.12, 0.98, 0.44)),
+    ("title", (0.10, 0.12, 0.82, 0.36)),
+    ("address", (0.10, 0.28, 0.82, 0.58)),
+    ("nace", (0.10, 0.48, 0.98, 0.72)),
+)
+
+
 def score_confidence(*, title: str, tax_id: str, tax_office: str, activity_description: str, nace_code: str, addresses: tuple[str, ...], start_date: str) -> int:
     score = 0
     if title:
@@ -516,6 +524,58 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
     )
 
 
+def _run_tesseract(tesseract: str, image_path: Path, *, language: str, psm: str, timeout: int = 90) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [tesseract, str(image_path), "stdout", "-l", language, "--psm", psm],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
+def _ocr_image_regions(path: Path, tesseract: str, *, language: str) -> tuple[str, tuple[str, ...], int]:
+    try:
+        from PIL import Image
+    except ModuleNotFoundError:
+        return "", ("ocr_roi_pillow_missing",), 0
+
+    texts: list[str] = []
+    failures: list[str] = []
+    attempts = 0
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            with Image.open(path) as image:
+                width, height = image.size
+                for name, box in OCR_ROI_BOXES:
+                    left = max(0, int(width * box[0]))
+                    top = max(0, int(height * box[1]))
+                    right = min(width, int(width * box[2]))
+                    bottom = min(height, int(height * box[3]))
+                    if right <= left or bottom <= top:
+                        continue
+                    crop_path = Path(temp_dir) / f"tax_certificate_roi_{name}.png"
+                    image.crop((left, top, right, bottom)).save(crop_path)
+                    attempts += 1
+                    try:
+                        completed = _run_tesseract(tesseract, crop_path, language=language, psm="6", timeout=45)
+                    except Exception as exc:  # noqa: BLE001
+                        failures.append(f"ocr_roi_error_{name}:{type(exc).__name__}")
+                        continue
+                    if completed.returncode != 0:
+                        failures.append(f"ocr_roi_failed_{name}:{completed.returncode}")
+                        continue
+                    if completed.stdout.strip():
+                        texts.append(completed.stdout)
+        except Exception as exc:  # noqa: BLE001
+            return "", (f"ocr_roi_image_error:{type(exc).__name__}",), attempts
+    if texts:
+        return "\n".join(texts), ("ocr_roi", f"ocr_roi_regions_{attempts}"), attempts
+    return "", tuple(failures or ("ocr_roi_empty",)), attempts
+
+
 def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
     tesseract = shutil.which("tesseract")
     if not tesseract:
@@ -529,15 +589,7 @@ def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
     for psm in ocr_psm_candidates():
         attempts += 1
         try:
-            completed = subprocess.run(
-                [tesseract, str(path), "stdout", "-l", language, "--psm", psm],
-                check=False,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=90,
-            )
+            completed = _run_tesseract(tesseract, path, language=language, psm=psm)
         except Exception as exc:  # noqa: BLE001
             failures.append(f"ocr_error_psm_{psm}:{type(exc).__name__}")
             continue
@@ -554,6 +606,15 @@ def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
         if _tax_certificate_extraction_complete(candidate_extraction) and candidate_score >= 90:
             return candidate_text, ("ocr_tesseract", f"ocr_tesseract_psm_{psm}", "ocr_early_exit", f"ocr_attempts_{attempts}")
     if best_score >= 0:
+        if best_score < 75:
+            roi_text, roi_notes, roi_attempts = _ocr_image_regions(path, tesseract, language=language)
+            total_attempts = attempts + roi_attempts
+            if roi_text.strip():
+                roi_candidate_text = "\n".join(value for value in (best_text, roi_text) if value.strip())
+                roi_extraction = parse_tax_certificate_text(roi_candidate_text)
+                if roi_extraction.confidence > best_score:
+                    return roi_candidate_text, tuple((*best_notes, *roi_notes, "ocr_roi_used", f"ocr_attempts_{total_attempts}"))
+            return best_text, tuple((*best_notes, *roi_notes, f"ocr_attempts_{total_attempts}"))
         return best_text, tuple((*best_notes, f"ocr_attempts_{attempts}"))
     return "", tuple(failures or ("ocr_failed",))
 

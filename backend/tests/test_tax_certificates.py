@@ -482,6 +482,37 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertIn("ocr_tesseract_psm_6", notes)
         self.assertIn("ocr_early_exit", notes)
 
+    def test_ocr_image_supplements_low_score_full_page_with_regions(self) -> None:
+        weak_output = """
+        VERGI LEVHASI
+        TICARET UNVANI
+        """
+        roi_output = """
+        RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI
+        UMRANIYE
+        7342497874
+        464601-CERRAHI, TIBBI VE ORTOPEDIK ALET VE CIHAZLARIN TOPTAN TICARETI
+        KAZIM KARABEKIR MAH. ADEM YAVUZ CAD. NO: 22 IC KAPI NO: 2 UMRANIYE / ISTANBUL
+        """
+
+        def fake_run(command, **_kwargs):
+            return FakeCompletedProcess(weak_output)
+
+        with patch("app.domain.tax_certificates.shutil.which", return_value="/usr/bin/tesseract"):
+            with patch("app.domain.tax_certificates.ocr_psm_candidates", return_value=("6", "1")):
+                with patch("app.domain.tax_certificates.subprocess.run", side_effect=fake_run):
+                    with patch(
+                        "app.domain.tax_certificates._ocr_image_regions",
+                        return_value=(roi_output, ("ocr_roi", "ocr_roi_regions_4"), 4),
+                    ):
+                        text, notes = ocr_image(Path("rana-tax-certificate.png"))
+
+        extraction = parse_tax_certificate_text(text)
+        self.assertEqual(extraction.vkn, "7342497874")
+        self.assertEqual(extraction.nace_code, "464601")
+        self.assertIn("ocr_roi_used", notes)
+        self.assertIn("ocr_attempts_6", notes)
+
 
 if __name__ == "__main__":
     unittest.main()

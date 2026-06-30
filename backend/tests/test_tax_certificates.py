@@ -195,6 +195,77 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.start_date, "04.01.2023")
         self.assertEqual(extraction.nace_code, "477401")
 
+    def test_parse_tax_certificate_text_handles_rana_grid_layout_without_label_leakage(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            VERGI LEVHASI
+            ADI SOYADI
+            TICARET UNVANI
+            IS YERI ADRESI
+            VERGI TURU
+            VERGI
+            DAIRESI
+            VERGI KIMLIK
+            NO
+            TC KIMLIK NO
+            ISE BASLAMA
+            TARIHI
+            ANA FAALIYET
+            KODU VE ADI
+            MUKELLEFIN
+            RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI
+            KAZIM KARABEKIR MAH. ADEM YAVUZ CAD. NO: 22 IC KAPI NO: 2 UMRANIYE / ISTANBUL
+            KURUMLAR VERGISI
+            UMRANIYE
+            7342497874
+            01.09.2022
+            464601-CERRAHI, TIBBI VE ORTOPEDIK ALET VE CIHAZLARIN TOPTAN TICARETI
+            """
+        )
+
+        self.assertEqual(extraction.title, "RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI")
+        self.assertEqual(extraction.legal_name, "RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI")
+        self.assertEqual(extraction.vkn, "7342497874")
+        self.assertEqual(extraction.tckn, "")
+        self.assertEqual(extraction.tax_office, "UMRANIYE")
+        self.assertEqual(extraction.nace_code, "464601")
+        self.assertEqual(extraction.activity_description, "CERRAHI, TIBBI VE ORTOPEDIK ALET VE CIHAZLARIN TOPTAN TICARETI")
+        self.assertEqual(
+            extraction.workplace_addresses,
+            ("KAZIM KARABEKIR MAH. ADEM YAVUZ CAD. NO: 22 IC KAPI NO: 2 UMRANIYE / ISTANBUL",),
+        )
+        self.assertEqual(extraction.start_date, "01.09.2022")
+
+    def test_parse_tax_certificate_text_rejects_label_fragments_as_values(self) -> None:
+        extraction = parse_tax_certificate_text(
+            """
+            VERGI LEVHASI
+            ADI SOYADI
+            TICARET UNVANI
+            IS YERI ADRESI
+            VERGI TURU
+            VERGI DAIRESI
+            VERGI KIMLIK NO
+            TC KIMLIK NO
+            ANA FAALIYET KODU VE ADI
+            MUKELLEFIN
+            VE ADLARI
+            TCKN
+            DAIRESI
+            SIRKETI NO 7342497874
+            RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI
+            KAZIM KARABEKIR MAH. ADEM YAVUZ CAD. NO: 22 IC KAPI NO: 2 UMRANIYE / ISTANBUL
+            KURUMLAR VERGISI
+            UMRANIYE
+            7342497874
+            464601-CERRAHI, TIBBI VE ORTOPEDIK ALET VE CIHAZLARIN TOPTAN TICARETI
+            """
+        )
+
+        self.assertNotIn(extraction.title, {"VE ADLARI", "TCKN", "DAIRESI", "SIRKETI NO 7342497874"})
+        self.assertEqual(extraction.title, "RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI")
+        self.assertEqual(extraction.tax_office, "UMRANIYE")
+
     def test_parse_tax_certificate_text_prefers_trade_name_for_display_but_keeps_legal_name(self) -> None:
         extraction = parse_tax_certificate_text(
             """
@@ -250,6 +321,42 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.vkn, "9270740926")
         self.assertEqual(extraction.tax_identifier, "9270740926")
         self.assertIn("ocr_pdf_rendered", extraction.extraction_notes)
+
+    def test_parse_tax_certificate_file_keeps_text_layer_without_ocr_when_critical_fields_exist(self) -> None:
+        text_layer = """
+        VERGI LEVHASI
+        ADI SOYADI
+        TICARET UNVANI
+        IS YERI ADRESI
+        VERGI TURU
+        VERGI
+        DAIRESI
+        VERGI KIMLIK
+        NO
+        TC KIMLIK NO
+        ISE BASLAMA
+        TARIHI
+        ANA FAALIYET
+        KODU VE ADI
+        MUKELLEFIN
+        RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI
+        KAZIM KARABEKIR MAH. ADEM YAVUZ CAD. NO: 22 IC KAPI NO: 2 UMRANIYE / ISTANBUL
+        KURUMLAR VERGISI
+        UMRANIYE
+        7342497874
+        01.09.2022
+        464601-CERRAHI, TIBBI VE ORTOPEDIK ALET VE CIHAZLARIN TOPTAN TICARETI
+        """
+
+        with patch("app.domain.tax_certificates.extract_pdf_text", return_value=(1, text_layer, ("pdf_text_layer",))):
+            with patch("app.domain.tax_certificates.ocr_pdf") as ocr_pdf:
+                extraction = parse_tax_certificate_file(Path("rana-vergi-levhasi.pdf"))
+
+        ocr_pdf.assert_not_called()
+        self.assertEqual(extraction.vkn, "7342497874")
+        self.assertEqual(extraction.nace_code, "464601")
+        self.assertFalse(extraction.processing_metrics["used_ocr"])
+        self.assertTrue(extraction.processing_metrics["used_text_layer"])
 
     def test_tax_certificate_parse_endpoint_returns_fields_without_storing_file(self) -> None:
         if TestClient is None or phase0 is None or app is None:
@@ -315,6 +422,7 @@ class TaxCertificateParserTests(unittest.TestCase):
                 },
                 "confidence": 92,
                 "extraction_notes": ["pdf_text_layer"],
+                "processing_metrics": {},
             },
         )
 
@@ -332,6 +440,47 @@ class TaxCertificateParserTests(unittest.TestCase):
         )
 
         self.assertEqual(extraction.title, "ABC ISITME CIHAZLARI LIMITED SIRKETI")
+
+    def test_ocr_image_stops_after_high_quality_first_page_segmentation(self) -> None:
+        readable_output = """
+        VERGI LEVHASI
+        ADI SOYADI
+        TICARET UNVANI
+        IS YERI ADRESI
+        VERGI TURU
+        VERGI
+        DAIRESI
+        VERGI KIMLIK
+        NO
+        TC KIMLIK NO
+        ISE BASLAMA
+        TARIHI
+        ANA FAALIYET
+        KODU VE ADI
+        MUKELLEFIN
+        RANAMED MEDIKAL TIBBI MALZEME URUNLERI SANAYI VE TICARET LIMITED SIRKETI
+        KAZIM KARABEKIR MAH. ADEM YAVUZ CAD. NO: 22 IC KAPI NO: 2 UMRANIYE / ISTANBUL
+        KURUMLAR VERGISI
+        UMRANIYE
+        7342497874
+        01.09.2022
+        464601-CERRAHI, TIBBI VE ORTOPEDIK ALET VE CIHAZLARIN TOPTAN TICARETI
+        """
+        calls: list[str] = []
+
+        def fake_run(command, **_kwargs):
+            psm = command[command.index("--psm") + 1]
+            calls.append(psm)
+            return FakeCompletedProcess(readable_output)
+
+        with patch("app.domain.tax_certificates.shutil.which", return_value="/usr/bin/tesseract"):
+            with patch("app.domain.tax_certificates.subprocess.run", side_effect=fake_run):
+                text, notes = ocr_image(Path("rana-tax-certificate.png"))
+
+        self.assertEqual(calls, ["6"])
+        self.assertIn("RANAMED MEDIKAL", text)
+        self.assertIn("ocr_tesseract_psm_6", notes)
+        self.assertIn("ocr_early_exit", notes)
 
 
 if __name__ == "__main__":

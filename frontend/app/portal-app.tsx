@@ -204,7 +204,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     newClientNaceResearchPending, newClientNaceResearchProfile, newClientNaceResearchStatus,
     newClientStatus,
     newClientTaxCertificateFile,
-    newClientTaxCertificateInputKey,
+    newClientTaxCertificateInputKey, newClientTaxCertificateParsePending, newClientTaxCertificateStage,
     parseNewClientChartAccounts,
     portalPassword,
     portalPasswordStatus,
@@ -539,7 +539,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           newClientNaceResearchPending={newClientNaceResearchPending} newClientNaceResearchProfile={newClientNaceResearchProfile} newClientNaceResearchStatus={newClientNaceResearchStatus}
           newClientStatus={newClientStatus}
           newClientTaxCertificateFile={newClientTaxCertificateFile}
-          newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
+          newClientTaxCertificateInputKey={newClientTaxCertificateInputKey} newClientTaxCertificateParsePending={newClientTaxCertificateParsePending} newClientTaxCertificateStage={newClientTaxCertificateStage}
           onChartFileSelected={parseNewClientChartAccounts}
           onExistingChartFileSelected={uploadChartAccounts}
           onClientSearchChange={setClientSearch}

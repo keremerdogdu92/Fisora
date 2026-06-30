@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unicodedata
 
 from app.domain.business_relevance import ActivityProfile, build_activity_profile
@@ -33,6 +34,7 @@ class TaxCertificateExtraction:
     activity_profile: ActivityProfile = field(default_factory=ActivityProfile)
     confidence: int = 0
     extraction_notes: tuple[str, ...] = ()
+    processing_metrics: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         identifier = self.tax_identifier or self.vkn or self.tckn or self.tax_id
@@ -57,6 +59,7 @@ class TaxCertificateExtraction:
         payload["activity_tags"] = list(self.activity_tags)
         payload["activity_profile"] = self.activity_profile.to_payload()
         payload["extraction_notes"] = list(self.extraction_notes)
+        payload["processing_metrics"] = dict(self.processing_metrics)
         return payload
 
 
@@ -321,13 +324,22 @@ def _looks_like_tax_office(line: str) -> bool:
     return "vergidairesi" in key and not is_label_line(line)
 
 
+def _looks_like_label_fragment(line: str) -> bool:
+    key = normalize_key(line)
+    if key in {"dairesi", "tckn", "vkn", "veadlari", "veadi", "koduveadi", "no", "numara"}:
+        return True
+    if re.fullmatch(r"(sirketi|limitedsirketi|anonimsirketi)?no\d{10,11}", key):
+        return True
+    return key.startswith(("sirketino", "vergikimlik", "tckimlik"))
+
+
 def _looks_like_title_candidate(line: str) -> bool:
     key = normalize_key(line)
-    if not key or is_label_line(line) or _line_is_date(line) or _line_is_tax_identifier(line):
+    if not key or is_label_line(line) or _looks_like_label_fragment(line) or _line_is_date(line) or _line_is_tax_identifier(line):
         return False
     if re.search(r"\b\d{6}\s*[-:]", line) or _looks_like_address(line) or _looks_like_tax_office(line):
         return False
-    blocked = ("vergi", "faaliyet", "gelir", "gib", "www", "http", "baskanligi", "turu", "tarihi")
+    blocked = ("vergi", "faaliyet", "gelir", "gib", "www", "http", "baskanligi", "turu", "tarihi", "adlari")
     if any(token in key for token in blocked):
         return False
     return bool(re.search(r"[A-Za-zÄ°Ä±Ã‡Ã§ÄžÄŸÃ–Ã¶ÅžÅŸÃœÃ¼]", line)) and len(line.split()) >= 2
@@ -405,7 +417,7 @@ def gib_grid_values(lines: list[str]) -> dict[str, str]:
         for line in values[values.index(tax_type) + 1 :]:
             if _line_is_tax_identifier(line) or _line_is_date(line):
                 break
-            if line != tax_type and not _looks_like_tax_type(line) and not _looks_like_address(line):
+            if line != tax_type and not _looks_like_tax_type(line) and not _looks_like_address(line) and not _looks_like_label_fragment(line):
                 tax_office = line
                 break
     if not tax_office:
@@ -429,20 +441,22 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
     column_values = gib_column_values(lines)
     grid_values = gib_grid_values(lines)
     legal_name = (
-        value_after_label(lines, "legal_name", max_lines=1)
+        grid_values.get("legal_name", "")
+        or value_after_label(lines, "legal_name", max_lines=1)
         or inline_named_value(lines, "legal_name")
-        or grid_values.get("legal_name", "")
     )
     trade_name = (
-        value_after_label(lines, "trade_name", max_lines=1)
+        grid_values.get("trade_name", "")
+        or value_after_label(lines, "trade_name", max_lines=1)
         or inline_named_value(lines, "trade_name")
-        or grid_values.get("trade_name", "")
     )
-    combined_title = value_after_label(lines, "title", max_lines=1) or inline_title_value(lines) or column_values.get("title", "")
-    title = trade_name or combined_title or legal_name or grid_values.get("title", "")
-    vkn = first_identifier_with_length(value_after_label(lines, "vkn", max_lines=2), 10) or grid_values.get("vkn", "")
-    tckn = first_identifier_with_length(value_after_label(lines, "tckn", max_lines=2), 11) or grid_values.get("tckn", "")
-    tax_id = first_tax_id(value_after_label(lines, "tax_id", max_lines=2)) or column_values.get("tax_identifier", "") or first_tax_id(joined_text)
+    combined_title = grid_values.get("title", "") or value_after_label(lines, "title", max_lines=1) or inline_title_value(lines) or column_values.get("title", "")
+    title = trade_name or combined_title or legal_name
+    if _looks_like_label_fragment(title):
+        title = grid_values.get("title", "") or column_values.get("title", "")
+    vkn = grid_values.get("vkn", "") or first_identifier_with_length(value_after_label(lines, "vkn", max_lines=2), 10)
+    tckn = grid_values.get("tckn", "") or first_identifier_with_length(value_after_label(lines, "tckn", max_lines=2), 11)
+    tax_id = vkn or tckn or first_tax_id(value_after_label(lines, "tax_id", max_lines=2)) or column_values.get("tax_identifier", "") or first_tax_id(joined_text)
     if tax_id and len(tax_id) == 10 and not vkn:
         vkn = tax_id
     if tax_id and len(tax_id) == 11 and not tckn:
@@ -453,7 +467,9 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
         tckn = first_identifier_with_length(joined_text, 11)
     tax_identifier = vkn or tckn or tax_id
     identity_type = "tckn_vkn" if tckn and vkn else identity_type_for(tax_identifier)
-    tax_office = value_after_label(lines, "tax_office", max_lines=1) or grid_values.get("tax_office", "") or column_values.get("tax_office", "")
+    tax_office = grid_values.get("tax_office", "") or value_after_label(lines, "tax_office", max_lines=1) or column_values.get("tax_office", "")
+    if _looks_like_label_fragment(tax_office):
+        tax_office = grid_values.get("tax_office", "") or column_values.get("tax_office", "")
     activity_value = activity_value_from_nace_line(lines) or value_after_label(lines, "activity", max_lines=3) or inline_activity_value(lines)
     nace_code, activity_description = parse_activity(activity_value)
     activity_profile = build_activity_profile(
@@ -509,7 +525,9 @@ def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
     best_notes: tuple[str, ...] = ("ocr_tesseract",)
     best_score = -1
     failures: list[str] = []
+    attempts = 0
     for psm in ocr_psm_candidates():
+        attempts += 1
         try:
             completed = subprocess.run(
                 [tesseract, str(path), "stdout", "-l", language, "--psm", psm],
@@ -527,13 +545,16 @@ def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
             failures.append(f"ocr_failed_psm_{psm}:{completed.returncode}")
             continue
         candidate_text = completed.stdout
-        candidate_score = parse_tax_certificate_text(candidate_text).confidence
+        candidate_extraction = parse_tax_certificate_text(candidate_text)
+        candidate_score = candidate_extraction.confidence
         if candidate_score > best_score:
             best_text = candidate_text
             best_score = candidate_score
             best_notes = ("ocr_tesseract", f"ocr_tesseract_psm_{psm}")
+        if _tax_certificate_extraction_complete(candidate_extraction) and candidate_score >= 90:
+            return candidate_text, ("ocr_tesseract", f"ocr_tesseract_psm_{psm}", "ocr_early_exit", f"ocr_attempts_{attempts}")
     if best_score >= 0:
-        return best_text, best_notes
+        return best_text, tuple((*best_notes, f"ocr_attempts_{attempts}"))
     return "", tuple(failures or ("ocr_failed",))
 
 
@@ -601,15 +622,106 @@ def merge_tax_certificate_extractions(primary: TaxCertificateExtraction, supplem
         activity_profile=activity_profile,
         confidence=max(primary.confidence, supplemental.confidence),
         extraction_notes=tuple(dict.fromkeys((*primary.extraction_notes, *supplemental.extraction_notes))),
+        processing_metrics={**primary.processing_metrics, **supplemental.processing_metrics},
     )
 
 
+def _duration_ms(start: float) -> int:
+    return int((time.perf_counter() - start) * 1000)
+
+
+def _tax_certificate_extraction_complete(extraction: TaxCertificateExtraction) -> bool:
+    return bool(extraction.title and extraction.nace_code and (extraction.vkn or extraction.tckn or extraction.tax_id))
+
+
+def _ocr_attempt_count(notes: tuple[str, ...]) -> int:
+    for note in notes:
+        match = re.fullmatch(r"ocr_attempts_(\d+)", note)
+        if match:
+            return int(match.group(1))
+    return 1 if any(note.startswith("ocr_tesseract_psm_") for note in notes) else 0
+
+
+def _selected_psm(notes: tuple[str, ...]) -> str:
+    for note in notes:
+        match = re.fullmatch(r"ocr_tesseract_psm_(\d+)", note)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def parse_tax_certificate_file(path: Path) -> TaxCertificateExtraction:
-    text, notes = extract_tax_certificate_text(path)
+    total_start = time.perf_counter()
+    metrics: dict[str, object] = {
+        "used_text_layer": False,
+        "used_ocr": False,
+        "selected_psm": "",
+        "ocr_attempts": 0,
+        "text_layer_ms": 0,
+        "pdf_render_ms": 0,
+        "ocr_ms": 0,
+        "parse_ms": 0,
+        "total_ms": 0,
+    }
+    suffix = path.suffix.lower()
+    text = ""
+    notes: tuple[str, ...]
+    if suffix == ".pdf":
+        text_start = time.perf_counter()
+        _, text, pdf_notes = extract_pdf_text(path)
+        metrics["text_layer_ms"] = _duration_ms(text_start)
+        if text.strip():
+            metrics["used_text_layer"] = True
+            notes = tuple((*pdf_notes, "pdf_text_layer"))
+        else:
+            ocr_start = time.perf_counter()
+            text, notes = ocr_pdf(path)
+            metrics["ocr_ms"] = _duration_ms(ocr_start)
+            metrics["used_ocr"] = any(note.startswith("ocr_tesseract") for note in notes)
+    else:
+        ocr_start = time.perf_counter()
+        text, notes = extract_tax_certificate_text(path)
+        metrics["ocr_ms"] = _duration_ms(ocr_start)
+        metrics["used_ocr"] = any(note.startswith("ocr_tesseract") for note in notes)
+
+    parse_start = time.perf_counter()
     extraction = parse_tax_certificate_text(text, extraction_notes=notes)
-    if path.suffix.lower() == ".pdf" and not extraction.vkn:
+    metrics["parse_ms"] = _duration_ms(parse_start)
+    metrics["selected_psm"] = _selected_psm(notes)
+    metrics["ocr_attempts"] = _ocr_attempt_count(notes)
+
+    if suffix == ".pdf" and metrics["used_text_layer"] and (not extraction.vkn or not _tax_certificate_extraction_complete(extraction)):
+        ocr_start = time.perf_counter()
         ocr_text, ocr_notes = ocr_pdf(path)
+        metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(ocr_start)
         if ocr_text.strip():
+            supplemental_start = time.perf_counter()
             supplemental = parse_tax_certificate_text(ocr_text, extraction_notes=ocr_notes)
-            return merge_tax_certificate_extractions(extraction, supplemental)
-    return extraction
+            metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
+            extraction = merge_tax_certificate_extractions(extraction, supplemental)
+            metrics["used_ocr"] = True
+            metrics["selected_psm"] = _selected_psm(ocr_notes)
+            metrics["ocr_attempts"] = _ocr_attempt_count(ocr_notes)
+
+    metrics["total_ms"] = _duration_ms(total_start)
+    return TaxCertificateExtraction(
+        title=extraction.title,
+        tax_id=extraction.tax_id,
+        tckn=extraction.tckn,
+        vkn=extraction.vkn,
+        identity_type=extraction.identity_type,
+        tax_identifier=extraction.tax_identifier,
+        legal_name=extraction.legal_name,
+        trade_name=extraction.trade_name,
+        display_title=extraction.display_title,
+        tax_office=extraction.tax_office,
+        activity_description=extraction.activity_description,
+        nace_code=extraction.nace_code,
+        workplace_addresses=extraction.workplace_addresses,
+        start_date=extraction.start_date,
+        activity_tags=extraction.activity_tags,
+        activity_profile=extraction.activity_profile,
+        confidence=extraction.confidence,
+        extraction_notes=extraction.extraction_notes,
+        processing_metrics=metrics,
+    )

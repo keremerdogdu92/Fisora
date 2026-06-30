@@ -23,6 +23,8 @@ export function ClientManagementView({
   newClientStatus,
   newClientTaxCertificateFile,
   newClientTaxCertificateInputKey,
+  newClientTaxCertificateParsePending,
+  newClientTaxCertificateStage,
   onChartFileSelected,
   onExistingChartFileSelected,
   onClientSearchChange,
@@ -64,6 +66,8 @@ export function ClientManagementView({
   newClientStatus: string;
   newClientTaxCertificateFile: File | null;
   newClientTaxCertificateInputKey: number;
+  newClientTaxCertificateParsePending: boolean;
+  newClientTaxCertificateStage: string;
   onChartFileSelected: (files: FileList | null) => void | Promise<void>;
   onExistingChartFileSelected: (files: FileList | null) => void | Promise<void>;
   onClientSearchChange: (value: string) => void;
@@ -138,6 +142,8 @@ export function ClientManagementView({
             status={newClientStatus}
             taxCertificateFile={newClientTaxCertificateFile}
             taxCertificateInputKey={newClientTaxCertificateInputKey}
+            taxCertificateParsePending={newClientTaxCertificateParsePending}
+            taxCertificateStage={newClientTaxCertificateStage}
           />
         </section>
       ) : null}
@@ -398,6 +404,8 @@ function NewClientStepper({
   status,
   taxCertificateFile,
   taxCertificateInputKey,
+  taxCertificateParsePending,
+  taxCertificateStage,
 }: {
   draft: NewClientDraft;
   naceResearchPending: boolean;
@@ -413,6 +421,8 @@ function NewClientStepper({
   status: string;
   taxCertificateFile: File | null;
   taxCertificateInputKey: number;
+  taxCertificateParsePending: boolean;
+  taxCertificateStage: string;
 }) {
   const identityReady = Boolean(draft.title.trim() && (draft.vkn.trim() || draft.tckn.trim() || draft.taxId.trim()) && draft.activityDescription.trim());
   const chartReady = draft.chartAccounts.length > 0;
@@ -420,6 +430,7 @@ function NewClientStepper({
   const canComplete = identityReady && chartReady && accessReady;
   const [taxCertificatePreviewUrl, setTaxCertificatePreviewUrl] = useState("");
   const taxCertificateIsImage = Boolean(taxCertificateFile?.type?.startsWith("image/"));
+  const [taxCertificateSlow, setTaxCertificateSlow] = useState(false);
   const researchSummary = String(naceResearchProfile?.summary_tr || naceResearchProfile?.scope_summary || "");
   const sourceUrls = Array.isArray(naceResearchProfile?.source_urls) ? naceResearchProfile.source_urls.map(String).filter(Boolean) : [];
 
@@ -432,6 +443,15 @@ function NewClientStepper({
     setTaxCertificatePreviewUrl(nextUrl);
     return () => URL.revokeObjectURL(nextUrl);
   }, [taxCertificateFile]);
+
+  useEffect(() => {
+    if (!taxCertificateParsePending) {
+      setTaxCertificateSlow(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setTaxCertificateSlow(true), 15000);
+    return () => window.clearTimeout(timer);
+  }, [taxCertificateParsePending]);
 
   return (
     <section className="new-client-card onboarding-stepper">
@@ -477,6 +497,16 @@ function NewClientStepper({
               ) : (
                 <p>Vergi levhası yüklendiğinde burada görünecek.</p>
               )}
+              {taxCertificateParsePending ? (
+                <div className="tax-certificate-progress" role="status" aria-live="polite">
+                  <span className="tax-certificate-spinner" aria-hidden="true" />
+                  <strong>{taxCertificateStage || "OCR/parser çalışıyor"}</strong>
+                  <div className="tax-certificate-progress-bar" aria-hidden="true" />
+                  <small>{taxCertificateSlow ? "Bu dosya taranmış görünüyor; OCR biraz sürebilir." : "OCR/parser çalışıyor"}</small>
+                </div>
+              ) : taxCertificateStage ? (
+                <small className="tax-certificate-stage">{taxCertificateStage}</small>
+              ) : null}
             </div>
             <div className="tax-certificate-fields" aria-label="Vergi levhası alanları">
               <input aria-label="Görünen unvan" onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Görünen unvan" value={draft.title} />
@@ -506,6 +536,7 @@ function NewClientStepper({
                 <span>NACE araştırması</span>
                 <strong>{naceResearchPending ? "Araştırılıyor" : naceResearchProfile ? "Araştırma sonucu hazır" : "Araştırma bekliyor"}</strong>
               </div>
+              {naceResearchPending ? <small>NACE araştırması yapılıyor</small> : null}
               <button disabled={!draft.naceCode.trim() || naceResearchPending} onClick={onRefreshNaceResearch} type="button">
                 NACE araştırmasını onayla
               </button>

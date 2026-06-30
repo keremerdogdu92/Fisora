@@ -265,6 +265,8 @@ export async function selectNewClientTaxCertificateAction({
   setNewClientNaceResearchStatus = () => undefined,
   setNewClientStatus,
   setNewClientTaxCertificateFile,
+  setNewClientTaxCertificateParsePending = () => undefined,
+  setNewClientTaxCertificateStage = () => undefined,
 }: {
   file: File | null;
   loginUserId: string;
@@ -275,14 +277,20 @@ export async function selectNewClientTaxCertificateAction({
   setNewClientNaceResearchStatus?: (status: string) => void;
   setNewClientStatus: (status: string) => void;
   setNewClientTaxCertificateFile: (file: File | null) => void;
+  setNewClientTaxCertificateParsePending?: (pending: boolean) => void;
+  setNewClientTaxCertificateStage?: (stage: string) => void;
 }) {
   setNewClientTaxCertificateFile(file);
   setNewClientNaceResearchProfile(null);
   setNewClientNaceResearchStatus("");
+  setNewClientTaxCertificateStage(file ? "Vergi levhası alındı" : "");
+  setNewClientTaxCertificateParsePending(false);
   if (!file) return;
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
   setNewClientStatus(`${file.name} vergi levhası okunuyor.`);
+  setNewClientTaxCertificateParsePending(true);
+  setNewClientTaxCertificateStage("OCR/parser çalışıyor");
   try {
     const extraction = await parseTaxCertificateFromBackend({
       apiBaseUrl,
@@ -343,6 +351,7 @@ export async function selectNewClientTaxCertificateAction({
     const profileConfidence = Number(activityProfile.confidence || 0);
     const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
     setNewClientStatus(buildTaxCertificateParseStatus({ filledFields, confidence, profileSummary, tckn, vkn }));
+    setNewClientTaxCertificateStage("Alanlar dolduruldu");
     if (naceCode) {
       await refreshNewClientNaceResearchAction({
         loginUserId,
@@ -363,6 +372,9 @@ export async function selectNewClientTaxCertificateAction({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
+    setNewClientTaxCertificateStage("Vergi levhası okunamadı");
+  } finally {
+    setNewClientTaxCertificateParsePending(false);
   }
 }
 

@@ -167,6 +167,19 @@ test("client management view keeps new-client onboarding readable in tabs", () =
   assert.match(clientsView, /NACE araştırmasını onayla/);
 });
 
+test("client management view separates tax certificate OCR loading from NACE research", () => {
+  const clientsView = require("node:fs").readFileSync(join(__dirname, "portal-clients-view.tsx"), "utf8");
+  const clientActions = require("node:fs").readFileSync(join(__dirname, "portal-client-actions.ts"), "utf8");
+
+  assert.match(clientsView, /taxCertificateParsePending/);
+  assert.match(clientsView, /tax-certificate-progress/);
+  assert.match(clientsView, /OCR\/parser çalışıyor/);
+  assert.match(clientsView, /Bu dosya taranmış görünüyor; OCR biraz sürebilir\./);
+  assert.match(clientsView, /NACE araştırması yapılıyor/);
+  assert.match(clientActions, /setNewClientTaxCertificateParsePending\(true\)/);
+  assert.match(clientActions, /setNewClientTaxCertificateStage\("Alanlar dolduruldu"\)/);
+});
+
 test("locked portal links ignore stale sessions from the other role", () => {
   const clientConfig = portalConfigForRouteKey("mukellef");
   const accountantConfig = portalConfigForRouteKey("musavir");

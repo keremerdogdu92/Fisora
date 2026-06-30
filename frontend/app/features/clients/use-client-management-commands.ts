@@ -33,6 +33,8 @@ export function useClientManagementCommands({
   const [newClientChartAccountsFile, setNewClientChartAccountsFile] = useState<File | null>(null);
   const [newClientTaxCertificateFile, setNewClientTaxCertificateFile] = useState<File | null>(null);
   const [newClientTaxCertificateInputKey, setNewClientTaxCertificateInputKey] = useState(0);
+  const [newClientTaxCertificateParsePending, setNewClientTaxCertificateParsePending] = useState(false);
+  const [newClientTaxCertificateStage, setNewClientTaxCertificateStage] = useState("");
   const [newClientStatus, setNewClientStatus] = useState("");
   const [newClientNaceResearchPending, setNewClientNaceResearchPending] = useState(false);
   const [newClientNaceResearchProfile, setNewClientNaceResearchProfile] = useState<Record<string, unknown> | null>(null);
@@ -91,6 +93,8 @@ export function useClientManagementCommands({
       setNewClientNaceResearchStatus,
       setNewClientStatus,
       setNewClientTaxCertificateFile,
+      setNewClientTaxCertificateParsePending,
+      setNewClientTaxCertificateStage,
     });
   };
 
@@ -203,6 +207,8 @@ export function useClientManagementCommands({
     newClientStatus,
     newClientTaxCertificateFile,
     newClientTaxCertificateInputKey,
+    newClientTaxCertificateParsePending,
+    newClientTaxCertificateStage,
     parseNewClientChartAccounts,
     portalPassword,
     portalPasswordStatus,

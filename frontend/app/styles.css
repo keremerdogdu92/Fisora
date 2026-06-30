@@ -3134,6 +3134,7 @@ button.danger:disabled {
   grid-row: 1 / span 4;
   min-height: 520px;
   overflow: hidden;
+  position: relative;
 }
 
 .tax-certificate-preview img,
@@ -3152,6 +3153,85 @@ button.danger:disabled {
   margin: 0;
   padding: 18px;
   text-align: center;
+}
+
+.tax-certificate-progress {
+  align-content: center;
+  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 8px;
+  bottom: 16px;
+  box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14);
+  display: grid;
+  gap: 8px;
+  left: 16px;
+  padding: 14px;
+  position: absolute;
+  right: 16px;
+}
+
+.tax-certificate-spinner {
+  animation: tax-certificate-spin 900ms linear infinite;
+  border: 2px solid rgba(20, 184, 166, 0.18);
+  border-top-color: #0f766e;
+  border-radius: 999px;
+  height: 22px;
+  width: 22px;
+}
+
+.tax-certificate-progress strong,
+.tax-certificate-progress small {
+  color: var(--text);
+  padding: 0;
+  text-align: left;
+}
+
+.tax-certificate-progress small {
+  color: var(--muted);
+}
+
+.tax-certificate-progress-bar {
+  background: linear-gradient(90deg, rgba(15, 118, 110, 0.08), rgba(15, 118, 110, 0.68), rgba(15, 118, 110, 0.08));
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.tax-certificate-progress-bar::after {
+  animation: tax-certificate-progress 1200ms ease-in-out infinite;
+  background: #0f766e;
+  border-radius: inherit;
+  content: "";
+  height: 100%;
+  left: -35%;
+  position: absolute;
+  top: 0;
+  width: 35%;
+}
+
+.tax-certificate-stage {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  bottom: 16px;
+  color: var(--muted);
+  font-weight: 800;
+  left: 16px;
+  padding: 8px 10px;
+  position: absolute;
+}
+
+@keyframes tax-certificate-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes tax-certificate-progress {
+  to {
+    left: 100%;
+  }
 }
 
 .tax-certificate-fields {

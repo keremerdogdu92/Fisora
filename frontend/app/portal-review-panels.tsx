@@ -640,7 +640,7 @@ function ManualDraftEditor({
           </thead>
           <tbody>
             {rows.map((line, index) => (
-              <tr key={`${line.account_code}-${index}`}>
+              <tr key={index}>
                 <td><input onChange={(event) => onUpdateLine(index, { account_code: event.target.value })} value={line.account_code} /></td>
                 <td><input onChange={(event) => onUpdateLine(index, { description: event.target.value })} value={line.description} /></td>
                 <td><input inputMode="decimal" onChange={(event) => onUpdateLine(index, { debit: event.target.value })} value={line.debit} /></td>

@@ -1,2 +1,2 @@
 export { journalDraftLinesForDocument } from "../../portal-review-actions";
-export { useReviewCommands } from "./use-review-commands";
+export { emptyCorrectionDraft, useReviewCommands } from "./use-review-commands";

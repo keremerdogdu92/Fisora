@@ -61,7 +61,7 @@ import type {
 import { emptyPilotData } from "./portal-data-mappers";
 import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
-import { journalDraftLinesForDocument, useReviewCommands } from "./features/review";
+import { emptyCorrectionDraft, journalDraftLinesForDocument, useReviewCommands } from "./features/review";
 
 type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
 
@@ -136,13 +136,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [uploadStatus, setUploadStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
   const [exportMode, setExportMode] = useState<ExportMode>("bulk");
-  const [correctionDraft, setCorrectionDraft] = useState<CorrectionDraft>({
-    accountCode: "",
-    counterpartyCode: "",
-    manualDraftLines: [],
-    reason: "",
-    ruleInstruction: "",
-  });
+  const [correctionDraft, setCorrectionDraft] = useState<CorrectionDraft>(() => emptyCorrectionDraft());
   const readinessQuery = usePilotReadinessQuery();
   const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });
 
@@ -258,6 +252,9 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     mode,
     selectedClientId: selectedClient?.clientId,
   });
+  useEffect(() => {
+    setCorrectionDraft(emptyCorrectionDraft());
+  }, [selectedDocument?.id]);
   const clientSelectedDocument = periodDocuments.find((document) => document.id === selectedDocumentId);
   const filteredClients = useMemo(() => {
     const query = clientSearch.trim().toLocaleLowerCase("tr-TR");

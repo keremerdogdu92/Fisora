@@ -10,6 +10,16 @@ import {
 } from "../../portal-document-actions";
 import type { CorrectionDraft, LocalSession, PilotData, PilotDocument } from "../../portal-types";
 
+export function emptyCorrectionDraft(): CorrectionDraft {
+  return {
+    accountCode: "",
+    counterpartyCode: "",
+    manualDraftLines: [],
+    reason: "",
+    ruleInstruction: "",
+  };
+}
+
 export function useReviewCommands({
   activeReviewDocuments,
   correctionDraft,

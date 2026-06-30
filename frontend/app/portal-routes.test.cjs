@@ -156,6 +156,17 @@ test("portal shell delegates session and review helpers to feature modules", () 
   assert.doesNotMatch(portalApp, /const statementTypeLabels/);
 });
 
+test("client management view keeps new-client onboarding readable in tabs", () => {
+  const clientsView = require("node:fs").readFileSync(join(__dirname, "portal-clients-view.tsx"), "utf8");
+
+  assert.match(clientsView, /type ClientManagementTab = "new-client" \| "client-list" \| "requests"/);
+  assert.match(clientsView, /useState<ClientManagementTab>\("new-client"\)/);
+  assert.match(clientsView, /className="client-management-tabs"/);
+  assert.match(clientsView, /Vergi levhası bilgileri/);
+  assert.match(clientsView, /className="tax-certificate-preview"/);
+  assert.match(clientsView, /NACE araştırmasını onayla/);
+});
+
 test("locked portal links ignore stale sessions from the other role", () => {
   const clientConfig = portalConfigForRouteKey("mukellef");
   const accountantConfig = portalConfigForRouteKey("musavir");

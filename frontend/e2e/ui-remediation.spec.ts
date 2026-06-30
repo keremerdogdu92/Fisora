@@ -150,6 +150,10 @@ test("mobile portal starts with content visible and opens menu as drawer", async
 test("client management shows onboarding steps and readable blocked actions", async ({ page }) => {
   await setupPilotRoutes(page);
   await page.goto("/portal/mukellefler");
+  const tabs = page.locator(".client-management-tabs button");
+  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".tax-certificate-preview")).toBeVisible();
+  await expect(page.getByLabel("Vergi levhası alanları")).toBeVisible();
 
   await expect(page.locator(".client-onboarding-steps")).toBeVisible();
   await expect(page.locator(".client-step")).toHaveCount(3);
@@ -157,7 +161,9 @@ test("client management shows onboarding steps and readable blocked actions", as
   await expect(page.locator(".client-step").nth(1)).toContainText(/Hesap plan/i);
   await expect(page.locator(".client-step").nth(2)).toContainText(/Portal eri/i);
   await expect(page.locator(".file-drop-control").first()).toBeVisible();
-  await expect(page.locator(".blocked-reason").first()).toBeVisible();
+  await tabs.nth(1).click();
+  await expect(page.locator(".client-existing-operations")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Seçili belgeleri sil|SeÃ§ili belgeleri sil/i })).toBeDisabled();
   await expect(page.locator(".client-row").first().locator("strong")).toHaveText("Pilot Test AS");
   await expect(page.locator(".client-row").first().locator("span")).toContainText(/Kontrol|Bekliyor/i);
   await expect(page.locator(".blocked-reason").first()).toContainText(/nce|Önce|Ã–nce/i);

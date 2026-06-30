@@ -678,6 +678,7 @@ button:disabled {
 .correction-form input,
 .correction-form textarea,
 .new-client-card input,
+.new-client-card textarea,
 .compact-field select,
 .toolbar-controls select {
   background: #fff;
@@ -697,6 +698,7 @@ button:disabled {
 .correction-form input:focus,
 .correction-form textarea:focus,
 .new-client-card input:focus,
+.new-client-card textarea:focus,
 .compact-field select:focus,
 .toolbar-controls select:focus {
   border-color: var(--accent);
@@ -3050,6 +3052,147 @@ button.danger:disabled {
   gap: 12px;
 }
 
+.client-management-tabbed {
+  align-content: start;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.client-management-tabs {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 8px;
+}
+
+.client-management-tabs button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.client-management-tabs button.active,
+.client-management-tabs button[aria-selected="true"] {
+  background: #eef6f4;
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.client-management-tabs strong {
+  color: var(--accent);
+  font-size: 0.82rem;
+}
+
+.client-tab-panel {
+  min-width: 0;
+}
+
+.client-list-operations-grid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+}
+
+.client-existing-operations {
+  align-content: start;
+}
+
+.onboarding-stepper .client-onboarding-steps {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tax-certificate-step {
+  grid-column: 1 / -1;
+}
+
+.tax-certificate-workspace {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(360px, 1fr) minmax(420px, 0.92fr);
+}
+
+.tax-certificate-preview {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  min-height: 520px;
+  overflow: hidden;
+}
+
+.tax-certificate-preview img,
+.tax-certificate-preview object {
+  border: 0;
+  display: block;
+  height: 100%;
+  min-height: 520px;
+  object-fit: contain;
+  width: 100%;
+}
+
+.tax-certificate-preview p {
+  color: var(--muted);
+  font-weight: 800;
+  margin: 0;
+  padding: 18px;
+  text-align: center;
+}
+
+.tax-certificate-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tax-certificate-fields textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.tax-certificate-fields textarea,
+.tax-certificate-fields input[aria-label="Faaliyet etiketleri"] {
+  grid-column: 1 / -1;
+}
+
+.nace-research-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.nace-research-panel button {
+  justify-self: start;
+}
+
+.nace-research-panel small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.decision-status.error {
+  background: #fff7f7;
+  border-color: rgba(185, 28, 28, 0.28);
+  color: #7f1d1d;
+}
+
 .plain-list {
   color: var(--muted);
   line-height: 1.8;
@@ -3090,6 +3233,22 @@ code {
 @media (max-width: 1080px) {
   .dashboard-visual-grid {
     grid-template-columns: 1fr;
+  }
+
+  .client-list-operations-grid,
+  .tax-certificate-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .tax-certificate-preview {
+    grid-column: auto;
+    grid-row: auto;
+    min-height: 360px;
+  }
+
+  .tax-certificate-preview img,
+  .tax-certificate-preview object {
+    min-height: 360px;
   }
 }
 
@@ -3159,6 +3318,8 @@ code {
   .bottom-queue-row,
   .dashboard-visual-grid,
   .client-management-page,
+  .client-management-tabs,
+  .tax-certificate-fields,
   .summary-grid,
   .ai-guidance,
   .journal-meta,

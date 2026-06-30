@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
+  buildNaceResearchRefreshPayload,
   buildTaxCertificateParseStatus,
   buildPortalUserBootstrapPayload,
   createClientOnboardingPackage,
@@ -225,6 +226,22 @@ test("buildTaxCertificateParseStatus warns when TCKN is read but VKN is missing"
 
   assert.match(message, /VKN okunamadı/);
   assert.match(message, /kontrol edin/);
+});
+
+test("buildNaceResearchRefreshPayload normalizes OCR NACE and activity context", () => {
+  assert.deepEqual(
+    buildNaceResearchRefreshPayload({
+      naceCode: "47.74.01",
+      activityDescription: "Isitme cihazi satis ve servis",
+    }),
+    {
+      kind: "nace",
+      key: "47.74.01",
+      activity_context: "Isitme cihazi satis ve servis",
+      force: false,
+    },
+  );
+  assert.equal(buildNaceResearchRefreshPayload({ naceCode: "", activityDescription: "Eksik" }), null);
 });
 
 test("buildClientOnboardingPackagePayload includes parsed chart accounts for final onboarding", () => {

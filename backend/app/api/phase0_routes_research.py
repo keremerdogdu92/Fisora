@@ -148,6 +148,17 @@ def store_research_refresh(
             bypass_cache=payload.force,
         )
         return {"profile": profile, "refreshed": True, "reason": "research_runtime"}
+    if runtime and payload.kind == "nace":
+        profile = ResearchHarness(
+            store=store,
+            provider=runtime.get("provider"),  # type: ignore[arg-type]
+            policy=runtime.get("policy"),  # type: ignore[arg-type]
+        ).research_nace(
+            nace_code=payload.key,
+            activity_context=payload.activity_context,
+            bypass_cache=payload.force,
+        )
+        return {"profile": profile, "refreshed": True, "reason": "research_runtime"}
     profile = normalize_research_profile(
         kind=payload.kind,
         key=payload.key,

@@ -8,6 +8,7 @@ import {
   deleteSelectedClientDocumentsAction,
   emptyNewClientDraft,
   parseNewClientChartAccountsAction,
+  refreshNewClientNaceResearchAction,
   reprocessSelectedClientAction,
   selectNewClientTaxCertificateAction,
   setPasswordForSelectedClientAction,
@@ -33,6 +34,10 @@ export function useClientManagementCommands({
   const [newClientTaxCertificateFile, setNewClientTaxCertificateFile] = useState<File | null>(null);
   const [newClientTaxCertificateInputKey, setNewClientTaxCertificateInputKey] = useState(0);
   const [newClientStatus, setNewClientStatus] = useState("");
+  const [newClientNaceResearchPending, setNewClientNaceResearchPending] = useState(false);
+  const [newClientNaceResearchProfile, setNewClientNaceResearchProfile] = useState<Record<string, unknown> | null>(null);
+  const [newClientNaceResearchStatus, setNewClientNaceResearchStatus] = useState("");
+  const [newClientNaceResearchWarningAccepted, setNewClientNaceResearchWarningAccepted] = useState(false);
   const [chartUploadStatus, setChartUploadStatus] = useState("");
   const [inviteStatus, setInviteStatus] = useState("");
   const [portalPassword, setPortalPasswordDraft] = useState("");
@@ -55,12 +60,18 @@ export function useClientManagementCommands({
       loginUserId,
       newClientChartAccountsFile,
       newClientDraft,
+      newClientNaceResearchPending,
+      newClientNaceResearchProfile,
+      newClientNaceResearchWarningAccepted,
       newClientTaxCertificateFile,
       portalPassword,
       refreshBackendPilotData,
       session,
       setNewClientDraft,
       setNewClientChartAccountsFile,
+      setNewClientNaceResearchProfile,
+      setNewClientNaceResearchStatus,
+      setNewClientNaceResearchWarningAccepted,
       setNewClientStatus,
       setNewClientTaxCertificateFile,
       setNewClientTaxCertificateInputKey,
@@ -75,8 +86,25 @@ export function useClientManagementCommands({
       loginUserId,
       session,
       setNewClientDraft,
+      setNewClientNaceResearchPending,
+      setNewClientNaceResearchProfile,
+      setNewClientNaceResearchStatus,
       setNewClientStatus,
       setNewClientTaxCertificateFile,
+    });
+  };
+
+  const refreshNewClientNaceResearch = () => {
+    setNewClientNaceResearchWarningAccepted(false);
+    void refreshNewClientNaceResearchAction({
+      force: true,
+      loginUserId,
+      newClientDraft,
+      session,
+      setNewClientDraft,
+      setNewClientNaceResearchPending,
+      setNewClientNaceResearchProfile,
+      setNewClientNaceResearchStatus,
     });
   };
 
@@ -169,6 +197,9 @@ export function useClientManagementCommands({
     deleteSelectedClientDocuments,
     inviteStatus,
     newClientDraft,
+    newClientNaceResearchPending,
+    newClientNaceResearchProfile,
+    newClientNaceResearchStatus,
     newClientStatus,
     newClientTaxCertificateFile,
     newClientTaxCertificateInputKey,
@@ -176,6 +207,7 @@ export function useClientManagementCommands({
     portalPassword,
     portalPasswordStatus,
     portalUserIdDraft,
+    refreshNewClientNaceResearch,
     selectNewClientTaxCertificate,
     selectedClientDocumentRefs,
     setClientDocumentDeleteConfirmed,

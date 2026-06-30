@@ -201,6 +201,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     deleteSelectedClientDocuments,
     inviteStatus,
     newClientDraft,
+    newClientNaceResearchPending, newClientNaceResearchProfile, newClientNaceResearchStatus,
     newClientStatus,
     newClientTaxCertificateFile,
     newClientTaxCertificateInputKey,
@@ -208,6 +209,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     portalPassword,
     portalPasswordStatus,
     portalUserIdDraft, reprocessSelectedClient,
+    refreshNewClientNaceResearch,
     selectNewClientTaxCertificate,
     selectedClientDocumentRefs,
     setClientDocumentDeleteConfirmed,
@@ -534,6 +536,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           documents={clientDocuments}
           inviteStatus={inviteStatus}
           newClientDraft={newClientDraft}
+          newClientNaceResearchPending={newClientNaceResearchPending} newClientNaceResearchProfile={newClientNaceResearchProfile} newClientNaceResearchStatus={newClientNaceResearchStatus}
           newClientStatus={newClientStatus}
           newClientTaxCertificateFile={newClientTaxCertificateFile}
           newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
@@ -544,6 +547,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onCreateNewClient={createNewClient}
           onDeleteSelectedDocuments={deleteSelectedClientDocuments} onReprocessSelectedClient={reprocessSelectedClient}
           onResolveCancellation={resolveCancellation}
+          onRefreshNaceResearch={refreshNewClientNaceResearch}
           onSetPassword={setPasswordForSelectedClient}
           onUpdatePortalAccess={updatePortalAccessForSelectedClient}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}

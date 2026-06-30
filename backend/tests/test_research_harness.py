@@ -28,10 +28,12 @@ from app.workflows.document_processing import parser_kind_for_document_type, pro
 try:
     from fastapi.testclient import TestClient
     from app.api import phase0
+    from app.api import phase0_routes_research
     from app.main import app
 except Exception:  # pragma: no cover - optional FastAPI import guard
     TestClient = None
     phase0 = None
+    phase0_routes_research = None
     app = None
 
 
@@ -517,6 +519,56 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertIn("accounting_impact_accuracy", benchmark.json()["run"]["metrics"])
         self.assertIn("review_gate_accuracy", benchmark.json()["run"]["metrics"])
         self.assertEqual(runs.json()["runs"][0]["run_type"], "benchmark")
+
+    def test_research_api_refresh_invokes_nace_runtime_when_forced(self) -> None:
+        if TestClient is None or phase0 is None or phase0_routes_research is None or app is None:
+            self.skipTest("FastAPI TestClient unavailable")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_store_path = phase0.DEFAULT_STORE_PATH
+            original_runtime_builder = phase0_routes_research.build_research_runtime_from_env
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "phase0_store.json"
+            store = JsonWorkflowStore(phase0.DEFAULT_STORE_PATH)
+            store.upsert_portal_user(
+                user_id="mali-musavir",
+                display_name="Mali Musavir",
+                role="accountant",
+                allowed_client_ids=["*"],
+            )
+            provider = FakeResearchProvider(
+                {
+                    "display_name": "477401",
+                    "summary_tr": "Isitme cihazi perakende faaliyet kapsami.",
+                    "activity_tags": ["hearing_aid", "medical_retail"],
+                    "confidence": 84,
+                    "source_urls": ["https://ec.europa.eu/eurostat/web/nace/overview"],
+                }
+            )
+            phase0_routes_research.build_research_runtime_from_env = lambda _env: {
+                "provider": provider,
+                "policy": ResearchPolicy(enabled=True, confidence_threshold=70),
+            }
+            try:
+                client = TestClient(app)
+                response = client.post(
+                    "/phase0/store/research/refresh",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={
+                        "kind": "nace",
+                        "key": "47.74.01",
+                        "activity_context": "Isitme cihazi satis ve servis",
+                        "force": True,
+                    },
+                )
+            finally:
+                phase0.DEFAULT_STORE_PATH = original_store_path
+                phase0_routes_research.build_research_runtime_from_env = original_runtime_builder
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reason"], "research_runtime")
+        self.assertEqual(len(provider.queries), 1)
+        self.assertEqual(provider.queries[0].kind, "nace")
+        self.assertEqual(provider.queries[0].key, "477401")
+        self.assertEqual(response.json()["profile"]["activity_tags"], ["hearing_aid", "medical_retail"])
 
     def test_worker_records_research_timeline_and_keeps_low_confidence_result_in_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

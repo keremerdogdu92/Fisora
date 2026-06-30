@@ -1,6 +1,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import {
   buildClientOnboardingPackagePayload,
+  buildNaceResearchRefreshPayload,
   buildTaxCertificateParseStatus,
   createClientOnboardingPackage,
   createPortalInvite,
@@ -15,6 +16,7 @@ import {
   uploadChartAccountsToBackend,
   uploadTaxCertificateToBackend,
 } from "./upload-api";
+import { refreshResearchProfile } from "./workspace-api";
 import type { LocalSession, NewClientDraft, PilotClient } from "./portal-types";
 
 function pageUrl() {
@@ -46,16 +48,101 @@ export function emptyNewClientDraft(): NewClientDraft {
   };
 }
 
+function profileText(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function naceResearchStatus(profile: Record<string, unknown>) {
+  const title = profileText(profile.activity_title || profile.display_name || profile.nace_code);
+  const confidence = Number(profile.research_confidence || profile.confidence || 0);
+  const summary = profileText(profile.summary_tr || profile.scope_summary);
+  return [
+    title ? `NACE araştırması tamamlandı: ${title}` : "NACE araştırması tamamlandı.",
+    confidence ? `Güven ${confidence}.` : "",
+    summary ? summary : "",
+  ].filter(Boolean).join(" ");
+}
+
+export async function refreshNewClientNaceResearchAction({
+  force = false,
+  loginUserId,
+  newClientDraft,
+  session,
+  setNewClientDraft,
+  setNewClientNaceResearchPending,
+  setNewClientNaceResearchProfile,
+  setNewClientNaceResearchStatus,
+}: {
+  force?: boolean;
+  loginUserId: string;
+  newClientDraft: NewClientDraft;
+  session: LocalSession | null;
+  setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
+  setNewClientNaceResearchPending: (pending: boolean) => void;
+  setNewClientNaceResearchProfile: (profile: Record<string, unknown> | null) => void;
+  setNewClientNaceResearchStatus: (status: string) => void;
+}) {
+  const payload = buildNaceResearchRefreshPayload({
+    naceCode: newClientDraft.naceCode,
+    activityDescription: newClientDraft.activityDescription,
+    force,
+  });
+  if (!payload) {
+    setNewClientNaceResearchStatus("NACE kodu bulunamadı. Kodu veya faaliyeti doldurup araştırmayı onaylayın.");
+    return;
+  }
+  const apiBaseUrl = resolveApiBaseUrl(pageUrl());
+  const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+  setNewClientNaceResearchPending(true);
+  setNewClientNaceResearchStatus("NACE araştırması yapılıyor. Bu sırada diğer adımlara devam edebilirsiniz.");
+  try {
+    const result = await refreshResearchProfile({
+      apiBaseUrl,
+      userId: actingUserId,
+      sessionToken: session?.sessionToken,
+      payload,
+    });
+    const profile = result?.profile && typeof result.profile === "object" ? result.profile as Record<string, unknown> : {};
+    const activityTags = Array.isArray(profile.activity_tags)
+      ? (profile.activity_tags as unknown[]).map((value) => String(value).trim()).filter(Boolean)
+      : [];
+    setNewClientNaceResearchProfile(profile);
+    setNewClientDraft((current) => ({
+      ...current,
+      activityTags: activityTags.length ? Array.from(new Set([...current.activityTags, ...activityTags])) : current.activityTags,
+      activityProfile: {
+        ...current.activityProfile,
+        ...(profile.activity_title || profile.display_name ? { display_label: profileText(profile.activity_title || profile.display_name) } : {}),
+        ...(profile.confidence || profile.research_confidence ? { confidence: Number(profile.confidence || profile.research_confidence) } : {}),
+        nace_research_profile: profile,
+      },
+    }));
+    setNewClientNaceResearchStatus(naceResearchStatus(profile));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setNewClientNaceResearchProfile(null);
+    setNewClientNaceResearchStatus(`NACE araştırması tamamlanamadı. Sonra tekrar deneyin. ${message}`);
+  } finally {
+    setNewClientNaceResearchPending(false);
+  }
+}
+
 export async function createNewClientAction({
   loginUserId,
   newClientChartAccountsFile,
   newClientDraft,
+  newClientNaceResearchPending = false,
+  newClientNaceResearchProfile = null,
+  newClientNaceResearchWarningAccepted = false,
   newClientTaxCertificateFile,
   portalPassword,
   refreshBackendPilotData,
   session,
   setNewClientDraft,
   setNewClientChartAccountsFile,
+  setNewClientNaceResearchProfile = () => undefined,
+  setNewClientNaceResearchStatus = () => undefined,
+  setNewClientNaceResearchWarningAccepted = () => undefined,
   setNewClientStatus,
   setNewClientTaxCertificateFile,
   setNewClientTaxCertificateInputKey,
@@ -64,6 +151,9 @@ export async function createNewClientAction({
 }: {
   loginUserId: string;
   newClientDraft: NewClientDraft;
+  newClientNaceResearchPending?: boolean;
+  newClientNaceResearchProfile?: Record<string, unknown> | null;
+  newClientNaceResearchWarningAccepted?: boolean;
   newClientTaxCertificateFile: File | null;
   newClientChartAccountsFile: File | null;
   portalPassword: string;
@@ -71,6 +161,9 @@ export async function createNewClientAction({
   session: LocalSession | null;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
   setNewClientChartAccountsFile: (file: File | null) => void;
+  setNewClientNaceResearchProfile?: (profile: Record<string, unknown> | null) => void;
+  setNewClientNaceResearchStatus?: (status: string) => void;
+  setNewClientNaceResearchWarningAccepted?: (accepted: boolean) => void;
   setNewClientStatus: (status: string) => void;
   setNewClientTaxCertificateFile: (file: File | null) => void;
   setNewClientTaxCertificateInputKey: Dispatch<SetStateAction<number>>;
@@ -91,6 +184,11 @@ export async function createNewClientAction({
   }
   if (!newClientDraft.portalUserId.trim() || !portalPassword.trim()) {
     setNewClientStatus("Portal kullanıcı adı ve geçici şifre gerekli.");
+    return;
+  }
+  if (newClientDraft.naceCode.trim() && (newClientNaceResearchPending || !newClientNaceResearchProfile) && !newClientNaceResearchWarningAccepted) {
+    setNewClientNaceResearchWarningAccepted(true);
+    setNewClientStatus("NACE araştırması henüz tamamlanmadı. Kontrol edip devam etmek istiyorsanız Mükellefi oluştur düğmesine tekrar basın.");
     return;
   }
   const payload = buildClientOnboardingPackagePayload(newClientDraft);
@@ -143,6 +241,9 @@ export async function createNewClientAction({
     });
     setNewClientDraft(emptyNewClientDraft());
     setNewClientChartAccountsFile(null);
+    setNewClientNaceResearchProfile(null);
+    setNewClientNaceResearchStatus("");
+    setNewClientNaceResearchWarningAccepted(false);
     setPortalPasswordDraft("");
     setNewClientTaxCertificateFile(null);
     setNewClientTaxCertificateInputKey((current) => current + 1);
@@ -159,6 +260,9 @@ export async function selectNewClientTaxCertificateAction({
   loginUserId,
   session,
   setNewClientDraft,
+  setNewClientNaceResearchPending = () => undefined,
+  setNewClientNaceResearchProfile = () => undefined,
+  setNewClientNaceResearchStatus = () => undefined,
   setNewClientStatus,
   setNewClientTaxCertificateFile,
 }: {
@@ -166,10 +270,15 @@ export async function selectNewClientTaxCertificateAction({
   loginUserId: string;
   session: LocalSession | null;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
+  setNewClientNaceResearchPending?: (pending: boolean) => void;
+  setNewClientNaceResearchProfile?: (profile: Record<string, unknown> | null) => void;
+  setNewClientNaceResearchStatus?: (status: string) => void;
   setNewClientStatus: (status: string) => void;
   setNewClientTaxCertificateFile: (file: File | null) => void;
 }) {
   setNewClientTaxCertificateFile(file);
+  setNewClientNaceResearchProfile(null);
+  setNewClientNaceResearchStatus("");
   if (!file) return;
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
@@ -234,6 +343,23 @@ export async function selectNewClientTaxCertificateAction({
     const profileConfidence = Number(activityProfile.confidence || 0);
     const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
     setNewClientStatus(buildTaxCertificateParseStatus({ filledFields, confidence, profileSummary, tckn, vkn }));
+    if (naceCode) {
+      await refreshNewClientNaceResearchAction({
+        loginUserId,
+        newClientDraft: {
+          ...emptyNewClientDraft(),
+          naceCode,
+          activityDescription,
+        },
+        session,
+        setNewClientDraft,
+        setNewClientNaceResearchPending,
+        setNewClientNaceResearchProfile,
+        setNewClientNaceResearchStatus,
+      });
+    } else {
+      setNewClientNaceResearchStatus("Vergi levhasından NACE kodu okunamadı. Alanı doldurunca araştırmayı onaylayın.");
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);

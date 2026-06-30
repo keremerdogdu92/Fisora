@@ -137,6 +137,17 @@ function buildTaxCertificateParseStatus({ filledFields = [], confidence = 0, pro
   return [base, profileSummary, ...warnings].filter(Boolean).join(" ");
 }
 
+function buildNaceResearchRefreshPayload({ naceCode = "", activityDescription = "", force = false } = {}) {
+  const key = String(naceCode || "").trim();
+  if (!key) return null;
+  return {
+    kind: "nace",
+    key,
+    activity_context: String(activityDescription || "").trim(),
+    force: Boolean(force),
+  };
+}
+
 async function responseErrorMessage(response, fallback) {
   try {
     const payload = await response.json();
@@ -732,6 +743,7 @@ module.exports = {
   backendAuthHeaders,
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
+  buildNaceResearchRefreshPayload,
   buildTaxCertificateParseStatus,
   buildPortalUserBootstrapPayload,
   createClientOnboardingPackage,

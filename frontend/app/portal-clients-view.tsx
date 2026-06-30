@@ -1,6 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { CancellationRequest, DashboardClientRow, NewClientDraft, PilotClient, PilotDocument } from "./portal-types";
+
+type ClientManagementTab = "new-client" | "client-list" | "requests";
 
 export function ClientManagementView({
   cancellationRequests,
@@ -14,6 +17,9 @@ export function ClientManagementView({
   documents,
   inviteStatus,
   newClientDraft,
+  newClientNaceResearchPending,
+  newClientNaceResearchProfile,
+  newClientNaceResearchStatus,
   newClientStatus,
   newClientTaxCertificateFile,
   newClientTaxCertificateInputKey,
@@ -25,6 +31,7 @@ export function ClientManagementView({
   onDeleteSelectedDocuments,
   onReprocessSelectedClient,
   onResolveCancellation,
+  onRefreshNaceResearch,
   onSetPassword,
   onUpdatePortalAccess,
   onTaxCertificateFileChange,
@@ -51,6 +58,9 @@ export function ClientManagementView({
   documents: PilotDocument[];
   inviteStatus: string;
   newClientDraft: NewClientDraft;
+  newClientNaceResearchPending: boolean;
+  newClientNaceResearchProfile: Record<string, unknown> | null;
+  newClientNaceResearchStatus: string;
   newClientStatus: string;
   newClientTaxCertificateFile: File | null;
   newClientTaxCertificateInputKey: number;
@@ -62,6 +72,7 @@ export function ClientManagementView({
   onDeleteSelectedDocuments: () => void | Promise<void>;
   onReprocessSelectedClient: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
+  onRefreshNaceResearch: () => void | Promise<void>;
   onSetPassword: () => void | Promise<void>;
   onUpdatePortalAccess: () => void | Promise<void>;
   onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
@@ -77,6 +88,7 @@ export function ClientManagementView({
   setSelectedDocumentRefs: (value: string[]) => void;
   setSelectedClientId: (value: string) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<ClientManagementTab>("new-client");
   const selectedDocumentRefSet = new Set(selectedDocumentRefs);
   const selectableDocumentRefs = documents.map((document) => document.originalDocumentRef || document.id).filter(Boolean);
   const allDocumentsSelected = Boolean(selectableDocumentRefs.length && selectableDocumentRefs.every((ref) => selectedDocumentRefSet.has(ref)));
@@ -91,159 +103,191 @@ export function ClientManagementView({
   const toggleAllDocuments = (checked: boolean) => {
     setSelectedDocumentRefs(checked ? selectableDocumentRefs : []);
   };
+  const tabClass = (tab: ClientManagementTab) => activeTab === tab ? "active" : "";
 
   return (
-    <section className="client-management-page">
-      <section className="panel">
-        <div className="section-heading">
-          <span>Mükellef listesi</span>
+    <section className="client-management-page client-management-tabbed">
+      <div className="client-management-tabs" role="tablist" aria-label="Mükellefler sekmeleri">
+        <button aria-selected={activeTab === "new-client"} className={tabClass("new-client")} onClick={() => setActiveTab("new-client")} role="tab" type="button">
+          Yeni mükellef
+        </button>
+        <button aria-selected={activeTab === "client-list"} className={tabClass("client-list")} onClick={() => setActiveTab("client-list")} role="tab" type="button">
+          Mükellef listesi
           <strong>{clients.length}</strong>
-        </div>
-        <input
-          className="search-input"
-          onChange={(event) => onClientSearchChange(event.target.value)}
-          placeholder="Mükellef ara"
-          value={clientSearch}
-        />
-        <div className="client-list dashboard-client-list">
-          {clientRows.map((row) => (
-            <button
-              className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
-              key={row.clientId}
-              onClick={() => setSelectedClientId(row.clientId)}
-              type="button"
-            >
-              <strong>{row.clientName}</strong>
-              <span>{row.status}</span>
-              <em>{row.documentCount} belge / {row.cancellationCount} talep</em>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="panel onboarding-panel">
-        <NewClientStepper
-          draft={newClientDraft}
-          onChartFileSelected={onChartFileSelected}
-          onCreate={onCreateNewClient}
-          onTaxCertificateFileChange={onTaxCertificateFileChange}
-          portalPassword={portalPassword}
-          setDraft={setNewClientDraft}
-          setPortalPassword={setPortalPassword}
-          status={newClientStatus}
-          taxCertificateFile={newClientTaxCertificateFile}
-          taxCertificateInputKey={newClientTaxCertificateInputKey}
-        />
-        <div className="settings-card">
-          <span>Hesap planı import</span>
-          <strong>{selectedClient?.clientName ?? "-"}</strong>
-          <label className="file-drop-control compact-upload">
-            <input
-              accept=".csv,.xlsx,.xlsm"
-              disabled={!hasSelectedClient}
-              onChange={(event) => onExistingChartFileSelected(event.target.files)}
-              type="file"
-            />
-            <span>Dosya seç</span>
-            <small>CSV/XLSX hesap planı</small>
-          </label>
-          {!hasSelectedClient ? <small className="blocked-reason">Önce mükellef seçin.</small> : null}
-          {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
-        </div>
-        <div className="settings-card">
-          <span>Portal erişimi</span>
-          <strong>{selectedClient?.portalUserId ?? "-"}</strong>
-          <div className="inline-actions">
-            <input
-              aria-label="Mükellef üyelik adı"
-              onChange={(event) => setPortalUserIdDraft(event.target.value)}
-              placeholder="Üyelik adı / e-posta"
-              value={portalUserIdDraft}
-            />
-            <button onClick={onCreateInvite} type="button">Davet tokeni oluştur</button>
-            <input
-              aria-label="Portal şifresi"
-              onChange={(event) => setPortalPassword(event.target.value)}
-              placeholder="Geçici şifre"
-              type="password"
-              value={portalPassword}
-            />
-            <button className="primary" onClick={onSetPassword} type="button">Şifre kur</button>
-            <button className="primary" onClick={onUpdatePortalAccess} type="button">Üyelik güncelle</button>
-          </div>
-          {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
-          {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
-        </div>
-        <div className="settings-card">
-          <span>Mükellef belgeleri</span>
-          <strong>{selectedClient?.clientName ?? "-"}</strong>
-          <label className="bulk-document-check">
-            <input
-              checked={allDocumentsSelected}
-              disabled={!selectableDocumentRefs.length}
-              onChange={(event) => toggleAllDocuments(event.target.checked)}
-              type="checkbox"
-            />
-            Tüm belgeleri seç
-          </label>
-          <div className="client-document-delete-list">
-            {documents.length ? documents.map((document) => {
-              const documentRef = document.originalDocumentRef || document.id;
-              return (
-                <label className="client-document-delete-row" key={document.id}>
-                  <input
-                    checked={selectedDocumentRefSet.has(documentRef)}
-                    onChange={(event) => toggleDocument(documentRef, event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>{document.fileName}</span>
-                  <small>{document.status}</small>
-                </label>
-              );
-            }) : <p className="empty">Belge yok.</p>}
-          </div>
-          <button
-            disabled={!hasSelectedClient}
-            onClick={onReprocessSelectedClient}
-            type="button"
-          >
-            Mükellefi yeniden işle
-          </button>
-          {clientReprocessStatus ? <p className="decision-status">{clientReprocessStatus}</p> : null}
-          <label className="bulk-document-check danger">
-            <input
-              checked={clientDocumentDeleteConfirmed}
-              onChange={(event) => setClientDocumentDeleteConfirmed(event.target.checked)}
-              type="checkbox"
-            />
-            Seçili belgelerin dosyalarıyla birlikte silineceğini onaylıyorum
-          </label>
-          <button
-            className="danger"
-            disabled={!selectedDocumentRefs.length}
-            onClick={onDeleteSelectedDocuments}
-            type="button"
-          >
-            Seçili belgeleri sil
-          </button>
-          {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
-        </div>
-      </section>
-      <section className="panel">
-        <div className="section-heading">
-          <span>İptal / düzeltme talepleri</span>
+        </button>
+        <button aria-selected={activeTab === "requests"} className={tabClass("requests")} onClick={() => setActiveTab("requests")} role="tab" type="button">
+          İptal / düzeltme
           <strong>{cancellationRequests.length}</strong>
-        </div>
-        <div className="request-list">
-          {cancellationRequests.length ? cancellationRequests.map((request) => (
-            <div className="request-compact" key={request.id}>
-              <span>{request.clientId}</span>
-              <strong>{request.fileName}</strong>
-              <p>{request.reason}</p>
-              <small>Karar için Belge işleme ekranında ilgili belgeyi seçin.</small>
+        </button>
+      </div>
+
+      {activeTab === "new-client" ? (
+        <section className="panel client-tab-panel">
+          <NewClientStepper
+            draft={newClientDraft}
+            naceResearchPending={newClientNaceResearchPending}
+            naceResearchProfile={newClientNaceResearchProfile}
+            naceResearchStatus={newClientNaceResearchStatus}
+            onChartFileSelected={onChartFileSelected}
+            onCreate={onCreateNewClient}
+            onRefreshNaceResearch={onRefreshNaceResearch}
+            onTaxCertificateFileChange={onTaxCertificateFileChange}
+            portalPassword={portalPassword}
+            setDraft={setNewClientDraft}
+            setPortalPassword={setPortalPassword}
+            status={newClientStatus}
+            taxCertificateFile={newClientTaxCertificateFile}
+            taxCertificateInputKey={newClientTaxCertificateInputKey}
+          />
+        </section>
+      ) : null}
+
+      {activeTab === "client-list" ? (
+        <section className="client-list-operations-grid">
+          <section className="panel">
+            <div className="section-heading">
+              <span>Mükellef listesi</span>
+              <strong>{clients.length}</strong>
             </div>
-          )) : <p className="empty">Acik talep yok.</p>}
-        </div>
-      </section>
+            <input
+              className="search-input"
+              onChange={(event) => onClientSearchChange(event.target.value)}
+              placeholder="Mükellef ara"
+              value={clientSearch}
+            />
+            <div className="client-list dashboard-client-list">
+              {clientRows.map((row) => (
+                <button
+                  className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
+                  key={row.clientId}
+                  onClick={() => setSelectedClientId(row.clientId)}
+                  type="button"
+                >
+                  <strong>{row.clientName}</strong>
+                  <span>{row.status}</span>
+                  <em>{row.documentCount} belge / {row.cancellationCount} talep</em>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className="panel onboarding-panel client-existing-operations">
+            <div className="section-heading">
+              <span>Mevcut mükellef işlemleri</span>
+              <strong>{selectedClient?.clientName ?? "-"}</strong>
+            </div>
+            <div className="settings-card">
+              <span>Hesap planı import</span>
+              <strong>{selectedClient?.clientName ?? "-"}</strong>
+              <label className="file-drop-control compact-upload">
+                <input
+                  accept=".csv,.xlsx,.xlsm"
+                  disabled={!hasSelectedClient}
+                  onChange={(event) => onExistingChartFileSelected(event.target.files)}
+                  type="file"
+                />
+                <span>Dosya seç</span>
+                <small>CSV/XLSX hesap planı</small>
+              </label>
+              {!hasSelectedClient ? <small className="blocked-reason">Önce mükellef seçin.</small> : null}
+              {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
+            </div>
+            <div className="settings-card">
+              <span>Portal erişimi</span>
+              <strong>{selectedClient?.portalUserId ?? "-"}</strong>
+              <div className="inline-actions">
+                <input
+                  aria-label="Mükellef üyelik adı"
+                  onChange={(event) => setPortalUserIdDraft(event.target.value)}
+                  placeholder="Üyelik adı / e-posta"
+                  value={portalUserIdDraft}
+                />
+                <button onClick={onCreateInvite} type="button">Davet tokeni oluştur</button>
+                <input
+                  aria-label="Portal şifresi"
+                  onChange={(event) => setPortalPassword(event.target.value)}
+                  placeholder="Geçici şifre"
+                  type="password"
+                  value={portalPassword}
+                />
+                <button className="primary" onClick={onSetPassword} type="button">Şifre kur</button>
+                <button className="primary" onClick={onUpdatePortalAccess} type="button">Üyelik güncelle</button>
+              </div>
+              {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
+              {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
+            </div>
+            <div className="settings-card">
+              <span>Mükellef belgeleri</span>
+              <strong>{selectedClient?.clientName ?? "-"}</strong>
+              <label className="bulk-document-check">
+                <input
+                  checked={allDocumentsSelected}
+                  disabled={!selectableDocumentRefs.length}
+                  onChange={(event) => toggleAllDocuments(event.target.checked)}
+                  type="checkbox"
+                />
+                Tüm belgeleri seç
+              </label>
+              <div className="client-document-delete-list">
+                {documents.length ? documents.map((document) => {
+                  const documentRef = document.originalDocumentRef || document.id;
+                  return (
+                    <label className="client-document-delete-row" key={document.id}>
+                      <input
+                        checked={selectedDocumentRefSet.has(documentRef)}
+                        onChange={(event) => toggleDocument(documentRef, event.target.checked)}
+                        type="checkbox"
+                      />
+                      <span>{document.fileName}</span>
+                      <small>{document.status}</small>
+                    </label>
+                  );
+                }) : <p className="empty">Belge yok.</p>}
+              </div>
+              <button disabled={!hasSelectedClient} onClick={onReprocessSelectedClient} type="button">
+                Mükellefi yeniden işle
+              </button>
+              {clientReprocessStatus ? <p className="decision-status">{clientReprocessStatus}</p> : null}
+              <label className="bulk-document-check danger">
+                <input
+                  checked={clientDocumentDeleteConfirmed}
+                  onChange={(event) => setClientDocumentDeleteConfirmed(event.target.checked)}
+                  type="checkbox"
+                />
+                Seçili belgelerin dosyalarıyla birlikte silineceğini onaylıyorum
+              </label>
+              <button
+                className="danger"
+                disabled={!selectedDocumentRefs.length}
+                onClick={onDeleteSelectedDocuments}
+                type="button"
+              >
+                Seçili belgeleri sil
+              </button>
+              {!selectedDocumentRefs.length ? <small className="blocked-reason">Önce silinecek belgeleri seçin.</small> : null}
+              {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
+            </div>
+          </section>
+        </section>
+      ) : null}
+
+      {activeTab === "requests" ? (
+        <section className="panel client-tab-panel">
+          <div className="section-heading">
+            <span>İptal / düzeltme talepleri</span>
+            <strong>{cancellationRequests.length}</strong>
+          </div>
+          <div className="request-list">
+            {cancellationRequests.length ? cancellationRequests.map((request) => (
+              <div className="request-compact" key={request.id}>
+                <span>{request.clientId}</span>
+                <strong>{request.fileName}</strong>
+                <p>{request.reason}</p>
+                <small>Karar için Belge işleme ekranında ilgili belgeyi seçin.</small>
+              </div>
+            )) : <p className="empty">Açık talep yok.</p>}
+          </div>
+        </section>
+      ) : null}
     </section>
   );
 }
@@ -341,8 +385,12 @@ export function NewClientCard({
 
 function NewClientStepper({
   draft,
+  naceResearchPending,
+  naceResearchProfile,
+  naceResearchStatus,
   onChartFileSelected,
   onCreate,
+  onRefreshNaceResearch,
   onTaxCertificateFileChange,
   portalPassword,
   setDraft,
@@ -352,8 +400,12 @@ function NewClientStepper({
   taxCertificateInputKey,
 }: {
   draft: NewClientDraft;
+  naceResearchPending: boolean;
+  naceResearchProfile: Record<string, unknown> | null;
+  naceResearchStatus: string;
   onChartFileSelected: (files: FileList | null) => void | Promise<void>;
   onCreate: () => void | Promise<void>;
+  onRefreshNaceResearch: () => void | Promise<void>;
   onTaxCertificateFileChange: (file: File | null) => void;
   portalPassword: string;
   setDraft: (value: NewClientDraft) => void;
@@ -366,7 +418,20 @@ function NewClientStepper({
   const chartReady = draft.chartAccounts.length > 0;
   const accessReady = Boolean(draft.portalUserId.trim() && portalPassword.trim());
   const canComplete = identityReady && chartReady && accessReady;
-  const showManualFields = Boolean(taxCertificateFile || draft.title || draft.vkn || draft.tckn || draft.taxId || draft.activityDescription);
+  const [taxCertificatePreviewUrl, setTaxCertificatePreviewUrl] = useState("");
+  const taxCertificateIsImage = Boolean(taxCertificateFile?.type?.startsWith("image/"));
+  const researchSummary = String(naceResearchProfile?.summary_tr || naceResearchProfile?.scope_summary || "");
+  const sourceUrls = Array.isArray(naceResearchProfile?.source_urls) ? naceResearchProfile.source_urls.map(String).filter(Boolean) : [];
+
+  useEffect(() => {
+    if (!taxCertificateFile) {
+      setTaxCertificatePreviewUrl("");
+      return;
+    }
+    const nextUrl = URL.createObjectURL(taxCertificateFile);
+    setTaxCertificatePreviewUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [taxCertificateFile]);
 
   return (
     <section className="new-client-card onboarding-stepper">
@@ -385,87 +450,72 @@ function NewClientStepper({
       </div>
 
       <section className="client-onboarding-steps" aria-label="Mükellef onboarding adımları">
-        <article className={`client-step ${identityReady ? "onboarding-step done" : "onboarding-step active"}`}>
-        <div>
-          <span>1. Vergi levhası</span>
-          <strong>Önce belgeyi yükleyin, alanları otomatik dolduralım</strong>
-        </div>
-        <label className="file-drop-control">
-          <span>Vergi levhası</span>
-          <input
-            accept=".pdf,.jpg,.jpeg,.png"
-            aria-label="Vergi levhası"
-            key={taxCertificateInputKey}
-            onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
-            type="file"
-          />
-          <small>{taxCertificateFile?.name ?? "PDF, XML, XLSX veya CSV"}</small>
-        </label>
-        {showManualFields ? (
-          <div className="onboarding-fields">
-            <input
-              aria-label="Görünen unvan"
-              onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-              placeholder="Görünen unvan"
-              value={draft.title}
-            />
-            <input
-              aria-label="Adı soyadı / yasal ad"
-              onChange={(event) => setDraft({ ...draft, legalName: event.target.value })}
-              placeholder="Adı soyadı / yasal ad"
-              value={draft.legalName}
-            />
-            <input
-              aria-label="Ticaret ünvanı"
-              onChange={(event) => setDraft({ ...draft, tradeName: event.target.value })}
-              placeholder="Ticaret ünvanı"
-              value={draft.tradeName}
-            />
-            <input
-              aria-label="VKN"
-              inputMode="numeric"
-              maxLength={10}
-              onChange={(event) => setDraft({ ...draft, vkn: event.target.value, taxId: event.target.value || draft.tckn })}
-              pattern="[0-9]*"
-              placeholder="VKN"
-              value={draft.vkn}
-            />
-            <input
-              aria-label="TCKN"
-              inputMode="numeric"
-              maxLength={11}
-              onChange={(event) => setDraft({ ...draft, tckn: event.target.value, taxId: draft.vkn || event.target.value })}
-              pattern="[0-9]*"
-              placeholder="TCKN"
-              value={draft.tckn}
-            />
-            <input
-              aria-label="Vergi dairesi"
-              onChange={(event) => setDraft({ ...draft, taxOffice: event.target.value })}
-              placeholder="Vergi dairesi"
-              value={draft.taxOffice}
-            />
-            <input
-              aria-label="Faaliyet"
-              onChange={(event) => setDraft({ ...draft, activityDescription: event.target.value })}
-              placeholder="Faaliyet"
-              value={draft.activityDescription}
-            />
-            <input
-              aria-label="NACE"
-              onChange={(event) => setDraft({ ...draft, naceCode: event.target.value })}
-              placeholder="NACE"
-              value={draft.naceCode}
-            />
+        <article className={`client-step tax-certificate-step ${identityReady ? "onboarding-step done" : "onboarding-step active"}`}>
+          <div className="tax-certificate-workspace">
+            <div>
+              <span>1. Vergi levhası</span>
+              <strong>Vergi levhası bilgileri</strong>
+            </div>
+            <label className="file-drop-control tax-certificate-drop">
+              <span>Vergi levhası</span>
+              <input
+                accept=".pdf,.jpg,.jpeg,.png"
+                aria-label="Vergi levhası"
+                key={taxCertificateInputKey}
+                onChange={(event) => onTaxCertificateFileChange(event.target.files?.[0] ?? null)}
+                type="file"
+              />
+              <small>{taxCertificateFile?.name ?? "PDF/JPG/PNG seç"}</small>
+            </label>
+            <div className="tax-certificate-preview" aria-label="Vergi levhası önizleme">
+              {taxCertificatePreviewUrl ? (
+                taxCertificateIsImage ? (
+                  <img alt="Vergi levhası önizleme" src={taxCertificatePreviewUrl} />
+                ) : (
+                  <object data={taxCertificatePreviewUrl} title="Vergi levhası önizleme" type={taxCertificateFile?.type || "application/pdf"} />
+                )
+              ) : (
+                <p>Vergi levhası yüklendiğinde burada görünecek.</p>
+              )}
+            </div>
+            <div className="tax-certificate-fields" aria-label="Vergi levhası alanları">
+              <input aria-label="Görünen unvan" onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Görünen unvan" value={draft.title} />
+              <input aria-label="Adı soyadı / yasal ad" onChange={(event) => setDraft({ ...draft, legalName: event.target.value })} placeholder="Adı soyadı / yasal ad" value={draft.legalName} />
+              <input aria-label="Ticaret ünvanı" onChange={(event) => setDraft({ ...draft, tradeName: event.target.value })} placeholder="Ticaret ünvanı" value={draft.tradeName} />
+              <input aria-label="Vergi kimliği" inputMode="numeric" onChange={(event) => setDraft({ ...draft, taxId: event.target.value })} pattern="[0-9]*" placeholder="Vergi kimliği" value={draft.taxId} />
+              <input aria-label="VKN" inputMode="numeric" maxLength={10} onChange={(event) => setDraft({ ...draft, vkn: event.target.value, taxId: event.target.value || draft.tckn })} pattern="[0-9]*" placeholder="VKN" value={draft.vkn} />
+              <input aria-label="TCKN" inputMode="numeric" maxLength={11} onChange={(event) => setDraft({ ...draft, tckn: event.target.value, taxId: draft.vkn || event.target.value })} pattern="[0-9]*" placeholder="TCKN" value={draft.tckn} />
+              <input aria-label="Vergi dairesi" onChange={(event) => setDraft({ ...draft, taxOffice: event.target.value })} placeholder="Vergi dairesi" value={draft.taxOffice} />
+              <input aria-label="NACE" onChange={(event) => setDraft({ ...draft, naceCode: event.target.value })} placeholder="NACE" value={draft.naceCode} />
+              <textarea aria-label="Faaliyet" onChange={(event) => setDraft({ ...draft, activityDescription: event.target.value })} placeholder="Faaliyet" value={draft.activityDescription} />
+              <textarea
+                aria-label="İşyeri adresleri"
+                onChange={(event) => setDraft({ ...draft, workplaceAddresses: event.target.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean) })}
+                placeholder="İşyeri adresleri"
+                value={draft.workplaceAddresses.join("\n")}
+              />
+              <input
+                aria-label="Faaliyet etiketleri"
+                onChange={(event) => setDraft({ ...draft, activityTags: event.target.value.split(",").map((value) => value.trim()).filter(Boolean) })}
+                placeholder="Faaliyet etiketleri"
+                value={draft.activityTags.join(", ")}
+              />
+            </div>
+            <div className="nace-research-panel">
+              <div>
+                <span>NACE araştırması</span>
+                <strong>{naceResearchPending ? "Araştırılıyor" : naceResearchProfile ? "Araştırma sonucu hazır" : "Araştırma bekliyor"}</strong>
+              </div>
+              <button disabled={!draft.naceCode.trim() || naceResearchPending} onClick={onRefreshNaceResearch} type="button">
+                NACE araştırmasını onayla
+              </button>
+              <p className={naceResearchStatus.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>
+                {naceResearchStatus || "NACE kodu OCR ile gelirse otomatik araştırılır; eksikse kodu doldurup onaylayın."}
+              </p>
+              {researchSummary ? <p>{researchSummary}</p> : null}
+              {sourceUrls.length ? <small>Kaynak: {sourceUrls.slice(0, 2).join(", ")}</small> : null}
+            </div>
           </div>
-        ) : null}
-        {draft.activityTags.length ? (
-          <div className="activity-tag-strip" aria-label="Faaliyet etiketleri">
-            {draft.activityTags.slice(0, 4).map((tag) => (
-              <span key={tag}>{tag.replace(/_/g, " ")}</span>
-            ))}
-          </div>
-        ) : null}
         </article>
 
         <article className={`client-step ${chartReady ? "onboarding-step done" : identityReady ? "onboarding-step active" : "onboarding-step locked"}`}>

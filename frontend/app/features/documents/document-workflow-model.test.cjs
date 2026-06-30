@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   documentMatchesSegment,
+  reviewCockpitQueues,
   nextDocumentSelection,
   reviewFilteredDocuments,
   segmentForDocument,
@@ -47,4 +48,42 @@ test("selected document is found from the segment source even when the visible r
     })?.id,
     "purchase-1",
   );
+});
+
+test("review cockpit queues separate one-click, minor-edit, and manual-risk documents", () => {
+  const queues = reviewCockpitQueues([
+    {
+      id: "one-click",
+      status: "review_required",
+      isBalanced: true,
+      reviewReasons: ["ai_assisted_draft_requires_accountant_approval"],
+      draftLines: [{ account_code: "770.01" }],
+    },
+    {
+      id: "minor-edit",
+      status: "review_required",
+      isBalanced: true,
+      reviewReasons: ["counterparty_missing"],
+      counterpartyCreationSuggestion: { suggested_code: "320.9999999999" },
+      draftLines: [{ account_code: "770.01" }],
+    },
+    {
+      id: "manual",
+      status: "review_required",
+      isBalanced: false,
+      reviewReasons: ["mixed_vat_manual_review"],
+      draftLines: [],
+    },
+    {
+      id: "ready",
+      status: "export_ready",
+      isBalanced: true,
+      reviewReasons: [],
+      draftLines: [{ account_code: "770.01" }],
+    },
+  ]);
+
+  assert.deepEqual(queues.oneClickApproval.map((document) => document.id), ["one-click", "ready"]);
+  assert.deepEqual(queues.minorEdit.map((document) => document.id), ["minor-edit"]);
+  assert.deepEqual(queues.manualRisk.map((document) => document.id), ["manual"]);
 });

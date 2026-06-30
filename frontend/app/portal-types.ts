@@ -130,6 +130,11 @@ export type PilotDocument = {
   deterministicSummary: string;
   exportGateReason: string;
   draftStatus: string;
+  draftConfidence?: number;
+  primarySuggestion?: Record<string, unknown>;
+  reviewBlockers?: string[];
+  automationEligibility?: string;
+  accountantActionHint?: string;
   accountantSummary: string;
   accountantExplanation?: string;
   technicalDetails: Record<string, unknown>;
@@ -389,6 +394,16 @@ export type ReviewData = {
     processingMode?: string;
     deterministicChecks?: string[];
     exportGateReason?: string;
+    draftConfidence?: number;
+    draft_confidence?: number;
+    primarySuggestion?: Record<string, unknown>;
+    primary_suggestion?: Record<string, unknown>;
+    reviewBlockers?: string[];
+    review_blockers?: string[];
+    automationEligibility?: string;
+    automation_eligibility?: string;
+    accountantActionHint?: string;
+    accountant_action_hint?: string;
     draftLines?: DraftLine[];
     statementLines?: unknown[];
     statement_lines?: unknown[];

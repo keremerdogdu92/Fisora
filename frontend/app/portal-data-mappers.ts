@@ -72,6 +72,15 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolü gerekli"),
       exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Çıktı listesine alınabilir." : "Müşavir kontrolü gerekiyor."),
       draftStatus: Array.isArray(row.draftLines) && row.draftLines.length ? "draft_ready" : "manual_draft_required",
+      draftConfidence: safeNumber((row as Record<string, unknown>).draftConfidence ?? (row as Record<string, unknown>).draft_confidence),
+      primarySuggestion: ((row as Record<string, unknown>).primarySuggestion ?? (row as Record<string, unknown>).primary_suggestion ?? {}) as Record<string, unknown>,
+      reviewBlockers: Array.isArray((row as Record<string, unknown>).reviewBlockers)
+        ? ((row as Record<string, unknown>).reviewBlockers as unknown[]).map(String)
+        : Array.isArray((row as Record<string, unknown>).review_blockers)
+          ? ((row as Record<string, unknown>).review_blockers as unknown[]).map(String)
+          : [],
+      automationEligibility: safeText((row as Record<string, unknown>).automationEligibility ?? (row as Record<string, unknown>).automation_eligibility),
+      accountantActionHint: safeText((row as Record<string, unknown>).accountantActionHint ?? (row as Record<string, unknown>).accountant_action_hint),
       accountantSummary: Array.isArray(row.draftLines) && row.draftLines.length ? "Fiş taslağı hazır." : "Fiş taslağı için manuel kontrol gerekiyor.",
       accountantExplanation: safeText(row.accountantExplanationTr ?? row.accountant_explanation_tr ?? row.aiClassificationReason ?? row.businessRelevanceReason),
       technicalDetails: {},

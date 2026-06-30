@@ -37,6 +37,7 @@ def write_export_manifest(
         "entry_count": package_payload.get("entry_count"),
         "candidate_count": package_payload.get("candidate_count"),
         "excluded_document_refs": package_payload.get("excluded_document_refs"),
+        "excluded_documents": package_payload.get("excluded_documents"),
         "generated_entries": [
             {
                 "entry_type": entry.get("entry_type"),
@@ -100,5 +101,6 @@ def export_package_payload(payload: ExportPackagePayload) -> dict[str, object]:
         "export_type": package.export_type,
         "entry_count": len(package.entries),
         "excluded_document_refs": list(package.excluded_document_refs),
+        "excluded_documents": list(package.excluded_documents),
         "entries": [entry_payload(entry) for entry in package.entries],
     }

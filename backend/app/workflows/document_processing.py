@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import UTC, datetime
 from decimal import Decimal
 from os import environ
 from pathlib import Path
@@ -399,6 +400,38 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
     updated = dict(result)
     updated.setdefault("document_validation_status", document_validation_status)
     updated.setdefault("draft_status", _draft_status(updated))
+    draft_lines = list(updated.get("draft_lines") or [])
+    statement_entries = list(updated.get("statement_entries") or [])
+    review_blockers = list(updated.get("review_blockers") or updated.get("review_reason_codes") or updated.get("risk_flags") or [])
+    updated.setdefault("review_blockers", review_blockers)
+    updated.setdefault("draft_confidence", 75 if draft_lines or statement_entries else 20)
+    updated.setdefault(
+        "automation_eligibility",
+        "eligible_after_policy" if updated.get("export_status") == "export_ready" and not review_blockers else "not_eligible",
+    )
+    updated.setdefault(
+        "accountant_action_hint",
+        "Taslak hazir; mustavir kontrolu bekliyor." if draft_lines or statement_entries else "Manuel kontrol gerekiyor.",
+    )
+    updated.setdefault(
+        "primary_suggestion",
+        {
+            "direction": updated.get("accounting_direction") or updated.get("invoice_type") or "",
+            "counterparty_account": updated.get("selected_supplier_account")
+            or updated.get("selected_customer_account")
+            or updated.get("suggested_counterparty_account")
+            or "",
+            "account": updated.get("selected_expense_account") or updated.get("selected_revenue_account") or "",
+            "vat_account": updated.get("selected_vat_account")
+            or updated.get("selected_purchase_vat_account")
+            or updated.get("selected_sales_vat_account")
+            or "",
+            "draft_lines": draft_lines,
+            "statement_entries": statement_entries,
+            "reason": updated.get("accountant_summary") or updated.get("business_relevance_reason") or "",
+            "export_gate_reason": updated.get("export_gate_reason") or "",
+        },
+    )
     updated.setdefault("accountant_summary", _accountant_summary(updated))
     updated.setdefault("accountant_explanation_tr", updated.get("accountant_explanation_tr") or _ai_explanation_tr(updated))
     updated.setdefault("ai_explanation_tr", _ai_explanation_tr(updated))
@@ -1171,7 +1204,19 @@ def process_queued_documents(
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
     research_runtime: dict[str, object] | None = None,
 ) -> dict[str, Any]:
-    summary = {"processed_count": 0, "completed_count": 0, "failed_count": 0}
+    queued_count = 0
+    try:
+        queued_count = sum(1 for job in store.list_processing_jobs() if str(job.get("status") or "") == "queued")
+    except Exception:
+        queued_count = 0
+    summary = {
+        "run_id": f"processing-run-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}",
+        "queued_count": queued_count,
+        "processed_count": 0,
+        "completed_count": 0,
+        "failed_count": 0,
+        "current_status": "running" if queued_count else "idle",
+    }
     for _ in range(max_jobs):
         result = process_next_job_once(
             store,
@@ -1182,6 +1227,12 @@ def process_queued_documents(
         )
         if result["processed_count"] == 0:
             break
-        for key in summary:
+        for key in ("processed_count", "completed_count", "failed_count"):
             summary[key] += int(result[key])
+    if summary["processed_count"] == 0:
+        summary["current_status"] = "idle" if queued_count == 0 else "queued"
+    elif summary["failed_count"]:
+        summary["current_status"] = "completed_with_errors"
+    else:
+        summary["current_status"] = "completed"
     return summary

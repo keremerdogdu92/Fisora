@@ -3477,6 +3477,59 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(controlled.export_status, "export_ready")
         self.assertEqual(controlled.simulated_status, "auto_ready")
 
+    def test_ai_assisted_draft_result_exposes_agentic_review_contract(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="new-supplier.pdf",
+            provider_hint="Yeni Tedarikci",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=900,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="YEN2026000000001",
+            ettn="",
+            issue_date="02.05.2026",
+            tax_ids=("9999999999",),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Ofis sarf malzemesi",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Demo Ofis",
+            tax_id="1234567890",
+            activity_description="Muhasebe ve ofis hizmetleri",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, counterparty_match=None, processing_mode="ai_assisted_draft")
+
+        self.assertGreater(result.draft_confidence, 0)
+        self.assertEqual(result.automation_eligibility, "not_eligible")
+        self.assertIn("counterparty_missing", result.review_blockers)
+        self.assertIn("mustavir onayi", result.accountant_action_hint.lower())
+        self.assertEqual(result.suggested_counterparty_creation["suggested_code"], "320.9999999999")
+        self.assertEqual(result.primary_suggestion["direction"], "purchase")
+        self.assertEqual(result.primary_suggestion["counterparty_account"], "320.9999999999")
+        self.assertEqual(result.primary_suggestion["vat_account"], "191.01")
+        self.assertTrue(result.primary_suggestion["draft_lines"])
+
     def test_counterparty_matching_prefers_tax_id_then_review_for_missing(self) -> None:
         accounts = [
             ChartAccount("320.01", "320.01", "Saticilar", is_detail_account=False),
@@ -3810,6 +3863,16 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(len(package.entries), 1)
         self.assertEqual(package.entries[0].description, "Alis faturasi ready.pdf")
         self.assertEqual(package.excluded_document_refs, ("risky.pdf",))
+        self.assertEqual(
+            package.excluded_documents,
+            (
+                {
+                    "document_ref": "risky.pdf",
+                    "export_status": "review_required",
+                    "review_blockers": ["counterparty_not_found"],
+                },
+            ),
+        )
 
     def test_export_adapter_writes_json_manifest_and_rejects_unknown_type(self) -> None:
         entry = build_purchase_entry(
@@ -3946,6 +4009,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(build.candidate_count, 3)
         self.assertEqual(len(build.package.entries), 2)
         self.assertEqual(build.package.excluded_document_refs, ("statement.csv#statement-2",))
+        self.assertEqual(build.package.excluded_documents[0]["review_blockers"], ["pos_policy_review_required"])
 
     def test_workspace_export_package_blocks_statement_entries_until_accountant_approval(self) -> None:
         workspace = {

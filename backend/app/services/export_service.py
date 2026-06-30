@@ -48,6 +48,7 @@ class ExportService:
                 "export_type": package.get("export_type"),
                 "entry_count": package.get("entry_count"),
                 "excluded_document_refs": package.get("excluded_document_refs", []),
+                "excluded_documents": package.get("excluded_documents", []),
             },
         )
         return saved
@@ -92,6 +93,7 @@ class ExportService:
             "candidate_count": build.candidate_count,
             "entry_count": len(build.package.entries),
             "excluded_document_refs": list(build.package.excluded_document_refs),
+            "excluded_documents": list(build.package.excluded_documents),
             "output_filename": output_filename,
             "output_path": str(output_path),
             "download_url": f"/phase0/store/export-package/download/{payload.client_id}/{output_filename}",
@@ -116,6 +118,7 @@ class ExportService:
                 "entry_count": package_payload["entry_count"],
                 "candidate_count": package_payload["candidate_count"],
                 "excluded_document_refs": package_payload["excluded_document_refs"],
+                "excluded_documents": package_payload["excluded_documents"],
                 "output_filename": package_payload["output_filename"],
                 "manifest_filename": package_payload["manifest_filename"],
             },

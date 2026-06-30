@@ -123,6 +123,12 @@ class SimulatedInvoiceResult:
     rule_prompt: dict[str, object]
     export_status: str
     draft_lines: tuple[dict[str, str], ...]
+    draft_confidence: int = 0
+    primary_suggestion: dict[str, object] = field(default_factory=dict)
+    review_blockers: tuple[str, ...] = ()
+    automation_eligibility: str = "not_eligible"
+    accountant_action_hint: str = ""
+    suggested_counterparty_creation: dict[str, object] | None = None
     selected_revenue_account: str = ""
     selected_purchase_vat_account: str = ""
     selected_sales_vat_account: str = ""
@@ -900,6 +906,87 @@ def _export_gate_reason(
     return "Deterministik kontroller temiz; export paketine alinabilir."
 
 
+def _draft_confidence(
+    *,
+    entry: JournalEntry | None,
+    amount: Decimal | None,
+    direction_confidence: int,
+    counterparty_match: CounterpartyMatch | None,
+    review_reasons: tuple[str, ...],
+) -> int:
+    score = 35
+    if amount is not None and amount > 0:
+        score += 15
+    if entry and entry.is_balanced:
+        score += 20
+    if direction_confidence >= 70:
+        score += 15
+    if counterparty_match and counterparty_match.account_code and not counterparty_match.requires_review:
+        score += 10
+    elif counterparty_match and counterparty_match.account_code:
+        score += 5
+    score -= min(len(review_reasons) * 5, 25)
+    return max(10, min(score, 95))
+
+
+def _review_blockers(
+    *,
+    review_reasons: tuple[str, ...],
+    deterministic_checks: tuple[str, ...],
+    counterparty_match: CounterpartyMatch | None,
+    counterparty_creation_suggestion: dict[str, object] | None,
+) -> tuple[str, ...]:
+    blockers = list(review_reasons)
+    if counterparty_match is None and counterparty_creation_suggestion:
+        blockers.append("counterparty_missing")
+    if "balanced_entry_missing" in deterministic_checks:
+        blockers.append("balanced_entry_missing")
+    if "amount_requires_review" in deterministic_checks:
+        blockers.append("amount_requires_review")
+    return tuple(dict.fromkeys(blockers))
+
+
+def _automation_eligibility(*, export_status: str, mode: ProcessingMode, blockers: tuple[str, ...]) -> str:
+    if export_status != "export_ready":
+        return "not_eligible"
+    if mode == "controlled_automation" and not blockers:
+        return "eligible_after_policy"
+    return "candidate"
+
+
+def _accountant_action_hint(*, export_status: str, blockers: tuple[str, ...], draft_lines: tuple[dict[str, str], ...]) -> str:
+    if export_status == "export_ready":
+        return "Tek tik onay veya cikti listesine alma icin hazir."
+    if "counterparty_missing" in blockers:
+        return "Fis taslagi hazir; yeni cari onerisi mustavir onayi bekliyor."
+    if not draft_lines:
+        return "Belge manuel kontrol istiyor; fis satirlari tamamlanmali."
+    return "Fis taslagi hazir; mustavir onayi veya kucuk duzeltme bekliyor."
+
+
+def _primary_suggestion(
+    *,
+    direction: str,
+    counterparty_account: str,
+    suggested_counterparty: str,
+    expense_account: str,
+    revenue_account: str,
+    vat_account: str,
+    draft_lines: tuple[dict[str, str], ...],
+    ai_reason: str,
+    export_gate_reason: str,
+) -> dict[str, object]:
+    return {
+        "direction": direction,
+        "counterparty_account": counterparty_account or suggested_counterparty,
+        "account": revenue_account if direction == "sales" else expense_account,
+        "vat_account": vat_account,
+        "draft_lines": list(draft_lines),
+        "reason": ai_reason,
+        "export_gate_reason": export_gate_reason,
+    }
+
+
 def simulate_invoice(
     invoice: ParsedInvoice,
     selection: AccountSelection,
@@ -1177,6 +1264,8 @@ def simulate_invoice(
     counterparty_reasons: tuple[str, ...] = ()
     if counterparty_match and counterparty_match.requires_review:
         counterparty_reasons = (f"counterparty_{counterparty_match.match_reason}",)
+    elif counterparty_match is None and counterparty_creation_suggestion:
+        counterparty_reasons = ("counterparty_missing",)
     onboarding_reasons: tuple[str, ...] = ()
     if client_profile:
         onboarding = check_client_onboarding(client_profile)
@@ -1226,6 +1315,36 @@ def simulate_invoice(
         purchase_vat_account=selected_purchase_vat_account,
         sales_vat_account=selected_sales_vat_account,
         suggested_counterparty=suggested_counterparty,
+    )
+    draft_lines = _entry_lines(entry)
+    review_blockers = _review_blockers(
+        review_reasons=all_reasons,
+        deterministic_checks=deterministic_checks,
+        counterparty_match=counterparty_match,
+        counterparty_creation_suggestion=counterparty_creation_suggestion,
+    )
+    draft_confidence = _draft_confidence(
+        entry=entry,
+        amount=amount,
+        direction_confidence=direction_confidence,
+        counterparty_match=counterparty_match,
+        review_reasons=review_blockers,
+    )
+    automation_eligibility = _automation_eligibility(export_status=export_status, mode=mode, blockers=review_blockers)
+    primary_suggestion = _primary_suggestion(
+        direction=direction,
+        counterparty_account=(
+            selected_customer_account
+            if direction == "sales"
+            else counterparty_match.account_code if counterparty_match and counterparty_match.account_code else ""
+        ),
+        suggested_counterparty=suggested_counterparty,
+        expense_account="" if direction == "sales" else purchase_account,
+        revenue_account=selected_revenue_account,
+        vat_account=selected_sales_vat_account if direction == "sales" else selected_purchase_vat_account,
+        draft_lines=draft_lines,
+        ai_reason=ai_reason or relevance.reason,
+        export_gate_reason=export_gate_reason,
     )
 
     return SimulatedInvoiceResult(
@@ -1286,7 +1405,17 @@ def simulate_invoice(
         accounting_intent_confidence=0,
         rule_prompt={},
         export_status=export_status,
-        draft_lines=_entry_lines(entry),
+        draft_lines=draft_lines,
+        draft_confidence=draft_confidence,
+        primary_suggestion=primary_suggestion,
+        review_blockers=review_blockers,
+        automation_eligibility=automation_eligibility,
+        accountant_action_hint=_accountant_action_hint(
+            export_status=export_status,
+            blockers=review_blockers,
+            draft_lines=draft_lines,
+        ),
+        suggested_counterparty_creation=counterparty_creation_suggestion,
         selected_revenue_account=selected_revenue_account,
         selected_purchase_vat_account=selected_purchase_vat_account,
         selected_sales_vat_account=selected_sales_vat_account,

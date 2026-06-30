@@ -1201,6 +1201,34 @@ button:disabled {
   font-weight: 900;
 }
 
+.review-cockpit-queues {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.review-cockpit-queues div {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.review-cockpit-queues span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.review-cockpit-queues strong {
+  color: var(--text);
+  font-size: 1.1rem;
+}
+
 .debug-accordion {
   background: #fff;
   border: 1px solid var(--border);

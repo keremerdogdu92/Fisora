@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   documentMatchesSegment,
   nextDocumentSelection,
+  reviewCockpitQueues,
 } from "./features/documents/document-workflow-model";
 import { reviewReasonLabel } from "./portal-normalization";
 import { DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
@@ -161,6 +162,7 @@ export function AccountantWorkspace({
         return `${document.fileName} ${document.provider} ${document.amount} ${formatStatus(document.status)}`.toLocaleLowerCase("tr-TR").includes(query);
       });
   }, [allClientDocuments, documentQuery, reviewFilter, selectedDocumentSegment]);
+  const cockpitQueues = useMemo(() => reviewCockpitQueues(queueDocuments), [queueDocuments]);
   const navigationDocuments = selectedDocument && !documents.some((document) => document.id === selectedDocument.id)
     ? queueDocuments
     : documents;
@@ -239,6 +241,20 @@ export function AccountantWorkspace({
             <span>{selectedDocument ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
             <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
             <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+          </div>
+        </div>
+        <div className="review-cockpit-queues" aria-label="Mustavir karar kuyruklari">
+          <div>
+            <span>Tek tik onay</span>
+            <strong>{cockpitQueues.oneClickApproval.length}</strong>
+          </div>
+          <div>
+            <span>Kucuk duzeltme</span>
+            <strong>{cockpitQueues.minorEdit.length}</strong>
+          </div>
+          <div>
+            <span>Manuel/riskli</span>
+            <strong>{cockpitQueues.manualRisk.length}</strong>
           </div>
         </div>
       </section>

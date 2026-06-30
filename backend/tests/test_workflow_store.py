@@ -175,6 +175,18 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(len(reloaded["learning_events"]), 1)
         self.assertEqual(len(reloaded["export_packages"]), 1)
 
+    def test_processing_run_summary_exposes_progress_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+
+            summary = process_queued_documents(store, max_jobs=3)
+
+        self.assertRegex(summary["run_id"], r"^processing-run-")
+        self.assertEqual(summary["queued_count"], 0)
+        self.assertEqual(summary["completed_count"], 0)
+        self.assertEqual(summary["failed_count"], 0)
+        self.assertEqual(summary["current_status"], "idle")
+
     def test_json_store_is_scoped_by_client_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

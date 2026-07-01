@@ -440,7 +440,7 @@ def _tavily_search_text(query: ResearchQuery) -> str:
             for part in (
                 query.search_text,
                 query.activity_context,
-                "NACE Rev.2 official activity classification scope business expenses",
+                "Turkce anlasilir cevap ver resmi NACE faaliyet kapsami muhasebe giderleri",
             )
             if str(part).strip()
         )
@@ -451,6 +451,28 @@ def _tavily_search_text(query: ResearchQuery) -> str:
         "official manufacturer product category",
     ]
     return " ".join(part for part in parts if str(part).strip())
+
+
+def _looks_like_english_research_text(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    english_tokens = ("retail", "sale", "medical", "orthopaedic", "official", "classification", "business", "expenses", "goods")
+    turkish_tokens = ("faaliyet", "ticaret", "perakende", "tibbi", "urun", "kapsam", "gider")
+    return sum(1 for token in english_tokens if token in text) >= 2 and not any(token in text for token in turkish_tokens)
+
+
+def _turkish_nace_summary(query: ResearchQuery, raw_summary: str, activity_profile: object) -> str:
+    summary = str(raw_summary or "").strip()
+    if summary and not _looks_like_english_research_text(summary):
+        return summary
+    context = str(query.activity_context or "").strip()
+    if context:
+        return f"{query.key} NACE kodu, {context} faaliyet kapsami icin degerlendirilir. Kapsam ve gider iliskisi resmi NACE kayitlariyla musavir tarafindan kontrol edilmelidir."
+    display_label = str(getattr(activity_profile, "display_label", "") or "").strip()
+    if display_label and display_label != "Belirsiz faaliyet":
+        return f"{query.key} NACE kodu, {display_label} faaliyeti icin degerlendirilir. Kapsam ve gider iliskisi resmi NACE kayitlariyla kontrol edilmelidir."
+    return f"{query.key} NACE kodu icin faaliyet kapsami arastirildi; net kapsam resmi NACE kayitlariyla kontrol edilmelidir."
 
 
 def _tavily_payload_to_research_profile(query: ResearchQuery, payload: dict[str, Any]) -> dict[str, Any]:
@@ -474,12 +496,14 @@ def _tavily_payload_to_research_profile(query: ResearchQuery, payload: dict[str,
             activity_description=" ".join(part for part in (query.activity_context, answer) if part),
             nace_code=query.key,
         )
+        raw_summary = answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else "")
+        summary_tr = _turkish_nace_summary(query, raw_summary, activity_profile)
         research_confidence = 85 if answer and accepted_evidence else 75 if accepted_evidence else 40
         return {
             "display_name": query.key,
-            "activity_title": answer.split(".")[0].strip() if answer else query.activity_context,
-            "scope_summary": answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else ""),
-            "summary_tr": answer or (str(accepted_evidence[0].get("summary_tr") or "") if accepted_evidence else ""),
+            "activity_title": query.activity_context or activity_profile.display_label or query.key,
+            "scope_summary": summary_tr,
+            "summary_tr": summary_tr,
             "included_goods_services": [],
             "likely_business_expenses": [],
             "unlikely_or_personal_items": [],

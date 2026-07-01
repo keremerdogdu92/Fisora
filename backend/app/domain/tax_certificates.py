@@ -543,6 +543,39 @@ def _run_tesseract(tesseract: str, image_path: Path, *, language: str, psm: str,
     )
 
 
+def _ocr_orientation_variants(path: Path, temp_dir: Path) -> tuple[tuple[str, Path], tuple[str, ...]]:
+    try:
+        from PIL import Image, ImageOps
+    except ModuleNotFoundError:
+        return (("original", path),), ("ocr_orientation_pillow_missing",)
+    try:
+        with Image.open(path) as image:
+            normalized = ImageOps.exif_transpose(image)
+            exif_orientation = 0
+            getexif = getattr(image, "getexif", None)
+            if callable(getexif):
+                try:
+                    exif_orientation = int((getexif() or {}).get(274) or 0)
+                except Exception:  # noqa: BLE001
+                    exif_orientation = 0
+            width, height = normalized.size
+            primary_path = path
+            primary_label = "original"
+            if exif_orientation in {3, 6, 8}:
+                primary_path = temp_dir / "tax_certificate_exif.png"
+                normalized.save(primary_path)
+                primary_label = "exif"
+            variants: list[tuple[str, Path]] = [(primary_label, primary_path)]
+            if width > height:
+                for degrees in (90, 270):
+                    rotated_path = temp_dir / f"tax_certificate_rot{degrees}.png"
+                    normalized.rotate(degrees, expand=True).save(rotated_path)
+                    variants.append((f"rot{degrees}", rotated_path))
+            return tuple(variants), ("ocr_orientation_checked",)
+    except Exception as exc:  # noqa: BLE001
+        return (("original", path),), (f"ocr_orientation_error:{type(exc).__name__}",)
+
+
 def _ocr_image_regions(path: Path, tesseract: str, *, language: str, region_names: tuple[str, ...] = ()) -> tuple[str, tuple[str, ...], int]:
     try:
         from PIL import Image
@@ -593,38 +626,55 @@ def ocr_image(path: Path) -> tuple[str, tuple[str, ...]]:
     best_text = ""
     best_notes: tuple[str, ...] = ("ocr_tesseract",)
     best_score = -1
+    best_path = path
     failures: list[str] = []
     attempts = 0
-    for psm in ocr_psm_candidates():
-        attempts += 1
-        try:
-            completed = _run_tesseract(tesseract, path, language=language, psm=psm)
-        except Exception as exc:  # noqa: BLE001
-            failures.append(f"ocr_error_psm_{psm}:{type(exc).__name__}")
-            continue
-        if completed.returncode != 0:
-            failures.append(f"ocr_failed_psm_{psm}:{completed.returncode}")
-            continue
-        candidate_text = completed.stdout
-        candidate_extraction = parse_tax_certificate_text(candidate_text)
-        candidate_score = candidate_extraction.confidence
-        if candidate_score > best_score:
-            best_text = candidate_text
-            best_score = candidate_score
-            best_notes = ("ocr_tesseract", f"ocr_tesseract_psm_{psm}")
-        if _tax_certificate_extraction_complete(candidate_extraction) and candidate_score >= 90:
-            return candidate_text, ("ocr_tesseract", f"ocr_tesseract_psm_{psm}", "ocr_early_exit", f"ocr_attempts_{attempts}")
-    if best_score >= 0:
-        if best_score < 75:
-            roi_text, roi_notes, roi_attempts = _ocr_image_regions(path, tesseract, language=language)
-            total_attempts = attempts + roi_attempts
-            if roi_text.strip():
-                roi_candidate_text = "\n".join(value for value in (best_text, roi_text) if value.strip())
-                roi_extraction = parse_tax_certificate_text(roi_candidate_text)
-                if roi_extraction.confidence > best_score:
-                    return roi_candidate_text, tuple((*best_notes, *roi_notes, "ocr_roi_used", f"ocr_attempts_{total_attempts}"))
-            return best_text, tuple((*best_notes, *roi_notes, f"ocr_attempts_{total_attempts}"))
-        return best_text, tuple((*best_notes, f"ocr_attempts_{attempts}"))
+    with tempfile.TemporaryDirectory() as temp_dir_name:
+        variants, orientation_notes = _ocr_orientation_variants(path, Path(temp_dir_name))
+        for orientation, candidate_path in variants:
+            for psm in ocr_psm_candidates():
+                attempts += 1
+                try:
+                    completed = _run_tesseract(tesseract, candidate_path, language=language, psm=psm)
+                except Exception as exc:  # noqa: BLE001
+                    failures.append(f"ocr_error_{orientation}_psm_{psm}:{type(exc).__name__}")
+                    continue
+                if completed.returncode != 0:
+                    failures.append(f"ocr_failed_{orientation}_psm_{psm}:{completed.returncode}")
+                    continue
+                candidate_text = completed.stdout
+                candidate_extraction = parse_tax_certificate_text(candidate_text)
+                candidate_score = candidate_extraction.confidence
+                if candidate_score > best_score:
+                    best_text = candidate_text
+                    best_score = candidate_score
+                    best_path = candidate_path
+                    best_notes = (
+                        "ocr_tesseract",
+                        f"ocr_tesseract_psm_{psm}",
+                        f"ocr_orientation_{orientation}",
+                        *orientation_notes,
+                    )
+                if _tax_certificate_extraction_complete(candidate_extraction) and candidate_score >= 90:
+                    return candidate_text, (
+                        "ocr_tesseract",
+                        f"ocr_tesseract_psm_{psm}",
+                        f"ocr_orientation_{orientation}",
+                        *orientation_notes,
+                        "ocr_early_exit",
+                        f"ocr_attempts_{attempts}",
+                    )
+        if best_score >= 0:
+            if best_score < 75:
+                roi_text, roi_notes, roi_attempts = _ocr_image_regions(best_path, tesseract, language=language)
+                total_attempts = attempts + roi_attempts
+                if roi_text.strip():
+                    roi_candidate_text = "\n".join(value for value in (best_text, roi_text) if value.strip())
+                    roi_extraction = parse_tax_certificate_text(roi_candidate_text)
+                    if roi_extraction.confidence > best_score:
+                        return roi_candidate_text, tuple((*best_notes, *roi_notes, "ocr_roi_used", f"ocr_attempts_{total_attempts}"))
+                return best_text, tuple((*best_notes, *roi_notes, f"ocr_attempts_{total_attempts}"))
+            return best_text, tuple((*best_notes, f"ocr_attempts_{attempts}"))
     return "", tuple(failures or ("ocr_failed",))
 
 

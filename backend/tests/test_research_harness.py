@@ -396,6 +396,36 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(profile["source_urls"], ["https://www.rexton.com/hearing-aids/"])
         self.assertEqual(profile["evidence"][1]["accepted"], False)
 
+    def test_tavily_nace_research_uses_turkish_query_and_summary_fallback(self) -> None:
+        http_client = FakeHttpClient(
+            {
+                "answer": "Retail sale of medical and orthopaedic goods in specialised stores.",
+                "results": [
+                    {
+                        "title": "NACE Rev.2",
+                        "url": "https://ec.europa.eu/eurostat/web/nace/overview",
+                        "content": "Retail sale of medical and orthopaedic goods.",
+                    }
+                ],
+            }
+        )
+        provider = TavilySearchResearchProvider(api_key="tvly-test", http_client=http_client)
+
+        payload = provider.research(
+            ResearchQuery(
+                kind="nace",
+                key="477401",
+                search_text="NACE 477401 faaliyet kodu kapsami",
+                activity_context="Tibbi ve ortopedik urunlerin perakende ticareti",
+            )
+        )
+
+        request_query = http_client.requests[0]["json"]["query"]
+        self.assertIn("Turkce", request_query)
+        self.assertNotIn("business expenses", request_query)
+        self.assertIn("477401 NACE kodu", payload["summary_tr"])
+        self.assertIn("Tibbi ve ortopedik urunlerin perakende ticareti", payload["summary_tr"])
+
     def test_tavily_research_confidence_scoring_tiers(self) -> None:
         accepted_result = {"results": [{"url": "https://www.rexton.com/", "content": "Rexton hearing aids."}]}
         rejected_result = {

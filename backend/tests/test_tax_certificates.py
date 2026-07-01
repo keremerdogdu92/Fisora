@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import types
 import unittest
 from unittest.mock import patch
 
@@ -619,6 +620,57 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.nace_code, "464601")
         self.assertIn("ocr_roi_used", notes)
         self.assertIn("ocr_attempts_6", notes)
+
+    def test_ocr_image_tries_sideways_orientation_when_original_scores_low(self) -> None:
+        weak_output = "VERGI LEVHASI"
+        rotated_output = """
+        VERGI LEVHASI
+        ADI SOYADI
+        ORHAN ELIBOL
+        TC KIMLIK NO
+        30052309394
+        VERGI DAIRESI
+        MASLAK
+        ANA FAALIYET KODU VE ADI
+        477401-TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI
+        """
+
+        class FakeImage:
+            size = (1800, 1000)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def rotate(self, _degrees, *, expand=True):
+                return self
+
+            def crop(self, _box):
+                return self
+
+            def save(self, path):
+                Path(path).write_bytes(b"fake-image")
+
+        fake_image_module = types.SimpleNamespace(open=lambda _path: FakeImage())
+        fake_imageops_module = types.SimpleNamespace(exif_transpose=lambda image: image)
+        fake_pil_module = types.SimpleNamespace(Image=fake_image_module, ImageOps=fake_imageops_module)
+
+        def fake_run(command, **_kwargs):
+            image_path = str(command[1])
+            return FakeCompletedProcess(rotated_output if "rot90" in image_path else weak_output)
+
+        with patch.dict(sys.modules, {"PIL": fake_pil_module, "PIL.Image": fake_image_module, "PIL.ImageOps": fake_imageops_module}):
+            with patch("app.domain.tax_certificates.shutil.which", return_value="/usr/bin/tesseract"):
+                with patch("app.domain.tax_certificates.ocr_psm_candidates", return_value=("6",)):
+                    with patch("app.domain.tax_certificates.subprocess.run", side_effect=fake_run):
+                        text, notes = ocr_image(Path("sideways-tax-certificate.png"))
+
+        extraction = parse_tax_certificate_text(text)
+        self.assertEqual(extraction.tckn, "30052309394")
+        self.assertEqual(extraction.nace_code, "477401")
+        self.assertIn("ocr_orientation_rot90", notes)
 
 
 if __name__ == "__main__":

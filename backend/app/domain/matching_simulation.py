@@ -569,6 +569,46 @@ def _counterparty_creation_suggestion(
     return suggested, {"type": "supplier", "base_account": "320", "suggested_code": suggested, "always_suggest_new": True}
 
 
+def _counterparty_account_description(
+    *,
+    account: str,
+    suggested_counterparty: str,
+    counterparty_match: CounterpartyMatch | None,
+    base_description: str,
+) -> str:
+    if account and account == suggested_counterparty and not (counterparty_match and counterparty_match.account_code):
+        return f"Yeni cari onerisi - {base_description}"
+    return base_description
+
+
+def _selected_sales_customer_account(
+    *,
+    selection: AccountSelection,
+    suggested_counterparty: str,
+    counterparty_match: CounterpartyMatch | None,
+) -> str:
+    if counterparty_match and counterparty_match.account_code:
+        return counterparty_match.account_code
+    return suggested_counterparty or selection.customer_account
+
+
+def _selected_purchase_supplier_account(
+    *,
+    selection: AccountSelection,
+    suggested_counterparty: str,
+    counterparty_match: CounterpartyMatch | None,
+) -> str:
+    if counterparty_match and counterparty_match.account_code:
+        return counterparty_match.account_code
+    return suggested_counterparty or selection.supplier_account
+
+
+def _counterparty_requires_review(counterparty_match: CounterpartyMatch | None, counterparty_creation_suggestion: dict[str, object] | None) -> bool:
+    if counterparty_match and counterparty_match.requires_review:
+        return True
+    return counterparty_match is None and bool(counterparty_creation_suggestion)
+
+
 def _counterparty_match_for_invoice(
     accounts: list[ChartAccount],
     invoice: ParsedInvoice,
@@ -613,7 +653,16 @@ def _accountant_explanation(
     purchase_vat_account: str,
     sales_vat_account: str,
     suggested_counterparty: str,
+    draft_quality: str,
 ) -> str:
+    vat_split_note = ""
+    if len(invoice.vat_rates) > 1:
+        if draft_quality.startswith("mixed_vat") and str(invoice.vat_split_status or "") in {"exact", "derived"}:
+            vat_split_note = f" KDV ayrimi {invoice.vat_split_status}; fise oran bazli uygulandi."
+        elif draft_quality == "gross_balanced_needs_vat_split":
+            vat_split_note = " KDV oranlari var ama tutar ayrimi guvenli degil; brut kontrol fisi uretildi."
+        else:
+            vat_split_note = " KDV oranlari var; ayrim kontrol gerekcesinde gosterildi."
     if direction == "return_review":
         return "Iade sinyali bulundu. Bu fazda otomatik fis uretilmedi; belge iade kontrol kuyrugunda tutulmali."
     if direction == "sales":
@@ -623,11 +672,13 @@ def _accountant_explanation(
             f"Belge satis/gelir olarak yorumlandi ({', '.join(direction_evidence)}). "
             f"KDV oranlari: {vat_text}. Gelir hesabi: {revenue_account}. "
             f"Hesaplanan KDV hesabi: {vat_account_text}. Cari onerisi: {suggested_counterparty}."
+            f"{vat_split_note}"
         )
     return (
         f"Belge alis/gider olarak yorumlandi ({', '.join(direction_evidence)}). "
         f"Gider/stok hesabi: {expense_account}. Indirilecek KDV hesabi: {purchase_vat_account}. "
         f"Cari onerisi: {suggested_counterparty}."
+        f"{vat_split_note}"
     )
 
 
@@ -637,6 +688,7 @@ def _gross_review_entry(
     supplier_account: str,
     *,
     expense_account: str | None = None,
+    supplier_description: str = "Kontrol bekleyen satici cari",
 ) -> JournalEntry:
     total = money(invoice.payable_total)
     return JournalEntry(
@@ -645,7 +697,7 @@ def _gross_review_entry(
         description=f"Kontrol gerekli fatura {invoice.file_name}",
         lines=(
             JournalLine(expense_account or selection.expense_account, "Kontrol bekleyen gider taslagi", debit=total, document_ref=invoice.file_name),
-            JournalLine(supplier_account, "Kontrol bekleyen satici cari", credit=total, document_ref=invoice.file_name),
+            JournalLine(supplier_account, supplier_description, credit=total, document_ref=invoice.file_name),
         ),
         risk_flags=invoice.risk_flags,
     )
@@ -656,6 +708,7 @@ def _gross_sales_review_entry(
     *,
     revenue_account: str,
     customer_account: str,
+    customer_description: str = "Kontrol bekleyen alici cari",
 ) -> JournalEntry:
     total = money(invoice.payable_total)
     return JournalEntry(
@@ -663,7 +716,7 @@ def _gross_sales_review_entry(
         entry_date=invoice.issue_date or "1900-01-01",
         description=f"Kontrol gerekli satis faturasi {invoice.file_name}",
         lines=(
-            JournalLine(customer_account, "Kontrol bekleyen alici cari", debit=total, document_ref=invoice.file_name),
+            JournalLine(customer_account, customer_description, debit=total, document_ref=invoice.file_name),
             JournalLine(revenue_account, "Kontrol bekleyen satis geliri", credit=total, document_ref=invoice.file_name),
         ),
         risk_flags=invoice.risk_flags,
@@ -768,7 +821,10 @@ def _vat_split_summary_by_rate(invoice: ParsedInvoice) -> dict[str, dict[str, De
         tax = _money_hint(str(getattr(line, "tax_amount", "") or ""))
         if not rate or taxable is None or tax is None:
             continue
-        summary[rate] = {"taxable": taxable, "tax": tax, "gross": (taxable + tax).quantize(Decimal("0.01"))}
+        bucket = summary.setdefault(rate, {"taxable": Decimal("0.00"), "tax": Decimal("0.00"), "gross": Decimal("0.00")})
+        bucket["taxable"] += taxable
+        bucket["tax"] += tax
+        bucket["gross"] += (taxable + tax).quantize(Decimal("0.01"))
     return summary
 
 
@@ -800,6 +856,39 @@ def _grouped_line_amounts_validate(invoice: ParsedInvoice, grouped: dict[str, di
     if payable_total is not None and not _money_values_match(total_gross, payable_total):
         return False
     return True
+
+
+def _vat_split_summary_validate(invoice: ParsedInvoice, summary: dict[str, dict[str, Decimal]]) -> bool:
+    if str(getattr(invoice, "vat_split_status", "") or "") not in {"exact", "derived"}:
+        return False
+    return _grouped_line_amounts_validate(invoice, summary)
+
+
+def _mixed_vat_items_from_grouped_amounts(
+    grouped: dict[str, dict[str, Decimal]],
+    selection: AccountSelection,
+    *,
+    direction: str,
+    purchase_account: str,
+) -> tuple[tuple[str, Decimal, Decimal, str], ...]:
+    items: list[tuple[str, Decimal, Decimal, str]] = []
+    for raw_rate in sorted(grouped, key=lambda value: Decimal(str(value).replace(",", "."))):
+        rate = Decimal(raw_rate.replace(",", ".")) / Decimal("100")
+        gross_amount = grouped[raw_rate]["gross"].quantize(Decimal("0.01"))
+        if direction == "sales":
+            revenue_account = _sales_revenue_account(selection, rate)
+            if rate > Decimal("0.00"):
+                revenue_account = _vat_account_for_rate(
+                    selection.account_candidates.get("sales_revenue"),
+                    rate=rate,
+                    fallback=revenue_account,
+                )
+            vat_account = _sales_vat_account_for_rate(selection, rate)
+            items.append((revenue_account, gross_amount, rate, vat_account))
+        else:
+            vat_account = _purchase_vat_account_for_rate(selection, rate)
+            items.append((purchase_account, gross_amount, rate, vat_account))
+    return tuple(items)
 
 
 def _line_detail_text(invoice: ParsedInvoice, index: int) -> str:
@@ -854,24 +943,20 @@ def _mixed_vat_items_from_lines(
 ) -> tuple[tuple[str, Decimal, Decimal, str], ...]:
     grouped = _line_detail_group_amounts(invoice)
     if grouped and _grouped_line_amounts_validate(invoice, grouped):
-        items: list[tuple[str, Decimal, Decimal, str]] = []
-        for raw_rate in sorted(grouped, key=lambda value: int(value)):
-            rate = Decimal(raw_rate) / Decimal("100")
-            gross_amount = grouped[raw_rate]["gross"].quantize(Decimal("0.01"))
-            if direction == "sales":
-                revenue_account = _sales_revenue_account(selection, rate)
-                if rate > Decimal("0.00"):
-                    revenue_account = _vat_account_for_rate(
-                        selection.account_candidates.get("sales_revenue"),
-                        rate=rate,
-                        fallback=revenue_account,
-                    )
-                vat_account = _sales_vat_account_for_rate(selection, rate)
-                items.append((revenue_account, gross_amount, rate, vat_account))
-            else:
-                vat_account = _purchase_vat_account_for_rate(selection, rate)
-                items.append((purchase_account, gross_amount, rate, vat_account))
-        return tuple(items)
+        return _mixed_vat_items_from_grouped_amounts(
+            grouped,
+            selection,
+            direction=direction,
+            purchase_account=purchase_account,
+        )
+    split_summary = _vat_split_summary_by_rate(invoice)
+    if split_summary and _vat_split_summary_validate(invoice, split_summary):
+        return _mixed_vat_items_from_grouped_amounts(
+            split_summary,
+            selection,
+            direction=direction,
+            purchase_account=purchase_account,
+        )
     if _has_structured_line_vat_details(invoice):
         return ()
 
@@ -1173,10 +1258,10 @@ def simulate_invoice(
         invoice,
         client_profile,
     )
-    supplier_account = (
-        counterparty_match.account_code
-        if counterparty_match and counterparty_match.account_code
-        else suggested_counterparty if counterparty_match and direction != "sales" else selection.supplier_account
+    supplier_account = _selected_purchase_supplier_account(
+        selection=selection,
+        suggested_counterparty=suggested_counterparty if direction != "sales" else "",
+        counterparty_match=counterparty_match,
     )
     selected_revenue_account = ""
     selected_purchase_vat_account = ""
@@ -1267,7 +1352,11 @@ def simulate_invoice(
         if direction == "sales":
             selected_revenue_account = _sales_revenue_account(selection, vat_rate)
             selected_sales_vat_account = _sales_vat_account_for_rate(selection, vat_rate) if vat_rate > Decimal("0.00") else ""
-            selected_customer_account = counterparty_match.account_code if counterparty_match and counterparty_match.account_code else selection.customer_account
+            selected_customer_account = _selected_sales_customer_account(
+                selection=selection,
+                suggested_counterparty=suggested_counterparty,
+                counterparty_match=counterparty_match,
+            )
             if len(invoice.vat_rates) <= 1:
                 entry = build_sales_return_entry(
                     entry_date=invoice.issue_date or "1900-01-01",
@@ -1332,7 +1421,11 @@ def simulate_invoice(
         sales_vat_account = _sales_vat_account_for_rate(selection, vat_rate)
         selected_revenue_account = _sales_revenue_account(selection, vat_rate)
         selected_sales_vat_account = sales_vat_account if vat_rate > Decimal("0.00") else ""
-        selected_customer_account = counterparty_match.account_code if counterparty_match and counterparty_match.account_code else selection.customer_account
+        selected_customer_account = _selected_sales_customer_account(
+            selection=selection,
+            suggested_counterparty=suggested_counterparty,
+            counterparty_match=counterparty_match,
+        )
         entry = build_sales_entry(
             entry_date=invoice.issue_date or "1900-01-01",
             total=money(invoice.payable_total),
@@ -1340,6 +1433,12 @@ def simulate_invoice(
             revenue_account=selected_revenue_account,
             vat_account=sales_vat_account,
             customer_account=selected_customer_account,
+            customer_description=_counterparty_account_description(
+                account=selected_customer_account,
+                suggested_counterparty=suggested_counterparty,
+                counterparty_match=counterparty_match,
+                base_description="Alici cari",
+            ),
             document_ref=invoice.file_name,
         )
         draft_quality = "full_basic_sales" if not reasons else "partial_review_required"
@@ -1347,7 +1446,11 @@ def simulate_invoice(
     elif direction == "sales":
         selected_revenue_account = selection.revenue_account
         selected_sales_vat_account = selection.sales_vat_account
-        selected_customer_account = counterparty_match.account_code if counterparty_match and counterparty_match.account_code else selection.customer_account
+        selected_customer_account = _selected_sales_customer_account(
+            selection=selection,
+            suggested_counterparty=suggested_counterparty,
+            counterparty_match=counterparty_match,
+        )
         mixed_items = _mixed_vat_items_from_lines(
             invoice,
             selection,
@@ -1359,17 +1462,38 @@ def simulate_invoice(
                 entry_date=invoice.issue_date or "1900-01-01",
                 items=mixed_items,
                 customer_account=selected_customer_account,
+                customer_description=_counterparty_account_description(
+                    account=selected_customer_account,
+                    suggested_counterparty=suggested_counterparty,
+                    counterparty_match=counterparty_match,
+                    base_description="Alici cari",
+                ),
                 document_ref=invoice.file_name,
+            )
+            reasons = tuple(
+                reason
+                for reason in reasons
+                if reason not in {"mixed_vat_manual_review", "vat_split_review_required", "vat_split_non_vat_total"}
             )
             reasons = tuple(dict.fromkeys((*reasons, *entry.risk_flags)))
             selected_revenue_account = mixed_items[-1][0]
             selected_sales_vat_account = mixed_items[-1][3]
-            draft_quality = "mixed_vat_sales_ready" if not reasons else "mixed_vat_sales_review"
+            draft_quality = (
+                "mixed_vat_sales_review"
+                if reasons or _counterparty_requires_review(counterparty_match, counterparty_creation_suggestion)
+                else "mixed_vat_sales_ready"
+            )
         else:
             entry = _gross_sales_review_entry(
                 invoice,
                 revenue_account=selected_revenue_account,
                 customer_account=selected_customer_account,
+                customer_description=_counterparty_account_description(
+                    account=selected_customer_account,
+                    suggested_counterparty=suggested_counterparty,
+                    counterparty_match=counterparty_match,
+                    base_description="Kontrol bekleyen alici cari",
+                ),
             )
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
@@ -1377,7 +1501,18 @@ def simulate_invoice(
         vat_rate = _single_vat_rate(invoice)
         selected_purchase_vat_account = _purchase_vat_account_for_rate(selection, vat_rate)
         if relevance.account_treatment == "non_deductible_review":
-            entry = _gross_review_entry(invoice, selection, supplier_account, expense_account=selection.non_deductible_account)
+            entry = _gross_review_entry(
+                invoice,
+                selection,
+                supplier_account,
+                expense_account=selection.non_deductible_account,
+                supplier_description=_counterparty_account_description(
+                    account=supplier_account,
+                    suggested_counterparty=suggested_counterparty,
+                    counterparty_match=counterparty_match,
+                    base_description="Kontrol bekleyen satici cari",
+                ),
+            )
             selected_purchase_vat_account = ""
             draft_quality = "gross_non_deductible_review"
         else:
@@ -1388,6 +1523,12 @@ def simulate_invoice(
                 expense_account=purchase_account,
                 vat_account=selected_purchase_vat_account,
                 supplier_account=supplier_account,
+                supplier_description=_counterparty_account_description(
+                    account=supplier_account,
+                    suggested_counterparty=suggested_counterparty,
+                    counterparty_match=counterparty_match,
+                    base_description="Satici cari",
+                ),
                 document_ref=invoice.file_name,
             )
             draft_quality = "full_basic_purchase" if not reasons else "partial_review_required"
@@ -1405,6 +1546,12 @@ def simulate_invoice(
                 entry_date=invoice.issue_date or "1900-01-01",
                 items=mixed_items,
                 supplier_account=supplier_account,
+                supplier_description=_counterparty_account_description(
+                    account=supplier_account,
+                    suggested_counterparty=suggested_counterparty,
+                    counterparty_match=counterparty_match,
+                    base_description="Satici cari",
+                ),
                 document_ref=invoice.file_name,
             )
             reasons = tuple(
@@ -1414,9 +1561,24 @@ def simulate_invoice(
             )
             reasons = tuple(dict.fromkeys((*reasons, *entry.risk_flags)))
             selected_purchase_vat_account = mixed_items[-1][3]
-            draft_quality = "mixed_vat_purchase_ready" if not reasons else "mixed_vat_purchase_review"
+            draft_quality = (
+                "mixed_vat_purchase_review"
+                if reasons or _counterparty_requires_review(counterparty_match, counterparty_creation_suggestion)
+                else "mixed_vat_purchase_ready"
+            )
         else:
-            entry = _gross_review_entry(invoice, selection, supplier_account, expense_account=purchase_account)
+            entry = _gross_review_entry(
+                invoice,
+                selection,
+                supplier_account,
+                expense_account=purchase_account,
+                supplier_description=_counterparty_account_description(
+                    account=supplier_account,
+                    suggested_counterparty=suggested_counterparty,
+                    counterparty_match=counterparty_match,
+                    base_description="Kontrol bekleyen satici cari",
+                ),
+            )
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
@@ -1474,6 +1636,7 @@ def simulate_invoice(
         purchase_vat_account=selected_purchase_vat_account,
         sales_vat_account=selected_sales_vat_account,
         suggested_counterparty=suggested_counterparty,
+        draft_quality=draft_quality,
     )
     draft_lines = _entry_lines(entry)
     review_blockers = _review_blockers(

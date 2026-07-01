@@ -315,6 +315,68 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(workspace["uploaded_documents"], [])
         self.assertEqual(workspace["processing_jobs"], [])
 
+    def test_tax_certificate_attachment_updates_client_profile_without_processing_job(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.domain.tax_certificates import TaxCertificateExtraction
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "tax_id": "1111111111", "has_chart_accounts": False},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                return_value=TaxCertificateExtraction(
+                    title="Demo Mukellef A.S.",
+                    tax_id="1111111111",
+                    vkn="1111111111",
+                    tax_office="Kadikoy",
+                    activity_description="Tibbi ve ortopedik urunlerin perakende ticareti",
+                    nace_code="477401",
+                    workplace_addresses=("Istanbul",),
+                    confidence=95,
+                ),
+                create=True,
+            ):
+                response = client.post(
+                    "/phase0/store/client-onboarding-attachment",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    data={
+                        "client_id": "client-1",
+                        "attachment_type": "tax_certificate",
+                        "uploaded_by": "mali-musavir",
+                        "uploaded_by_user_id": "mali-musavir",
+                    },
+                    files={"file": ("vergi-levhasi.pdf", b"%PDF-1.7", "application/pdf")},
+                )
+            workspace = client.get(
+                "/phase0/store/workspace/client-1",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["tax_certificate_parse_status"], "parsed")
+        self.assertEqual(payload["tax_certificate"]["nace_code"], "477401")
+        self.assertEqual(workspace["client"]["profile"]["nace_code"], "477401")
+        self.assertEqual(workspace["client"]["profile"]["activity_description"], "Tibbi ve ortopedik urunlerin perakende ticareti")
+        self.assertEqual(workspace["client"]["profile"]["workplace_addresses"], ["Istanbul"])
+        self.assertEqual(workspace["processing_jobs"], [])
+
     def test_store_document_file_records_preview_fetch_failure_when_file_is_missing(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

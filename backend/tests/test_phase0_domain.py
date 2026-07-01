@@ -31,6 +31,7 @@ from app.domain.openai_provider import ChatCompletionsAccountingProvider, GroqAc
 from app.domain.business_relevance import (
     build_activity_profile,
     ClientProfile,
+    ProductClassification,
     assess_business_relevance,
     check_client_onboarding,
     decide_export_status,
@@ -66,6 +67,7 @@ from app.domain.review_learning import ReviewDecision, build_learning_event
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, StatementAiSuggestionRequest, suggest_statement_lines
 from app.domain.statement_lines import StatementLine
 from app.domain.vat_split_learning import build_vat_split_review_record, vat_split_review_payload
+from app.domain.vat_splits import VatSplitLine
 from app.domain.workspace_exports import build_workspace_export_package, export_candidates_from_workspace
 
 
@@ -1151,7 +1153,69 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.suggested_counterparty_account, "120.9999999999")
         self.assertEqual(result.counterparty_creation_suggestion["suggested_code"], "120.9999999999")
         account_codes = [line["account_code"] for line in result.draft_lines]
-        self.assertEqual(account_codes, ["120.01", "600.20", "391.20"])
+        self.assertEqual(account_codes, ["120.9999999999", "600.20", "391.20"])
+
+    def test_sales_title_match_uses_existing_customer_and_keeps_new_counterparty_suggestion(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="sales-title-match.pdf",
+            provider_hint="Isitme Merkezi A",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="SLS2026000000009",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1234567890", "9999999999"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            issuer_title="Isitme Merkezi A",
+            issuer_tax_id="1234567890",
+            recipient_title="Alici Firma",
+            recipient_tax_id="9999999999",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        counterparty = CounterpartyMatch(
+            account_code="120.A01",
+            account_name="Alici Firma",
+            confidence=82,
+            match_reason="title_similarity",
+            requires_review=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
+
+        self.assertEqual(result.selected_customer_account, "120.A01")
+        self.assertEqual(result.suggested_counterparty_account, "120.9999999999")
+        self.assertEqual(result.draft_lines[0]["account_code"], "120.A01")
+        self.assertIn("counterparty_title_similarity", result.review_reason_codes)
+        self.assertEqual(result.counterparty_creation_suggestion["suggested_code"], "120.9999999999")
 
     def test_zero_vat_sales_uses_3065_revenue_without_vat_line(self) -> None:
         invoice = ParsedInvoice(
@@ -1206,7 +1270,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_revenue_account, "600.00.3065")
         self.assertEqual(result.selected_sales_vat_account, "")
         self.assertEqual(len(result.draft_lines), 2)
-        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.01", "600.00.3065"])
+        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.9999999999", "600.00.3065"])
         self.assertNotIn("391.20", [line["account_code"] for line in result.draft_lines])
 
     def test_hearing_device_sales_with_vat_uses_3065_and_requires_review(self) -> None:
@@ -1259,7 +1323,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.selected_revenue_account, "600.00.3065")
         self.assertEqual(result.selected_sales_vat_account, "")
-        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.01", "600.00.3065"])
+        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.9999999999", "600.00.3065"])
         self.assertIn("hearing_device_vat_should_be_zero", result.review_reason_codes)
         self.assertEqual(result.export_status, "review_required")
 
@@ -1318,7 +1382,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_revenue_account, "")
         self.assertEqual(result.selected_sales_vat_account, "")
         self.assertEqual(result.suggested_counterparty_account, "320.9999999999")
-        self.assertEqual([line["account_code"] for line in result.draft_lines], ["153.01.001", "191.20", "320.01"])
+        self.assertEqual([line["account_code"] for line in result.draft_lines], ["153.01.001", "191.20", "320.9999999999"])
 
     def test_purchase_intake_handles_supplier_perspective_sales_pdf(self) -> None:
         invoice = ParsedInvoice(
@@ -1930,6 +1994,92 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.draft_lines[4]["account_code"], "391.20")
         self.assertNotIn("mixed_vat_accountant_review", result.review_reason_codes)
 
+    def test_exact_vat_split_sales_uses_rate_summary_when_line_amounts_missing(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="ranamed-mixed-sales.pdf",
+            provider_hint="Tel: e-Posta: ranamedmedikal@gmail.com",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="EARSIVFATURA",
+            invoice_type="SATIS",
+            invoice_no="RNH2026000000003",
+            ettn="",
+            issue_date="15.05.2026",
+            tax_ids=("7342497874", "46141426750"),
+            vat_rates=("10", "20"),
+            goods_services_total="23257.58",
+            vat_total="3742.42",
+            special_tax_total="",
+            tax_inclusive_total="27000.00",
+            payable_total="27000.00",
+            risk_flags=("mixed_vat_manual_review",),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("22507 REM PRIMUS", "22509 HI-PRO 2 PROGRAMLAMA CIHAZI", "22510 NOAHLINK WIRELESS"),
+            line_item_details=(
+                InvoiceLine(raw_text="22507 REM PRIMUS", description="22507 REM PRIMUS", vat_rate="10", tax_amount="909,09"),
+                InvoiceLine(raw_text="22509 HI-PRO 2 PROGRAMLAMA CIHAZI", description="22509 HI-PRO 2 PROGRAMLAMA CIHAZI", vat_rate="20", tax_amount="1.583,33"),
+                InvoiceLine(raw_text="22510 NOAHLINK WIRELESS", description="22510 NOAHLINK WIRELESS", vat_rate="20", tax_amount="1.250,00"),
+            ),
+            issuer_title="RANAMED MEDIKAL",
+            issuer_tax_id="7342497874",
+            recipient_title="Semra Goktas",
+            recipient_tax_id="46141426750",
+            vat_split_status="exact",
+            vat_split_lines=(
+                VatSplitLine(rate="10", taxable_amount="9090.91", tax_amount="909.09", source="pdf_summary_table", evidence=("expected_tax:909.09",)),
+                VatSplitLine(rate="20", taxable_amount="14166.67", tax_amount="2833.33", source="pdf_summary_table", evidence=("expected_tax:2833.33",)),
+            ),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.01.020",
+            sales_vat_account="391.01.020",
+            customer_account="120.01.S01",
+            account_candidates={
+                "sales_revenue": (
+                    {"code": "600.01.010", "name": "Yuzde 10 Satislar", "reason": ""},
+                    {"code": "600.01.020", "name": "Yuzde 20 Satislar", "reason": ""},
+                ),
+                "sales_vat": (
+                    {"code": "391.01.010", "name": "Yuzde 10 Hesaplanan KDV", "reason": ""},
+                    {"code": "391.01.020", "name": "Yuzde 20 Hesaplanan KDV", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="ranamed",
+            title="RANAMED MEDIKAL",
+            tax_id="7342497874",
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.draft_entry_type, "mixed_vat_sales")
+        self.assertEqual(result.draft_quality, "mixed_vat_sales_review")
+        self.assertEqual(result.selected_customer_account, "120.46141426750")
+        self.assertEqual(result.suggested_counterparty_account, "120.46141426750")
+        self.assertEqual(
+            result.draft_lines,
+            (
+                {"account_code": "120.46141426750", "description": "Yeni cari onerisi - Alici cari", "debit": "27000.00", "credit": "0.00"},
+                {"account_code": "600.01.010", "description": "Satis KDV 10.00%", "debit": "0.00", "credit": "9090.91"},
+                {"account_code": "391.01.010", "description": "Hesaplanan KDV 10.00%", "debit": "0.00", "credit": "909.09"},
+                {"account_code": "600.01.020", "description": "Satis KDV 20.00%", "debit": "0.00", "credit": "14166.67"},
+                {"account_code": "391.01.020", "description": "Hesaplanan KDV 20.00%", "debit": "0.00", "credit": "2833.33"},
+            ),
+        )
+        self.assertIn("counterparty_missing", result.review_reason_codes)
+        self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)
+        self.assertIn("KDV ayrimi exact; fise oran bazli uygulandi.", result.accountant_explanation_tr)
+
     def test_solved_mixed_vat_purchase_can_be_export_ready(self) -> None:
         invoice = ParsedInvoice(
             file_name="mixed-purchase.pdf",
@@ -1995,11 +2145,118 @@ class Phase0DomainTests(unittest.TestCase):
             requires_review=False,
         )
 
-        result = simulate_invoice(invoice, selection, profile, counterparty)
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            counterparty,
+            classification_override=ProductClassification(
+                raw_line="Sarf malzeme",
+                category="medikal_sarf",
+                confidence=90,
+                evidence=("test_stock_treatment",),
+            ),
+        )
 
         self.assertEqual(result.draft_entry_type, "mixed_vat_purchase")
         self.assertTrue(result.is_balanced)
         self.assertEqual(result.export_status, "export_ready")
+        self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)
+
+    def test_exact_vat_split_purchase_uses_rate_summary_when_line_amounts_missing(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="mixed-purchase-summary.pdf",
+            provider_hint="Tedarikci A",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="MP2026000000002",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("10", "20"),
+            goods_services_total="23257.58",
+            vat_total="3742.42",
+            special_tax_total="",
+            tax_inclusive_total="27000.00",
+            payable_total="27000.00",
+            risk_flags=("mixed_vat_manual_review",),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Sarf malzeme", "Sarf malzeme"),
+            line_item_details=(
+                InvoiceLine(raw_text="Sarf malzeme", description="Sarf malzeme", vat_rate="10", tax_amount="909.09"),
+                InvoiceLine(raw_text="Sarf malzeme", description="Sarf malzeme", vat_rate="20", tax_amount="2833.33"),
+            ),
+            issuer_title="Tedarikci A",
+            issuer_tax_id="9999999999",
+            recipient_title="Isitme Merkezi A",
+            recipient_tax_id="1234567890",
+            vat_split_status="exact",
+            vat_split_lines=(
+                VatSplitLine(rate="10", taxable_amount="9090.91", tax_amount="909.09", source="pdf_summary_table", evidence=("expected_tax:909.09",)),
+                VatSplitLine(rate="20", taxable_amount="14166.67", tax_amount="2833.33", source="pdf_summary_table", evidence=("expected_tax:2833.33",)),
+            ),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            stock_account="153.01.001",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            account_candidates={
+                "purchase_stock": ({"code": "153.01.001", "name": "Ticari mallar", "reason": "153 stok adayi"},),
+                "purchase_vat": (
+                    {"code": "191.01.010", "name": "Indirilecek KDV %10", "reason": ""},
+                    {"code": "191.01.020", "name": "Indirilecek KDV %20", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve servis",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        counterparty = CounterpartyMatch(
+            account_code="320.01",
+            account_name="Tedarikci A",
+            confidence=95,
+            match_reason="tax_id_exact",
+            requires_review=False,
+        )
+
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            counterparty,
+            classification_override=ProductClassification(
+                raw_line="Sarf malzeme",
+                category="medikal_sarf",
+                confidence=90,
+                evidence=("test_stock_treatment",),
+            ),
+        )
+
+        self.assertEqual(result.draft_entry_type, "mixed_vat_purchase")
+        self.assertEqual(result.draft_quality, "mixed_vat_purchase_ready")
+        self.assertEqual(
+            result.draft_lines,
+            (
+                {"account_code": "153.01.001", "description": "Gider KDV 10.00%", "debit": "9090.91", "credit": "0.00"},
+                {"account_code": "191.01.010", "description": "Indirilecek KDV 10.00%", "debit": "909.09", "credit": "0.00"},
+                {"account_code": "153.01.001", "description": "Gider KDV 20.00%", "debit": "14166.67", "credit": "0.00"},
+                {"account_code": "191.01.020", "description": "Indirilecek KDV 20.00%", "debit": "2833.33", "credit": "0.00"},
+                {"account_code": "320.01", "description": "Satici cari", "debit": "0.00", "credit": "27000.00"},
+            ),
+        )
         self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)
 
     def test_multiline_mixed_vat_purchase_groups_lines_by_rate_and_keeps_stock_account(self) -> None:
@@ -2345,7 +2602,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.draft_entry_type, "review_sales")
         self.assertNotEqual(result.draft_entry_type, "review_purchase")
         self.assertEqual(result.selected_revenue_account, "600.20")
-        self.assertEqual(result.selected_customer_account, "120.01")
+        self.assertEqual(result.selected_customer_account, "120.7750409379")
         self.assertEqual(result.export_status, "review_required")
 
     def test_payable_total_falls_back_to_single_safe_total_candidate(self) -> None:

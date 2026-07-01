@@ -215,6 +215,33 @@ class DocumentService:
                 "uploaded_by_user_id": effective_user_id,
             }
         )
+        tax_certificate: dict[str, object] = {}
+        if normalized_type == "tax_certificate":
+            try:
+                storage_path = Path(str(payload.get("storage_path") or ""))
+                tax_certificate = parse_tax_certificate_file(storage_path).to_payload()
+                payload.update(
+                    {
+                        "tax_certificate_parse_status": "parsed",
+                        "tax_certificate_parse_error": "",
+                        "tax_certificate": tax_certificate,
+                    }
+                )
+                workspace = self.store.get_workspace(normalized_client_id)
+                self._update_client_from_tax_certificate(
+                    client_id=normalized_client_id,
+                    workspace=workspace,
+                    tax_certificate=tax_certificate,
+                    nace_profile={},
+                )
+            except Exception as exc:  # pragma: no cover - exercised through API behavior, exact OCR errors vary by runtime
+                payload.update(
+                    {
+                        "tax_certificate_parse_status": "failed",
+                        "tax_certificate_parse_error": str(exc),
+                        "tax_certificate": {},
+                    }
+                )
         saved = self.store.save_onboarding_attachment(client_id=normalized_client_id, attachment=payload)
         self.record_operation_event(
             store=self.store,
@@ -227,6 +254,7 @@ class DocumentService:
                 "attachment_type": saved["attachment_type"],
                 "file_name": file_name,
                 "uploaded_by_user_id": effective_user_id,
+                "tax_certificate_parse_status": saved.get("tax_certificate_parse_status", ""),
             },
         )
         return saved

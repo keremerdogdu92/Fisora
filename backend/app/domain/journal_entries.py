@@ -58,6 +58,7 @@ def build_purchase_entry(
     expense_account: str,
     vat_account: str = "191.01",
     supplier_account: str = "320.01.001",
+    supplier_description: str = "Satici cari",
     supplier_tax_id: str | None = None,
     document_ref: str | None = None,
 ) -> JournalEntry:
@@ -71,7 +72,7 @@ def build_purchase_entry(
             JournalLine(vat_account, "Indirilecek KDV", debit=vat, document_ref=document_ref),
             JournalLine(
                 supplier_account,
-                "Satici cari",
+                supplier_description,
                 credit=total,
                 counterparty_tax_id=supplier_tax_id,
                 document_ref=document_ref,
@@ -88,6 +89,7 @@ def build_sales_entry(
     revenue_account: str,
     vat_account: str = "391.01",
     customer_account: str = "120.01.001",
+    customer_description: str = "Alici cari",
     customer_tax_id: str | None = None,
     document_ref: str | None = None,
 ) -> JournalEntry:
@@ -95,7 +97,7 @@ def build_sales_entry(
     lines = [
             JournalLine(
                 customer_account,
-                "Alici cari",
+                customer_description,
                 debit=total,
                 counterparty_tax_id=customer_tax_id,
                 document_ref=document_ref,
@@ -263,6 +265,7 @@ def build_mixed_vat_purchase_entry(
     entry_date: str,
     items: Iterable[tuple[str, Decimal, Decimal] | tuple[str, Decimal, Decimal, str]],
     supplier_account: str = "320.01.001",
+    supplier_description: str = "Satici cari",
     supplier_tax_id: str | None = None,
     document_ref: str | None = None,
 ) -> JournalEntry:
@@ -278,7 +281,7 @@ def build_mixed_vat_purchase_entry(
     lines.append(
         JournalLine(
             supplier_account,
-            "Satici cari",
+            supplier_description,
             credit=total.quantize(MONEY),
             counterparty_tax_id=supplier_tax_id,
             document_ref=document_ref,
@@ -298,6 +301,7 @@ def build_mixed_vat_sales_entry(
     entry_date: str,
     items: Iterable[tuple[str, Decimal, Decimal] | tuple[str, Decimal, Decimal, str]],
     customer_account: str = "120.01.001",
+    customer_description: str = "Alici cari",
     customer_tax_id: str | None = None,
     document_ref: str | None = None,
 ) -> JournalEntry:
@@ -318,7 +322,7 @@ def build_mixed_vat_sales_entry(
         lines=(
             JournalLine(
                 customer_account,
-                "Alici cari",
+                customer_description,
                 debit=total.quantize(MONEY),
                 counterparty_tax_id=customer_tax_id,
                 document_ref=document_ref,

@@ -546,8 +546,7 @@ export async function reprocessSelectedClientAction({
       maxJobs: 100,
     });
     const queued = Number(result?.queued_document_count || 0);
-    const completed = Number(result?.processing_summary?.completed_count || 0);
-    setClientReprocessStatus(`${selectedClient.clientName}: ${queued} belge kuyruğa alındı, ${completed} işlem tamamlandı.`);
+    setClientReprocessStatus(`${selectedClient.clientName}: ${queued} belge kuyruğa alındı, arka planda işlenecek.`);
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

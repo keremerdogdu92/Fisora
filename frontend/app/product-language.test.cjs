@@ -90,6 +90,13 @@ test("client onboarding labels portal user as the client email login", () => {
   assert.match(clientsSource, /Mükellefi yeniden işle/);
 });
 
+test("client reprocess copy explains queued background processing", () => {
+  const actionsSource = source("portal-client-actions.ts");
+
+  assert.match(actionsSource, /arka planda işlenecek/);
+  assert.doesNotMatch(actionsSource, /işlem tamamlandı/);
+});
+
 test("portal visible source does not contain mojibake Turkish copy", () => {
   const visibleSource = visibleCopyFiles.map(source).join("\n");
 

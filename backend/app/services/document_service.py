@@ -355,16 +355,21 @@ class DocumentService:
                 debug_code="client_reprocess_queued",
                 details={"job_id": str(job.get("id") or "")},
             )
-        processing_summary = process_queued_documents(self.store, max_jobs=max(max_jobs, len(queued_jobs)))
+        processing_summary = {
+            "queued_count": len(queued_jobs),
+            "processed_count": 0,
+            "completed_count": 0,
+            "failed_count": 0,
+            "current_status": "queued" if queued_jobs else "idle",
+        }
         self.record_operation_event(
             store=self.store,
             client_id=normalized_client_id,
             event_type="client_reprocess",
-            status="ok" if not processing_summary.get("failed_count") else "warning",
-            message="Mükellef vergi levhası, NACE ve belgeleri yeni motorla yeniden işlendi.",
+            status="ok",
+            message="Mükellef vergi levhası, NACE ve belgeleri yeni motor kuyruğuna alındı.",
             metadata={
                 "queued_document_count": len(queued_jobs),
-                "processed_count": processing_summary.get("processed_count", 0),
                 "tax_certificate_reparsed": bool(tax_certificate),
                 "nace_researched": bool(nace_profile),
             },

@@ -246,11 +246,15 @@ class DocumentUploadApiTests(unittest.TestCase):
                     return_value={"provider": FakeNaceProvider(), "policy": ResearchPolicy(enabled=True)},
                     create=True,
                 ):
-                    response = client.post(
-                        "/phase0/store/client-reprocess",
-                        headers={"X-Fisora-User-Id": "mali-musavir"},
-                        json={"client_id": "client-1", "max_jobs": 5},
-                    )
+                    with patch(
+                        "app.services.document_service.process_queued_documents",
+                        side_effect=AssertionError("client reprocess must return after queueing documents"),
+                    ):
+                        response = client.post(
+                            "/phase0/store/client-reprocess",
+                            headers={"X-Fisora-User-Id": "mali-musavir"},
+                            json={"client_id": "client-1", "max_jobs": 5},
+                        )
             workspace = client.get(
                 "/phase0/store/workspace/client-1",
                 headers={"X-Fisora-User-Id": "mali-musavir"},
@@ -259,13 +263,14 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["queued_document_count"], 1)
-        self.assertGreaterEqual(payload["processing_summary"]["completed_count"], payload["queued_document_count"])
+        self.assertEqual(payload["processing_summary"]["current_status"], "queued")
+        self.assertEqual(payload["processing_summary"]["processed_count"], 0)
         self.assertEqual(payload["tax_certificate"]["nace_code"], "477401")
         self.assertEqual(payload["nace_research_profile"]["activity_tags"], ["hearing_aid", "medical_retail"])
         self.assertEqual(workspace["client"]["profile"]["nace_code"], "477401")
         self.assertEqual(workspace["client"]["profile"]["activity_tags"], ["hearing_aid", "medical_retail"])
         self.assertEqual(workspace["processing_jobs"][-1]["document_ref"], document["document_ref"])
-        self.assertEqual(workspace["processing_jobs"][-1]["status"], "completed")
+        self.assertEqual(workspace["processing_jobs"][-1]["status"], "queued")
 
     def test_onboarding_attachment_does_not_create_processing_job(self) -> None:
         if TestClient is None or phase0 is None or app is None:

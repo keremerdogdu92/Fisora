@@ -924,7 +924,7 @@ test("reprocessDocument posts an existing document back to the processing queue"
   assert.deepEqual(result, { processing_job: { status: "queued" } });
 });
 
-test("reprocessClient posts selected client for immediate reprocessing", async () => {
+test("reprocessClient posts selected client for queued background reprocessing", async () => {
   let request;
   const fetchImpl = async (url, init) => {
     request = { url, init };

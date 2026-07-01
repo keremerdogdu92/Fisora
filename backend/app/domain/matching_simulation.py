@@ -46,6 +46,8 @@ from app.domain.journal_entries import (
 from app.domain.pdf_invoices import ParsedInvoice, parse_invoice_folder
 
 ProcessingMode = Literal["conservative", "ai_assisted_draft", "controlled_automation"]
+VALID_PURCHASE_VAT_RATES = {"0", "1", "10", "20"}
+MONEY_TOLERANCE = Decimal("0.01")
 
 
 @dataclass(frozen=True)
@@ -669,20 +671,135 @@ def _gross_sales_review_entry(
 
 
 def _money_hint(value: str) -> Decimal | None:
-    compact = str(value or "").strip().replace(" ", "").replace(".", "").replace(",", ".")
+    compact = str(value or "").strip().replace(" ", "")
+    compact = re.sub(r"(?:TL|TRY)$", "", compact, flags=re.IGNORECASE)
+    if "," in compact:
+        raw = compact.replace(".", "").replace(",", ".")
+    elif "." in compact and len(compact.rsplit(".", 1)[-1]) <= 2:
+        raw = compact
+    else:
+        raw = compact.replace(".", "")
     try:
-        return money(compact)
+        return money(raw)
     except (InvalidOperation, ValueError):
         return None
+
+
+def _money_values_match(left: Decimal, right: Decimal) -> bool:
+    return abs(left - right) <= MONEY_TOLERANCE
+
+
+def _line_detail_money(line: object, field_name: str) -> Decimal | None:
+    return _money_hint(str(getattr(line, field_name, "") or ""))
+
+
+def _line_detail_gross_amount(line: object) -> Decimal | None:
+    gross = _line_detail_money(line, "gross_amount")
+    if gross is not None and gross > Decimal("0.00"):
+        return gross
+    taxable = _line_detail_money(line, "taxable_amount")
+    tax = _line_detail_money(line, "tax_amount")
+    if taxable is not None and tax is not None:
+        return (taxable + tax).quantize(Decimal("0.01"))
+    amount = _line_detail_money(line, "amount_hint")
+    if amount is not None and amount > Decimal("0.00"):
+        return amount
+    return None
+
+
+def _line_detail_vat_rate(line: object) -> str:
+    explicit = str(getattr(line, "vat_rate", "") or "").strip()
+    if explicit:
+        return str(int(explicit)) if explicit.isdigit() else explicit
+    haystack = " ".join(
+        str(getattr(line, field_name, "") or "")
+        for field_name in ("description", "raw_text")
+    )
+    match = re.search(r"%\s*(0|1|10|20)(?:[,.]0+)?\b", haystack)
+    return str(int(match.group(1))) if match else ""
 
 
 def _line_detail_amounts(invoice: ParsedInvoice) -> tuple[Decimal, ...]:
     amounts: list[Decimal] = []
     for line in getattr(invoice, "line_item_details", ()) or ():
-        amount = _money_hint(getattr(line, "amount_hint", ""))
+        amount = _line_detail_gross_amount(line)
         if amount and amount > Decimal("0.00"):
             amounts.append(amount)
     return tuple(amounts)
+
+
+def _line_detail_group_amounts(invoice: ParsedInvoice) -> dict[str, dict[str, Decimal]]:
+    grouped: dict[str, dict[str, Decimal]] = {}
+    for line in getattr(invoice, "line_item_details", ()) or ():
+        rate = _line_detail_vat_rate(line)
+        if not rate:
+            continue
+        if rate not in VALID_PURCHASE_VAT_RATES:
+            return {}
+        gross = _line_detail_gross_amount(line)
+        if gross is None:
+            continue
+        bucket = grouped.setdefault(rate, {"gross": Decimal("0.00"), "taxable": Decimal("0.00"), "tax": Decimal("0.00")})
+        bucket["gross"] += gross
+        taxable = _line_detail_money(line, "taxable_amount")
+        tax = _line_detail_money(line, "tax_amount")
+        if taxable is not None:
+            bucket["taxable"] += taxable
+        if tax is not None:
+            bucket["tax"] += tax
+    return grouped
+
+
+def _has_structured_line_vat_details(invoice: ParsedInvoice) -> bool:
+    for line in getattr(invoice, "line_item_details", ()) or ():
+        if any(
+            str(getattr(line, field_name, "") or "").strip()
+            for field_name in ("vat_rate", "taxable_amount", "tax_amount", "gross_amount")
+        ):
+            return True
+    return False
+
+
+def _vat_split_summary_by_rate(invoice: ParsedInvoice) -> dict[str, dict[str, Decimal]]:
+    summary: dict[str, dict[str, Decimal]] = {}
+    for line in getattr(invoice, "vat_split_lines", ()) or ():
+        rate = str(getattr(line, "rate", "") or "").strip()
+        taxable = _money_hint(str(getattr(line, "taxable_amount", "") or ""))
+        tax = _money_hint(str(getattr(line, "tax_amount", "") or ""))
+        if not rate or taxable is None or tax is None:
+            continue
+        summary[rate] = {"taxable": taxable, "tax": tax, "gross": (taxable + tax).quantize(Decimal("0.01"))}
+    return summary
+
+
+def _grouped_line_amounts_validate(invoice: ParsedInvoice, grouped: dict[str, dict[str, Decimal]]) -> bool:
+    if not grouped:
+        return False
+    invoice_rates = {str(rate) for rate in invoice.vat_rates}
+    if invoice_rates and set(grouped) != invoice_rates:
+        return False
+    split_summary = _vat_split_summary_by_rate(invoice)
+    for rate, summary_values in split_summary.items():
+        group = grouped.get(rate)
+        if not group:
+            return False
+        if not _money_values_match(group["taxable"], summary_values["taxable"]):
+            return False
+        if not _money_values_match(group["tax"], summary_values["tax"]):
+            return False
+    total_taxable = sum((values["taxable"] for values in grouped.values()), Decimal("0.00"))
+    total_tax = sum((values["tax"] for values in grouped.values()), Decimal("0.00"))
+    total_gross = sum((values["gross"] for values in grouped.values()), Decimal("0.00"))
+    goods_total = _money_hint(invoice.goods_services_total)
+    vat_total = _money_hint(invoice.vat_total)
+    payable_total = _money_hint(invoice.payable_total) or _money_hint(invoice.tax_inclusive_total)
+    if goods_total is not None and total_taxable and not _money_values_match(total_taxable, goods_total):
+        return False
+    if vat_total is not None and total_tax and not _money_values_match(total_tax, vat_total):
+        return False
+    if payable_total is not None and not _money_values_match(total_gross, payable_total):
+        return False
+    return True
 
 
 def _line_detail_text(invoice: ParsedInvoice, index: int) -> str:
@@ -735,6 +852,29 @@ def _mixed_vat_items_from_lines(
     direction: str,
     purchase_account: str,
 ) -> tuple[tuple[str, Decimal, Decimal, str], ...]:
+    grouped = _line_detail_group_amounts(invoice)
+    if grouped and _grouped_line_amounts_validate(invoice, grouped):
+        items: list[tuple[str, Decimal, Decimal, str]] = []
+        for raw_rate in sorted(grouped, key=lambda value: int(value)):
+            rate = Decimal(raw_rate) / Decimal("100")
+            gross_amount = grouped[raw_rate]["gross"].quantize(Decimal("0.01"))
+            if direction == "sales":
+                revenue_account = _sales_revenue_account(selection, rate)
+                if rate > Decimal("0.00"):
+                    revenue_account = _vat_account_for_rate(
+                        selection.account_candidates.get("sales_revenue"),
+                        rate=rate,
+                        fallback=revenue_account,
+                    )
+                vat_account = _sales_vat_account_for_rate(selection, rate)
+                items.append((revenue_account, gross_amount, rate, vat_account))
+            else:
+                vat_account = _purchase_vat_account_for_rate(selection, rate)
+                items.append((purchase_account, gross_amount, rate, vat_account))
+        return tuple(items)
+    if _has_structured_line_vat_details(invoice):
+        return ()
+
     amounts = _line_detail_amounts(invoice)
     if not amounts or len(amounts) != len(invoice.vat_rates):
         return ()
@@ -812,6 +952,18 @@ def _ai_context(
             if code
         )
     )
+    account_candidate_details = tuple(
+        {
+            "code": str(candidate.get("code") or "").strip(),
+            "name": str(candidate.get("name") or "").strip(),
+            "family": str(candidate.get("code") or "").strip().split(".")[0],
+            "group": str(group),
+            "reason": str(candidate.get("reason") or "").strip(),
+        }
+        for group, candidates in (selection.account_candidates or {}).items()
+        for candidate in candidates
+        if str(candidate.get("code") or "").strip()
+    )
     counterparty_candidates = tuple(
         dict.fromkeys(
             code
@@ -824,8 +976,10 @@ def _ai_context(
     )
     return AiClassificationContext(
         client_activity=client_profile.activity_description if client_profile else "",
+        nace_code=client_profile.nace_code if client_profile else "",
         activity_tags=client_profile.activity_tags if client_profile else (),
         account_candidates=account_candidates,
+        account_candidate_details=account_candidate_details,
         counterparty_candidates=counterparty_candidates,
     )
 
@@ -1253,11 +1407,16 @@ def simulate_invoice(
                 supplier_account=supplier_account,
                 document_ref=invoice.file_name,
             )
+            reasons = tuple(
+                reason
+                for reason in reasons
+                if reason not in {"mixed_vat_manual_review", "vat_split_review_required", "vat_split_non_vat_total"}
+            )
             reasons = tuple(dict.fromkeys((*reasons, *entry.risk_flags)))
             selected_purchase_vat_account = mixed_items[-1][3]
             draft_quality = "mixed_vat_purchase_ready" if not reasons else "mixed_vat_purchase_review"
         else:
-            entry = _gross_review_entry(invoice, selection, supplier_account)
+            entry = _gross_review_entry(invoice, selection, supplier_account, expense_account=purchase_account)
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 

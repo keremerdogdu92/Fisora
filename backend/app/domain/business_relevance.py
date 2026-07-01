@@ -36,6 +36,7 @@ GENERAL_EXPENSE_CATEGORIES = {
     "kira",
     "kargo",
     "arac_kiralama",
+    "guvenlik",
 }
 
 HEARING_CENTER_CATEGORIES = {
@@ -77,6 +78,7 @@ PRODUCT_RULES: tuple[tuple[str, str, int], ...] = (
     ("domates", "gida_alimi", 90),
     ("sebze", "gida_alimi", 86),
     ("gida alimi", "gida_alimi", 90),
+    ("gida", "gida_alimi", 80),
     ("et alimi", "gida_alimi", 84),
     ("un alimi", "gida_alimi", 78),
     ("ambalaj", "ambalaj", 90),
@@ -110,6 +112,8 @@ PRODUCT_RULES: tuple[tuple[str, str, int], ...] = (
     ("arac kiralama", "arac_kiralama", 88),
     ("kira", "kira", 85),
     ("kargo", "kargo", 85),
+    ("guvenlik", "guvenlik", 86),
+    ("security", "guvenlik", 86),
     ("sampuan", "kisisel_bakim_kozmetik", 94),
     ("shampoo", "kisisel_bakim_kozmetik", 94),
     ("kozmetik", "kisisel_bakim_kozmetik", 90),
@@ -122,6 +126,7 @@ ACTIVITY_TAG_CATEGORY_ALLOWLIST: dict[str, tuple[str, ...]] = {
     "hearing_aid": tuple(sorted(HEARING_CENTER_CATEGORIES)),
     "medical_retail": ("medikal_sarf",),
     "food_service": ("ambalaj", "gida_alimi"),
+    "retail_trade": ("ambalaj", "gida_alimi"),
     "construction": ("construction_material", "equipment_rental", "subcontractor_service"),
 }
 
@@ -185,7 +190,7 @@ ACTIVITY_RULES: tuple[dict[str, object], ...] = (
         "tags": ("retail_trade",),
         "nace_prefixes": ("47",),
         "needles": ("perakende", "magaza", "satis"),
-        "relevance_hints": ("kira", "kargo", "internet"),
+        "relevance_hints": ("gida_alimi", "ambalaj", "kira", "kargo", "internet"),
         "confidence": 58,
     },
 )

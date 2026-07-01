@@ -718,6 +718,47 @@ class Phase0DomainTests(unittest.TestCase):
         lines = extract_invoice_lines_from_text(text)
 
         self.assertEqual(lines[0].description, "SLIM TAPER")
+        self.assertEqual(lines[0].vat_rate, "10")
+        self.assertEqual(lines[0].tax_amount, "309,09")
+
+    def test_invoice_line_extraction_keeps_table_amounts_for_grouped_vat(self) -> None:
+        text = "\n".join(
+            [
+                "Fatura No:",
+                "EEY2026000002099",
+                "Mal Hizmet",
+                "Miktar",
+                "Birim Fiyat",
+                "KDV Oranı",
+                "KDV Tutarı",
+                "Mal Hizmet Tutarı",
+                "1",
+                "TAMEK KORNİŞON (SALATALIK) TURŞUSU 330 CC*12",
+                "12 Adet",
+                "98,56TL",
+                "%1,00",
+                "11,83TL",
+                "1.182,72TL",
+                "2",
+                "COCA COLA CHERRY *24",
+                "6 Adet",
+                "90,91TL",
+                "%10,00",
+                "54,55TL",
+                "545,46TL",
+            ]
+        )
+
+        lines = extract_invoice_lines_from_text(text)
+
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0].description, "TAMEK KORNİŞON (SALATALIK) TURŞUSU 330 CC*12")
+        self.assertEqual(lines[0].vat_rate, "1")
+        self.assertEqual(lines[0].taxable_amount, "1.182,72")
+        self.assertEqual(lines[0].tax_amount, "11,83")
+        self.assertEqual(lines[1].vat_rate, "10")
+        self.assertEqual(lines[1].taxable_amount, "545,46")
+        self.assertEqual(lines[1].tax_amount, "54,55")
 
     def test_pdf_vat_split_extracts_real_pilot_table_and_summary_evidence(self) -> None:
         cases = [
@@ -1960,6 +2001,227 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.is_balanced)
         self.assertEqual(result.export_status, "export_ready")
         self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)
+
+    def test_multiline_mixed_vat_purchase_groups_lines_by_rate_and_keeps_stock_account(self) -> None:
+        line_details = tuple(
+            InvoiceLine(
+                raw_text=f"TAMEK kalemi {index + 1}",
+                description=f"TAMEK kalemi {index + 1}",
+                vat_rate="1" if index < 10 else "10",
+                taxable_amount="100.00",
+                tax_amount="1.00" if index < 10 else "10.00",
+            )
+            for index in range(20)
+        )
+        invoice = ParsedInvoice(
+            file_name="tamek-multiline.pdf",
+            provider_hint="TAMEK",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=2400,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="TMK2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("1", "10"),
+            goods_services_total="2000.00",
+            vat_total="110.00",
+            special_tax_total="",
+            tax_inclusive_total="2110.00",
+            payable_total="2110.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=tuple(line.description for line in line_details),
+            line_item_details=line_details,
+            issuer_title="TAMEK",
+            issuer_tax_id="9999999999",
+            recipient_title="Market A",
+            recipient_tax_id="1234567890",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.02.011",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01.001", "name": "Ticari mallar", "reason": "153 stok adayi"},),
+                "purchase_expense": ({"code": "770.02.011", "name": "Isyeri Guvenligi Giderleri", "reason": "7xx gider adayi"},),
+                "purchase_vat": (
+                    {"code": "191.01.001", "name": "Indirilecek KDV %1", "reason": ""},
+                    {"code": "191.01.010", "name": "Indirilecek KDV %10", "reason": ""},
+                    {"code": "191.01.020", "name": "Indirilecek KDV %20", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-market",
+            title="Market A",
+            tax_id="1234567890",
+            activity_description="Market ve gida perakende satisi",
+            nace_code="471101",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        counterparty = CounterpartyMatch(
+            account_code="320.01",
+            account_name="TAMEK",
+            confidence=95,
+            match_reason="tax_id",
+            requires_review=False,
+        )
+        provider = FakeProductProvider(
+            {
+                "category": "gida_alimi",
+                "confidence": 92,
+                "reason": "TAMEK gida kalemleri markette yeniden satis icin ticari maldir.",
+                "evidence": ["tamek", "market", "gida"],
+                "suggested_account_code": "153.01.001",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Gida perakende faaliyetinde stok/ticari mal hesabi uygundur.",
+                "product_identity": "TAMEK gida urunleri",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
+
+        result = simulate_invoice(invoice, selection, profile, counterparty, product_classifier=classifier)
+
+        account_codes = [line["account_code"] for line in result.draft_lines]
+        self.assertEqual(result.draft_entry_type, "mixed_vat_purchase")
+        self.assertEqual(result.selected_expense_account, "153.01.001")
+        self.assertTrue(result.ai_classification_used)
+        self.assertIn("153.01.001", account_codes)
+        self.assertIn("191.01.001", account_codes)
+        self.assertIn("191.01.010", account_codes)
+        self.assertNotIn("770.02.011", account_codes)
+        self.assertTrue(result.is_balanced)
+
+    def test_structured_mixed_vat_purchase_with_total_mismatch_keeps_review_draft(self) -> None:
+        line_details = (
+            InvoiceLine(raw_text="Gida %1", description="Gida %1", vat_rate="1", taxable_amount="100.00", tax_amount="1.00"),
+            InvoiceLine(raw_text="Gida %10", description="Gida %10", vat_rate="10", taxable_amount="100.00", tax_amount="10.00"),
+        )
+        invoice = ParsedInvoice(
+            file_name="mismatch-vat.pdf",
+            provider_hint="TAMEK",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="MIS2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("1", "10"),
+            goods_services_total="999.00",
+            vat_total="11.00",
+            special_tax_total="",
+            tax_inclusive_total="1010.00",
+            payable_total="1010.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=tuple(line.description for line in line_details),
+            line_item_details=line_details,
+            issuer_title="TAMEK",
+            issuer_tax_id="9999999999",
+            recipient_title="Market A",
+            recipient_tax_id="1234567890",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.02.011",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+            account_candidates={"purchase_stock": ({"code": "153.01.001", "name": "Ticari mallar", "reason": ""},)},
+        )
+        profile = ClientProfile(
+            client_id="client-market",
+            title="Market A",
+            tax_id="1234567890",
+            activity_description="Market ve gida perakende satisi",
+            nace_code="471101",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.draft_entry_type, "review_purchase")
+        self.assertEqual(result.export_status, "review_required")
+        self.assertEqual(result.selected_expense_account, "153.01.001")
+        self.assertNotIn("770.02.011", [line["account_code"] for line in result.draft_lines])
+
+    def test_structured_mixed_vat_purchase_with_invalid_rate_stays_in_review(self) -> None:
+        line_details = (
+            InvoiceLine(raw_text="Gida %5", description="Gida %5", vat_rate="5", taxable_amount="100.00", tax_amount="5.00"),
+            InvoiceLine(raw_text="Gida %20", description="Gida %20", vat_rate="20", taxable_amount="100.00", tax_amount="20.00"),
+        )
+        invoice = ParsedInvoice(
+            file_name="invalid-vat.pdf",
+            provider_hint="TAMEK",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="INV2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("5", "20"),
+            goods_services_total="200.00",
+            vat_total="25.00",
+            special_tax_total="",
+            tax_inclusive_total="225.00",
+            payable_total="225.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=tuple(line.description for line in line_details),
+            line_item_details=line_details,
+            issuer_title="TAMEK",
+            issuer_tax_id="9999999999",
+            recipient_title="Market A",
+            recipient_tax_id="1234567890",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.02.011",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+            account_candidates={"purchase_stock": ({"code": "153.01.001", "name": "Ticari mallar", "reason": ""},)},
+        )
+        profile = ClientProfile(
+            client_id="client-market",
+            title="Market A",
+            tax_id="1234567890",
+            activity_description="Market ve gida perakende satisi",
+            nace_code="471101",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.draft_entry_type, "review_purchase")
+        self.assertEqual(result.export_status, "review_required")
+        self.assertEqual(result.selected_expense_account, "153.01.001")
 
     def test_mixed_device_and_battery_sales_keeps_device_zero_and_battery_taxable(self) -> None:
         invoice = ParsedInvoice(

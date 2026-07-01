@@ -46,6 +46,7 @@ USAGE_KEYWORDS = {
     "tevkifat": ("tevkifat",),
     "internet": ("internet",),
     "yazilim": ("yazilim", "e-fatura", "efatura"),
+    "guvenlik": ("guvenlik", "güvenlik", "security"),
 }
 
 
@@ -355,6 +356,14 @@ def select_usage_account(
     candidates = _detail_accounts(accounts, preferred_prefixes)
     if not candidates:
         return None
+
+    if not desired_tags:
+        generic_candidates = [
+            account
+            for account in candidates
+            if any(needle in normalize_text(account.account_name) for needle in ("genel", "disaridan", "diger"))
+        ]
+        return min(generic_candidates or candidates, key=lambda account: (account.code_depth, len(account.normalized_account_code), account.normalized_account_code))
 
     def score(account: ChartAccount) -> tuple[int, int, int, str]:
         tags = set(account.usage_tags)

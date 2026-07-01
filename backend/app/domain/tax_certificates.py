@@ -336,6 +336,8 @@ def _looks_like_label_fragment(line: str) -> bool:
     key = normalize_key(line)
     if key in {"dairesi", "tckn", "vkn", "veadlari", "veadi", "koduveadi", "no", "numara"}:
         return True
+    if "tckimlikno" in key or "vergikimlikno" in key:
+        return True
     if re.fullmatch(r"(sirketi|limitedsirketi|anonimsirketi)?no\d{10,11}", key):
         return True
     return key.startswith(("sirketino", "vergikimlik", "tckimlik"))
@@ -356,6 +358,11 @@ def _looks_like_title_candidate(line: str) -> bool:
 def _looks_like_tax_type(line: str) -> bool:
     key = normalize_key(line)
     return "gelirvergisi" in key or "kurumlarvergisi" in key or key.endswith("vergisi")
+
+
+def _clean_name_candidate(value: str) -> str:
+    value = normalize_spaces(value)
+    return value if _looks_like_title_candidate(value) else ""
 
 
 def gib_column_values(lines: list[str]) -> dict[str, str]:
@@ -448,12 +455,12 @@ def parse_tax_certificate_text(text: str, *, extraction_notes: tuple[str, ...] =
     joined_text = "\n".join(lines)
     column_values = gib_column_values(lines)
     grid_values = gib_grid_values(lines)
-    legal_name = (
+    legal_name = _clean_name_candidate(
         grid_values.get("legal_name", "")
         or value_after_label(lines, "legal_name", max_lines=1)
         or inline_named_value(lines, "legal_name")
     )
-    trade_name = (
+    trade_name = _clean_name_candidate(
         grid_values.get("trade_name", "")
         or value_after_label(lines, "trade_name", max_lines=1)
         or inline_named_value(lines, "trade_name")
@@ -664,16 +671,20 @@ def merge_tax_certificate_extractions(primary: TaxCertificateExtraction, supplem
     tax_identifier = vkn or primary.tax_identifier or supplemental.tax_identifier or tckn
     identity_type = "tckn_vkn" if tckn and vkn else identity_type_for(tax_identifier)
     activity_profile = primary.activity_profile if primary.activity_profile.confidence >= supplemental.activity_profile.confidence else supplemental.activity_profile
+    legal_name = _clean_name_candidate(primary.legal_name) or _clean_name_candidate(supplemental.legal_name)
+    trade_name = _clean_name_candidate(primary.trade_name) or _clean_name_candidate(supplemental.trade_name)
+    title = _clean_name_candidate(primary.title) or _clean_name_candidate(supplemental.title)
+    display_title = _clean_name_candidate(primary.display_title) or _clean_name_candidate(supplemental.display_title)
     return TaxCertificateExtraction(
-        title=primary.title or supplemental.title,
+        title=trade_name or title or legal_name,
         tax_id=tax_identifier,
         tckn=tckn,
         vkn=vkn,
         identity_type=identity_type,
         tax_identifier=tax_identifier,
-        legal_name=primary.legal_name or supplemental.legal_name,
-        trade_name=primary.trade_name or supplemental.trade_name,
-        display_title=primary.display_title or supplemental.display_title,
+        legal_name=legal_name,
+        trade_name=trade_name,
+        display_title=trade_name or display_title or legal_name,
         tax_office=primary.tax_office or supplemental.tax_office,
         activity_description=primary.activity_description or supplemental.activity_description,
         nace_code=primary.nace_code or supplemental.nace_code,
@@ -693,6 +704,14 @@ def _duration_ms(start: float) -> int:
 
 def _tax_certificate_extraction_complete(extraction: TaxCertificateExtraction) -> bool:
     return bool(extraction.title and extraction.nace_code and (extraction.vkn or extraction.tckn or extraction.tax_id))
+
+
+def _should_run_pdf_ocr_fallback(extraction: TaxCertificateExtraction) -> bool:
+    if not extraction.title or not extraction.nace_code:
+        return True
+    if not (extraction.vkn or extraction.tckn or extraction.tax_id):
+        return True
+    return False
 
 
 def _ocr_attempt_count(notes: tuple[str, ...]) -> int:
@@ -751,7 +770,7 @@ def parse_tax_certificate_file(path: Path) -> TaxCertificateExtraction:
     metrics["selected_psm"] = _selected_psm(notes)
     metrics["ocr_attempts"] = _ocr_attempt_count(notes)
 
-    if suffix == ".pdf" and metrics["used_text_layer"] and (not extraction.vkn or not _tax_certificate_extraction_complete(extraction)):
+    if suffix == ".pdf" and metrics["used_text_layer"] and _should_run_pdf_ocr_fallback(extraction):
         ocr_start = time.perf_counter()
         ocr_text, ocr_notes = ocr_pdf(path)
         metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(ocr_start)

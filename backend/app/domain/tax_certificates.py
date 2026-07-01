@@ -543,7 +543,7 @@ def _run_tesseract(tesseract: str, image_path: Path, *, language: str, psm: str,
     )
 
 
-def _ocr_image_regions(path: Path, tesseract: str, *, language: str) -> tuple[str, tuple[str, ...], int]:
+def _ocr_image_regions(path: Path, tesseract: str, *, language: str, region_names: tuple[str, ...] = ()) -> tuple[str, tuple[str, ...], int]:
     try:
         from PIL import Image
     except ModuleNotFoundError:
@@ -557,6 +557,8 @@ def _ocr_image_regions(path: Path, tesseract: str, *, language: str) -> tuple[st
             with Image.open(path) as image:
                 width, height = image.size
                 for name, box in OCR_ROI_BOXES:
+                    if region_names and name not in region_names:
+                        continue
                     left = max(0, int(width * box[0]))
                     top = max(0, int(height * box[1]))
                     right = min(width, int(width * box[2]))
@@ -650,6 +652,36 @@ def ocr_pdf(path: Path) -> tuple[str, tuple[str, ...]]:
         image_path = output_prefix.with_suffix(".png")
         text, ocr_notes = ocr_image(image_path)
         return text, tuple((*notes, *ocr_notes))
+
+
+def ocr_pdf_identity_region(path: Path) -> tuple[str, tuple[str, ...]]:
+    pdftoppm = shutil.which("pdftoppm")
+    tesseract = shutil.which("tesseract")
+    if not pdftoppm:
+        return "", ("ocr_pdf_identity_renderer_missing",)
+    if not tesseract:
+        return "", ("ocr_tesseract_missing",)
+    language = os.environ.get("FISORA_TAX_CERTIFICATE_OCR_LANG", "tur+eng")
+    notes = ["ocr_pdf_identity_rendered"]
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_prefix = Path(temp_dir) / "tax_certificate_identity"
+        try:
+            rendered = subprocess.run(
+                [pdftoppm, "-r", "250", "-png", "-singlefile", str(path), str(output_prefix)],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=90,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return "", tuple((*notes, f"ocr_pdf_identity_render_error:{type(exc).__name__}"))
+        if rendered.returncode != 0:
+            return "", tuple((*notes, f"ocr_pdf_identity_render_failed:{rendered.returncode}"))
+        image_path = output_prefix.with_suffix(".png")
+        text, roi_notes, attempts = _ocr_image_regions(image_path, tesseract, language=language, region_names=("identity",))
+        return text, tuple((*notes, "ocr_tesseract", *roi_notes, f"ocr_attempts_{attempts}"))
 
 
 def extract_tax_certificate_text(path: Path) -> tuple[str, tuple[str, ...]]:
@@ -771,17 +803,31 @@ def parse_tax_certificate_file(path: Path) -> TaxCertificateExtraction:
     metrics["ocr_attempts"] = _ocr_attempt_count(notes)
 
     if suffix == ".pdf" and metrics["used_text_layer"] and _should_run_pdf_ocr_fallback(extraction):
-        ocr_start = time.perf_counter()
-        ocr_text, ocr_notes = ocr_pdf(path)
-        metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(ocr_start)
-        if ocr_text.strip():
-            supplemental_start = time.perf_counter()
-            supplemental = parse_tax_certificate_text(ocr_text, extraction_notes=ocr_notes)
-            metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
-            extraction = merge_tax_certificate_extractions(extraction, supplemental)
-            metrics["used_ocr"] = True
-            metrics["selected_psm"] = _selected_psm(ocr_notes)
-            metrics["ocr_attempts"] = _ocr_attempt_count(ocr_notes)
+        if extraction.title and extraction.nace_code and not (extraction.vkn or extraction.tckn or extraction.tax_id):
+            identity_start = time.perf_counter()
+            identity_text, identity_notes = ocr_pdf_identity_region(path)
+            metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(identity_start)
+            if identity_text.strip():
+                supplemental_start = time.perf_counter()
+                supplemental = parse_tax_certificate_text(identity_text, extraction_notes=identity_notes)
+                metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
+                if supplemental.vkn or supplemental.tckn or supplemental.tax_id:
+                    extraction = merge_tax_certificate_extractions(extraction, supplemental)
+                    metrics["used_ocr"] = True
+                    metrics["selected_psm"] = _selected_psm(identity_notes)
+                    metrics["ocr_attempts"] = _ocr_attempt_count(identity_notes)
+        if _should_run_pdf_ocr_fallback(extraction):
+            ocr_start = time.perf_counter()
+            ocr_text, ocr_notes = ocr_pdf(path)
+            metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(ocr_start)
+            if ocr_text.strip():
+                supplemental_start = time.perf_counter()
+                supplemental = parse_tax_certificate_text(ocr_text, extraction_notes=ocr_notes)
+                metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
+                extraction = merge_tax_certificate_extractions(extraction, supplemental)
+                metrics["used_ocr"] = True
+                metrics["selected_psm"] = _selected_psm(ocr_notes)
+                metrics["ocr_attempts"] = _ocr_attempt_count(ocr_notes)
 
     metrics["total_ms"] = _duration_ms(total_start)
     return TaxCertificateExtraction(

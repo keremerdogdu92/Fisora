@@ -352,6 +352,32 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.nace_code, "477401")
         self.assertFalse(extraction.processing_metrics["used_ocr"])
 
+    def test_parse_tax_certificate_file_uses_identity_roi_before_full_ocr(self) -> None:
+        text_layer = """
+        VERGI LEVHASI
+        TICARET UNVANI
+        GKN GIG ISITME CIHAZLARI SANAYI VE TICARET LIMITED SIRKETI
+        VERGI DAIRESI
+        GOZTEPE
+        ANA FAALIYET KODU VE ADI
+        477401-TIBBI VE ORTOPEDIK URUNLERIN PERAKENDE TICARETI
+        """
+
+        with patch("app.domain.tax_certificates.extract_pdf_text", return_value=(1, text_layer, ("pdf_text_layer",))):
+            with patch(
+                "app.domain.tax_certificates.ocr_pdf_identity_region",
+                return_value=("3961668006", ("ocr_pdf_identity_rendered", "ocr_tesseract", "ocr_attempts_1")),
+                create=True,
+            ):
+                with patch("app.domain.tax_certificates.ocr_pdf") as ocr_pdf:
+                    extraction = parse_tax_certificate_file(Path("gkn-vergi-levhasi.pdf"))
+
+        ocr_pdf.assert_not_called()
+        self.assertEqual(extraction.vkn, "3961668006")
+        self.assertNotEqual(extraction.trade_name, "3961668006")
+        self.assertTrue(extraction.processing_metrics["used_ocr"])
+        self.assertEqual(extraction.processing_metrics["ocr_attempts"], 1)
+
     def test_merge_tax_certificate_extractions_keeps_clean_primary_names(self) -> None:
         text_layer = parse_tax_certificate_text(
             """

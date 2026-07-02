@@ -569,10 +569,22 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
   const researchStatus = document.reviewReasons.includes("research_low_confidence")
     || document.reviewReasons.includes("research_source_rejected")
     ? "Kontrol"
-    : "Gerekmedi";
+    : document.aiResearchRequested
+      ? "İstendi"
+      : "Gerekmedi";
   const learningStatus = document.rulePrompt.show || document.learningRuleSourceSummary
     ? "Aday var"
     : "Yok";
+  const activityContext = [
+    document.clientNaceCode,
+    ...(document.clientActivityTags ?? []),
+  ].filter(Boolean).join(" / ");
+  const counterpartyIntent = [
+    document.counterpartyTaxId,
+    document.counterpartyTitle,
+    document.aiSuggestedCounterpartyCode,
+    document.suggestedCounterpartyAccount,
+  ].filter(Boolean).join(" / ");
   return (
     <section className="decision-chain-panel" aria-label="Karar ve gerekçe">
       <div className="statement-review-heading">
@@ -591,6 +603,10 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
         <summary>Kararı etkileyen açıklamaları göster</summary>
         <div className="ai-guidance compact">
           <ReasonCard label="AI muhasebe gerekçesi" value={document.accountantExplanation || document.aiReason || document.accountantSummary || "-"} />
+          <ReasonCard label="Ürün kimliği" value={document.aiProductIdentity || document.productLine || "-"} />
+          <ReasonCard label="NACE/faaliyet" value={activityContext || "-"} />
+          <ReasonCard label="Research ihtiyacı" value={document.aiResearchRequested ? (document.aiResearchQuery || "AI araştırma istedi") : researchStatus} />
+          <ReasonCard label="Cari niyeti" value={counterpartyIntent || "-"} />
           <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
           <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
           <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />

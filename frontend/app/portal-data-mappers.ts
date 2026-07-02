@@ -33,6 +33,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
   const documentsFromRows = (raw.invoiceRows ?? []).map((row, index): PilotDocument => {
     const fileName = safeText(row.documentRef || row.fileName, `ofis-belge-${index + 1}.pdf`);
     const status = normalizeStatus(row.exportStatus || row.status);
+    const rowRecord = row as Record<string, unknown>;
     return {
       id: safeText(row.documentRef || row.fileName, `${clientId}-doc-${index + 1}`),
       clientId,
@@ -65,22 +66,35 @@ function normalizeReviewData(raw: ReviewData): PilotData {
         safeText(row.businessRelevanceReason) ||
         safeText(row.aiClassificationSkippedReason, "Öneri gerekçesi yok"),
       aiProvider: safeText(row.aiClassificationProvider, "-"),
+      aiGateReason: safeText(row.aiGateReason ?? rowRecord.ai_gate_reason),
+      aiProductIdentity: safeText(row.aiProductIdentity ?? rowRecord.ai_product_identity),
+      aiResearchRequested: Boolean(row.aiResearchRequested ?? rowRecord.ai_research_requested),
+      aiResearchQuery: safeText(row.aiResearchQuery ?? rowRecord.ai_research_query),
       aiSuggestedAccountCode: safeText(row.aiSuggestedAccountCode, ""),
       aiSuggestedCounterpartyCode: safeText(row.aiSuggestedCounterpartyCode, ""),
       aiRiskFlags: Array.isArray(row.aiRiskFlags) ? row.aiRiskFlags.map(String) : [],
       aiAccountReason: safeText(row.aiAccountReason, ""),
+      clientNaceCode: safeText(row.clientNaceCode ?? rowRecord.client_nace_code),
+      clientActivityTags: Array.isArray(row.clientActivityTags)
+        ? row.clientActivityTags.map(String)
+        : Array.isArray(rowRecord.client_activity_tags)
+          ? rowRecord.client_activity_tags.map(String)
+          : [],
+      counterpartyTaxId: safeText(row.counterpartyTaxId ?? rowRecord.counterparty_tax_id),
+      counterpartyTitle: safeText(row.counterpartyTitle ?? rowRecord.counterparty_title),
+      counterpartyIdentityKey: safeText(row.counterpartyIdentityKey ?? rowRecord.counterparty_identity_key),
       deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolü gerekli"),
       exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Çıktı listesine alınabilir." : "Müşavir kontrolü gerekiyor."),
       draftStatus: Array.isArray(row.draftLines) && row.draftLines.length ? "draft_ready" : "manual_draft_required",
-      draftConfidence: safeNumber((row as Record<string, unknown>).draftConfidence ?? (row as Record<string, unknown>).draft_confidence),
-      primarySuggestion: ((row as Record<string, unknown>).primarySuggestion ?? (row as Record<string, unknown>).primary_suggestion ?? {}) as Record<string, unknown>,
-      reviewBlockers: Array.isArray((row as Record<string, unknown>).reviewBlockers)
-        ? ((row as Record<string, unknown>).reviewBlockers as unknown[]).map(String)
-        : Array.isArray((row as Record<string, unknown>).review_blockers)
-          ? ((row as Record<string, unknown>).review_blockers as unknown[]).map(String)
+      draftConfidence: safeNumber(rowRecord.draftConfidence ?? rowRecord.draft_confidence),
+      primarySuggestion: (rowRecord.primarySuggestion ?? rowRecord.primary_suggestion ?? {}) as Record<string, unknown>,
+      reviewBlockers: Array.isArray(rowRecord.reviewBlockers)
+        ? (rowRecord.reviewBlockers as unknown[]).map(String)
+        : Array.isArray(rowRecord.review_blockers)
+          ? (rowRecord.review_blockers as unknown[]).map(String)
           : [],
-      automationEligibility: safeText((row as Record<string, unknown>).automationEligibility ?? (row as Record<string, unknown>).automation_eligibility),
-      accountantActionHint: safeText((row as Record<string, unknown>).accountantActionHint ?? (row as Record<string, unknown>).accountant_action_hint),
+      automationEligibility: safeText(rowRecord.automationEligibility ?? rowRecord.automation_eligibility),
+      accountantActionHint: safeText(rowRecord.accountantActionHint ?? rowRecord.accountant_action_hint),
       accountantSummary: Array.isArray(row.draftLines) && row.draftLines.length ? "Fiş taslağı hazır." : "Fiş taslağı için manuel kontrol gerekiyor.",
       accountantExplanation: safeText(row.accountantExplanationTr ?? row.accountant_explanation_tr ?? row.aiClassificationReason ?? row.businessRelevanceReason),
       technicalDetails: {},
@@ -259,12 +273,21 @@ export function normalizePilotData(raw: unknown): PilotData {
         intakeCategory: toIntakeCategory(document.intakeCategory || inferIntakeCategory(document.documentType)),
         status: normalizeStatus(document.status),
         aiProvider: safeText(document.aiProvider, "-"),
+        aiGateReason: safeText(document.aiGateReason, ""),
+        aiProductIdentity: safeText(document.aiProductIdentity, ""),
+        aiResearchRequested: Boolean(document.aiResearchRequested),
+        aiResearchQuery: safeText(document.aiResearchQuery, ""),
         accountantExplanation: safeText(document.accountantExplanation, ""),
         accountingDirection: safeText(document.accountingDirection, ""),
         aiSuggestedAccountCode: safeText(document.aiSuggestedAccountCode, ""),
         aiSuggestedCounterpartyCode: safeText(document.aiSuggestedCounterpartyCode, ""),
         aiRiskFlags: Array.isArray(document.aiRiskFlags) ? document.aiRiskFlags : [],
         aiAccountReason: safeText(document.aiAccountReason, ""),
+        clientNaceCode: safeText(document.clientNaceCode, ""),
+        clientActivityTags: Array.isArray(document.clientActivityTags) ? document.clientActivityTags : [],
+        counterpartyTaxId: safeText(document.counterpartyTaxId, ""),
+        counterpartyTitle: safeText(document.counterpartyTitle, ""),
+        counterpartyIdentityKey: safeText(document.counterpartyIdentityKey, ""),
         vatRates: Array.isArray(document.vatRates) ? document.vatRates : [],
         reviewReasons: Array.isArray(document.reviewReasons) ? document.reviewReasons : [],
         riskFlags: Array.isArray(document.riskFlags) ? document.riskFlags : [],

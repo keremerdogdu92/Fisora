@@ -66,6 +66,15 @@ const workspaceRecord = {
         business_relevance_requires_review: false,
         ai_classification_provider: "static_rules",
         ai_classification_reason: "Kalem satis olarak siniflandi.",
+        ai_gate_reason: "cold_start_core_accounting_line",
+        ai_product_identity: "Helix Force 200 RI isitme cihazi",
+        ai_research_requested: false,
+        ai_research_query: "",
+        client_nace_code: "477401",
+        client_activity_tags: ["hearing_aid", "medical_retail", "retail_trade"],
+        counterparty_tax_id: "2222222222",
+        counterparty_title: "Alici Hasta",
+        counterparty_identity_key: "2222222222",
         ai_explanation_tr: "AI kararı: statik kurallar belge kalemini satış olarak değerlendirdi.",
         accounting_intent: "e_fatura_yazilim_gideri",
         accounting_intent_confidence: 84,
@@ -224,6 +233,13 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].businessRelation, "core_business");
   assert.equal(data.documents[0].accountTreatment, "stock_or_cogs");
   assert.equal(data.documents[0].requiresAccountantReview, false);
+  assert.equal(data.documents[0].aiGateReason, "cold_start_core_accounting_line");
+  assert.equal(data.documents[0].aiProductIdentity, "Helix Force 200 RI isitme cihazi");
+  assert.equal(data.documents[0].aiResearchRequested, false);
+  assert.equal(data.documents[0].clientNaceCode, "477401");
+  assert.deepEqual(data.documents[0].clientActivityTags, ["hearing_aid", "medical_retail", "retail_trade"]);
+  assert.equal(data.documents[0].counterpartyTaxId, "2222222222");
+  assert.equal(data.documents[0].counterpartyTitle, "Alici Hasta");
   assert.equal(data.documents[0].aiReason, "AI kararı: statik kurallar belge kalemini satış olarak değerlendirdi.");
   assert.deepEqual(
     data.documents[0].pipelineEvents.map((event) => [event.step, event.status, event.messageTr, event.debugCode]),

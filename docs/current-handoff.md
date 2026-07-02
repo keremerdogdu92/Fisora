@@ -18,10 +18,22 @@ oturumdan devam etmek icin son durumu ozetler.
   kaydi, pipeline'a `vat_split_classified`, musavir onayina
   `vat_split_review_saved` olayi eklendi.
 - 2026-06-29 hesap plani ve AI karar kapisi release'i canliya alindi:
-  kesin KDV/hukuki kurallar AI tarafindan ezilmez; AI yalniz belirsiz satir,
-  zayif hesap adayi veya marka/model-only aciklamalarda devreye girer.
-  Tavily/global research sadece AI veya statik siniflandirma urunu
-  anlayamadiginda calisir ve ayni ifade sonraki mukelleflerde cache'ten gelir.
+  kesin KDV/hukuki kurallar AI tarafindan ezilmez. Bu release'te AI yalniz
+  belirsiz satir, zayif hesap adayi veya marka/model-only aciklamalarda
+  devreye giriyordu; 2026-07-02 yururluk notuyla bu kapi AI-first soguk
+  baslangic yorumlayicisi olacak sekilde genisletildi.
+- 2026-07-02 yururluk notu: yeni AI-first karar motoru hedefinde AI soguk
+  baslangicta ana fatura anlamlandirici katmandir. Deterministik motor KDV,
+  borc/alacak dengesi, hesap ailesi guardrail'i, kesin kanuni kurallar ve
+  export kapisini korur; Tavily yalniz AI emin degilse, urun yeni/belirsizse
+  veya faaliyet/NACE baglami eksikse calisir. Musavir onay/duzeltmeleri
+  learning event olarak AI/research tekrarini azaltacak sekilde kullanilir.
+- 2026-07-02 lokal uygulama durumu: cold-start core business stok/COGS satiri
+  `cold_start_core_accounting_line` gerekcesiyle kabul ediliyor; AI
+  `needs_research=true` dediginde kategori bilinse veya guven yuksek olsa bile
+  research calisiyor; portal karar zinciri urun kimligi, NACE/faaliyet,
+  research ihtiyaci/sorgusu ve cari niyetini gosteriyor. Faz 8 icin cok
+  mukellefli private sample matrix ve canli smoke henuz siradaki is.
 - Muhasebe fisi UX'i guncellendi: `/portal/belgeler` ekraninda fis satirlari
   en onde duzenlenir; `Karar ve gerekce` sureci fisin altinda ikincil alanda
   kalir. `Duzeltme notu` ve `Kural talimati`, fis satiri/hesap-cari

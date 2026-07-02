@@ -454,6 +454,8 @@ def _research_candidate_from_result(result: dict[str, Any], document: dict[str, 
 
 
 def _should_run_research_for_result(result: dict[str, Any]) -> bool:
+    if bool(result.get("ai_research_requested")):
+        return True
     category = str(result.get("product_category") or "").strip()
     relation = str(result.get("business_relevance_relation") or "").strip()
     treatment = str(result.get("business_relevance_account_treatment") or "").strip()

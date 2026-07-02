@@ -2978,6 +2978,91 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(len(provider.requests), 1)
         self.assertEqual(result.selected_expense_account, "153.01")
 
+    def test_ai_first_cold_start_explains_known_hearing_device_sale(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="helix-sales.pdf",
+            provider_hint="Rana Medikal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="HLX2026000000100",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1111111111", "2222222222"),
+            vat_rates=("0",),
+            goods_services_total="12000.00",
+            vat_total="0.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Helix Force 200 RI isitme cihazi",),
+            issuer_title="Rana Medikal",
+            issuer_tax_id="1111111111",
+            recipient_title="Alici Hasta",
+            recipient_tax_id="2222222222",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            zero_vat_revenue_account="600.01.000",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+            next_customer_account="120.A02",
+            account_candidates={
+                "zero_vat_revenue": ({"code": "600.01.000", "name": "3065 istisnali isitme cihazi satislari", "reason": ""},),
+                "customer": ({"code": "120.01", "name": "Alicilar", "reason": ""},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Rana Medikal",
+            tax_id="1111111111",
+            vkn="1111111111",
+            activity_description="Medikal ve ortopedik urunlerin perakende satisi",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 92,
+                "reason": "Urun isitme cihazidir; NACE 477401 medikal/ortopedik perakende faaliyetiyle guclu iliskili.",
+                "evidence": ["ai:product_identity", "ai:nace_477401"],
+                "suggested_account_code": "600.01.000",
+                "suggested_counterparty_code": "120.01",
+                "risk_flags": [],
+                "account_reason": "Satis yonunde alici cari 120 borc, 3065 istisnali gelir hesabi alacak.",
+                "product_identity": "Helix Force 200 RI isitme cihazi",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
+
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertTrue(result.ai_classification_used)
+        self.assertEqual(result.ai_gate_reason, "cold_start_core_accounting_line")
+        self.assertEqual(result.ai_product_identity, "Helix Force 200 RI isitme cihazi")
+        self.assertEqual(result.product_category, "isitme_cihazi")
+        self.assertIn("ai:nace_477401", result.business_relevance_evidence)
+        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.2222222222", "600.01.000"])
+        self.assertTrue(all(line["account_code"] != "391.20" for line in result.draft_lines))
+        self.assertIn("120 borc", result.ai_account_reason)
+        self.assertFalse(result.ai_research_requested)
+        self.assertEqual(len(provider.requests), 1)
+
     def test_ai_response_can_request_research_without_overriding_export(self) -> None:
         invoice = ParsedInvoice(
             file_name="needs-research.pdf",

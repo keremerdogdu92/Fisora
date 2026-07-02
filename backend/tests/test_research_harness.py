@@ -773,6 +773,56 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(research_provider.queries[0].search_text, "ZX Sonic Pro 9")
         self.assertEqual(result["research_profile"]["display_name"], "ZX Sonic Pro 9")
 
+    def test_worker_honors_ai_research_request_even_with_known_category(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "ai-known-needs-research.xml"
+            write_invoice_xml(xml_path, line_name="Helix Force 200 RI isitme cihazi", supplier_name="Medikal Tedarik")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            queue_invoice(store, xml_path)
+            product_provider = FakeProductProvider(
+                {
+                    "category": "isitme_cihazi",
+                    "confidence": 88,
+                    "reason": "Urun isitme cihazi gibi; model yeni oldugu icin kaynak kontrolu gerekir.",
+                    "evidence": ["ai:known_category"],
+                    "suggested_account_code": "153.01",
+                    "suggested_counterparty_code": "",
+                    "risk_flags": [],
+                    "account_reason": "Stok hesabi uygun gorunuyor.",
+                    "product_identity": "Helix Force 200 RI",
+                    "needs_research": True,
+                    "research_query": "Helix Force 200 RI",
+                }
+            )
+            classifier = StaticFirstClassifier(
+                provider=product_provider,
+                policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+            )
+            research_provider = FakeResearchProvider(
+                {
+                    "display_name": "Helix Force 200 RI",
+                    "summary_tr": "Uretici sayfasina gore isitme cihazi modelidir.",
+                    "common_product_categories": ["isitme_cihazi"],
+                    "account_treatment": "stock_or_cogs",
+                    "research_confidence": 85,
+                    "accounting_impact_confidence": 90,
+                    "evidence": [{"url": "https://manufacturer.example/helix-force-200-ri", "summary_tr": "Uretici sayfasi."}],
+                }
+            )
+
+            process_queued_documents(
+                store,
+                product_classifier=classifier,
+                research_runtime={"provider": research_provider, "policy": ResearchPolicy(enabled=True, confidence_threshold=70)},
+            )
+            result = store.get_workspace("client-1")["documents"][0]["result"]
+
+        self.assertEqual(len(product_provider.requests), 1)
+        self.assertEqual(len(research_provider.queries), 1)
+        self.assertEqual(research_provider.queries[0].search_text, "Helix Force 200 RI")
+        self.assertTrue(result["ai_research_requested"])
+        self.assertEqual(result["research_profile"]["display_name"], "Helix Force 200 RI")
+
 
 if __name__ == "__main__":
     unittest.main()

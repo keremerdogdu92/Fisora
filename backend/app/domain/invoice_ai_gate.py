@@ -38,6 +38,8 @@ def invoice_ai_gate(
         return InvoiceAiGateDecision(True, "weak_business_match", True, True)
     if treatment == "manual_review":
         return InvoiceAiGateDecision(True, "manual_review_treatment", True, True)
+    if relation == "core_business" and treatment == "stock_or_cogs":
+        return InvoiceAiGateDecision(True, "cold_start_core_accounting_line", True, False)
     if vague:
         return InvoiceAiGateDecision(True, "vague_line", True, True)
     return InvoiceAiGateDecision(False, "static_confident", False, False)

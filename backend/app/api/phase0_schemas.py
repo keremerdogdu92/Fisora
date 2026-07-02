@@ -341,6 +341,12 @@ class AuthLoginPayload(BaseModel):
     ttl_hours: int = 12
 
 
+class DelegatedClientSessionPayload(BaseModel):
+    client_id: str
+    target_user_id: str = ""
+    ttl_hours: int = 12
+
+
 class AuthLogoutPayload(BaseModel):
     session_token: str = ""
 

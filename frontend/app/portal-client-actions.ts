@@ -1,8 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
 import {
+  buildDelegatedClientPortalUrl,
   buildClientOnboardingPackagePayload,
   buildNaceResearchRefreshPayload,
   buildTaxCertificateParseStatus,
+  createDelegatedClientSession,
   createClientOnboardingPackage,
   createPortalInvite,
   deleteClientDocuments,
@@ -599,6 +601,49 @@ export async function updatePortalAccessForSelectedClientAction({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setPortalPasswordStatus(`Üyelik güncellenemedi. ${sessionAuthErrorMessage(message) || message}`);
+  }
+}
+
+export async function openSelectedClientPortalAction({
+  loginUserId,
+  selectedClient,
+  session,
+  setClientPortalOpenStatus,
+}: {
+  loginUserId: string;
+  selectedClient?: PilotClient;
+  session: LocalSession | null;
+  setClientPortalOpenStatus: (status: string) => void;
+}) {
+  if (!selectedClient) return;
+  const targetUserId = selectedClient.portalUserId?.trim();
+  if (!targetUserId) {
+    setClientPortalOpenStatus("Portal kullanÄ±cÄ±sÄ± olmayan mÃ¼kellef iÃ§in ekran aÃ§Ä±lamaz.");
+    return;
+  }
+  const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+  setClientPortalOpenStatus(`${selectedClient.clientName} mÃ¼kellef ekranÄ± aÃ§Ä±lÄ±yor...`);
+  try {
+    const delegatedSession = await createDelegatedClientSession({
+      apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+      clientId: selectedClient.clientId,
+      targetUserId,
+      userId: actingUserId,
+      sessionToken: session?.sessionToken,
+    });
+    const url = buildDelegatedClientPortalUrl({
+      origin: typeof window === "undefined" ? "" : window.location.origin,
+      session: delegatedSession,
+    });
+    const popup = typeof window === "undefined" ? null : window.open(url, "_blank", "noopener,noreferrer");
+    setClientPortalOpenStatus(
+      popup
+        ? `${selectedClient.clientName} mÃ¼kellef ekranÄ± yeni sekmede aÃ§Ä±ldÄ±.`
+        : "Yeni sekme aÃ§Ä±lamadÄ±. TarayÄ±cÄ± popup engelini kontrol edin.",
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setClientPortalOpenStatus(`MÃ¼kellef ekranÄ± aÃ§Ä±lamadÄ±. ${sessionAuthErrorMessage(message) || message}`);
   }
 }
 

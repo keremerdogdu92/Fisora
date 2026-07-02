@@ -227,6 +227,67 @@ async function loginWithPassword({
   };
 }
 
+async function createDelegatedClientSession({
+  apiBaseUrl,
+  clientId,
+  targetUserId = "",
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  ttlHours = 12,
+  fetchImpl = fetch,
+}) {
+  const payload = await postJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/delegated-client-session",
+    payload: {
+      client_id: String(clientId || "").trim(),
+      target_user_id: String(targetUserId || "").trim(),
+      ttl_hours: Number(ttlHours || 12),
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+  const session = payload?.session || {};
+  return {
+    sessionToken: String(payload?.session_token || ""),
+    userId: String(session?.user_id || targetUserId || "").trim(),
+    role: "client_user",
+    storageScope: "tab",
+    delegatedBy: String(payload?.delegated_by || session?.delegated_by || userId || "").trim(),
+    delegatedClientId: String(payload?.delegated_client_id || session?.delegated_client_id || clientId || "").trim(),
+    expiresAt: String(session?.expires_at || ""),
+    raw: payload,
+  };
+}
+
+function buildDelegatedClientPortalUrl({ origin = "", session }) {
+  const normalizedOrigin = String(origin || "").replace(/\/+$/, "");
+  const encodedSession = encodeURIComponent(JSON.stringify(session || {}));
+  return `${normalizedOrigin}/portal/mukellef#delegated_session=${encodedSession}`;
+}
+
+function parseDelegatedSessionHash(hash = "") {
+  const rawHash = String(hash || "").replace(/^#/, "");
+  const params = new URLSearchParams(rawHash);
+  const encodedSession = params.get("delegated_session");
+  if (!encodedSession) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encodedSession));
+    if (!parsed?.sessionToken || !parsed?.userId) return null;
+    return {
+      sessionToken: String(parsed.sessionToken || ""),
+      userId: String(parsed.userId || ""),
+      role: "client_user",
+      storageScope: "tab",
+      delegatedBy: String(parsed.delegatedBy || ""),
+      delegatedClientId: String(parsed.delegatedClientId || ""),
+      expiresAt: String(parsed.expiresAt || ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function resetTestData({
   apiBaseUrl,
   confirmation,
@@ -743,14 +804,17 @@ module.exports = {
   backendAuthHeaders,
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
+  buildDelegatedClientPortalUrl,
   buildNaceResearchRefreshPayload,
   buildTaxCertificateParseStatus,
   buildPortalUserBootstrapPayload,
+  createDelegatedClientSession,
   createClientOnboardingPackage,
   createPortalInvite,
   deleteClientDocuments,
   ensureUploadWorkspace,
   loginWithPassword,
+  parseDelegatedSessionHash,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   pickUploadUser,

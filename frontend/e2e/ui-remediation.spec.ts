@@ -176,3 +176,42 @@ test("Bilgi Havuzu uses Turkish fallback copy for English-only profiles", async 
   await expect(page.getByText(/Kaynak .*Turkceye|Kaynak .*Türkçeye|Kaynak .*TÃ¼rkÃ§eye/i)).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Failed to fetch");
 });
+test("accountant opens selected client portal in a delegated tab without return controls", async ({ page }) => {
+  await page.context().route("**/phase0/store/system/readiness", async (route) => {
+    await route.fulfill({ json: readyForRealDataPayload });
+  });
+  await page.context().route("**/phase0/store/clients", async (route) => {
+    await route.fulfill({ json: { clients: [pilotClient] } });
+  });
+  await page.context().route("**/phase0/store/workspace/**", async (route) => {
+    await route.fulfill({ json: pilotWorkspace });
+  });
+  await page.context().route("**/phase0/store/auth/delegated-client-session", async (route) => {
+    await route.fulfill({
+      json: {
+        session_token: "delegated-session-1",
+        delegated_by: "mali-musavir",
+        delegated_client_id: "pilot-client",
+        session: {
+          user_id: "pilot-user",
+          expires_at: "2026-07-02T22:00:00+00:00",
+          delegated_by: "mali-musavir",
+          delegated_client_id: "pilot-client",
+        },
+      },
+    });
+  });
+
+  await page.goto("/portal/mukellefler");
+  await page.locator(".client-management-tabs button").nth(1).click();
+
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: /Mükellef ekranına git|MÃ¼kellef ekranÄ±na git|MÃƒÂ¼kellef ekran/i }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState("domcontentloaded");
+
+  await expect(popup).toHaveURL(/\/portal\/mukellef/);
+  await expect(popup.getByText("Pilot Test AS").first()).toBeVisible();
+  await expect(popup.getByText(/Müşavir vekaletinde|MÃ¼ÅŸavir vekaletinde|MÃƒÂ¼ÅŸavir vekaletinde|Musavir vekaletinde/i)).toBeVisible();
+  await expect(popup.getByRole("button", { name: /Müşavir ekranına dön|MÃ¼ÅŸavir ekranÄ±na dÃ¶n|sekme kapat|kapat/i })).toHaveCount(0);
+});

@@ -184,6 +184,7 @@ export function PortalTopbarStatus({
   session,
   showSidebarToggle,
   source,
+  subtitle = "",
   title,
 }: {
   clientName?: string;
@@ -193,6 +194,7 @@ export function PortalTopbarStatus({
   session: LocalSession | null;
   showSidebarToggle?: boolean;
   source: { label: string; status: string; detail: string };
+  subtitle?: string;
   title: string;
 }) {
   const [activePanel, setActivePanel] = useState<"notifications" | "help" | null>(null);
@@ -212,7 +214,10 @@ export function PortalTopbarStatus({
         {showSidebarToggle ? (
           <button className="topbar-menu" onClick={onToggleSidebar} type="button" aria-label="Menüyü aç">☰</button>
         ) : null}
-        <h1>{title}</h1>
+        <div>
+          <h1>{title}</h1>
+          {subtitle ? <small className="portal-title-subtitle">{subtitle}</small> : null}
+        </div>
       </div>
       <div className="portal-topbar-actions">
         <button className="topbar-action" onClick={() => setActivePanel("notifications")} type="button">Bildirimler <strong>3</strong></button>
@@ -226,9 +231,11 @@ export function PortalTopbarStatus({
           <strong>{source.label}</strong>
           <small>{source.detail}</small>
         </div>
-        <button className="secondary compact-exit" onClick={onExit} type="button">
-          Çıkış
-        </button>
+        {session?.delegatedBy ? null : (
+          <button className="secondary compact-exit" onClick={onExit} type="button">
+            Çıkış
+          </button>
+        )}
       </div>
       {activePanel ? (
         <div className="topbar-popover" role="dialog" aria-label={activePanel === "notifications" ? "Bildirimler" : "Yardım"}>

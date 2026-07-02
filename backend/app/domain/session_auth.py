@@ -104,12 +104,17 @@ def credential_public_payload(record: dict[str, object]) -> dict[str, object]:
 
 
 def session_public_payload(record: dict[str, object]) -> dict[str, object]:
-    return {
+    payload = {
         "session_id": str(record.get("session_id") or ""),
         "user_id": str(record.get("user_id") or ""),
         "expires_at": str(record.get("expires_at") or ""),
         "created_at": str(record.get("created_at") or ""),
     }
+    for key in ("session_kind", "delegated_by", "delegated_client_id"):
+        value = str(record.get(key) or "")
+        if value:
+            payload[key] = value
+    return payload
 
 
 def auth_token_public_payload(record: dict[str, object]) -> dict[str, object]:

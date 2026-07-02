@@ -220,13 +220,25 @@ class PostgresWorkflowStore:
         credential = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_credential", user_id) or {}
         return str(credential.get("password_hash") or "")
 
-    def create_auth_session(self, *, user_id: str, token_hash: str, expires_at: str) -> dict[str, Any]:
+    def create_auth_session(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        expires_at: str,
+        session_kind: str = "password",
+        delegated_by: str = "",
+        delegated_client_id: str = "",
+    ) -> dict[str, Any]:
         timestamp = utc_now()
         record = {
             "session_id": str(uuid4()),
             "user_id": user_id,
             "token_hash": token_hash,
             "expires_at": expires_at,
+            "session_kind": session_kind,
+            "delegated_by": delegated_by,
+            "delegated_client_id": delegated_client_id,
             "revoked_at": "",
             "created_at": timestamp,
             "updated_at": timestamp,

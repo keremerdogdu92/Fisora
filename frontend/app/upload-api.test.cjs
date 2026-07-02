@@ -6,7 +6,9 @@ const {
   buildClientOnboardingPackagePayload,
   buildNaceResearchRefreshPayload,
   buildTaxCertificateParseStatus,
+  buildDelegatedClientPortalUrl,
   buildPortalUserBootstrapPayload,
+  createDelegatedClientSession,
   createClientOnboardingPackage,
   createPortalInvite,
   deleteClientDocuments,
@@ -28,6 +30,7 @@ const {
   uploadDocumentToBackend,
   uploadDocumentsToBackend,
   uploadTaxCertificateToBackend,
+  parseDelegatedSessionHash,
 } = require("./upload-api.js");
 
 class CapturingFormData {
@@ -544,6 +547,90 @@ test("loginWithPassword posts credentials and returns a backend session", async 
   });
   assert.equal(result.sessionToken, "session-token-1");
   assert.equal(result.userId, "mali-musavir");
+});
+
+test("createDelegatedClientSession posts accountant-authorized delegated session request", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return {
+      ok: true,
+      json: async () => ({
+        session_token: "delegated-session-1",
+        delegated_by: "mali-musavir",
+        delegated_client_id: "client-1",
+        session: {
+          user_id: "client-user",
+          expires_at: "2026-07-02T22:00:00+00:00",
+          delegated_by: "mali-musavir",
+          delegated_client_id: "client-1",
+        },
+      }),
+    };
+  };
+
+  const result = await createDelegatedClientSession({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    targetUserId: "client-user",
+    userId: "mali-musavir",
+    sessionToken: "accountant-session",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/auth/delegated-client-session");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "accountant-session",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    client_id: "client-1",
+    target_user_id: "client-user",
+    ttl_hours: 12,
+  });
+  assert.deepEqual(result, {
+    sessionToken: "delegated-session-1",
+    userId: "client-user",
+    role: "client_user",
+    storageScope: "tab",
+    delegatedBy: "mali-musavir",
+    delegatedClientId: "client-1",
+    expiresAt: "2026-07-02T22:00:00+00:00",
+    raw: {
+      session_token: "delegated-session-1",
+      delegated_by: "mali-musavir",
+      delegated_client_id: "client-1",
+      session: {
+        user_id: "client-user",
+        expires_at: "2026-07-02T22:00:00+00:00",
+        delegated_by: "mali-musavir",
+        delegated_client_id: "client-1",
+      },
+    },
+  });
+});
+
+test("delegated client portal URL stores the session in a URL fragment only", () => {
+  const session = {
+    sessionToken: "delegated-session-1",
+    userId: "client-user",
+    role: "client_user",
+    storageScope: "tab",
+    delegatedBy: "mali-musavir",
+    delegatedClientId: "client-1",
+    expiresAt: "2026-07-02T22:00:00+00:00",
+  };
+  const url = buildDelegatedClientPortalUrl({
+    origin: "http://localhost:3000",
+    session,
+  });
+
+  assert.match(url, /^http:\/\/localhost:3000\/portal\/mukellef#delegated_session=/);
+  assert.equal(url.includes("?"), false);
+  assert.deepEqual(parseDelegatedSessionHash(new URL(url).hash), session);
+  assert.equal(parseDelegatedSessionHash("#other=value"), null);
 });
 
 test("sessionAuthErrorMessage translates stale backend sessions into a re-login prompt", () => {

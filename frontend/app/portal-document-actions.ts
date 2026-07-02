@@ -125,7 +125,7 @@ export async function addLocalUploadsAction({
 
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const uploadUserId = pickUploadUser({ session, selectedClient });
-  const uploadDisplayName = selectedClient.userLabel || uploadUserId;
+  const uploadDisplayName = session?.delegatedBy || selectedClient.userLabel || uploadUserId;
   try {
     await ensureUploadWorkspace({
       apiBaseUrl,

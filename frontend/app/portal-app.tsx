@@ -32,7 +32,6 @@ import {
 } from "./features/documents";
 import { useExportCommands } from "./features/export";
 import {
-  buildClientCancellationViewModel,
   buildPortalDashboard,
   clientDashboardRows,
   clientUploadTracking,
@@ -48,17 +47,13 @@ import type {
   CancellationRequest,
   CorrectionDraft,
   ExportMode,
-  IntakeCategory,
-  LocalSession,
-  PilotClient,
+  IntakeCategory, LocalSession,
   PilotData,
-  PilotMode,
-  PilotReadinessView,
-  PilotStatus,
-  PortalNavItem,
+  PilotMode, PilotReadinessView, PortalNavItem,
   PortalRouteKey,
 } from "./portal-types";
 import { emptyPilotData } from "./portal-data-mappers";
+import { scopePilotDataForSession } from "./portal-data-scope";
 import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
 import { emptyCorrectionDraft, journalDraftLinesForDocument, useReviewCommands } from "./features/review";
@@ -141,12 +136,13 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });
 
   function applyPilotData(payload: PilotData, nextSource: string) {
-    setData(payload);
-    setSource(workspaceSourceState(payload, nextSource));
+    const scopedPayload = scopePilotDataForSession(payload, session);
+    setData(scopedPayload);
+    setSource(workspaceSourceState(scopedPayload, nextSource));
     setSelectedClientId((current) =>
-      current && payload.clients.some((client) => client.clientId === current)
+      current && scopedPayload.clients.some((client) => client.clientId === current)
         ? current
-        : payload.clients[0]?.clientId ?? "",
+        : scopedPayload.clients[0]?.clientId ?? "",
     );
     setSelectedPeriod(previousCompletedPeriod());
   }
@@ -196,6 +192,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
   const {
     chartUploadStatus, clientDocumentDeleteConfirmed, clientDocumentDeleteStatus, clientReprocessStatus,
+    clientPortalOpenStatus,
     createInviteForSelectedClient,
     createNewClient,
     deleteSelectedClientDocuments,
@@ -206,6 +203,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     newClientTaxCertificateFile,
     newClientTaxCertificateInputKey, newClientTaxCertificateParsePending, newClientTaxCertificateStage,
     parseNewClientChartAccounts,
+    openSelectedClientPortal,
     portalPassword,
     portalPasswordStatus,
     portalUserIdDraft, reprocessSelectedClient,
@@ -413,7 +411,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           session={session}
           showSidebarToggle={showSidebar}
           source={source}
-          title={mode === "client" ? "Mükellef portalı" : mode === "documents" ? "Belge İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
+          subtitle={mode === "client" && session?.delegatedBy ? "Musavir vekaletinde islem yapiliyor" : ""}
+          title={mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Belge İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
         />
 
       {mode === "documents" ? (
@@ -530,6 +529,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         <ClientManagementView
           cancellationRequests={openCancellationRequests}
           chartUploadStatus={chartUploadStatus} clientDocumentDeleteConfirmed={clientDocumentDeleteConfirmed} clientDocumentDeleteStatus={clientDocumentDeleteStatus}
+          clientPortalOpenStatus={clientPortalOpenStatus}
           clientRows={visibleDashboardClientRows}
           clients={filteredClients}
           clientSearch={clientSearch}
@@ -546,6 +546,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onCreateInvite={createInviteForSelectedClient}
           onCreateNewClient={createNewClient}
           onDeleteSelectedDocuments={deleteSelectedClientDocuments} onReprocessSelectedClient={reprocessSelectedClient}
+          onOpenClientPortal={openSelectedClientPortal}
           onResolveCancellation={resolveCancellation}
           onRefreshNaceResearch={refreshNewClientNaceResearch}
           onSetPassword={setPasswordForSelectedClient}

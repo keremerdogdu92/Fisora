@@ -8,6 +8,7 @@ import {
   deleteSelectedClientDocumentsAction,
   emptyNewClientDraft,
   parseNewClientChartAccountsAction,
+  openSelectedClientPortalAction,
   refreshNewClientNaceResearchAction,
   reprocessSelectedClientAction,
   selectNewClientTaxCertificateAction,
@@ -47,6 +48,7 @@ export function useClientManagementCommands({
   const [portalPasswordStatus, setPortalPasswordStatus] = useState("");
   const [clientDocumentDeleteConfirmed, setClientDocumentDeleteConfirmed] = useState(false);
   const [clientDocumentDeleteStatus, setClientDocumentDeleteStatus] = useState("");
+  const [clientPortalOpenStatus, setClientPortalOpenStatus] = useState("");
   const [clientReprocessStatus, setClientReprocessStatus] = useState("");
   const [selectedClientDocumentRefs, setSelectedClientDocumentRefs] = useState<string[]>([]);
 
@@ -55,6 +57,7 @@ export function useClientManagementCommands({
     setSelectedClientDocumentRefs([]);
     setClientDocumentDeleteConfirmed(false);
     setClientDocumentDeleteStatus("");
+    setClientPortalOpenStatus("");
   }, [selectedClient?.clientId, selectedClient?.portalUserId]);
 
   const createNewClient = () => {
@@ -178,6 +181,15 @@ export function useClientManagementCommands({
     });
   };
 
+  const openSelectedClientPortal = () => {
+    void openSelectedClientPortalAction({
+      loginUserId,
+      selectedClient,
+      session,
+      setClientPortalOpenStatus,
+    });
+  };
+
   const deleteSelectedClientDocuments = () => {
     void deleteSelectedClientDocumentsAction({
       deleteConfirmed: clientDocumentDeleteConfirmed,
@@ -195,6 +207,7 @@ export function useClientManagementCommands({
     chartUploadStatus,
     clientDocumentDeleteConfirmed,
     clientDocumentDeleteStatus,
+    clientPortalOpenStatus,
     clientReprocessStatus,
     createInviteForSelectedClient,
     createNewClient,
@@ -210,6 +223,7 @@ export function useClientManagementCommands({
     newClientTaxCertificateParsePending,
     newClientTaxCertificateStage,
     parseNewClientChartAccounts,
+    openSelectedClientPortal,
     portalPassword,
     portalPasswordStatus,
     portalUserIdDraft,

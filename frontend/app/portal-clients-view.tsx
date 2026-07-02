@@ -8,6 +8,7 @@ type ClientManagementTab = "new-client" | "client-list" | "requests";
 export function ClientManagementView({
   cancellationRequests,
   chartUploadStatus,
+  clientPortalOpenStatus,
   clientReprocessStatus,
   clientDocumentDeleteConfirmed,
   clientDocumentDeleteStatus,
@@ -31,6 +32,7 @@ export function ClientManagementView({
   onCreateInvite,
   onCreateNewClient,
   onDeleteSelectedDocuments,
+  onOpenClientPortal,
   onReprocessSelectedClient,
   onResolveCancellation,
   onRefreshNaceResearch,
@@ -51,6 +53,7 @@ export function ClientManagementView({
 }: {
   cancellationRequests: CancellationRequest[];
   chartUploadStatus: string;
+  clientPortalOpenStatus: string;
   clientReprocessStatus: string;
   clientDocumentDeleteConfirmed: boolean;
   clientDocumentDeleteStatus: string;
@@ -74,6 +77,7 @@ export function ClientManagementView({
   onCreateInvite: () => void | Promise<void>;
   onCreateNewClient: () => void | Promise<void>;
   onDeleteSelectedDocuments: () => void | Promise<void>;
+  onOpenClientPortal: () => void | Promise<void>;
   onReprocessSelectedClient: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onRefreshNaceResearch: () => void | Promise<void>;
@@ -201,6 +205,14 @@ export function ClientManagementView({
               <span>Portal erişimi</span>
               <strong>{selectedClient?.portalUserId ?? "-"}</strong>
               <div className="inline-actions">
+                <button
+                  className="primary"
+                  disabled={!hasSelectedClient || !selectedClient?.portalUserId}
+                  onClick={onOpenClientPortal}
+                  type="button"
+                >
+                  Mükellef ekranına git
+                </button>
                 <input
                   aria-label="Mükellef üyelik adı"
                   onChange={(event) => setPortalUserIdDraft(event.target.value)}
@@ -218,6 +230,8 @@ export function ClientManagementView({
                 <button className="primary" onClick={onSetPassword} type="button">Şifre kur</button>
                 <button className="primary" onClick={onUpdatePortalAccess} type="button">Üyelik güncelle</button>
               </div>
+              {!selectedClient?.portalUserId ? <small className="blocked-reason">Önce portal üyeliği oluşturun.</small> : null}
+              {clientPortalOpenStatus ? <p className="decision-status">{clientPortalOpenStatus}</p> : null}
               {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
               {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
             </div>

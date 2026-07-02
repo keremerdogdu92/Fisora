@@ -22,6 +22,7 @@ from app.api.phase0_schemas import (
     AuthPasswordResetConfirmPayload,
     AuthPasswordResetPayload,
     ClientPortalAccessUpdatePayload,
+    DelegatedClientSessionPayload,
     PortalAccessPayload,
     PortalUserPayload,
     TestDataResetPayload,
@@ -139,6 +140,69 @@ def store_auth_login(payload: AuthLoginPayload, response: Response) -> dict[str,
     )
     set_portal_session_cookie(response, session_token.raw_token, ttl_hours=payload.ttl_hours)
     return {"session_token": session_token.raw_token, "session": session}
+
+
+@router.post("/store/auth/delegated-client-session")
+def store_auth_delegated_client_session(
+    payload: DelegatedClientSessionPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    client_id = payload.client_id.strip()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="client_id is required")
+    actor_user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    require_client_access(
+        client_id=client_id,
+        user_id=actor_user_id,
+        allowed_roles=("accountant", "admin"),
+    )
+    store = get_workflow_store()
+    workspace = store.get_workspace(client_id)
+    target_user_id = payload.target_user_id.strip()
+    if not target_user_id:
+        target_user_id = next(
+            (
+                str(user.get("user_id") or "").strip()
+                for user in workspace.get("portal_users", [])
+                if str(user.get("role") or "").strip().lower() == "client_user"
+            ),
+            "",
+        )
+    if not target_user_id:
+        raise HTTPException(status_code=400, detail={"allowed": False, "reason": "client_portal_user_required"})
+    target_access = store.verify_portal_access(client_id=client_id, user_id=target_user_id)
+    if not target_access.get("allowed"):
+        raise HTTPException(status_code=403, detail=target_access)
+    if str(target_access.get("role") or "").strip().lower() != "client_user":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                **target_access,
+                "reason": "target_role_not_allowed",
+                "allowed_roles": ["client_user"],
+            },
+        )
+    session_token = create_session_token()
+    try:
+        expires_at = session_expires_at(ttl_hours=payload.ttl_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session = store.create_auth_session(
+        user_id=target_user_id,
+        token_hash=session_token.token_hash,
+        expires_at=expires_at,
+        session_kind="delegated_client",
+        delegated_by=actor_user_id,
+        delegated_client_id=client_id,
+    )
+    return {
+        "session_token": session_token.raw_token,
+        "session": session,
+        "delegated_by": actor_user_id,
+        "delegated_client_id": client_id,
+    }
 
 
 @router.post("/store/auth/invite")

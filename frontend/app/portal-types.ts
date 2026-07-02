@@ -490,4 +490,7 @@ export type LocalSession = {
   role: "client_user" | "accountant";
   sessionToken?: string;
   expiresAt?: string;
+  storageScope?: "local" | "tab";
+  delegatedBy?: string;
+  delegatedClientId?: string;
 };

@@ -218,6 +218,129 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(revoked_session.status_code, 401)
         self.assertEqual(revoked_session.json()["detail"]["reason"], "session_revoked")
 
+    def test_accountant_can_create_delegated_client_session_without_cookie(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/client",
+                    json={"client_id": "client-1", "title": "Client One", "has_chart_accounts": True},
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "client-user",
+                        "display_name": "Client User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+
+                response = client.post(
+                    "/phase0/store/auth/delegated-client-session",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"client_id": "client-1", "target_user_id": "client-user", "ttl_hours": 12},
+                )
+                payload = response.json()
+                session_token = payload.get("session_token", "")
+                session = client.get(
+                    "/phase0/store/auth/session",
+                    headers={"X-Fisora-Session": session_token},
+                )
+                workspace = client.get(
+                    "/phase0/store/workspace/client-1",
+                    headers={"X-Fisora-Session": session_token},
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("fisora_session=", response.headers.get("set-cookie", ""))
+        self.assertEqual(payload["delegated_by"], "mali-musavir")
+        self.assertEqual(payload["delegated_client_id"], "client-1")
+        self.assertEqual(payload["session"]["user_id"], "client-user")
+        self.assertEqual(payload["session"]["delegated_by"], "mali-musavir")
+        self.assertEqual(payload["session"]["delegated_client_id"], "client-1")
+        self.assertEqual(session.status_code, 200)
+        self.assertEqual(session.json()["delegated_by"], "mali-musavir")
+        self.assertEqual(workspace.status_code, 200)
+        self.assertEqual(workspace.json()["client"]["client_id"], "client-1")
+
+    def test_delegated_client_session_requires_accountant_role_and_client_access(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                for client_id in ("client-1", "client-2"):
+                    client.post(
+                        "/phase0/store/client",
+                        json={"client_id": client_id, "title": client_id, "has_chart_accounts": True},
+                    )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "mali-musavir",
+                        "display_name": "Mali Musavir",
+                        "role": "accountant",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "client-user",
+                        "display_name": "Client User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+
+                client_actor = client.post(
+                    "/phase0/store/auth/delegated-client-session",
+                    headers={"X-Fisora-User-Id": "client-user"},
+                    json={"client_id": "client-1", "target_user_id": "client-user"},
+                )
+                unassigned_client = client.post(
+                    "/phase0/store/auth/delegated-client-session",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"client_id": "client-2", "target_user_id": "client-user"},
+                )
+        finally:
+            if previous is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(client_actor.status_code, 403)
+        self.assertEqual(client_actor.json()["detail"]["reason"], "role_not_allowed")
+        self.assertEqual(unassigned_client.status_code, 403)
+        self.assertEqual(unassigned_client.json()["detail"]["reason"], "client_not_assigned_to_user")
+
     def test_system_readiness_reports_storage_and_auth(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

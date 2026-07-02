@@ -618,11 +618,11 @@ export async function openSelectedClientPortalAction({
   if (!selectedClient) return;
   const targetUserId = selectedClient.portalUserId?.trim();
   if (!targetUserId) {
-    setClientPortalOpenStatus("Portal kullanÄ±cÄ±sÄ± olmayan mÃ¼kellef iÃ§in ekran aÃ§Ä±lamaz.");
+    setClientPortalOpenStatus("Portal kullanıcısı olmayan mükellef için ekran açılamaz.");
     return;
   }
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-  setClientPortalOpenStatus(`${selectedClient.clientName} mÃ¼kellef ekranÄ± aÃ§Ä±lÄ±yor...`);
+  setClientPortalOpenStatus(`${selectedClient.clientName} mükellef ekranı açılıyor...`);
   try {
     const delegatedSession = await createDelegatedClientSession({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
@@ -638,12 +638,12 @@ export async function openSelectedClientPortalAction({
     const popup = typeof window === "undefined" ? null : window.open(url, "_blank", "noopener,noreferrer");
     setClientPortalOpenStatus(
       popup
-        ? `${selectedClient.clientName} mÃ¼kellef ekranÄ± yeni sekmede aÃ§Ä±ldÄ±.`
-        : "Yeni sekme aÃ§Ä±lamadÄ±. TarayÄ±cÄ± popup engelini kontrol edin.",
+        ? `${selectedClient.clientName} mükellef ekranı yeni sekmede açıldı.`
+        : "Yeni sekme açılamadı. Tarayıcı popup engelini kontrol edin.",
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setClientPortalOpenStatus(`MÃ¼kellef ekranÄ± aÃ§Ä±lamadÄ±. ${sessionAuthErrorMessage(message) || message}`);
+    setClientPortalOpenStatus(`Mükellef ekranı açılamadı. ${sessionAuthErrorMessage(message) || message}`);
   }
 }
 

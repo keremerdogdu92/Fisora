@@ -411,7 +411,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           session={session}
           showSidebarToggle={showSidebar}
           source={source}
-          subtitle={mode === "client" && session?.delegatedBy ? "Musavir vekaletinde islem yapiliyor" : ""}
+          subtitle={mode === "client" && session?.delegatedBy ? "Müşavir vekaletinde işlem yapılıyor" : ""}
           title={mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Belge İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
         />
 

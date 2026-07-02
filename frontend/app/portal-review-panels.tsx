@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Info, ReasonCard } from "./portal-shared";
 import type { AccountCandidate, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
+import { resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -53,10 +54,7 @@ function journalDraftLinesForDocument(document: PilotDocument, selectedStatement
 }
 
 function resolvePreviewApiBaseUrl() {
-  if (typeof window === "undefined") return "";
-  const configured = process.env.NEXT_PUBLIC_FISORA_API_BASE_URL?.trim().replace(/\/+$/, "");
-  if (configured) return configured;
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
+  return resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
 }
 
 function formatDraftStatus(status: string) {
@@ -72,7 +70,11 @@ function formatDraftStatus(status: string) {
 }
 
 function parseAmount(value: string) {
-  const normalized = String(value || "0").replace(/\./g, "").replace(",", ".");
+  const raw = String(value || "0").trim().replace(/\s+/g, "");
+  const decimalSeparator = raw.includes(",") ? "," : ".";
+  const normalized = decimalSeparator === ","
+    ? raw.replace(/\./g, "").replace(",", ".")
+    : raw.replace(/\.(?=.*\.)/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }

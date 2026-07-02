@@ -118,6 +118,7 @@ def enrich_learning_event(
     client_id: str,
     decision: dict[str, Any],
     document: dict[str, Any] | None = None,
+    client_profile: dict[str, Any] | None = None,
     prior_learning_events: Iterable[dict[str, Any]] = (),
     policy: LearningPolicy | None = None,
 ) -> dict[str, Any]:
@@ -139,6 +140,21 @@ def enrich_learning_event(
         document_type=document_type,
     )
     enriched = dict(event)
+    selected_account_code = _selected_account_code(result)
+    selected_counterparty_code = _selected_counterparty_code(result)
+    action = str(enriched.get("action") or "")
+    if action in APPROVAL_ACTIONS:
+        if not str(enriched.get("corrected_account_code") or "").strip():
+            enriched["corrected_account_code"] = selected_account_code
+        if not str(enriched.get("corrected_counterparty_code") or "").strip():
+            enriched["corrected_counterparty_code"] = selected_counterparty_code
+    profile = client_profile or {}
+    nace_code = _digits_only(profile.get("nace_code") or result.get("nace_code") or "")
+    activity_tags = _string_list(profile.get("activity_tags") or result.get("activity_tags") or [])
+    vat_rates = _string_list(result.get("vat_rates") or [])
+    counterparty_tax_id = _digits_only(result.get("counterparty_tax_id") or "")
+    counterparty_title = str(result.get("counterparty_title") or result.get("provider_hint") or "").strip()
+    counterparty_identity_key = str(result.get("counterparty_identity_key") or "").strip()
     enriched.update(
         {
             "client_id": client_id,
@@ -151,6 +167,21 @@ def enrich_learning_event(
             "accounting_intent_provider": classification.provider,
             "accounting_intent_keywords": list(classification.keywords),
             "scope_suggestion": classification.scope_suggestion,
+            "nace_code": nace_code,
+            "activity_tags": activity_tags,
+            "vat_rates": vat_rates,
+            "selected_account_code": selected_account_code,
+            "selected_counterparty_code": selected_counterparty_code,
+            "counterparty_tax_id": counterparty_tax_id,
+            "counterparty_title": counterparty_title,
+            "counterparty_identity_key": counterparty_identity_key,
+            "posting_signature": _posting_signature(
+                nace_code=nace_code,
+                category=str(event.get("category") or decision.get("category") or result.get("product_category") or ""),
+                vat_rates=vat_rates,
+                account_code=str(enriched.get("corrected_account_code") or selected_account_code),
+                counterparty_code=str(enriched.get("corrected_counterparty_code") or selected_counterparty_code),
+            ),
             "match_key": _match_key(
                 client_id=client_id,
                 document_type=document_type,
@@ -248,6 +279,14 @@ def _consistent_count(target: dict[str, Any], events: Iterable[dict[str, Any]], 
 def _office_match(target: dict[str, Any], item: dict[str, Any]) -> bool:
     if str(item.get("action") or "") not in APPROVAL_ACTIONS:
         return False
+    target_nace = str(target.get("nace_code") or "")
+    item_nace = str(item.get("nace_code") or "")
+    if target_nace and item_nace and target_nace != item_nace:
+        return False
+    target_vat_rates = set(_string_list(target.get("vat_rates") or []))
+    item_vat_rates = set(_string_list(item.get("vat_rates") or []))
+    if target_vat_rates and item_vat_rates and not target_vat_rates.intersection(item_vat_rates):
+        return False
     if str(item.get("accounting_intent") or "") != str(target.get("accounting_intent") or ""):
         return False
     target_account = str(target.get("corrected_account_code") or "")
@@ -259,6 +298,57 @@ def _office_match(target: dict[str, Any], item: dict[str, Any]) -> bool:
     if target_counterparty and item_counterparty and target_counterparty != item_counterparty and str(item.get("client_id") or "") == str(target.get("client_id") or ""):
         return False
     return True
+
+
+def _selected_account_code(result: dict[str, Any]) -> str:
+    direction = str(result.get("accounting_direction") or "").strip()
+    if direction == "sales":
+        return str(result.get("selected_revenue_account") or result.get("selected_expense_account") or "").strip()
+    return str(result.get("selected_expense_account") or result.get("selected_revenue_account") or "").strip()
+
+
+def _selected_counterparty_code(result: dict[str, Any]) -> str:
+    direction = str(result.get("accounting_direction") or "").strip()
+    if direction == "sales":
+        return str(result.get("selected_customer_account") or result.get("selected_supplier_account") or "").strip()
+    return str(result.get("selected_supplier_account") or result.get("selected_customer_account") or "").strip()
+
+
+def _digits_only(value: object) -> str:
+    return re.sub(r"\D+", "", str(value or ""))
+
+
+def _string_list(value: object) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if str(value or "").strip():
+        return [str(value).strip()]
+    return []
+
+
+def _account_family(code: str) -> str:
+    match = re.match(r"^(\d{3})", str(code or "").strip())
+    return match.group(1) if match else ""
+
+
+def _posting_signature(
+    *,
+    nace_code: str,
+    category: str,
+    vat_rates: Iterable[str],
+    account_code: str,
+    counterparty_code: str,
+) -> str:
+    vat = ",".join(tuple(dict.fromkeys(str(rate).strip() for rate in vat_rates if str(rate).strip())))
+    return "|".join(
+        (
+            f"nace:{nace_code}",
+            f"category:{str(category or '').strip()}",
+            f"vat:{vat}",
+            f"account:{_account_family(account_code)}",
+            f"counterparty:{_account_family(counterparty_code)}",
+        )
+    )
 
 
 def _rule_prompt(

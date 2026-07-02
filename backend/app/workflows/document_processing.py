@@ -129,6 +129,7 @@ def _client_profile(workspace: dict[str, Any]) -> ClientProfile | None:
         activity_description=str(profile.get("activity_description") or ""),
         nace_code=str(profile.get("nace_code") or ""),
         activity_tags=tuple(profile.get("activity_tags") or ()),
+        nace_research_profile=dict(profile.get("nace_research_profile") or {}),
         workplace_addresses=tuple(profile.get("workplace_addresses") or ()),
         has_chart_accounts=bool(profile.get("has_chart_accounts") or chart_accounts.get("account_count")),
     )

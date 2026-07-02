@@ -51,6 +51,7 @@ def client_profile_from_payload(payload: ClientProfilePayload) -> ClientProfile:
         activity_description=payload.activity_description,
         nace_code=payload.nace_code,
         activity_tags=tuple(payload.activity_tags),
+        nace_research_profile=dict(payload.nace_research_profile),
         workplace_addresses=tuple(payload.workplace_addresses),
         has_chart_accounts=payload.has_chart_accounts,
     )

@@ -42,9 +42,10 @@ class AiClassificationPolicy:
 class AiClassificationContext:
     client_activity: str = ""
     nace_code: str = ""
+    nace_research_summary: str = ""
     activity_tags: tuple[str, ...] = ()
     account_candidates: tuple[str, ...] = ()
-    account_candidate_details: tuple[dict[str, str], ...] = ()
+    account_candidate_details: tuple[dict[str, Any], ...] = ()
     counterparty_candidates: tuple[str, ...] = ()
 
 
@@ -64,6 +65,7 @@ class AiClassificationRequest:
             "supplier_hint": self.supplier_hint[: self.max_input_chars].strip(),
             "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
             "nace_code": self.context.nace_code[:64].strip(),
+            "nace_research_summary": self.context.nace_research_summary[: self.max_input_chars].strip(),
             "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
             "account_candidates": list(account_candidates),
             "account_candidate_details": list(self.context.account_candidate_details[:16]),

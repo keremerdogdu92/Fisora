@@ -77,6 +77,7 @@ class ReviewService:
             client_id=payload.client_id,
             decision=payload.decision.model_dump(),
             document=workspace_document(workspace, payload.decision.document_ref),
+            client_profile=(workspace.get("client") or {}).get("profile") or {},
             prior_learning_events=workspace.get("learning_events") or (),
         )
         saved = self.store.save_review_decision(

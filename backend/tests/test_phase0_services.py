@@ -56,6 +56,53 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual([client["client_id"] for client in payload["clients"]], ["client-1"])
         self.assertEqual(payload["auth"]["mode"], "session_or_header")
 
+    def test_workspace_service_researches_and_caches_nace_when_storing_client(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            calls: list[str] = []
+
+            def researcher(nace_code: str) -> dict[str, object]:
+                calls.append(nace_code)
+                return {
+                    "activity_title": "Tütün ürünleri perakende ticareti",
+                    "scope_summary": "Tekel bayi faaliyetinde içecek, gıda ve tütün ürünü alımları stokla ilişkilidir.",
+                    "included_goods_services": ["sigara", "içecek", "gıda"],
+                    "likely_business_expenses": ["kira", "pos komisyonu"],
+                    "unlikely_or_personal_items": ["kişisel giyim"],
+                    "bank_statement_hints": ["tedarikçi ödemesi"],
+                    "activity_tags": ["retail_trade", "food_service"],
+                    "source_urls": ["https://example.test/nace-472601"],
+                }
+
+            service = WorkspaceService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+                request_user_id=request_user_id,
+                nace_researcher=researcher,
+            )
+
+            saved = service.store_client(
+                ClientProfilePayload(
+                    client_id="client-1",
+                    title="Bünyamin Aktar",
+                    tax_id="10649861252",
+                    nace_code="47.26.01",
+                    workplace_addresses=["İstanbul"],
+                    has_chart_accounts=False,
+                )
+            )
+            cached = store.get_nace_research_profile("472601")
+
+        profile = saved["profile"]
+        self.assertEqual(calls, ["472601"])
+        self.assertEqual(profile["activity_tags"], ["retail_trade", "food_service"])
+        self.assertEqual(
+            profile["nace_research_profile"]["scope_summary"],
+            "Tekel bayi faaliyetinde içecek, gıda ve tütün ürünü alımları stokla ilişkilidir.",
+        )
+        self.assertEqual(cached["activity_tags"], ["retail_trade", "food_service"])
+
     def test_document_service_rejects_mock_user_mismatch_before_writing_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")

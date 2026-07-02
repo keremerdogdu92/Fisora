@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import mimetypes
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import os
@@ -9,9 +11,14 @@ import subprocess
 import tempfile
 import time
 import unicodedata
+from collections.abc import Callable
+from urllib import request as urllib_request
 
 from app.domain.business_relevance import ActivityProfile, build_activity_profile
 from app.domain.pdf_invoices import extract_pdf_text
+
+ExternalOcrProvider = Callable[[Path], tuple[str, tuple[str, ...]]]
+OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 
 
 @dataclass(frozen=True)
@@ -747,6 +754,94 @@ def extract_tax_certificate_text(path: Path) -> tuple[str, tuple[str, ...]]:
     return "", ("unsupported_tax_certificate_file_type",)
 
 
+def build_external_ocr_provider_from_env(env: dict[str, str] | None = None) -> ExternalOcrProvider | None:
+    source = env if env is not None else os.environ
+    provider = str(source.get("FISORA_TAX_CERTIFICATE_EXTERNAL_OCR_PROVIDER") or "").strip().lower()
+    if provider not in {"ocr_space", "ocrspace"}:
+        return None
+    api_key = str(source.get("FISORA_OCR_SPACE_API_KEY") or source.get("OCR_SPACE_API_KEY") or "").strip()
+    if not api_key:
+        return None
+    language = str(source.get("FISORA_OCR_SPACE_LANGUAGE") or "tur").strip() or "tur"
+    return ocr_space_external_ocr_provider(
+        api_key=api_key,
+        language=language,
+        api_url=str(source.get("FISORA_OCR_SPACE_API_URL") or OCR_SPACE_API_URL).strip() or OCR_SPACE_API_URL,
+    )
+
+
+def ocr_space_external_ocr_provider(
+    *,
+    api_key: str,
+    language: str = "tur",
+    api_url: str = OCR_SPACE_API_URL,
+    timeout: int = 90,
+) -> ExternalOcrProvider:
+    def provider(path: Path) -> tuple[str, tuple[str, ...]]:
+        try:
+            response_payload = _post_ocr_space(path=path, api_key=api_key, language=language, api_url=api_url, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 - external OCR is best-effort fallback
+            return "", ("external_ocr:ocr_space", f"external_ocr_error:{type(exc).__name__}")
+        if bool(response_payload.get("IsErroredOnProcessing")):
+            errors = response_payload.get("ErrorMessage") or response_payload.get("ErrorDetails") or []
+            if not isinstance(errors, list):
+                errors = [errors]
+            notes = tuple(f"external_ocr_error:{str(error).strip()[:80]}" for error in errors if str(error).strip())
+            return "", ("external_ocr:ocr_space", *(notes or ("external_ocr_error:processing",)))
+        parsed_results = response_payload.get("ParsedResults") or []
+        if not isinstance(parsed_results, list):
+            parsed_results = []
+        text = "\n".join(
+            str(result.get("ParsedText") or "").strip()
+            for result in parsed_results
+            if isinstance(result, dict) and str(result.get("ParsedText") or "").strip()
+        )
+        return text, ("external_ocr:ocr_space", f"external_ocr_pages:{len(parsed_results)}")
+
+    return provider
+
+
+def _post_ocr_space(
+    *,
+    path: Path,
+    api_key: str,
+    language: str,
+    api_url: str,
+    timeout: int,
+) -> dict[str, object]:
+    boundary = f"----fisora-ocr-{int(time.time() * 1000)}"
+    mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    fields = {
+        "apikey": api_key,
+        "language": language,
+        "isOverlayRequired": "false",
+        "scale": "true",
+        "OCREngine": "2",
+    }
+    body_parts: list[bytes] = []
+    for name, value in fields.items():
+        body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
+        body_parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode("utf-8"))
+    body_parts.append(f"--{boundary}\r\n".encode("utf-8"))
+    body_parts.append(
+        (
+            f'Content-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
+            f"Content-Type: {mime_type}\r\n\r\n"
+        ).encode("utf-8")
+    )
+    body_parts.append(path.read_bytes())
+    body_parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+    payload = b"".join(body_parts)
+    request = urllib_request.Request(
+        api_url,
+        data=payload,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    with urllib_request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - URL is configured deployment env
+        return json.loads(response.read().decode("utf-8", errors="replace"))
+
+
 def merge_tax_certificate_extractions(primary: TaxCertificateExtraction, supplemental: TaxCertificateExtraction) -> TaxCertificateExtraction:
     tckn = primary.tckn or supplemental.tckn
     vkn = primary.vkn or supplemental.vkn
@@ -812,16 +907,18 @@ def _selected_psm(notes: tuple[str, ...]) -> str:
     return ""
 
 
-def parse_tax_certificate_file(path: Path) -> TaxCertificateExtraction:
+def parse_tax_certificate_file(path: Path, external_ocr_provider: ExternalOcrProvider | None = None) -> TaxCertificateExtraction:
     total_start = time.perf_counter()
     metrics: dict[str, object] = {
         "used_text_layer": False,
         "used_ocr": False,
+        "used_external_ocr": False,
         "selected_psm": "",
         "ocr_attempts": 0,
         "text_layer_ms": 0,
         "pdf_render_ms": 0,
         "ocr_ms": 0,
+        "external_ocr_ms": 0,
         "parse_ms": 0,
         "total_ms": 0,
     }
@@ -878,6 +975,18 @@ def parse_tax_certificate_file(path: Path) -> TaxCertificateExtraction:
                 metrics["used_ocr"] = True
                 metrics["selected_psm"] = _selected_psm(ocr_notes)
                 metrics["ocr_attempts"] = _ocr_attempt_count(ocr_notes)
+
+    resolved_external_ocr_provider = external_ocr_provider or build_external_ocr_provider_from_env()
+    if resolved_external_ocr_provider and _should_run_pdf_ocr_fallback(extraction):
+        external_start = time.perf_counter()
+        external_text, external_notes = resolved_external_ocr_provider(path)
+        metrics["external_ocr_ms"] = _duration_ms(external_start)
+        if external_text.strip():
+            supplemental_start = time.perf_counter()
+            supplemental = parse_tax_certificate_text(external_text, extraction_notes=external_notes)
+            metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
+            extraction = merge_tax_certificate_extractions(extraction, supplemental)
+            metrics["used_external_ocr"] = True
 
     metrics["total_ms"] = _duration_ms(total_start)
     return TaxCertificateExtraction(

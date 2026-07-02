@@ -63,6 +63,37 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
   - Research bir belge icin sinirli calisir ve ayni marka/model/global ifade tekrar geldiyse cache sonucu kullanilir.
   - Research profili muhasebe etkisi guvenini de tasir; dusuk guven export'u acmaz.
 
+## AI-First Muhasebe Motoru Stratejisi
+
+- Urun hedefi AI'i kismak degil, soguk baslangicta muhasebe motorunu
+  hizlandirmaktir:
+  - AI fatura satirini, mukellef NACE/faaliyet baglamini, hesap plani
+    adlarini, cari adaylarini ve gerekirse research sonucunu birlikte okuyup
+    export-ready kalitesine yakin fis taslagi hazirlamalidir.
+  - Baslangicta review kapisi, mustavire isi yeniden yaptirmak icin degil,
+    AI/motor onerilerini hizlica gormesi, duzeltmesi ve guveni artirmasi icin
+    vardir.
+  - Onaylanan veya duzeltilen fisler learning event olur; tekrar eden benzer
+    kalemlerde motor ayni yorumu AI/research'e tekrar sormadan kullanmaya
+    calisir.
+  - Maliyet ve hiz hedefi: AI/research ilk anlamlandirma ve belirsiz/karmasik
+    kalemler icin kullanilir; guvenilir ogrenilmis kural, chart semantic map
+    veya cache olustuktan sonra ayni soruyu tekrar sormaz.
+- AI'in gorevi sadece "belirsizse sor" degildir:
+  - Yeni mukellef veya zayif gecmis veride AI aktif yardimci katman olarak
+    calisir.
+  - Fatura satirindan urun/hizmet anlami cikarmak, NACE/faaliyet ile
+    iliskisini yorumlamak, hesap planindaki uygun adaylari siralamak ve
+    cari/hizmet/stock niyetini aciklamak AI'in ana isidir.
+  - Deterministik motor tutar, KDV, borc/alacak dengesi, hesap ailesi
+    guardrail'i ve export kapisini kontrol eder; AI bu kesin kontrolleri
+    ezemez.
+- Beklenen kullanici deneyimi:
+  - Mustavir bos form doldurmaz; mumkun oldugunca dolu fis taslagi gorur.
+  - Review ekraninda "bu neden 153/600/191/320 oldu" aciklamasi gorunur.
+  - Mustavir onayladikca ayni tip kararlar daha guvenli ve daha az AI
+    maliyetli hale gelir.
+
 ## 2026-06-29 Hesap Plani ve AI Karar Kapisi
 
 - Kesin muhasebe kurallari AI tarafindan ezilmeyecek:
@@ -73,23 +104,33 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
   - Pil, kalip ve montaj kit alislari stok tarafinda kalir ve `153` alt hesap adaylari icinden en uygun detay hesaba iner.
   - Kargo/nakliye satirlari stok maliyetine yazilmaz; `760/770/740` icindeki kargo gideri detay hesabi aranir.
   - Arac kiralama, HGS ve benzeri arac giderleri genel kira hesabina sapmadan ilgili `760` alt hesabina inmeye calisir.
-- AI'in devreye girme sirasi:
+- AI ve motorun devreye girme sirasi:
   - Once kanuni/kesin kural.
   - Sonra cari eslesme ve VKN/TCKN kurali.
   - Sonra satir siniflandirma ve hesap plani aday skoru.
-  - AI sadece belirsizlik varsa devreye girer: dusuk siniflandirma guveni, birden fazla makul hesap adayi, zayif faaliyet eslesmesi, `hizmet bedeli` gibi belirsiz satirlar.
-  - AI da dusuk guven verirse veya hesap ailesiyle celisirse belge mustavir incelemesinde kalir.
+  - Yeni mukellef, yeni urun ailesi, zayif gecmis veri, NACE/faaliyet
+    belirsizligi, birden fazla makul hesap adayi veya aciklamasi zayif satirda
+    AI aktif olarak anlamlandirma yapar.
+  - Daha once onaylanmis kural, chart semantic map veya research cache yeterli
+    guven veriyorsa AI/research tekrar cagrilmaz.
+  - AI dusuk guven verirse veya hesap ailesiyle celisirse taslak yine
+    uretilir; export kapisi review'de kalir ve mustavir kararindan ogrenilir.
 - AI sonucunun sinirlari:
   - AI yeni hesap kodu uydurmayacak; sadece mevcut hesap/cari adaylari icinden sececek.
   - AI stok/gider/KKEG gibi hesap ailesi korumasini ezemeyecek. Ornegin stok olmasi gereken pil/kalip icin `770` onerirse onerisi reddedilecek.
   - `>=85` guven: kesin kurallara ve hesap ailesine aykirilik yoksa taslaga uygulanabilir.
   - `70-84` guven: ekranda onerilir, mustavir onayi gerekir.
   - `<70` guven: otomatik uygulanmaz, inceleme gerekir.
-- Marka/model ve internet arastirmasi karari:
-  - Fatura satirinda aciklama yok, sadece marka/model varsa once statik marka/model kurallari ve AI siniflandirma calisir.
-  - Bunlar urunun ne oldugunu anlayamazsa veya dusuk guven uretirse research katmani devreye girer.
+- Marka/model, NACE ve internet arastirmasi karari:
+  - Fatura satirinda marka/model, teknik urun, sektor terimi veya zayif aciklama
+    varsa AI once urun/hizmet anlamini cikarmaya calisir.
+  - Mukellefin NACE/faaliyet aciklamasi eksik veya genel kaldiginda research
+    katmani faaliyet baglamini zenginlestirir.
+  - AI urunu tanimlayamazsa, muhasebe etkisini dusuk guvenle aciklarsa veya
+    yeni bir kategori gorurse research katmani devreye girer.
   - Pilot research provider Tavily'dir; OpenAI web research sonraki iterasyon olarak kodda korunur.
-  - Research sadece belirsiz faturalarda otomatik calisir; bilinen/yuksek guvenli satirlar tekrar internet arastirmasi yapmaz.
+  - Research sadece ayni bilgi daha once guvenle cache'lenmemisse calisir;
+    bilinen/yuksek guvenli satirlar tekrar internet arastirmasi yapmaz.
   - Research ciktisi `marka`, `urun kategorisi`, `muhasebe etkisi`, `research_confidence` ve `accounting_impact_confidence` olarak ayrilacak.
   - Research sonucu da kanuni kurallari ve hesap ailesi korumasini ezemez; dusuk kaynak veya dusuk muhasebe etkisi guveni review sebebidir.
 - NACE arastirmasi karari:

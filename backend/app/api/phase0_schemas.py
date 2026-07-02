@@ -38,6 +38,7 @@ class ClientProfilePayload(BaseModel):
     nace_code: str = ""
     activity_tags: list[str] = Field(default_factory=list)
     activity_profile: dict[str, object] = Field(default_factory=dict)
+    nace_research_profile: dict[str, object] = Field(default_factory=dict)
     workplace_addresses: list[str] = Field(default_factory=list)
     has_chart_accounts: bool = False
 

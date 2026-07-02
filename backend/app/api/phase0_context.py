@@ -17,6 +17,7 @@ from app.api.phase0_dependencies import (
 )
 from app.api.phase0_uploads import save_uploaded_document_with_job as _save_uploaded_document_with_job
 from app.persistence.store_factory import build_workflow_store
+from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
@@ -56,13 +57,31 @@ def get_workflow_store():
 
 
 def get_workspace_service() -> WorkspaceService:
+    store = get_workflow_store()
     return WorkspaceService(
-        store=get_workflow_store(),
+        store=store,
         document_storage_path=default_document_storage_path(),
         record_operation_event=record_operation_event,
         require_client_access=require_client_access,
         request_user_id=request_user_id,
+        nace_researcher=build_nace_researcher(store),
     )
+
+
+def build_nace_researcher(store):
+    runtime = build_research_runtime_from_env(os.environ)
+    if not runtime:
+        return None
+
+    def researcher(nace_code: str) -> dict[str, object]:
+        harness = ResearchHarness(
+            store=store,
+            provider=runtime.get("provider"),  # type: ignore[arg-type]
+            policy=runtime.get("policy"),  # type: ignore[arg-type]
+        )
+        return harness.research_nace(nace_code=nace_code)
+
+    return researcher
 
 
 def get_document_service() -> DocumentService:

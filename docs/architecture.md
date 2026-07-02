@@ -152,15 +152,23 @@ belge yuklendi
 ## AI Provider Yon
 
 Kendi sunucuda AI modeli calistirma baslangic kapsamindan cikarildi. AI,
-karar verici muhasebe motoru degil, dis API/batch uzerinden calisan yardimci
-siniflandirma katmani olarak ele alinacak.
+tek basina nihai kayit atan motor degil; soguk baslangicta fatura satiri,
+NACE/faaliyet, hesap plani ve cari adaylarini anlamlandiran ana hizlandirici
+katman olarak ele alinacak. Deterministik muhasebe motoru tutar, KDV,
+borc/alacak dengesi, hesap ailesi guardrail'i ve export kapisini kontrol eder.
 
 AI API'ye uygun isler:
 
 - Marka/model satirindan urun kategorisi adayi cikarma.
+- Yeni veya zayif gecmisli mukellefte fatura kalemini NACE/faaliyet baglamiyla
+  yorumlama.
+- Hesap planindaki mevcut hesap adaylarini anlamlandirip siralama.
+- Cari adayi, tedarikci niyeti ve stok/gider/satis niyetini gerekcelendirme.
 - Belirsiz fatura kalemine kisa uygunluk gerekcesi yazma.
 - Tedarikci/aciklama metnini normalize etme.
 - Banka aciklamasini genel kategoriye ayirma.
+- Research gerekiyorsa arama sorgusunu daraltma ve research sonucunu muhasebe
+  etkisine cevirmeye yardim etme.
 - Pilot batch benchmark icin provider cevabini kategori/guven/gerekce JSON
   schema'siyla olcmek.
 
@@ -171,8 +179,11 @@ AI API'ye uygun olmayan isler:
 - KDV, tevkifat, istisna ve iade gibi riskli kararlar.
 - Zirve export formatinin kesinligi.
 
-Ilk politika: statik kural eslesirse AI cagrilmaz. Belirsiz kalemde dusuk
-tokenli API sorgusu denenir; guven dusukse sonuc mustavir review'a duser.
+Ilk politika: yeni mukellef, yeni urun ailesi, eksik NACE/faaliyet veya zayif
+gecmis veride AI aktif anlamlandirma katmanidir. Daha once mustavir tarafindan
+onaylanmis ogrenme kurali, chart semantic map veya research cache yeterli
+guven veriyorsa AI tekrar cagrilmaz. Guven dusukse bos sonuc donmek yerine
+dolu fis taslagi uretilir; export kapisi review'de kalir.
 
 Soguk baslangic politikasi: gecmis veri yoksa AI taslak hazirlayabilir, ancak
 onerilen hesap yalnizca mevcut hesap plani icinden secilir ve export kapisi

@@ -7,16 +7,19 @@ yokken, tamamen bos bir review ekrani gostermemelidir. Sistem AI destekli
 taslak modu ile faturadan muhasebe fisi adayi, kategori, gerekce, guven skoru
 ve risk bayragi uretir.
 
-Bu karar "AI kesin kayit atar" anlamina gelmez. AI ilk taslagi hazirlar;
-deterministik motor tutar, KDV, borc/alacak dengesi, hesap plani ve export
-kapisini kontrol eder; mustavir son karari verir.
+Bu kararin urun hedefi AI'i kismak degildir. AI, motorun aylarca ezberleyerek
+ogrenebilecegi fatura satiri, NACE/faaliyet, hesap plani ve cari anlamlarini
+baslangicta hizla cozer. Deterministik motor tutar, KDV, borc/alacak dengesi,
+hesap plani guardrail'i ve export kapisini kontrol eder; mustavir baslarda
+son karari verir, verdigi kararlar motorun tekrar AI/research'e sormadan
+ogrenmesine yarar.
 
 ## Calisma Modlari
 
 | Mod | Ne zaman kullanilir? | Export davranisi |
 |---|---|---|
 | `conservative` | AI kapali veya guven dusuk | Tum kayitlar review ister |
-| `ai_assisted_draft` | Gecmis veri az, demo/pilot veya yeni mukellef | AI taslak hazirlar, mustavir onayi olmadan export yok |
+| `ai_assisted_draft` | Gecmis veri az, demo/pilot veya yeni mukellef | AI export-ready kalitesine yakin taslak hazirlar, baslangicta mustavir onayi olmadan export yok |
 | `controlled_automation` | En az 3 tutarli onay ve mustavir politikasi var | Dusuk riskli kayitlar export adayi olabilir |
 
 Ilk demo ve ilk canli surum icin varsayilan mod `ai_assisted_draft` olmalidir.
@@ -76,10 +79,11 @@ AI'a verilen baglam:
 
 - Ham PDF/XML/ekstre dosyasi degil, parser'in cikardigi sinirli metin.
 - Mukellef faaliyet/NACE aciklamasi veya kisa faaliyet ozeti.
-- Mevcut hesap plani adaylari.
-- Cari adaylari.
+- Hesap planindan cikarilmis semantic roller ve mevcut hesap adaylari.
+- Cari adaylari, VKN/TCKN/IBAN sinyalleri ve title/token eslesme kanitlari.
 - Belge tipi, tutar/KDV sinyali ve risk bayraklari.
 - Varsa gecmis mustavir kararlarindan turetilen ozet sinyal.
+- Varsa research cache veya NACE/marka research ozeti.
 
 Kapali server demo env karari:
 
@@ -99,7 +103,7 @@ ayni env yapisi `FISORA_AI_PROVIDER=openai` ve `OPENAI_API_KEY` ile calisir.
 AI su islemleri yapamaz:
 
 - Yeni detay hesap kodu uyduramaz.
-- Gider yazilir/yazilmaz kararini kesinlestiremez.
+- Gider yazilir/yazilmaz kararini mustavir onayi olmadan kesinlestiremez.
 - Mustavir onayi olmadan export'a izin veremez.
 - KDV, tevkifat, iade veya istisna gibi riskli kararlar icin son karar veremez.
 
@@ -140,6 +144,20 @@ Asagidaki durumlarda export kapali kalir:
 - AI confidence dusuk.
 - Belge parse sonucu eksik.
 
+## AI-First Ogrenme Dongusu
+
+1. Parser fatura taraflarini, satirlarini, tutar/KDV sinyallerini ve hesap
+   planindaki secilebilir adaylari cikarir.
+2. AI satir anlamini, faaliyet/NACE iliskisini, cari niyetini ve uygun hesap
+   adaylarini gerekcelendirir; gerekirse research sorgusu olusturur.
+3. Research sonucu urun/hizmet anlamini veya NACE/faaliyet baglamini
+   guclendirir ve cache'e yazilir.
+4. Motor mevcut hesap plani ve guardrail'lerle dengeli fis taslagi uretir.
+5. Mustavir taslagi onaylar veya duzeltir.
+6. Onaylanan karar learning event olur; ayni kalem/cari/niyet tekrar geldiginde
+   motor once ogrenilmis kural, semantic map ve cache'i kullanir; gerekmedikce
+   AI/research'e tekrar sormaz.
+
 ## Demo ve Pilot Stratejisi
 
 Mali mustavire anlatilacak gercekci ifade:
@@ -162,11 +180,15 @@ Gercek fatura ile demo yapilacaksa veri akisi:
 ## Basari Kriterleri
 
 - Gecmis veri olmayan mukellefte bile sistem makul bir fis taslagi uretebilir.
+- AI fatura satiri, NACE/faaliyet, hesap plani ve cari adaylarini birlikte
+  kullanarak export-ready kalitesine yakin taslak uretebilir.
 - KDV, matrah ve toplam tutar deterministic motorla dogru tasinir.
-- AI belirsiz kalemi gerekce ve riskle review'a dusurur.
+- AI belirsiz kalemi bos birakmaz; gerekce, risk ve en iyi adaylarla review'a
+  tasir.
 - AI sadece mevcut hesap planindan hesap onerebilir.
 - Mustavir duzeltmesi learning event olarak saklanir.
-- Ayni karar en az 3 kez tutarli onaylaninca otomasyon adayi olur.
+- Onaylanan kararlar tekrar eden benzer belgelerde AI/research maliyetini
+  azaltir.
 - Export paketine AI'in tek basina hazirladigi riskli kayit girmez.
 
 ## Hemen Yapilacak Hazirliklar

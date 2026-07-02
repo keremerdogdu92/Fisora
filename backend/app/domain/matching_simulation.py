@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from app.domain.account_guardrails import account_allowed_for_treatment
 from app.domain.ai_classification import AiClassificationContext, ProductClassifier
@@ -26,6 +26,7 @@ from app.domain.chart_accounts import (
     select_revenue_account,
     select_usage_account,
     select_vat_account,
+    semantic_roles_for_account,
     validate_vat_accounts,
 )
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
@@ -66,7 +67,7 @@ class AccountSelection:
     next_supplier_account: str = ""
     stock_account: str = "153.01"
     non_deductible_account: str = "689.01"
-    account_candidates: dict[str, tuple[dict[str, str], ...]] = field(default_factory=dict)
+    account_candidates: dict[str, tuple[dict[str, Any], ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -142,11 +143,16 @@ class SimulatedInvoiceResult:
     direction_evidence: tuple[str, ...] = ()
     direction_conflict: dict[str, object] = field(default_factory=dict)
     accountant_explanation_tr: str = ""
-    account_candidates: dict[str, tuple[dict[str, str], ...]] | None = None
+    account_candidates: dict[str, tuple[dict[str, Any], ...]] | None = None
     ai_gate_reason: str = ""
     ai_product_identity: str = ""
     ai_research_requested: bool = False
     ai_research_query: str = ""
+    client_nace_code: str = ""
+    client_activity_tags: tuple[str, ...] = ()
+    counterparty_tax_id: str = ""
+    counterparty_title: str = ""
+    counterparty_identity_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -189,15 +195,17 @@ def _account_with_name_hint(accounts: list[ChartAccount], prefix: str, hints: tu
     return None
 
 
-def _candidate_payload(account: ChartAccount, reason: str) -> dict[str, str]:
+def _candidate_payload(account: ChartAccount, reason: str) -> dict[str, Any]:
     return {
         "code": account.normalized_account_code,
         "name": account.account_name,
         "reason": reason,
+        "semantic_roles": semantic_roles_for_account(account),
+        "vat_rate": account.vat_rate_hint,
     }
 
 
-def _candidate_group(accounts: list[ChartAccount], prefixes: tuple[str, ...], reason: str) -> tuple[dict[str, str], ...]:
+def _candidate_group(accounts: list[ChartAccount], prefixes: tuple[str, ...], reason: str) -> tuple[dict[str, Any], ...]:
     return tuple(
         _candidate_payload(account, reason)
         for account in accounts
@@ -205,7 +213,7 @@ def _candidate_group(accounts: list[ChartAccount], prefixes: tuple[str, ...], re
     )
 
 
-def _candidate_group_with_hint(accounts: list[ChartAccount], prefix: str, hints: tuple[str, ...], reason: str) -> tuple[dict[str, str], ...]:
+def _candidate_group_with_hint(accounts: list[ChartAccount], prefix: str, hints: tuple[str, ...], reason: str) -> tuple[dict[str, Any], ...]:
     return tuple(
         _candidate_payload(account, reason)
         for account in accounts
@@ -304,7 +312,7 @@ def _single_vat_rate(invoice: ParsedInvoice) -> Decimal:
 
 
 def _vat_account_for_rate(
-    candidates: tuple[dict[str, str], ...] | None,
+    candidates: tuple[dict[str, Any], ...] | None,
     *,
     rate: Decimal,
     fallback: str,
@@ -335,7 +343,7 @@ def _sales_vat_account_for_rate(selection: AccountSelection, rate: Decimal) -> s
     return _vat_account_for_rate(selection.account_candidates.get("sales_vat"), rate=rate, fallback=selection.sales_vat_account)
 
 
-def _candidate_accounts_as_chart_accounts(candidates: tuple[dict[str, str], ...] | None) -> list[ChartAccount]:
+def _candidate_accounts_as_chart_accounts(candidates: tuple[dict[str, Any], ...] | None) -> list[ChartAccount]:
     return [
         ChartAccount(
             raw_account_code=str(candidate.get("code") or ""),
@@ -567,6 +575,28 @@ def _counterparty_creation_suggestion(
     counterparty_tax_id = _counterparty_tax_identifier(invoice, client_profile, direction=direction)
     suggested = f"320.{counterparty_tax_id}" if counterparty_tax_id else selection.next_supplier_account or selection.supplier_account
     return suggested, {"type": "supplier", "base_account": "320", "suggested_code": suggested, "always_suggest_new": True}
+
+
+def _counterparty_title(
+    invoice: ParsedInvoice,
+    *,
+    direction: str,
+) -> str:
+    if direction == "sales":
+        return str(getattr(invoice, "recipient_title", "") or "").strip()
+    return str(getattr(invoice, "issuer_title", "") or invoice.provider_hint or "").strip()
+
+
+def _counterparty_identity_key(
+    *,
+    direction: str,
+    tax_id: str,
+    title: str,
+) -> str:
+    if tax_id:
+        return f"{direction}|tax:{tax_id}"
+    normalized_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return f"{direction}|title:{normalized_title}" if normalized_title else ""
 
 
 def _counterparty_account_description(
@@ -1044,6 +1074,8 @@ def _ai_context(
             "family": str(candidate.get("code") or "").strip().split(".")[0],
             "group": str(group),
             "reason": str(candidate.get("reason") or "").strip(),
+            "semantic_roles": list(candidate.get("semantic_roles") or []),
+            "vat_rate": str(candidate.get("vat_rate") or "").strip(),
         }
         for group, candidates in (selection.account_candidates or {}).items()
         for candidate in candidates
@@ -1062,6 +1094,7 @@ def _ai_context(
     return AiClassificationContext(
         client_activity=client_profile.activity_description if client_profile else "",
         nace_code=client_profile.nace_code if client_profile else "",
+        nace_research_summary=str((client_profile.nace_research_profile if client_profile else {}).get("scope_summary") or ""),
         activity_tags=client_profile.activity_tags if client_profile else (),
         account_candidates=account_candidates,
         account_candidate_details=account_candidate_details,
@@ -1257,6 +1290,13 @@ def simulate_invoice(
         selection,
         invoice,
         client_profile,
+    )
+    counterparty_tax_id = _counterparty_tax_identifier(invoice, client_profile, direction=direction)
+    counterparty_title = _counterparty_title(invoice, direction=direction)
+    counterparty_identity_key = _counterparty_identity_key(
+        direction=direction,
+        tax_id=counterparty_tax_id,
+        title=counterparty_title,
     )
     supplier_account = _selected_purchase_supplier_account(
         selection=selection,
@@ -1719,6 +1759,11 @@ def simulate_invoice(
         ai_product_identity=ai_product_identity,
         ai_research_requested=ai_research_requested,
         ai_research_query=ai_research_query,
+        client_nace_code=client_profile.nace_code if client_profile else "",
+        client_activity_tags=client_profile.activity_tags if client_profile else (),
+        counterparty_tax_id=counterparty_tax_id,
+        counterparty_title=counterparty_title,
+        counterparty_identity_key=counterparty_identity_key,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",

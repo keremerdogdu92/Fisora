@@ -23,6 +23,13 @@ class LearnedPostingRule:
     accounting_intent: str = ""
     accounting_intent_confidence: int = 0
     normalized_terms: tuple[str, ...] = ()
+    nace_code: str = ""
+    activity_tags: tuple[str, ...] = ()
+    vat_rates: tuple[str, ...] = ()
+    posting_signature: str = ""
+    counterparty_tax_id: str = ""
+    counterparty_title: str = ""
+    counterparty_identity_key: str = ""
     source_summary: str = ""
     rule_prompt: dict[str, object] | None = None
     natural_language_rule_candidate: dict[str, object] | None = None
@@ -52,6 +59,13 @@ def rule_from_event_payload(event: dict[str, object]) -> LearnedPostingRule:
         accounting_intent=str(event.get("accounting_intent") or ""),
         accounting_intent_confidence=int(event.get("accounting_intent_confidence") or 0),
         normalized_terms=tuple(str(term) for term in event.get("normalized_terms") or () if str(term).strip()),
+        nace_code="".join(ch for ch in str(event.get("nace_code") or "") if ch.isdigit()),
+        activity_tags=tuple(str(tag).strip() for tag in event.get("activity_tags") or () if str(tag).strip()),
+        vat_rates=tuple(str(rate).strip() for rate in event.get("vat_rates") or () if str(rate).strip()),
+        posting_signature=str(event.get("posting_signature") or ""),
+        counterparty_tax_id="".join(ch for ch in str(event.get("counterparty_tax_id") or "") if ch.isdigit()),
+        counterparty_title=str(event.get("counterparty_title") or ""),
+        counterparty_identity_key=str(event.get("counterparty_identity_key") or ""),
         source_summary=str(event.get("learning_rule_source_summary") or ""),
         rule_prompt=event.get("rule_prompt") if isinstance(event.get("rule_prompt"), dict) else None,
         natural_language_rule_candidate=(
@@ -68,14 +82,21 @@ def apply_learning_rules(
     if rule is None:
         return result
 
-    draft_lines = tuple(_apply_rule_to_line(line, result, rule) for line in result.draft_lines)
+    can_apply_counterparty = _can_apply_counterparty_code(result, rule)
+    effective_rule = rule if can_apply_counterparty else replace(rule, corrected_counterparty_code="")
+    trusted_export = _trusted_export_rule(result, rule)
+    draft_lines = tuple(_apply_rule_to_line(line, result, effective_rule) for line in result.draft_lines)
     evidence = tuple(dict.fromkeys((*result.business_relevance_evidence, LEARNING_APPLIED_EVIDENCE)))
-    review_reasons = tuple(dict.fromkeys((*result.review_reason_codes, "learning_rule_review_required")))
+    review_reasons = (
+        result.review_reason_codes
+        if trusted_export
+        else tuple(dict.fromkeys((*result.review_reason_codes, "learning_rule_review_required")))
+    )
     reason = rule.source_summary or rule.reason
     return replace(
         result,
         selected_expense_account=rule.corrected_account_code or result.selected_expense_account,
-        selected_supplier_account=rule.corrected_counterparty_code or result.selected_supplier_account,
+        selected_supplier_account=effective_rule.corrected_counterparty_code or result.selected_supplier_account,
         business_relevance_evidence=evidence,
         review_reason_codes=review_reasons,
         learning_rule_applied=True,
@@ -85,9 +106,13 @@ def apply_learning_rules(
         accounting_intent=rule.accounting_intent,
         accounting_intent_confidence=rule.accounting_intent_confidence,
         rule_prompt=rule.rule_prompt or {},
-        simulated_status="review_required",
-        export_status="review_required",
-        export_gate_reason=reason or "Onceki musavir karari benzerlik nedeniyle review gerektiriyor.",
+        simulated_status=result.simulated_status if trusted_export else "review_required",
+        export_status=result.export_status if trusted_export else "review_required",
+        export_gate_reason=(
+            result.export_gate_reason
+            if trusted_export
+            else reason or "Onceki musavir karari benzerlik nedeniyle review gerektiriyor."
+        ),
         draft_lines=draft_lines,
     )
 
@@ -105,6 +130,8 @@ def _select_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingR
         ):
             continue
         if not rule.corrected_account_code and not rule.corrected_counterparty_code:
+            continue
+        if _has_counterparty_scope(rule) and not _counterparty_scope_matches(result, rule):
             continue
         score = _rule_score(result, rule)
         if score >= 60:
@@ -136,9 +163,50 @@ def _rule_score(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> int
             score += 40
     overlap = len(set(rule.normalized_terms) & haystack_terms)
     score += min(overlap * 15, 45)
+    result_nace = "".join(ch for ch in str(result.client_nace_code or "") if ch.isdigit())
+    if rule.nace_code and result_nace:
+        score += 30 if rule.nace_code == result_nace else -30
+    result_vat_rates = {str(rate).strip() for rate in result.vat_rates if str(rate).strip()}
+    rule_vat_rates = {str(rate).strip() for rate in rule.vat_rates if str(rate).strip()}
+    if rule_vat_rates and result_vat_rates:
+        score += 20 if rule_vat_rates.intersection(result_vat_rates) else -20
+    tag_overlap = set(rule.activity_tags).intersection(result.client_activity_tags)
+    score += min(len(tag_overlap) * 15, 30)
     if rule.corrected_account_code and rule.corrected_account_code[:3] == result.selected_expense_account[:3]:
         score += 10
+    if _has_counterparty_scope(rule) and _counterparty_scope_matches(result, rule):
+        score += 35
     return score
+
+
+def _has_counterparty_scope(rule: LearnedPostingRule) -> bool:
+    return bool(rule.counterparty_identity_key or rule.counterparty_tax_id or rule.counterparty_title.strip())
+
+
+def _counterparty_scope_matches(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> bool:
+    if rule.counterparty_identity_key and result.counterparty_identity_key:
+        return rule.counterparty_identity_key == result.counterparty_identity_key
+    if rule.counterparty_tax_id and result.counterparty_tax_id:
+        return rule.counterparty_tax_id == result.counterparty_tax_id
+    if rule.counterparty_title.strip() and result.counterparty_title.strip():
+        return normalize_text(rule.counterparty_title) == normalize_text(result.counterparty_title)
+    return False
+
+
+def _can_apply_counterparty_code(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> bool:
+    return bool(rule.corrected_counterparty_code and _has_counterparty_scope(rule) and _counterparty_scope_matches(result, rule))
+
+
+def _trusted_export_rule(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> bool:
+    if result.export_status != "export_ready":
+        return False
+    if not result.is_balanced:
+        return False
+    if not (rule.automation_candidate or rule.action == "suggest_for_similar"):
+        return False
+    if not (_has_counterparty_scope(rule) and _counterparty_scope_matches(result, rule)):
+        return False
+    return _rule_score(result, rule) >= 90
 
 
 def _apply_rule_to_line(

@@ -1321,6 +1321,128 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("AI kararı", result["ai_explanation_tr"])
         self.assertIn("fake_llm", result["ai_explanation_tr"])
 
+    def test_processing_worker_sends_nace_research_and_chart_semantics_to_ai(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "rexton.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>ABC202600000001</cbc:ID>
+  <cbc:IssueDate>2026-05-03</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Medikal Tedarik</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>ZX Sonic Pro 9 receiver</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>1200.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1200.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>
+""",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Isitme Merkezi",
+                    "tax_id": "1111111111",
+                    "nace_code": "47.74.01",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.save_nace_research_profile(
+                nace_code="477401",
+                profile={
+                    "activity_title": "Tibbi ve ortopedik urunlerin perakende ticareti",
+                    "scope_summary": "Isitme cihazi satis faaliyetini kapsar.",
+                    "included_goods_services": ["isitme cihazi", "pil", "kalip"],
+                    "likely_business_expenses": ["medikal sarf"],
+                    "unlikely_or_personal_items": [],
+                    "bank_statement_hints": [],
+                    "activity_tags": ["hearing_aid", "medical_retail"],
+                    "source_urls": ["https://example.test/nace-477401"],
+                },
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {
+                        "raw_account_code": "153.01.001",
+                        "normalized_account_code": "153.01.001",
+                        "account_name": "ALINAN CIHAZLAR",
+                        "is_detail_account": True,
+                    },
+                    {
+                        "raw_account_code": "153.01.002",
+                        "normalized_account_code": "153.01.002",
+                        "account_name": "Pil Ve Kalip Montaj Kit Macun Alis",
+                        "is_detail_account": True,
+                    },
+                    {
+                        "raw_account_code": "191.01.020",
+                        "normalized_account_code": "191.01.020",
+                        "account_name": "Yuzde 20 Indirilecek KDV",
+                        "is_detail_account": True,
+                    },
+                    {
+                        "raw_account_code": "320.01",
+                        "normalized_account_code": "320.01",
+                        "account_name": "Medikal Tedarik",
+                        "is_detail_account": True,
+                    },
+                ],
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "xml-doc",
+                    "document_ref": "xml-doc",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "rexton.xml",
+                    "storage_path": str(xml_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="einvoice_xml",
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+            )
+            provider = FakeProductProvider(
+                {
+                    "category": "isitme_cihazi",
+                    "confidence": 88,
+                    "reason": "NACE ve hesap adaylari isitme cihazi stok alimiyla uyumlu.",
+                    "evidence": ["nace:477401", "account:153.01.001"],
+                    "suggested_account_code": "153.01.001",
+                    "suggested_counterparty_code": "320.01",
+                    "risk_flags": [],
+                    "account_reason": "153 stok hesabi cihaz alimi icin en guclu aday.",
+                    "product_identity": "isitme cihazi receiver",
+                    "needs_research": False,
+                    "research_query": "",
+                }
+            )
+            classifier = StaticFirstClassifier(
+                provider=provider,
+                policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+            )
+
+            process_queued_documents(store, product_classifier=classifier)
+
+        self.assertEqual(len(provider.requests), 1)
+        payload = provider.requests[0].to_schema_payload()
+        self.assertEqual(payload["nace_research_summary"], "Isitme cihazi satis faaliyetini kapsar.")
+        self.assertIn("hearing_aid", payload["activity_tags"])
+        account_details = {
+            str(item["code"]): item for item in payload["account_candidate_details"] if isinstance(item, dict)
+        }
+        self.assertIn("153.01.001", account_details)
+        self.assertIn("hearing_device_stock", account_details["153.01.001"]["semantic_roles"])
+
     def test_processing_worker_uses_cached_nace_activity_tags_as_match_signal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "gida.xml"

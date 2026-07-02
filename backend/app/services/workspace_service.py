@@ -12,6 +12,7 @@ from app.api.phase0_schemas import ChartAccountsStorePayload, ClientDocumentsDel
 from app.domain.business_relevance import check_client_onboarding
 from app.domain.chart_accounts import parse_chart_accounts
 from app.domain.document_uploads import store_document_content
+from app.domain.nace_research import NaceResearcher, resolve_nace_research_profile
 
 
 OperationRecorder = Callable[..., dict[str, object]]
@@ -29,6 +30,7 @@ class WorkspaceService:
         request_user_id: UserIdResolver,
         document_storage_path: Path | None = None,
         chart_account_parser: Callable[[Path], object] = parse_chart_accounts,
+        nace_researcher: NaceResearcher | None = None,
     ) -> None:
         self.store = store
         self.document_storage_path = document_storage_path or Path("exports/documents")
@@ -36,18 +38,39 @@ class WorkspaceService:
         self.require_client_access = require_client_access
         self.request_user_id = request_user_id
         self.chart_account_parser = chart_account_parser
+        self.nace_researcher = nace_researcher
 
     def onboarding_check(self, payload: ClientProfilePayload) -> dict[str, object]:
         check = check_client_onboarding(client_profile_from_payload(payload))
         return {"is_ready": check.is_ready, "missing_fields": list(check.missing_fields)}
 
+    def _with_nace_research(self, payload: ClientProfilePayload) -> ClientProfilePayload:
+        if not payload.nace_code.strip():
+            return payload
+        try:
+            profile = resolve_nace_research_profile(
+                store=self.store,
+                nace_code=payload.nace_code,
+                researcher=self.nace_researcher,
+            )
+        except Exception:
+            return payload
+        activity_tags = payload.activity_tags or [
+            str(tag).strip() for tag in profile.get("activity_tags") or [] if str(tag).strip()
+        ]
+        data = payload.model_dump()
+        data["activity_tags"] = activity_tags
+        data["nace_research_profile"] = profile
+        return ClientProfilePayload(**data)
+
     def store_client(self, payload: ClientProfilePayload) -> dict[str, object]:
         if not payload.client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required for persistence")
+        enriched_payload = self._with_nace_research(payload)
         return self.store.upsert_client(
-            client_id=payload.client_id,
-            profile=payload.model_dump(),
-            onboarding=self.onboarding_check(payload),
+            client_id=enriched_payload.client_id,
+            profile=enriched_payload.model_dump(),
+            onboarding=self.onboarding_check(enriched_payload),
         )
 
     def store_clients(
@@ -166,15 +189,16 @@ class WorkspaceService:
     ) -> dict[str, object]:
         if not payload.client.client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required for onboarding package")
+        enriched_client_payload = self._with_nace_research(payload.client)
         client = self.store.upsert_client(
-            client_id=payload.client.client_id,
-            profile=payload.client.model_dump(),
-            onboarding=self.onboarding_check(payload.client),
+            client_id=enriched_client_payload.client_id,
+            profile=enriched_client_payload.model_dump(),
+            onboarding=self.onboarding_check(enriched_client_payload),
         )
         chart_accounts = None
         if payload.chart_accounts:
             chart_accounts = self.store.replace_chart_accounts(
-                client_id=payload.client.client_id,
+                client_id=enriched_client_payload.client_id,
                 accounts=[asdict(chart_account_from_payload(account)) for account in payload.chart_accounts],
             )
         portal_users = []
@@ -184,13 +208,13 @@ class WorkspaceService:
                     user_id=user.user_id,
                     display_name=user.display_name,
                     role=user.role,
-                    allowed_client_ids=user.allowed_client_ids or [payload.client.client_id],
+                    allowed_client_ids=user.allowed_client_ids or [enriched_client_payload.client_id],
                 )
             )
         actor_user = self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
         actor_grant = self._grant_actor_access_to_new_client(
             actor_user_id=actor_user,
-            client_id=payload.client.client_id,
+            client_id=enriched_client_payload.client_id,
         )
         if actor_grant:
             portal_users.append(actor_grant)
@@ -198,7 +222,7 @@ class WorkspaceService:
             "client": client,
             "chart_accounts": chart_accounts,
             "portal_users": portal_users,
-            "workspace": self.store.get_workspace(payload.client.client_id),
+            "workspace": self.store.get_workspace(enriched_client_payload.client_id),
         }
 
     def _grant_actor_access_to_new_client(self, *, actor_user_id: str, client_id: str) -> dict[str, object] | None:

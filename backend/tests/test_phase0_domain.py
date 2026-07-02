@@ -12,6 +12,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.domain.chart_accounts import (
+    build_chart_semantic_map,
     extract_counterparty_candidates,
     normalize_account_code,
     parse_chart_accounts,
@@ -611,6 +612,26 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual({item.counterparty_type for item in counterparties}, {"customer", "supplier"})
         self.assertEqual(vat_status, {"has_purchase_vat_191": True, "has_sales_vat_391": True})
+
+    def test_chart_semantic_map_extracts_stock_revenue_vat_and_counterparty_roles(self) -> None:
+        accounts = [
+            ChartAccount("153 01 001", "153.01.001", "ALINAN CİHAZLAR", True),
+            ChartAccount("153 03", "153.03", "SİGARA ALIŞLARI", True),
+            ChartAccount("600 01 000", "600.01.000", "3065 KAPSAMINDA CİHAZ SATIŞI", True),
+            ChartAccount("191 01 020", "191.01.020", "Yüzde 20 İndirilecek KDV", True),
+            ChartAccount("391 01 020", "391.01.020", "Yüzde 20 Hesaplanan KDV", True),
+            ChartAccount("320 201", "320.201", "2BIR MEŞRUBAT VE GIDA", True),
+        ]
+
+        semantic_map = build_chart_semantic_map(accounts)
+
+        self.assertEqual(semantic_map["153.01.001"]["roles"], ["stock", "hearing_device_stock"])
+        self.assertEqual(semantic_map["153.03"]["roles"], ["stock", "tobacco_stock"])
+        self.assertEqual(semantic_map["600.01.000"]["roles"], ["sales_revenue", "zero_vat_3065_revenue"])
+        self.assertEqual(semantic_map["191.01.020"]["roles"], ["purchase_vat"])
+        self.assertEqual(semantic_map["191.01.020"]["vat_rate"], "20")
+        self.assertEqual(semantic_map["391.01.020"]["roles"], ["sales_vat"])
+        self.assertEqual(semantic_map["320.201"]["roles"], ["supplier", "food_supplier"])
 
     def test_account_code_normalization(self) -> None:
         self.assertEqual(normalize_account_code(" 120.01,001 "), "120.01.001")
@@ -4193,6 +4214,53 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(enriched["rule_prompt"]["default_scope"], "client_narrow")
         self.assertIn("kolay", enriched["normalized_terms"])
 
+    def test_learning_event_uses_approved_draft_account_with_nace_vat_signature(self) -> None:
+        event = {
+            "document_ref": "rexton-onay.xml",
+            "scope": "general_candidate",
+            "action": "approve",
+            "category": "isitme_cihazi",
+            "corrected_account_code": "",
+            "corrected_counterparty_code": "",
+            "reason": "Taslak musavir tarafindan dogru bulundu.",
+            "automation_candidate": False,
+            "statement_line_no": 0,
+        }
+        document = {
+            "document_ref": "rexton-onay.xml",
+            "result": {
+                "invoice_type": "ALIS",
+                "provider_hint": "Medikal Tedarik",
+                "product_line_hint": "Rexton RLi 20 isitme cihazi",
+                "product_category": "isitme_cihazi",
+                "vat_rates": ["20"],
+                "selected_expense_account": "153.01.001",
+                "selected_supplier_account": "320.01",
+                "accounting_direction": "purchase",
+            },
+        }
+
+        enriched = enrich_learning_event(
+            event,
+            client_id="client-1",
+            decision=event,
+            document=document,
+            client_profile={
+                "nace_code": "47.74.01",
+                "activity_tags": ["hearing_aid", "medical_retail"],
+            },
+        )
+
+        self.assertEqual(enriched["corrected_account_code"], "153.01.001")
+        self.assertEqual(enriched["corrected_counterparty_code"], "320.01")
+        self.assertEqual(enriched["nace_code"], "477401")
+        self.assertEqual(enriched["vat_rates"], ["20"])
+        self.assertEqual(enriched["activity_tags"], ["hearing_aid", "medical_retail"])
+        self.assertEqual(
+            enriched["posting_signature"],
+            "nace:477401|category:isitme_cihazi|vat:20|account:153|counterparty:320",
+        )
+
     def test_direct_rule_request_opens_client_rule_prompt_without_threshold(self) -> None:
         event = {
             "document_ref": "kolaysoft-tek.pdf",
@@ -4275,6 +4343,229 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(learned.export_status, "review_required")
         self.assertIn("Kolay Soft", learned.learning_rule_reason)
 
+    def test_learning_rule_matches_next_invoice_by_nace_vat_and_account_family(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail"),
+            workplace_addresses=(),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="isitme-cihazi-tekrar.xml",
+            provider_hint="Medikal Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000002",
+            ettn="",
+            issue_date="02.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Acme receiver unit",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="153.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            stock_account="153.01",
+            selection_notes=(),
+        )
+        event = {
+            "client_id": "client-1",
+            "scope": "client_rule",
+            "action": "approve",
+            "category": "baska_kategori",
+            "corrected_account_code": "153.01.001",
+            "corrected_counterparty_code": "320.01",
+            "reason": "Ayni NACE ve yuzde 20 KDV kapsaminda cihaz alimlari stokta izleniyor.",
+            "nace_code": "477401",
+            "activity_tags": ["hearing_aid"],
+            "vat_rates": ["20"],
+            "posting_signature": "nace:477401|category:isitme_cihazi|vat:20|account:153|counterparty:320",
+            "automation_candidate": False,
+            "rule_prompt": {"show": True, "default_scope": "client_narrow"},
+        }
+
+        result = simulate_invoice(invoice, selection, profile)
+        learned = apply_learning_rules(result, [rule_from_event_payload(event)])
+
+        self.assertEqual(result.selected_expense_account, "153.01")
+        self.assertEqual(learned.selected_expense_account, "153.01.001")
+        self.assertEqual(learned.selected_supplier_account, "320.01")
+        self.assertTrue(learned.learning_rule_applied)
+        self.assertIn("learning_rule_review_required", learned.review_reason_codes)
+
+    def test_counterparty_scoped_learning_rule_does_not_apply_to_different_supplier(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1111111111",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail"),
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="baska-tedarikci.xml",
+            provider_hint="Baska Tedarikci",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000003",
+            ettn="",
+            issue_date="03.05.2026",
+            tax_ids=("7777777777", "1111111111"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton RLi 20 isitme cihazi",),
+            issuer_title="Baska Tedarikci",
+            issuer_tax_id="7777777777",
+            recipient_title="Isitme Merkezi A",
+            recipient_tax_id="1111111111",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="153.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01.020",
+            bank_account="102.01",
+            stock_account="153.01",
+            selection_notes=(),
+        )
+        event = {
+            "client_id": "client-1",
+            "scope": "client_rule",
+            "action": "suggest_for_similar",
+            "category": "isitme_cihazi",
+            "corrected_account_code": "153.01.001",
+            "corrected_counterparty_code": "320.01.015",
+            "reason": "Medikal Tedarik bu mukellefin stok tedarikcisidir.",
+            "nace_code": "477401",
+            "activity_tags": ["hearing_aid"],
+            "vat_rates": ["20"],
+            "counterparty_tax_id": "8888888888",
+            "counterparty_title": "Medikal Tedarik",
+            "counterparty_identity_key": "purchase|tax:8888888888",
+            "automation_candidate": True,
+        }
+
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            CounterpartyMatch("320.01.020", "Baska Tedarikci", 98, "tax_id_exact", False),
+        )
+        learned = apply_learning_rules(result, [rule_from_event_payload(event)])
+
+        self.assertFalse(learned.learning_rule_applied)
+        self.assertEqual(learned.selected_expense_account, "153.01")
+        self.assertEqual(learned.selected_supplier_account, "320.01.020")
+        self.assertEqual(learned.export_status, result.export_status)
+
+    def test_counterparty_scoped_explicit_rule_can_keep_clean_invoice_export_ready(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1111111111",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail"),
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="medikal-tekrar.xml",
+            provider_hint="Medikal Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000004",
+            ettn="",
+            issue_date="04.05.2026",
+            tax_ids=("8888888888", "1111111111"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton RLi 20 isitme cihazi",),
+            issuer_title="Medikal Tedarik",
+            issuer_tax_id="8888888888",
+            recipient_title="Isitme Merkezi A",
+            recipient_tax_id="1111111111",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="153.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01.015",
+            bank_account="102.01",
+            stock_account="153.01",
+            selection_notes=(),
+        )
+        event = {
+            "client_id": "client-1",
+            "scope": "client_rule",
+            "action": "suggest_for_similar",
+            "category": "isitme_cihazi",
+            "corrected_account_code": "153.01.001",
+            "corrected_counterparty_code": "320.01.015",
+            "reason": "Medikal Tedarik bu mukellefin stok tedarikcisidir.",
+            "nace_code": "477401",
+            "activity_tags": ["hearing_aid"],
+            "vat_rates": ["20"],
+            "counterparty_tax_id": "8888888888",
+            "counterparty_title": "Medikal Tedarik",
+            "counterparty_identity_key": "purchase|tax:8888888888",
+            "automation_candidate": True,
+        }
+
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            CounterpartyMatch("320.01.015", "Medikal Tedarik", 98, "tax_id_exact", False),
+        )
+        learned = apply_learning_rules(result, [rule_from_event_payload(event)])
+
+        self.assertEqual(result.export_status, "export_ready")
+        self.assertEqual(learned.selected_expense_account, "153.01.001")
+        self.assertEqual(learned.selected_supplier_account, "320.01.015")
+        self.assertEqual(learned.export_status, "export_ready")
+        self.assertNotIn("learning_rule_review_required", learned.review_reason_codes)
+
     def test_accountant_note_creates_global_product_phrase_rule_candidate(self) -> None:
         candidate = build_natural_language_rule_candidate(
             accountant_note="Rexton RLi 20 isitme cihazidir, stok olarak 153.01 alt hesabinda izleyelim.",
@@ -4289,6 +4580,20 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(candidate["product_category"], "isitme_cihazi")
         self.assertEqual(candidate["account_treatment"], "stock_or_cogs")
         self.assertEqual(candidate["suggested_account_code"], "153.01")
+        self.assertTrue(candidate["requires_review"])
+
+    def test_accountant_note_creates_client_counterparty_rule_candidate_for_wholesaler(self) -> None:
+        candidate = build_natural_language_rule_candidate(
+            accountant_note="Bu cari bunun toptancisi, buradan bize kesilen tum faturalar stok alimidir.",
+            rule_instruction="Bu tedarikciden gelen faturalari bu mukellefte stok alimi olarak uygula.",
+            product_line_hint="Algida gida toptancisi",
+            category="gida_alimi",
+            corrected_account_code="153.03",
+        )
+
+        self.assertEqual(candidate["scope"], "client_counterparty")
+        self.assertEqual(candidate["account_treatment"], "stock_or_cogs")
+        self.assertEqual(candidate["suggested_account_code"], "153.03")
         self.assertTrue(candidate["requires_review"])
 
     def test_vague_accountant_note_does_not_create_active_learning_rule(self) -> None:

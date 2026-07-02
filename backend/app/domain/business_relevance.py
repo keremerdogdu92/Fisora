@@ -212,6 +212,7 @@ class ClientProfile:
     activity_description: str = ""
     nace_code: str = ""
     activity_tags: tuple[str, ...] = field(default_factory=tuple)
+    nace_research_profile: dict[str, object] = field(default_factory=dict)
     workplace_addresses: tuple[str, ...] = field(default_factory=tuple)
     has_chart_accounts: bool = False
 

@@ -284,6 +284,53 @@ def validate_vat_accounts(accounts: Iterable[ChartAccount]) -> dict[str, bool]:
     }
 
 
+def semantic_roles_for_account(account: ChartAccount) -> list[str]:
+    normalized_name = f" {normalize_text(account.account_name)} "
+    family = account.account_family
+    roles: list[str] = []
+    if family == "153":
+        roles.append("stock")
+        if "cihaz" in normalized_name:
+            roles.append("hearing_device_stock")
+        if any(token in normalized_name for token in ("pil", "kalip", "kalib", "montaj kit")):
+            roles.append("battery_mold_stock")
+        if any(token in normalized_name for token in ("sigara", "tutun")):
+            roles.append("tobacco_stock")
+        if any(token in normalized_name for token in ("gida", "mesrubat", "icecek")):
+            roles.append("food_stock")
+    elif family == "600":
+        roles.append("sales_revenue")
+        if "3065" in normalized_name or any(token in normalized_name for token in ("%0", "0 kdv", "istisna")):
+            roles.append("zero_vat_3065_revenue")
+    elif family == "191":
+        roles.append("purchase_vat")
+    elif family == "391":
+        roles.append("sales_vat")
+    elif family == "120":
+        roles.append("customer")
+    elif family == "320":
+        roles.append("supplier")
+        if any(token in normalized_name for token in ("gida", "mesrubat", "icecek")):
+            roles.append("food_supplier")
+    elif family == "689":
+        roles.append("non_deductible")
+    return roles
+
+
+def build_chart_semantic_map(accounts: Iterable[ChartAccount]) -> dict[str, dict[str, object]]:
+    result: dict[str, dict[str, object]] = {}
+    for account in accounts:
+        result[account.normalized_account_code] = {
+            "code": account.normalized_account_code,
+            "name": account.account_name,
+            "family": account.account_family,
+            "roles": semantic_roles_for_account(account),
+            "vat_rate": account.vat_rate_hint,
+            "usage_tags": list(account.usage_tags),
+        }
+    return result
+
+
 def _detail_accounts(accounts: Iterable[ChartAccount], prefixes: tuple[str, ...]) -> list[ChartAccount]:
     return [
         account

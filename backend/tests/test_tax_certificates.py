@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -24,6 +25,7 @@ except ModuleNotFoundError:
 from app.domain.business_relevance import ActivityProfile
 from app.domain.tax_certificates import (
     TaxCertificateExtraction,
+    build_external_ocr_provider_from_env,
     merge_tax_certificate_extractions,
     ocr_image,
     parse_tax_certificate_file,
@@ -671,6 +673,72 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(extraction.tckn, "30052309394")
         self.assertEqual(extraction.nace_code, "477401")
         self.assertIn("ocr_orientation_rot90", notes)
+
+    def test_parse_tax_certificate_file_uses_external_ocr_provider_after_local_pdf_ocr_fails(self) -> None:
+        external_text = """
+        ADI SOYADI
+        BÜNYAMİN AKTAR
+        TC KIMLIK NO
+        10649861252
+        VERGI DAIRESI
+        KADIKÖY
+        ANA FAALIYET KODU VE ADI
+        47.26.01 - BELIRLI BIR MALA TAHSIS EDILMIS MAGAZALARDA TUTUN URUNLERI PERAKENDE TICARETI
+        ISYERI ADRESI
+        ISTANBUL
+        """
+        calls: list[Path] = []
+
+        def external_provider(path: Path) -> tuple[str, tuple[str, ...]]:
+            calls.append(path)
+            return external_text, ("external_ocr:ocr_space",)
+
+        with patch("app.domain.tax_certificates.extract_pdf_text", return_value=(1, "", ("pdf_text_empty",))):
+            with patch(
+                "app.domain.tax_certificates.ocr_pdf",
+                return_value=("", ("pdf_text_empty", "ocr_pdf_render_failed:3")),
+            ):
+                extraction = parse_tax_certificate_file(
+                    Path("bunyamin-aktar-vergi-levhasi.pdf"),
+                    external_ocr_provider=external_provider,
+                )
+
+        self.assertEqual(extraction.title, "BÜNYAMİN AKTAR")
+        self.assertEqual(extraction.tckn, "10649861252")
+        self.assertEqual(extraction.nace_code, "472601")
+        self.assertIn("external_ocr:ocr_space", extraction.extraction_notes)
+        self.assertEqual(calls, [Path("bunyamin-aktar-vergi-levhasi.pdf")])
+
+    def test_external_ocr_provider_from_env_calls_ocr_space(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return (
+                    b'{"IsErroredOnProcessing":false,'
+                    b'"ParsedResults":[{"ParsedText":"ADI SOYADI\\nBUNYAMIN AKTAR"}]}'
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "levha.pdf"
+            path.write_bytes(b"%PDF-1.7")
+            with patch("app.domain.tax_certificates.urllib_request.urlopen", return_value=FakeResponse()) as urlopen:
+                provider = build_external_ocr_provider_from_env(
+                    {
+                        "FISORA_TAX_CERTIFICATE_EXTERNAL_OCR_PROVIDER": "ocr_space",
+                        "FISORA_OCR_SPACE_API_KEY": "test-key",
+                        "FISORA_OCR_SPACE_API_URL": "https://ocr.example.test/parse",
+                    }
+                )
+                text, notes = provider(path)
+
+        self.assertIn("BUNYAMIN AKTAR", text)
+        self.assertEqual(notes, ("external_ocr:ocr_space", "external_ocr_pages:1"))
+        self.assertEqual(urlopen.call_args.args[0].full_url, "https://ocr.example.test/parse")
 
 
 if __name__ == "__main__":

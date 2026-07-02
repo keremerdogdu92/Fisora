@@ -27,9 +27,10 @@ def build_natural_language_rule_candidate(
     product_category = _product_category(normalized, category)
     account_treatment = _account_treatment(normalized, product_category, corrected_account_code)
     vague = _is_vague(normalized, match_phrase, product_category, corrected_account_code)
+    counterparty_rule = _is_counterparty_rule(normalized)
 
     return {
-        "scope": "client_only" if vague or not match_phrase else "global_product_phrase",
+        "scope": _scope(vague=vague, match_phrase=match_phrase, counterparty_rule=counterparty_rule),
         "match_phrase": "" if vague else match_phrase,
         "product_category": "" if vague else product_category,
         "account_treatment": "" if vague else account_treatment,
@@ -93,6 +94,24 @@ def _is_vague(normalized: str, match_phrase: str, product_category: str, correct
     if not match_phrase and not product_category and not corrected_account_code:
         return True
     return False
+
+
+def _is_counterparty_rule(normalized: str) -> bool:
+    terms = set(normalized.split())
+    return bool(
+        {"cari", "toptanci", "tedarikci", "satici"}.intersection(terms)
+        or "bize kesilen" in normalized
+        or "gelen fatura" in normalized
+        or "bu mukellefte" in normalized
+    )
+
+
+def _scope(*, vague: bool, match_phrase: str, counterparty_rule: bool) -> str:
+    if vague or not match_phrase:
+        return "client_only"
+    if counterparty_rule:
+        return "client_counterparty"
+    return "global_product_phrase"
 
 
 def _reason(product_category: str, account_treatment: str, match_phrase: str) -> str:

@@ -10,9 +10,10 @@ ve risk bayragi uretir.
 Bu kararin urun hedefi AI'i kismak degildir. AI, motorun aylarca ezberleyerek
 ogrenebilecegi fatura satiri, NACE/faaliyet, hesap plani ve cari anlamlarini
 baslangicta hizla cozer. Deterministik motor tutar, KDV, borc/alacak dengesi,
-hesap plani guardrail'i ve export kapisini kontrol eder; mustavir baslarda
-son karari verir, verdigi kararlar motorun tekrar AI/research'e sormadan
-ogrenmesine yarar.
+hesap kodunun mevcut hesap plani adaylarindan gelmesi ve export kapisini
+kontrol eder. AI'in mevcut adaylardan sectigi muhasebe hesabi aile filtresiyle
+geri cevrilmez; mustavir baslarda son karari verir, verdigi kararlar motorun
+tekrar AI/research'e sormadan ogrenmesine yarar.
 
 ## Calisma Modlari
 
@@ -79,11 +80,30 @@ AI'a verilen baglam:
 
 - Ham PDF/XML/ekstre dosyasi degil, parser'in cikardigi sinirli metin.
 - Mukellef faaliyet/NACE aciklamasi veya kisa faaliyet ozeti.
-- Hesap planindan cikarilmis semantic roller ve mevcut hesap adaylari.
-- Cari adaylari, VKN/TCKN/IBAN sinyalleri ve title/token eslesme kanitlari.
+- Hesap planindan cikarilmis semantic roller ve mevcut hesap adaylari. Aday
+  sayisi kucukse tek cagrida nihai hesap secimi istenir; aday sayisi buyukse
+  iki asamali aday daraltma kullanilir.
+- Iki asamali akista ilk cagri hesap ailesi/karsilastirma seti secer, ikinci
+  cagri yalniz secilen ailelerin gercek hesaplari ve ilgili cari adaylariyla
+  nihai hesap/cari secimi yapar.
+- Cari adaylari, VKN/TCKN/IBAN sinyalleri ve title/token eslesme kanitlari
+  yon belirlendikten sonra ilgili `120` veya `320` seti olarak gonderilir.
 - Belge tipi, tutar/KDV sinyali ve risk bayraklari.
 - Varsa gecmis mustavir kararlarindan turetilen ozet sinyal.
 - Varsa research cache veya NACE/marka research ozeti.
+
+Iki asamali aday politikasi:
+
+- `account_candidates` sabit ve dar bir sayiyla kirpilmaz. Kucuk setlerde
+  mevcut tek cagri korunur; buyuk setlerde Stage 1 kompakt aile haritasi,
+  Stage 2 daraltilmis gercek hesap listesi kullanilir.
+- Stage 1 sonucu tek aileye kilitlenmez; karar icin makul komsu aileleri
+  Stage 2'ye tasir. Ornegin cihaz/stok/demirbas sinirinda `153`, ilgili
+  `25x` ve kontrol icin uygun gider aileleri birlikte gorulebilir.
+- Stage 2 schema'si yine yalniz gonderilen gercek hesap ve cari adaylarindan
+  secime izin verir; AI disaridan hesap kodu uyduramaz.
+- Her cagrida `stage`, `candidate_count`, `input_chars`, yaklasik token,
+  secilen aileler ve secilen hesap/cari loglanir.
 
 Kapali server demo env karari:
 
@@ -148,11 +168,12 @@ Asagidaki durumlarda export kapali kalir:
 
 1. Parser fatura taraflarini, satirlarini, tutar/KDV sinyallerini ve hesap
    planindaki secilebilir adaylari cikarir.
-2. AI satir anlamini, faaliyet/NACE iliskisini, cari niyetini ve uygun hesap
+2. AI satir anlamini, faaliyet/NACE iliskisini, cari aday izini ve uygun hesap
    adaylarini gerekcelendirir; gerekirse research sorgusu olusturur.
 3. Research sonucu urun/hizmet anlamini veya NACE/faaliyet baglamini
    guclendirir ve cache'e yazilir.
-4. Motor mevcut hesap plani ve guardrail'lerle dengeli fis taslagi uretir.
+4. Motor AI'in mevcut hesap plani adaylarindan sectigi hesabi bozmaz; tutar,
+   KDV ve borc/alacak dengesiyle dolu fis taslagi uretir.
 5. Mustavir taslagi onaylar veya duzeltir.
 6. Onaylanan karar learning event olur; ayni kalem/cari/niyet tekrar geldiginde
    motor once ogrenilmis kural, semantic map ve cache'i kullanir; gerekmedikce
@@ -199,5 +220,9 @@ Gercek fatura ile demo yapilacaksa veri akisi:
    ekle.
 4. Mustavir demo akisinda "AI taslagi hazirlar, mustavir son karari verir"
    mesajini ana anlatim yap.
-5. Pilot veri alinana kadar public demoyu sentetik veriyle, gercek testi lokal
+5. Hesap ailesi filtresini AI taslagini daha genel hesaba zorlayan bir kural
+   olarak kullanma; yanlis hesap secimi review ve learning dongusunde cozulur.
+6. Hesap adaylari buyukse iki asamali aday daraltma kullan; once aile setini,
+   sonra dar hesap/cari listesini AI'a sectir.
+7. Pilot veri alinana kadar public demoyu sentetik veriyle, gercek testi lokal
    veriyle ayri tut.

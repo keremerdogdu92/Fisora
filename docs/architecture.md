@@ -59,7 +59,8 @@ prototip icin opsiyonel tutulabilir.
 - Product classification: fatura kalemlerindeki marka/model satirlarini urun
   kategorilerine cevirir.
 - AI assisted draft adapter: soguk baslangicta mevcut hesap plani ve cari
-  adaylari icinden aciklamali fis taslagi onerir; export karari vermez.
+  adaylari icinden aciklamali fis taslagi ve taslak hesap secimi onerir;
+  export karari vermez.
 - Business relevance: urun/hizmet kategorisini mukellef faaliyet profili, NACE,
   isyeri adresi, tedarikci ve gecmis kararlarla karsilastirir.
 - Rule engine: genel kurallar, mustavir/ofis politikalari ve mukellef ozel
@@ -155,7 +156,10 @@ Kendi sunucuda AI modeli calistirma baslangic kapsamindan cikarildi. AI,
 tek basina nihai kayit atan motor degil; soguk baslangicta fatura satiri,
 NACE/faaliyet, hesap plani ve cari adaylarini anlamlandiran ana hizlandirici
 katman olarak ele alinacak. Deterministik muhasebe motoru tutar, KDV,
-borc/alacak dengesi, hesap ailesi guardrail'i ve export kapisini kontrol eder.
+borc/alacak dengesi, hesap kodunun mevcut hesap plani adaylarindan gelmesi ve
+export kapisini kontrol eder. AI'in mevcut adaylardan sectigi taslak hesap,
+hesap ailesi yorumuyla daha genel bir hesaba geri zorlanmaz; yanlis yorum
+mustavir review/learning dongusunde duzeltilir.
 
 AI API'ye uygun isler:
 
@@ -174,7 +178,7 @@ AI API'ye uygun isler:
 
 AI API'ye uygun olmayan isler:
 
-- Nihai hesap kodu karari.
+- Mustavir onayi olmadan nihai kayit veya export karari.
 - Mevzuat yorumu veya gider yazilir/yazilmaz kesin karari.
 - KDV, tevkifat, istisna ve iade gibi riskli kararlar.
 - Zirve export formatinin kesinligi.
@@ -186,6 +190,14 @@ guven veriyorsa AI tekrar cagrilmaz. Guven dusukse bos sonuc donmek yerine
 dolu fis taslagi uretilir; export kapisi review'de kalir.
 
 Soguk baslangic politikasi: gecmis veri yoksa AI taslak hazirlayabilir, ancak
-onerilen hesap yalnizca mevcut hesap plani icinden secilir ve export kapisi
-mustavir onayi olmadan acilmaz. Bu modun ayrintili hazirlik kriterleri
+onerilen hesap yalnizca mevcut hesap plani icinden secilir, motor bu secimi
+hesap ailesi filtresiyle geri cevirmez ve export kapisi mustavir onayi olmadan
+acilmaz. Bu modun ayrintili hazirlik kriterleri
 `docs/ai-assisted-draft-readiness.md` dosyasinda tutulur.
+
+Hesap plani baglami tek sabit aday limitiyle kirpilmez. Aday seti kucukken AI
+tek cagrida nihai hesap/cari secer; aday seti buyukse iki asamali secim
+kullanilir. Ilk asama kompakt hesap aile haritasi ve fatura/NACE baglamiyla
+ilgili aileleri belirler, ikinci asama yalniz secilen ailelerin gercek hesap
+adaylari ve ilgili `120/320` cari adaylari arasindan secim yaptirir. Her asama
+maliyet ve kalite icin `input_chars`, aday sayisi ve karar sonucuyla loglanir.

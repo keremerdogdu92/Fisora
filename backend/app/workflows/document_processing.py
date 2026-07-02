@@ -321,6 +321,9 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         static_confidence_threshold=int(source.get("FISORA_AI_STATIC_CONFIDENCE_THRESHOLD", "101")),
         max_input_chars=int(source.get("FISORA_AI_MAX_INPUT_CHARS", "420")),
         max_provider_calls=int(source.get("FISORA_AI_MAX_PROVIDER_CALLS", "3")),
+        single_stage_account_limit=int(source.get("FISORA_AI_SINGLE_STAGE_ACCOUNT_LIMIT", "40")),
+        final_stage_account_limit=int(source.get("FISORA_AI_FINAL_STAGE_ACCOUNT_LIMIT", "120")),
+        counterparty_limit=int(source.get("FISORA_AI_COUNTERPARTY_LIMIT", "80")),
     )
     statement_policy = StatementAiSuggestionPolicy(
         enabled=True,

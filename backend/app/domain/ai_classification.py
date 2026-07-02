@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
 from typing import Any, Protocol
 
 from app.domain.business_relevance import (
@@ -36,6 +37,18 @@ class AiClassificationPolicy:
     static_confidence_threshold: int = 70
     max_input_chars: int = 320
     max_provider_calls: int = 1
+    single_stage_account_limit: int = 40
+    final_stage_account_limit: int = 120
+    counterparty_limit: int = 80
+
+
+@dataclass(frozen=True)
+class AiCandidateStrategy:
+    mode: str = "single_stage"
+    stage: str = "final_account"
+    account_candidate_count: int = 0
+    counterparty_candidate_count: int = 0
+    selected_families: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,6 +60,11 @@ class AiClassificationContext:
     account_candidates: tuple[str, ...] = ()
     account_candidate_details: tuple[dict[str, Any], ...] = ()
     counterparty_candidates: tuple[str, ...] = ()
+    account_family_candidates: tuple[dict[str, Any], ...] = ()
+    candidate_strategy: AiCandidateStrategy = field(default_factory=AiCandidateStrategy)
+    account_candidate_limit: int = 40
+    counterparty_candidate_limit: int = 80
+    account_candidate_details_limit: int = 40
 
 
 @dataclass(frozen=True)
@@ -58,8 +76,10 @@ class AiClassificationRequest:
     context: AiClassificationContext = AiClassificationContext()
 
     def to_schema_payload(self) -> dict[str, object]:
-        account_candidates = _limited_strings(self.context.account_candidates, limit=12)
-        counterparty_candidates = _limited_strings(self.context.counterparty_candidates, limit=12)
+        if self.context.candidate_strategy.stage == "family_select":
+            return self._to_family_select_payload()
+        account_candidates = _limited_strings(self.context.account_candidates, limit=max(self.context.account_candidate_limit, 0))
+        counterparty_candidates = _limited_strings(self.context.counterparty_candidates, limit=max(self.context.counterparty_candidate_limit, 0))
         return {
             "raw_line": self.raw_line[: self.max_input_chars].strip(),
             "supplier_hint": self.supplier_hint[: self.max_input_chars].strip(),
@@ -67,8 +87,9 @@ class AiClassificationRequest:
             "nace_code": self.context.nace_code[:64].strip(),
             "nace_research_summary": self.context.nace_research_summary[: self.max_input_chars].strip(),
             "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
+            "candidate_strategy": _candidate_strategy_payload(self.context.candidate_strategy),
             "account_candidates": list(account_candidates),
-            "account_candidate_details": list(self.context.account_candidate_details[:16]),
+            "account_candidate_details": list(self.context.account_candidate_details[: max(self.context.account_candidate_details_limit, 0)]),
             "counterparty_candidates": list(counterparty_candidates),
             "allowed_categories": list(self.allowed_categories),
             "output_schema": {
@@ -109,6 +130,57 @@ class AiClassificationRequest:
             },
         }
 
+    def _to_family_select_payload(self) -> dict[str, object]:
+        family_candidates = tuple(self.context.account_family_candidates[: max(self.context.account_candidate_limit, 0)])
+        allowed_families = _limited_strings(
+            [str(candidate.get("family") or "").strip() for candidate in family_candidates],
+            limit=max(self.context.account_candidate_limit, 0),
+        )
+        return {
+            "raw_line": self.raw_line[: self.max_input_chars].strip(),
+            "supplier_hint": self.supplier_hint[: self.max_input_chars].strip(),
+            "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
+            "nace_code": self.context.nace_code[:64].strip(),
+            "nace_research_summary": self.context.nace_research_summary[: self.max_input_chars].strip(),
+            "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
+            "candidate_strategy": _candidate_strategy_payload(self.context.candidate_strategy),
+            "account_family_candidates": list(family_candidates),
+            "allowed_account_families": list(allowed_families),
+            "allowed_categories": list(self.allowed_categories),
+            "output_schema": {
+                "type": "object",
+                "required": [
+                    "category",
+                    "confidence",
+                    "reason",
+                    "evidence",
+                    "selected_account_families",
+                    "risk_flags",
+                    "account_reason",
+                    "product_identity",
+                    "needs_research",
+                    "research_query",
+                ],
+                "properties": {
+                    "category": {"type": "string", "enum": list(self.allowed_categories)},
+                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "reason": {"type": "string", "maxLength": 240},
+                    "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                    "selected_account_families": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(allowed_families)},
+                        "maxItems": 8,
+                    },
+                    "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+                    "account_reason": {"type": "string", "maxLength": 240},
+                    "product_identity": {"type": "string", "maxLength": 160},
+                    "needs_research": {"type": "boolean"},
+                    "research_query": {"type": "string", "maxLength": 160},
+                },
+                "additionalProperties": False,
+            },
+        }
+
 
 @dataclass(frozen=True)
 class AiProviderClassification:
@@ -123,6 +195,7 @@ class AiProviderClassification:
     product_identity: str = ""
     needs_research: bool = False
     research_query: str = ""
+    selected_account_families: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -140,6 +213,8 @@ class AiClassificationResult:
     product_identity: str = ""
     needs_research: bool = False
     research_query: str = ""
+    selected_account_families: tuple[str, ...] = ()
+    candidate_strategy: AiCandidateStrategy = field(default_factory=AiCandidateStrategy)
 
 
 class ProductClassifier(Protocol):
@@ -171,9 +246,33 @@ def _validated_suggestion(value: object, allowed: tuple[str, ...]) -> str:
     return candidate if candidate in set(allowed) else ""
 
 
+def _candidate_strategy_payload(strategy: AiCandidateStrategy) -> dict[str, object]:
+    return {
+        "mode": strategy.mode,
+        "stage": strategy.stage,
+        "account_candidate_count": strategy.account_candidate_count,
+        "counterparty_candidate_count": strategy.counterparty_candidate_count,
+        "selected_families": list(strategy.selected_families),
+    }
+
+
+def _allowed_family_values(request: AiClassificationRequest) -> tuple[str, ...]:
+    return _limited_strings(
+        [str(candidate.get("family") or "").strip() for candidate in request.context.account_family_candidates],
+        limit=max(request.context.account_candidate_limit, 0),
+    )
+
+
+def _validated_families(value: object, allowed: tuple[str, ...]) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    allowed_set = set(allowed)
+    return tuple(dict.fromkeys(str(item).strip() for item in value if str(item).strip() in allowed_set))[:8]
+
+
 def _validate_provider_payload(payload: dict[str, Any], request: AiClassificationRequest) -> AiProviderClassification | None:
     category = str(payload.get("category", "")).strip()
-    if category not in ALLOWED_AI_CATEGORIES:
+    if category not in request.allowed_categories:
         return None
     try:
         confidence = int(payload.get("confidence", -1))
@@ -202,6 +301,7 @@ def _validate_provider_payload(payload: dict[str, Any], request: AiClassificatio
         product_identity=str(payload.get("product_identity") or "").strip()[:160],
         needs_research=bool(payload.get("needs_research")),
         research_query=str(payload.get("research_query") or "").strip()[:160],
+        selected_account_families=_validated_families(payload.get("selected_account_families"), _allowed_family_values(request)),
     )
 
 
@@ -267,6 +367,7 @@ class StaticFirstClassifier:
             max_input_chars=self.policy.max_input_chars,
             context=resolved_context,
         )
+        estimated_chars = len(json.dumps(request.to_schema_payload(), ensure_ascii=False))
         try:
             provider_payload = self.provider.classify_product(request)
         except Exception as exc:  # noqa: BLE001 - provider boundaries must not fail document processing
@@ -319,6 +420,8 @@ class StaticFirstClassifier:
             product_identity=provider_result.product_identity,
             needs_research=provider_result.needs_research,
             research_query=provider_result.research_query,
+            selected_account_families=provider_result.selected_account_families,
+            candidate_strategy=resolved_context.candidate_strategy,
         )
 
 

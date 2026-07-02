@@ -6,6 +6,8 @@
 
 **Architecture:** The invoice worker keeps one decision chain: parse invoice, infer direction, apply legal/accounting hard rules, classify line identity, optionally ask AI, optionally use cached/Tavily research, then build or rebuild the voucher with account-family guards. `matching_simulation.py` remains the posting authority; `document_processing.py` remains orchestration; product identity, AI gate, and research cache rules are small domain helpers.
 
+> **Superseded on 2026-07-02:** The account-family guard described in Phase 2 is no longer product policy. AI may choose any `suggested_account_code` that passed the schema-enforced current chart-account candidate list. The engine must not replace that AI choice with a broader deterministic fallback merely because the account family differs from the static classification. Legal/KDV rules, balanced debit/credit, candidate-list validation, and the export review gate remain deterministic.
+
 **Tech Stack:** Python domain services and unittest backend tests; existing OpenAI/Groq-compatible AI providers; existing Tavily research harness; existing JSON/Postgres workflow stores; existing portal review UI.
 
 ---
@@ -193,55 +195,28 @@ python -m unittest backend.tests.test_phase0_domain
 
 Expected: all tests pass.
 
-## Phase 2: Account-Family Guard and Always-Draft Behavior
+## Phase 2: AI Candidate Passthrough and Always-Draft Behavior
 
 **Files:**
-- Create: `backend/app/domain/account_guardrails.py`
 - Modify: `backend/app/domain/matching_simulation.py`
 - Test: `backend/tests/test_phase0_domain.py`
 
-- [ ] **Step 1: Add account-family guard**
+- [ ] **Step 1: Trust schema-validated AI account candidates**
 
-Create `backend/app/domain/account_guardrails.py`:
-
-```python
-from __future__ import annotations
-
-
-def account_family(code: str) -> str:
-    return str(code or "").strip().split(".")[0]
-
-
-def account_allowed_for_treatment(code: str, treatment: str, direction: str) -> bool:
-    family = account_family(code)
-    if not family:
-        return False
-    if direction == "sales":
-        return family in {"600", "601", "602"}
-    if treatment == "stock_or_cogs":
-        return family in {"153", "150", "151", "152"}
-    if treatment == "expense":
-        return family in {"740", "750", "760", "770", "780"}
-    if treatment == "non_deductible_review":
-        return family == "689"
-    if treatment == "fixed_asset_review":
-        return family.startswith("25")
-    return family in {"153", "740", "750", "760", "770", "780", "689"}
-```
-
-- [ ] **Step 2: Reject AI account if family is wrong**
-
-In `matching_simulation.py`, replace direct use of `ai_suggested_account_code` with:
+Do not create an account-family rejection layer. The AI provider schema already
+limits `suggested_account_code` to the account candidates passed from the
+current chart plan. If AI chooses one of those candidates, use it in the review
+draft.
 
 ```python
-guarded_ai_account = (
-    ai_suggested_account_code
-    if account_allowed_for_treatment(ai_suggested_account_code, relevance.account_treatment, direction)
-    else ""
-)
+guarded_ai_account = ai_suggested_account_code
 ```
 
-Use `guarded_ai_account` before deterministic fallback.
+- [ ] **Step 2: Keep export gated by review**
+
+Use `guarded_ai_account` before deterministic fallback, but keep export
+eligibility controlled by balance, legal/KDV rules, risk flags, and accountant
+review policy.
 
 - [ ] **Step 3: Always create a draft**
 
@@ -259,8 +234,8 @@ If VAT split cannot be allocated line-by-line, keep existing `gross_balanced_nee
 Add tests:
 
 ```python
-def test_ai_cannot_route_stock_line_to_expense_account() -> None:
-    # AI suggests 770 for pil; result keeps 153 and marks ai_account_family_rejected
+def test_ai_account_candidate_is_not_overridden_by_account_family_guardrail() -> None:
+    # AI suggests 770 from chart candidates; result keeps 770 in the review draft
 
 def test_low_confidence_invoice_still_builds_review_draft() -> None:
     # unknown product creates draft_lines but export_status review_required

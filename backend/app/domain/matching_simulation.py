@@ -3,13 +3,12 @@ from __future__ import annotations
 import csv
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
-from app.domain.account_guardrails import account_allowed_for_treatment
-from app.domain.ai_classification import AiClassificationContext, ProductClassifier
+from app.domain.ai_classification import AiCandidateStrategy, AiClassificationContext, AiClassificationPolicy, AiClassificationResult, ProductClassifier
 from app.domain.business_relevance import (
     BusinessRelevance,
     ClientProfile,
@@ -153,6 +152,11 @@ class SimulatedInvoiceResult:
     counterparty_tax_id: str = ""
     counterparty_title: str = ""
     counterparty_identity_key: str = ""
+    ai_candidate_strategy: str = "single_stage"
+    ai_selected_account_families: tuple[str, ...] = ()
+    ai_stage_evidence: tuple[dict[str, object], ...] = ()
+    ai_account_candidate_count: int = 0
+    ai_counterparty_candidate_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -1039,29 +1043,140 @@ def _product_line_hint(invoice: ParsedInvoice) -> str:
     return invoice.line_items[0] if invoice.line_items else invoice.provider_hint or invoice.invoice_type or invoice.file_name
 
 
+def _ai_policy_from_classifier(product_classifier: ProductClassifier | None) -> AiClassificationPolicy:
+    policy = getattr(product_classifier, "policy", None)
+    return policy if isinstance(policy, AiClassificationPolicy) else AiClassificationPolicy()
+
+
+def _account_family_for_ai(code: str) -> str:
+    compact = str(code or "").strip()
+    if not compact:
+        return ""
+    family = compact.split(".")[0]
+    if family.startswith("25"):
+        return "25"
+    return family
+
+
+def _is_main_account_candidate(detail: dict[str, Any]) -> bool:
+    group = str(detail.get("group") or "")
+    if group in {"customer", "supplier", "purchase_vat", "sales_vat"}:
+        return False
+    return bool(str(detail.get("code") or "").strip())
+
+
+def _account_family_candidates(details: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    families: dict[str, dict[str, Any]] = {}
+    for detail in details:
+        if not _is_main_account_candidate(detail):
+            continue
+        code = str(detail.get("code") or "").strip()
+        family = _account_family_for_ai(code)
+        if not family:
+            continue
+        record = families.setdefault(
+            family,
+            {
+                "family": family,
+                "label": str(detail.get("name") or "").strip() or family,
+                "groups": [],
+                "candidate_count": 0,
+                "examples": [],
+            },
+        )
+        group = str(detail.get("group") or "").strip()
+        if group and group not in record["groups"]:
+            record["groups"].append(group)
+        record["candidate_count"] = int(record["candidate_count"]) + 1
+        examples = record["examples"]
+        if isinstance(examples, list) and len(examples) < 3:
+            examples.append(f"{code} {str(detail.get('name') or '').strip()}".strip())
+    return tuple(families.values())
+
+
+def _fallback_account_families(direction: str) -> tuple[str, ...]:
+    if direction == "sales":
+        return ("600", "601", "602")
+    return ("153", "15", "25", "740", "750", "760", "770", "780", "689")
+
+
+def _filter_context_for_families(
+    context: AiClassificationContext,
+    *,
+    selected_families: tuple[str, ...],
+    policy: AiClassificationPolicy,
+) -> AiClassificationContext:
+    allowed = set(selected_families)
+    details = tuple(
+        detail
+        for detail in context.account_candidate_details
+        if _is_main_account_candidate(detail) and _account_family_for_ai(str(detail.get("code") or "")) in allowed
+    )
+    account_candidates = tuple(
+        dict.fromkeys(str(detail.get("code") or "").strip() for detail in details if str(detail.get("code") or "").strip())
+    )
+    return replace(
+        context,
+        account_candidates=account_candidates,
+        account_candidate_details=details,
+        account_candidate_limit=policy.final_stage_account_limit,
+        counterparty_candidate_limit=policy.counterparty_limit,
+        account_candidate_details_limit=policy.final_stage_account_limit,
+        candidate_strategy=AiCandidateStrategy(
+            mode="two_stage",
+            stage="final_account",
+            account_candidate_count=len(account_candidates),
+            counterparty_candidate_count=len(context.counterparty_candidates),
+            selected_families=selected_families,
+        ),
+    )
+
+
+def _stage_evidence(result: AiClassificationResult, *, fallback_reason: str = "") -> dict[str, object]:
+    strategy = result.candidate_strategy
+    return {
+        "ai_stage": strategy.stage,
+        "candidate_strategy": strategy.mode,
+        "account_candidate_count": strategy.account_candidate_count,
+        "counterparty_candidate_count": strategy.counterparty_candidate_count,
+        "input_chars": result.estimated_input_chars,
+        "selected_account_families": list(result.selected_account_families or strategy.selected_families),
+        "selected_account_code": result.suggested_account_code,
+        "selected_counterparty_code": result.suggested_counterparty_code,
+        "fallback_reason": fallback_reason or result.skipped_reason,
+    }
+
+
 def _ai_context(
     *,
     selection: AccountSelection,
     client_profile: ClientProfile | None,
     counterparty_match: CounterpartyMatch | None,
+    direction: str,
+    suggested_counterparty: str,
 ) -> AiClassificationContext:
+    main_groups = (
+        {"sales_revenue", "zero_vat_revenue"}
+        if direction == "sales"
+        else {"purchase_stock", "purchase_expense", "non_deductible", "fixed_asset"}
+    )
     semantic_candidates = tuple(
         str(candidate.get("code") or "").strip()
-        for candidates in (selection.account_candidates or {}).values()
+        for group, candidates in (selection.account_candidates or {}).items()
         for candidate in candidates
+        if group in main_groups
         if str(candidate.get("code") or "").strip()
+    )
+    base_account_codes = (
+        (selection.revenue_account, selection.zero_vat_revenue_account)
+        if direction == "sales"
+        else (selection.stock_account, selection.expense_account, selection.non_deductible_account)
     )
     account_candidates = tuple(
         dict.fromkeys(
             code
             for code in (
-                selection.stock_account,
-                selection.expense_account,
-                selection.non_deductible_account,
-                selection.purchase_vat_account,
-                selection.revenue_account,
-                selection.sales_vat_account,
-                selection.bank_account,
+                *base_account_codes,
                 *semantic_candidates,
             )
             if code
@@ -1086,7 +1201,13 @@ def _ai_context(
             code
             for code in (
                 counterparty_match.account_code if counterparty_match else "",
-                selection.supplier_account,
+                suggested_counterparty,
+                selection.customer_account if direction == "sales" else selection.supplier_account,
+                *(
+                    str(candidate.get("code") or "").strip()
+                    for candidate in selection.account_candidates.get("supplier" if direction != "sales" else "customer", ())
+                    if str(candidate.get("code") or "").strip()
+                ),
             )
             if code
         )
@@ -1337,16 +1458,82 @@ def simulate_invoice(
     ai_product_identity = ""
     ai_research_requested = False
     ai_research_query = ""
+    ai_candidate_strategy = "single_stage"
+    ai_selected_account_families: tuple[str, ...] = ()
+    ai_stage_evidence: tuple[dict[str, object], ...] = ()
+    ai_account_candidate_count = 0
+    ai_counterparty_candidate_count = 0
     if client_profile and product_classifier and ai_gate.needs_ai and classification_override is None:
-        classification_result = product_classifier.classify(
-            raw_line,
-            supplier_hint=invoice.provider_hint,
-            context=_ai_context(
-                selection=selection,
-                client_profile=client_profile,
-                counterparty_match=counterparty_match,
-            ),
+        policy = _ai_policy_from_classifier(product_classifier)
+        base_context = _ai_context(
+            selection=selection,
+            client_profile=client_profile,
+            counterparty_match=counterparty_match,
+            direction=direction,
+            suggested_counterparty=suggested_counterparty,
         )
+        ai_account_candidate_count = len(base_context.account_candidates)
+        ai_counterparty_candidate_count = len(base_context.counterparty_candidates)
+        stage_records: list[dict[str, object]] = []
+        if len(base_context.account_candidates) > policy.single_stage_account_limit:
+            ai_candidate_strategy = "two_stage"
+            family_candidates = _account_family_candidates(base_context.account_candidate_details)
+            family_context = replace(
+                base_context,
+                account_family_candidates=family_candidates,
+                account_candidate_limit=policy.final_stage_account_limit,
+                account_candidate_details_limit=0,
+                counterparty_candidate_limit=policy.counterparty_limit,
+                candidate_strategy=AiCandidateStrategy(
+                    mode="two_stage",
+                    stage="family_select",
+                    account_candidate_count=len(base_context.account_candidates),
+                    counterparty_candidate_count=len(base_context.counterparty_candidates),
+                ),
+            )
+            family_result = product_classifier.classify(
+                raw_line,
+                supplier_hint=invoice.provider_hint,
+                context=family_context,
+            )
+            selected_families = family_result.selected_account_families
+            fallback_reason = ""
+            if not selected_families:
+                selected_families = tuple(
+                    family
+                    for family in _fallback_account_families(direction)
+                    if any(str(candidate.get("family") or "") == family for candidate in family_candidates)
+                )
+                fallback_reason = "family_stage_fallback"
+            ai_selected_account_families = selected_families
+            stage_records.append(_stage_evidence(family_result, fallback_reason=fallback_reason))
+            final_context = _filter_context_for_families(base_context, selected_families=selected_families, policy=policy)
+            classification_result = product_classifier.classify(
+                raw_line,
+                supplier_hint=invoice.provider_hint,
+                context=final_context,
+            )
+            stage_records.append(_stage_evidence(classification_result))
+        else:
+            single_context = replace(
+                base_context,
+                account_candidate_limit=policy.single_stage_account_limit,
+                counterparty_candidate_limit=policy.counterparty_limit,
+                account_candidate_details_limit=policy.single_stage_account_limit,
+                candidate_strategy=AiCandidateStrategy(
+                    mode="single_stage",
+                    stage="final_account",
+                    account_candidate_count=len(base_context.account_candidates),
+                    counterparty_candidate_count=len(base_context.counterparty_candidates),
+                ),
+            )
+            classification_result = product_classifier.classify(
+                raw_line,
+                supplier_hint=invoice.provider_hint,
+                context=single_context,
+            )
+            stage_records.append(_stage_evidence(classification_result))
+        ai_stage_evidence = tuple(stage_records)
         relevance = assess_business_relevance(
             raw_line,
             client_profile,
@@ -1365,17 +1552,15 @@ def simulate_invoice(
         ai_product_identity = classification_result.product_identity
         ai_research_requested = classification_result.needs_research
         ai_research_query = classification_result.research_query
+        ai_estimated_chars = sum(int(record.get("input_chars") or 0) for record in ai_stage_evidence)
+        ai_account_candidate_count = classification_result.candidate_strategy.account_candidate_count or ai_account_candidate_count
+        ai_counterparty_candidate_count = classification_result.candidate_strategy.counterparty_candidate_count or ai_counterparty_candidate_count
     elif client_profile and product_classifier:
         ai_provider = "static_rules"
         ai_skipped_reason = ai_gate.reason
     elif client_profile:
         ai_skipped_reason = "classifier_not_configured"
-    guarded_ai_account = ""
-    if ai_suggested_account_code:
-        if account_allowed_for_treatment(ai_suggested_account_code, relevance.account_treatment, direction):
-            guarded_ai_account = ai_suggested_account_code
-        else:
-            reasons = tuple(dict.fromkeys((*reasons, "ai_account_family_rejected")))
+    guarded_ai_account = ai_suggested_account_code
     if relevance.account_treatment == "stock_or_cogs":
         purchase_account = guarded_ai_account or _purchase_stock_account_for_line(selection, raw_line)
     elif relevance.account_treatment == "non_deductible_review":
@@ -1764,6 +1949,11 @@ def simulate_invoice(
         counterparty_tax_id=counterparty_tax_id,
         counterparty_title=counterparty_title,
         counterparty_identity_key=counterparty_identity_key,
+        ai_candidate_strategy=ai_candidate_strategy,
+        ai_selected_account_families=ai_selected_account_families,
+        ai_stage_evidence=ai_stage_evidence,
+        ai_account_candidate_count=ai_account_candidate_count,
+        ai_counterparty_candidate_count=ai_counterparty_candidate_count,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",
@@ -1978,6 +2168,11 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "aiSuggestedCounterpartyCode": result.ai_suggested_counterparty_code,
                     "aiRiskFlags": list(result.ai_risk_flags),
                     "aiAccountReason": result.ai_account_reason,
+                    "aiCandidateStrategy": result.ai_candidate_strategy,
+                    "aiSelectedAccountFamilies": list(result.ai_selected_account_families),
+                    "aiStageEvidence": list(result.ai_stage_evidence),
+                    "aiAccountCandidateCount": result.ai_account_candidate_count,
+                    "aiCounterpartyCandidateCount": result.ai_counterparty_candidate_count,
                     "aiProviderStatus": result.ai_classification_skipped_reason or ("used" if result.ai_classification_used else "not_used"),
                     "clientNaceCode": result.client_nace_code,
                     "clientActivityTags": list(result.client_activity_tags),

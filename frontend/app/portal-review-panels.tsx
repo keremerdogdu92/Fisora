@@ -608,7 +608,7 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
           <ReasonCard label="Ürün kimliği" value={document.aiProductIdentity || document.productLine || "-"} />
           <ReasonCard label="NACE/faaliyet" value={activityContext || "-"} />
           <ReasonCard label="Research ihtiyacı" value={document.aiResearchRequested ? (document.aiResearchQuery || "AI araştırma istedi") : researchStatus} />
-          <ReasonCard label="Cari niyeti" value={counterpartyIntent || "-"} />
+          <ReasonCard label="Cari aday izi" value={counterpartyIntent || "-"} />
           <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
           <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
           <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />

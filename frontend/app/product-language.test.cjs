@@ -127,7 +127,7 @@ test("document processing workbench keeps the journal review explicit", () => {
   assert.match(reviewSource, /Ürün kimliği/);
   assert.match(reviewSource, /NACE\/faaliyet/);
   assert.match(reviewSource, /Research ihtiyacı/);
-  assert.match(reviewSource, /Cari niyeti/);
+  assert.match(reviewSource, /Cari aday izi/);
   assert.match(reviewSource, /Fiş durumu/);
   assert.match(reviewSource, /Muhasebe fişi detayları/);
   assert.match(reviewSource, /AI muhasebe gerekçesi/);

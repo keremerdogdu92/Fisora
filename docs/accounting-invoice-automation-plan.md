@@ -12,7 +12,7 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 | Faz 4 | done | Research sonucu ile fis kararini yeniden kurma | Dusuk guven export'u acmaz, ama dengeli review taslagi korunur |
 | Faz 5 | done | Karisik KDV satir ayrimi | Cihaz %0/3065 kalir, aksesuar/pil satiri KDV'li kalabilir |
 | Faz 6 | done | Dogal dil musavir kural adayi | Not ve kural talimati review payload'ina baglandi |
-| Faz 7 | done | Portal karar zinciri gorunurlugu | Fis satirlari onde; urun kimligi, NACE/faaliyet, research ve cari niyeti karar izi alt akis oldu |
+| Faz 7 | done | Portal karar zinciri gorunurlugu | Fis satirlari onde; urun kimligi, NACE/faaliyet, research ve cari aday izi alt akis oldu |
 | Faz 8 | next | Cok mukellefli gercek belge matrisi | Canli deneme ve private sample matrix ile genisletilecek |
 
 ## Kararlar
@@ -68,7 +68,7 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - Urun hedefi AI'i kismak degil, soguk baslangicta muhasebe motorunun ana
   anlamlandirma katmanini AI ile kurmaktir:
   - AI fatura satirindan urun/hizmet kimligini, urun tag'ini,
-    NACE/faaliyet iliskisini, hesap ailesini ve cari niyetini aciklar.
+    NACE/faaliyet iliskisini, hesap ailesini ve cari aday izini aciklar.
   - AI fatura satirini, mukellef NACE/faaliyet baglamini, hesap plani
     adlarini, cari adaylarini ve gerekirse research sonucunu birlikte okuyup
     export-ready kalitesine yakin fis taslagi hazirlamalidir.
@@ -91,20 +91,21 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
     cari/hizmet/stock niyetini aciklamak AI'in ana isidir.
   - AI'siz otomasyon ancak AI kalitesine yakin oldugunda kullanilir; zayif
     motor "eslesmedi" deyip birakmak yerine AI kararina basvurur.
-  - Deterministik motor tutar, KDV, borc/alacak dengesi, hesap ailesi
-    guardrail'i, kesin kanuni kurallar ve export kapisini kontrol eder; AI bu
-    kesin kontrolleri ezemez.
+  - Deterministik motor tutar, KDV, borc/alacak dengesi, hesap kodunun mevcut
+    hesap plani adaylarindan gelmesi, kesin kanuni kurallar ve export kapisini
+    kontrol eder. AI'in muhasebe yorumunu hesap ailesi filtresiyle geri
+    cevirmek hedef degildir; yanlis yorum varsa mustavir review'de duzeltir.
 - Bilgi kaybi yasak:
   - AI ciktisi sadece kisa bir etikete indirgenmez. UI'da kisa Turkce ozet
     gosterilir, ayrica detay/ham karar izi korunur.
   - Karar izi en az urun kimligi, kategori/tag, NACE/faaliyet gerekcesi,
-    hesap ailesi, cari niyeti, guven ve research ihtiyacini tasir.
+    hesap ailesi, cari aday izi, guven ve research ihtiyacini tasir.
 - Ogrenme katmanlidir:
   - Global urun/tag hafizasi, NACE+tag iliski hafizasi ve mukellef ozel
     hesap/cari hafizasi ayrik dusunulur.
   - Musavir onay/duzeltmeleri learning event olarak kaydedilir; tekrar eden
-    satirlarda AI/research cagrisi azalir ama export kapisi deterministik
-    guardrail'lerle korunur.
+    satirlarda AI/research cagrisi azalir ama export kapisi ve kesin teknik
+    kontroller korunur.
 - Beklenen kullanici deneyimi:
   - Mustavir bos form doldurmaz; mumkun oldugunca dolu fis taslagi gorur.
   - Review ekraninda "bu neden 153/600/191/320 oldu" aciklamasi gorunur.
@@ -116,7 +117,9 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - 2026-07-02 yururluk karari: Bu bolum artik "AI yalniz belirsizse devreye
   girer" kapisi degil, AI-first muhasebe karar motorunun guardrail kapisidir.
   Soguk baslangicta AI ana anlamlandirici katmandir; deterministik motor
-  kesin kurallari ve export kapisini korur.
+  kesin kurallari, hesap adayinin mevcut hesap planindan gelmesini ve export
+  kapisini korur; AI'in sectigi aday hesap daha genel bir hesaba zorla
+  dusurulmez.
 - Kesin muhasebe kurallari AI tarafindan ezilmeyecek:
   - Isitme cihazi satisi her zaman `%0 / 3065` kabul edilir.
   - Isitme cihazi satisi KDV'li gelirse otomatik duzeltilmis kabul edilmez; `hearing_device_vat_should_be_zero` gerekcesiyle mustavir incelemesine duser.
@@ -136,8 +139,9 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
     adayi veya aciklamasi zayif satirda AI zorunlu anlamlandirma katmanidir.
   - Daha once onaylanmis kural, chart semantic map veya research cache yeterli
     guven veriyorsa AI/research tekrar cagrilmaz.
-  - AI dusuk guven verirse veya hesap ailesiyle celisirse taslak yine
-    uretilir; export kapisi review'de kalir ve mustavir kararindan ogrenilir.
+  - AI dusuk guven verirse veya hesap ailesi yorumu tartismaliysa taslak yine
+    AI'in mevcut hesap plani adayindan sectigi hesapla uretilir; export kapisi
+    review'de kalir ve mustavir kararindan ogrenilir.
 - 2026-07-02 uygulama durumu:
   - Soguk baslangicta core business stok/COGS satirlari AI aciklamasi ile
     muhasebe taslagina girebilir; deterministic gate bunu
@@ -147,14 +151,31 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
     siniflandirma guveni yuksek olsa bile research katmani calisir;
     `research_query` ham fatura satirindan once kullanilir.
   - Portal karar zinciri artik AI urun kimligi, NACE/faaliyet baglami,
-    research ihtiyaci/sorgusu ve cari niyetini kisa ozetin altinda gosterir;
+    research ihtiyaci/sorgusu ve cari aday izini kisa ozetin altinda gosterir;
     ham karar izi kisaltilarak bilgi kaybi yaratmadan saklanir.
 - AI sonucunun sinirlari:
-  - AI yeni hesap kodu uydurmayacak; sadece mevcut hesap/cari adaylari icinden sececek.
-  - AI stok/gider/KKEG gibi hesap ailesi korumasini ezemeyecek. Ornegin stok olmasi gereken pil/kalip icin `770` onerirse onerisi reddedilecek.
-  - `>=85` guven: kesin kurallara ve hesap ailesine aykirilik yoksa taslaga uygulanabilir.
-  - `70-84` guven: ekranda onerilir, mustavir onayi gerekir.
-  - `<70` guven: otomatik uygulanmaz, inceleme gerekir.
+  - AI yeni hesap kodu uydurmayacak; sadece mevcut hesap/cari adaylari icinden
+    sececek. Schema ve aday listesi bunu teknik olarak sinirlar.
+  - Hesap plani baglami tek seferde kocaman ve gurultulu bir liste olarak
+    gonderilmez. Aday sayisi kucukse tek AI cagrisi yeterlidir; aday seti
+    buyukse iki asamali secim kullanilir: once AI fatura satiri, yon,
+    NACE/faaliyet ve kompakt hesap aile haritasiyla ilgili aileleri secer;
+    sonra yalniz bu ailelerin gercek hesap adaylari ve ilgili `120/320` cari
+    adaylariyla nihai hesap/cari secimi yapar.
+  - Ilk asama tek ve dar aileye kilitlemez; `153`, `25x`, `760/770` gibi
+    makul komsu aileleri Stage 2'ye tasiyabilir. Boylece maliyet kontrol
+    edilirken AI'in dogru hesabi gormesi engellenmez.
+  - Her AI asamasi `stage`, `candidate_count`, `input_chars`, secilen aileler,
+    secilen hesap/cari ve fallback sebebiyle loglanir. Maliyet karari sabit
+    tahminle degil canli telemetry ile yonetilir.
+  - AI'in mevcut hesap planindan sectigi hesap aile filtresiyle geri
+    cevrilmeyecek ve motor tarafindan daha genel bir hesaba zorla
+    kaydirilmayacak. Ornegin AI `153.01.001` veya `770.01` sectiyse taslak o
+    hesapla olusur; dogruluk karari review ekraninda mustavirdedir.
+  - `>=85` guven: kesin kanuni/KDV kurala aykiri degilse taslaga uygulanabilir.
+  - `70-84` guven: taslaga uygulanabilir, mustavir onayi gerekir.
+  - `<70` guven: taslak yine dolu kalir, export review'de kalir ve gerekirse
+    research istenir.
 - Marka/model, NACE ve internet arastirmasi karari:
   - Vergi levhasi yuklendiginde client activity profile hazir olmalidir.
     Fatura aninda ayni NACE arastirmasi bastan gereksiz tekrar edilmemelidir.
@@ -168,7 +189,9 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
   - Research sadece ayni bilgi daha once guvenle cache'lenmemisse calisir;
     bilinen/yuksek guvenli satirlar tekrar internet arastirmasi yapmaz.
   - Research ciktisi `marka`, `urun kategorisi`, `muhasebe etkisi`, `research_confidence` ve `accounting_impact_confidence` olarak ayrilacak.
-  - Research sonucu da kanuni kurallari ve hesap ailesi korumasini ezemez; dusuk kaynak veya dusuk muhasebe etkisi guveni review sebebidir.
+  - Research sonucu da kanuni/KDV kurallari ve export kapisini ezemez; dusuk
+    kaynak veya dusuk muhasebe etkisi guveni review sebebidir, taslagi bos
+    birakma sebebi degildir.
 - NACE arastirmasi karari:
   - Mukellef profilinde NACE var ama faaliyet etiketi yoksa NACE research cache'i profilin faaliyet etiketlerini zenginlestirmek icin kullanilir.
   - NACE research tek basina fise export izni vermez; sadece faaliyet baglami ve uygunluk kararini guclendirir.
@@ -193,7 +216,10 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 
 - Hard rule sirasi netlesti: kanuni/KDV kural, cari eslesme, hesap plani adaylari, AI, research, musavir ogrenmesi.
 - AI kapi mantigi eklendi: kesin kurali ezmez, hesap kodu uydurmaz, dusuk guvende research veya review ister.
-- Hesap ailesi guardrail eklendi: stok olmasi gereken satir gider hesabina, satis geliri gider hesabina kayamaz.
+- 2026-07-02 karar guncellemesi: hesap ailesi guardrail'i AI taslagini geri
+  cevirmeyecek sekilde daraltildi. AI mevcut hesap plani adayindan hesap
+  sectiyse motor bunu daha genel bir hesaba kaydirmaz; mustavir review ve
+  learning dongusu son karardir.
 - Review required olsa bile temel tutarlar ve yon varsa dengeli muhasebe fis taslagi olusturulur.
 - Tavily/global research sadece belirsiz marka/model veya zayif siniflandirma durumunda calisir; sonuc cache'e yazilir.
 - Karisik KDV icin cihaz satiri %0/3065 kalabilirken pil, aksesuar veya sarj aleti KDV'li satir olarak ayrilabilir.

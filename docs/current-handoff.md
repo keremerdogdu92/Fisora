@@ -25,16 +25,25 @@ oturumdan devam etmek icin son durumu ozetler.
   baslangic yorumlayicisi olacak sekilde genisletildi.
 - 2026-07-02 yururluk notu: yeni AI-first karar motoru hedefinde AI soguk
   baslangicta ana fatura anlamlandirici katmandir. Deterministik motor KDV,
-  borc/alacak dengesi, hesap ailesi guardrail'i, kesin kanuni kurallar ve
-  export kapisini korur; Tavily yalniz AI emin degilse, urun yeni/belirsizse
-  veya faaliyet/NACE baglami eksikse calisir. Musavir onay/duzeltmeleri
-  learning event olarak AI/research tekrarini azaltacak sekilde kullanilir.
+  borc/alacak dengesi, mevcut hesap plani aday listesi, kesin kanuni kurallar
+  ve export kapisini korur. AI mevcut hesap plani adayindan hesap sectiyse
+  motor bunu hesap ailesi filtresiyle daha genel bir hesaba kaydirmaz; yanlis
+  muhasebe yorumu mustavir review/learning dongusunde duzeltilir. Tavily
+  yalniz AI emin degilse, urun yeni/belirsizse veya faaliyet/NACE baglami
+  eksikse calisir. Musavir onay/duzeltmeleri learning event olarak AI/research
+  tekrarini azaltacak sekilde kullanilir.
 - 2026-07-02 canli uygulama durumu: cold-start core business stok/COGS satiri
   `cold_start_core_accounting_line` gerekcesiyle kabul ediliyor; AI
   `needs_research=true` dediginde kategori bilinse veya guven yuksek olsa bile
   research calisiyor; portal karar zinciri urun kimligi, NACE/faaliyet,
-  research ihtiyaci/sorgusu ve cari niyetini gosteriyor. Faz 8 icin cok
+  research ihtiyaci/sorgusu ve cari aday izini gosteriyor. Faz 8 icin cok
   mukellefli private sample matrix ve canli smoke henuz siradaki is.
+- 2026-07-03 plan guncellemesi: sabit `12` hesap adayi kirpmasi yerine
+  zengin ama olculu iki asamali AI hesap/cari secimi hedeflendi. Aday seti
+  kucukse tek cagri kalir; buyukse Stage 1 hesap ailelerini, Stage 2 dar
+  gercek hesap listesi ve ilgili `120/320` cari adaylarini secer. Her asama
+  `candidate_count`, `input_chars`, secilen aile/hesap/cari ve fallback
+  sebebiyle telemetry'ye yazilacak.
 - 2026-07-02 belge onizleme duzeltmesi canlida: `/portal/belgeler` orijinal
   belge fetch'i artik diger backend cagrilariyla ayni API base resolver'i
   uzerinden `/api/phase0/store/document-file/...` yoluna gider. Orhan Elibol

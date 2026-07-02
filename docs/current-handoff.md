@@ -7,12 +7,13 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime kod release'i: `85ac6e0`; handoff-only sync
+- Son dogrulanan runtime kod release'i: `c726bc8`; handoff-only sync
   sonrasinda sunucu tekrar `origin/main` ile esitlenir. Kod release scripti
-  `before_commit=961d041`, `after_commit=85ac6e0`, `smoke=ok`, `/health`
-  200, readiness 200, `ready=true`, `pilot_sellable=true` dondu.
-- Son deploy smoke: 2026-06-29, `/health` 200, readiness `ready=true`,
-  `pilot_sellable=true`; root ve tum `/portal/*` kontrol rotalari 200.
+  `before_commit=2709823`, `after_commit=c726bc8`, `smoke=ok`, `/health`
+  200, readiness 200, root route 200, `ready=true`, `pilot_sellable=true`
+  dondu.
+- Son deploy smoke: 2026-07-02, `/health` 200, readiness `ready=true`,
+  `pilot_sellable=true`; root route 200.
 - KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,
   `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`
   kaydi, pipeline'a `vat_split_classified`, musavir onayina
@@ -28,7 +29,7 @@ oturumdan devam etmek icin son durumu ozetler.
   export kapisini korur; Tavily yalniz AI emin degilse, urun yeni/belirsizse
   veya faaliyet/NACE baglami eksikse calisir. Musavir onay/duzeltmeleri
   learning event olarak AI/research tekrarini azaltacak sekilde kullanilir.
-- 2026-07-02 lokal uygulama durumu: cold-start core business stok/COGS satiri
+- 2026-07-02 canli uygulama durumu: cold-start core business stok/COGS satiri
   `cold_start_core_accounting_line` gerekcesiyle kabul ediliyor; AI
   `needs_research=true` dediginde kategori bilinse veya guven yuksek olsa bile
   research calisiyor; portal karar zinciri urun kimligi, NACE/faaliyet,

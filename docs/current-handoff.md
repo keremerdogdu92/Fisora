@@ -7,9 +7,9 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime kod release'i: `c726bc8`; handoff-only sync
+- Son dogrulanan runtime kod release'i: `9213a86`; handoff-only sync
   sonrasinda sunucu tekrar `origin/main` ile esitlenir. Kod release scripti
-  `before_commit=2709823`, `after_commit=c726bc8`, `smoke=ok`, `/health`
+  `before_commit=76e2b29`, `after_commit=9213a86`, `smoke=ok`, `/health`
   200, readiness 200, root route 200, `ready=true`, `pilot_sellable=true`
   dondu.
 - Son deploy smoke: 2026-07-02, `/health` 200, readiness `ready=true`,
@@ -35,6 +35,12 @@ oturumdan devam etmek icin son durumu ozetler.
   research calisiyor; portal karar zinciri urun kimligi, NACE/faaliyet,
   research ihtiyaci/sorgusu ve cari niyetini gosteriyor. Faz 8 icin cok
   mukellefli private sample matrix ve canli smoke henuz siradaki is.
+- 2026-07-02 belge onizleme duzeltmesi canlida: `/portal/belgeler` orijinal
+  belge fetch'i artik diger backend cagrilariyla ayni API base resolver'i
+  uzerinden `/api/phase0/store/document-file/...` yoluna gider. Orhan Elibol
+  belgesi `1061386125_AVQ2026000000026.pdf` icin canli public API `200
+  application/pdf` dondu. Fis toplamlari icin `3399.99` gibi nokta-decimal
+  degerler artik `339999.00` olarak sismiyor.
 - Muhasebe fisi UX'i guncellendi: `/portal/belgeler` ekraninda fis satirlari
   en onde duzenlenir; `Karar ve gerekce` sureci fisin altinda ikincil alanda
   kalir. `Duzeltme notu` ve `Kural talimati`, fis satiri/hesap-cari

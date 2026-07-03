@@ -418,6 +418,64 @@ test("processed backend documents keep upload stamp and expose direction conflic
   });
 });
 
+test("processed backend documents expose AI retry without promoting static fallback as suggestion", () => {
+  const workspace = {
+    client: clientRecord,
+    portal_users: workspaceRecord.portal_users,
+    uploaded_documents: [],
+    documents: [
+      {
+        client_id: "client-1",
+        document_ref: "ai-retry-doc",
+        export_status: "review_required",
+        result: {
+          file_name: "belirsiz-alis.xml",
+          invoice_type: "ALIS",
+          accounting_direction: "purchase",
+          provider_hint: "Bilinmeyen Tedarik",
+          product_line_hint: "ZX Pilot Kalem",
+          ai_resolution_status: "ai_retry_required",
+          ai_retry_reason: "ai_account_missing",
+          ai_suggested_account_code: "",
+          selected_expense_account: "",
+          static_fallback_account: "770.01",
+          static_fallback_suppressed: true,
+          accountant_summary: "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek.",
+          technical_details: {
+            ai_resolution_status: "ai_retry_required",
+            static_fallback_account: "770.01",
+            static_fallback_suppressed: true,
+          },
+        },
+      },
+    ],
+    document_pipeline_events: [
+      {
+        document_ref: "ai-retry-doc",
+        step: "ai_retry_required",
+        status: "warning",
+        message_tr: "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek.",
+        debug_code: "ai_retry_required",
+      },
+    ],
+  };
+
+  const data = normalizeBackendWorkspaces({
+    clients: [clientRecord],
+    workspaces: [workspace],
+    source: "test",
+  });
+
+  const document = data.documents[0];
+  assert.equal(document.aiResolutionStatus, "ai_retry_required");
+  assert.equal(document.aiRetryReason, "ai_account_missing");
+  assert.equal(document.aiSuggestedAccountCode, "");
+  assert.equal(document.selectedExpenseAccount, "-");
+  assert.equal(document.staticFallbackAccount, "770.01");
+  assert.equal(document.staticFallbackSuppressed, true);
+  assert.deepEqual(document.pipelineEvents.map((event) => event.step), ["ai_retry_required"]);
+});
+
 test("fetchBackendPilotData loads clients then each allowed workspace", async () => {
   const requests = [];
   const fetchImpl = async (url, init = {}) => {

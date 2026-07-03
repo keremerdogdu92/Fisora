@@ -127,6 +127,8 @@ export type PilotDocument = {
   aiProductIdentity?: string;
   aiResearchRequested?: boolean;
   aiResearchQuery?: string;
+  aiResolutionStatus?: string;
+  aiRetryReason?: string;
   aiSuggestedAccountCode: string;
   aiSuggestedCounterpartyCode: string;
   aiRiskFlags: string[];
@@ -151,6 +153,8 @@ export type PilotDocument = {
   pipelineEvents: DocumentPipelineEvent[];
   accountingDirection?: string;
   directionConflict?: DirectionConflict;
+  staticFallbackAccount?: string;
+  staticFallbackSuppressed?: boolean;
   selectedExpenseAccount: string;
   selectedVatAccount: string;
   selectedCounterpartyAccount: string;
@@ -394,6 +398,8 @@ export type ReviewData = {
     aiProductIdentity?: string;
     aiResearchRequested?: boolean;
     aiResearchQuery?: string;
+    aiResolutionStatus?: string;
+    aiRetryReason?: string;
     aiSuggestedAccountCode?: string;
     aiSuggestedCounterpartyCode?: string;
     aiRiskFlags?: string[];
@@ -404,6 +410,8 @@ export type ReviewData = {
     counterpartyTitle?: string;
     counterpartyIdentityKey?: string;
     exportStatus?: string;
+    staticFallbackAccount?: string;
+    staticFallbackSuppressed?: boolean;
     selectedExpenseAccount?: string;
     selectedVatAccount?: string;
     selectedSupplierAccount?: string;

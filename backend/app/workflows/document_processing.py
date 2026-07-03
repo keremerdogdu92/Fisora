@@ -353,6 +353,8 @@ def _invoice_has_expected_shape(invoice: ParsedInvoice) -> bool:
 def _draft_status(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "wrong_document_type"
+    if result.get("ai_resolution_status") == "ai_retry_required":
+        return "ai_retry_required"
     if result.get("draft_lines"):
         return "draft_ready"
     return "manual_draft_required"
@@ -361,6 +363,8 @@ def _draft_status(result: dict[str, Any]) -> str:
 def _accountant_summary(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "Bu dosya beklenen fatura/ekstre yapisinda gorunmuyor. Dogru belge yeniden istenmeli."
+    if result.get("ai_resolution_status") == "ai_retry_required":
+        return "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek."
     if result.get("draft_lines"):
         if result.get("is_balanced"):
             return "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir."
@@ -379,6 +383,10 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "ai_provider": str(result.get("ai_classification_provider") or ""),
         "ai_skipped_reason": str(result.get("ai_classification_skipped_reason") or ""),
         "ai_reason": str(result.get("ai_classification_reason") or ""),
+        "ai_resolution_status": str(result.get("ai_resolution_status") or ""),
+        "ai_retry_reason": str(result.get("ai_retry_reason") or ""),
+        "static_fallback_account": str(result.get("static_fallback_account") or ""),
+        "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
     }
 
 
@@ -391,18 +399,25 @@ def _ai_explanation_tr(result: dict[str, Any]) -> str:
     account = str(result.get("ai_suggested_account_code") or result.get("selected_expense_account") or "-")
     counterparty = str(result.get("ai_suggested_counterparty_code") or result.get("selected_supplier_account") or "-")
     risks = ", ".join(str(flag) for flag in result.get("ai_risk_flags") or result.get("review_reason_codes") or []) or "risk yok"
+    if result.get("ai_resolution_status") == "ai_retry_required":
+        retry_reason = str(result.get("ai_retry_reason") or skipped or "ai_not_resolved")
+        if skipped == "ai_provider_error":
+            return f"AI karari alinamadi. Provider {provider} hata verdi; belge tekrar denenecek. Sebep: {retry_reason}. Riskler: {risks}."
+        return f"AI karari tamamlanamadi; belge tekrar denenecek. Sebep: {retry_reason}. Hesap onerisi nihai taslaga yazilmadi. Riskler: {risks}."
     if skipped == "ai_provider_error":
-        return f"AI kararı alınamadı. Provider {provider} hata verdi; statik kontrol sonucu korundu. Riskler: {risks}."
+        return f"AI karari alinamadi. Provider {provider} hata verdi; belge tekrar denenecek. Riskler: {risks}."
     return (
-        f"AI kararı: {provider} belge kalemini {category} olarak değerlendirdi. "
-        f"Güven: %{confidence}. Gerekçe: {reason or 'Gerekçe üretilmedi.'} "
-        f"Hesap önerisi: {account}. Cari önerisi: {counterparty}. Riskler: {risks}."
+        f"AI karari: {provider} belge kalemini {category} olarak degerlendirdi. "
+        f"Guven: %{confidence}. Gerekce: {reason or 'Gerekce uretilmedi.'} "
+        f"Hesap onerisi: {account}. Cari onerisi: {counterparty}. Riskler: {risks}."
     )
 
 
 def _with_review_summary(result: dict[str, Any], *, document_validation_status: str = "expected_document") -> dict[str, Any]:
     updated = dict(result)
     updated.setdefault("document_validation_status", document_validation_status)
+    if updated.get("ai_resolution_status") == "ai_retry_required":
+        updated["draft_status"] = "ai_retry_required"
     updated.setdefault("draft_status", _draft_status(updated))
     draft_lines = list(updated.get("draft_lines") or [])
     statement_entries = list(updated.get("statement_entries") or [])
@@ -415,7 +430,9 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
     )
     updated.setdefault(
         "accountant_action_hint",
-        "Taslak hazir; mustavir kontrolu bekliyor." if draft_lines or statement_entries else "Manuel kontrol gerekiyor.",
+        "AI kararini tamamlayinca belge otomatik yeniden denenecek."
+        if updated.get("ai_resolution_status") == "ai_retry_required"
+        else "Taslak hazir; mustavir kontrolu bekliyor." if draft_lines or statement_entries else "Manuel kontrol gerekiyor.",
     )
     updated.setdefault(
         "primary_suggestion",
@@ -436,9 +453,14 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
             "export_gate_reason": updated.get("export_gate_reason") or "",
         },
     )
-    updated.setdefault("accountant_summary", _accountant_summary(updated))
-    updated.setdefault("accountant_explanation_tr", updated.get("accountant_explanation_tr") or _ai_explanation_tr(updated))
-    updated.setdefault("ai_explanation_tr", _ai_explanation_tr(updated))
+    if updated.get("ai_resolution_status") == "ai_retry_required":
+        updated["accountant_summary"] = _accountant_summary(updated)
+        updated["accountant_explanation_tr"] = _ai_explanation_tr(updated)
+        updated["ai_explanation_tr"] = _ai_explanation_tr(updated)
+    else:
+        updated.setdefault("accountant_summary", _accountant_summary(updated))
+        updated.setdefault("accountant_explanation_tr", updated.get("accountant_explanation_tr") or _ai_explanation_tr(updated))
+        updated.setdefault("ai_explanation_tr", _ai_explanation_tr(updated))
     updated.setdefault("technical_details", _technical_details(updated))
     return updated
 
@@ -457,6 +479,8 @@ def _research_candidate_from_result(result: dict[str, Any], document: dict[str, 
 
 
 def _should_run_research_for_result(result: dict[str, Any]) -> bool:
+    if result.get("ai_resolution_status") == "ai_retry_required":
+        return True
     if bool(result.get("ai_research_requested")):
         return True
     category = str(result.get("product_category") or "").strip()
@@ -928,7 +952,7 @@ def process_next_job_once(
         pipeline_event(
             "parse_started",
             "ok",
-            "Belge parse edilmeye başladı.",
+            "Belge parse edilmeye basladi.",
             "parse_started",
             {"parser_kind": str(job.get("parser_kind") or "")},
         )
@@ -958,7 +982,7 @@ def process_next_job_once(
             pipeline_event(
                 "ai_provider_selected",
                 "ok",
-                f"AI provider seçildi: {selected_provider}.",
+                f"AI provider secildi: {selected_provider}.",
                 "ai_provider_selected",
                 {"provider": selected_provider},
             )
@@ -1059,7 +1083,7 @@ def process_next_job_once(
             pipeline_event(
                 "ai_decision_ready" if ai_status == "ok" else "ai_provider_failed",
                 ai_status,
-                "AI geldi karar verdi." if ai_status == "ok" else "AI provider hata verdi; fallback kontrol kullanıldı.",
+                "AI geldi karar verdi." if ai_status == "ok" else "AI provider karar veremedi; belge tekrar denenecek.",
                 "ai_decision_ready" if ai_status == "ok" else "ai_provider_failed",
                 {
                     "provider": str(result.get("ai_classification_provider") or ""),
@@ -1070,7 +1094,7 @@ def process_next_job_once(
             pipeline_event(
                 "accountant_ai_explanation_ready",
                 "ok",
-                "Müşavir AI çıktısını Türkçe gerekçeyle görebilir.",
+                "Musavir AI ciktisini Turkce gerekceyle gorebilir.",
                 "accountant_ai_explanation_ready",
                 {"ai_explanation_tr": str(result.get("ai_explanation_tr") or _ai_explanation_tr(result))},
             )
@@ -1078,7 +1102,7 @@ def process_next_job_once(
             pipeline_event(
                 "weak_match",
                 "warning",
-                "Kalem faaliyet profiliyle zayıf eşleşti.",
+                "Kalem faaliyet profiliyle zayif eslesti.",
                 "weak_match",
                 {"business_relevance_reason": str(result.get("business_relevance_reason") or "")},
             )
@@ -1154,11 +1178,24 @@ def process_next_job_once(
                         "research_source_rejected",
                         {"source_urls": list(profile.get("source_urls") or [])},
                     )
+        result = _with_review_summary(result)
+        if result.get("ai_resolution_status") == "ai_retry_required":
+            pipeline_event(
+                "ai_retry_required",
+                "warning",
+                "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek.",
+                "ai_retry_required",
+                {
+                    "reason": str(result.get("ai_retry_reason") or ""),
+                    "static_fallback_account": str(result.get("static_fallback_account") or ""),
+                    "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
+                },
+            )
         if result.get("draft_lines"):
             pipeline_event(
                 "journal_draft_ready",
                 "ok",
-                "Belge muhasebe fişi olarak doldu.",
+                "Belge muhasebe fisi olarak doldu.",
                 "journal_draft_ready",
                 {"draft_line_count": len(result.get("draft_lines") or [])},
             )
@@ -1166,7 +1203,7 @@ def process_next_job_once(
             pipeline_event(
                 "journal_unbalanced",
                 "warning",
-                "Muhasebe fişi dengeli değil.",
+                "Muhasebe fisi dengeli degil.",
                 "journal_unbalanced",
                 {
                     "total_debit": str(result.get("total_debit") or ""),
@@ -1177,7 +1214,7 @@ def process_next_job_once(
             pipeline_event(
                 "export_ready",
                 "ok",
-                "Muhasebe fişi kaydedildi; exporta gönderilebilir durumda.",
+                "Muhasebe fisi kaydedildi; exporta gonderilebilir durumda.",
                 "export_ready",
                 {},
             )

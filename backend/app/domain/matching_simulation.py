@@ -158,6 +158,10 @@ class SimulatedInvoiceResult:
     ai_account_candidate_count: int = 0
     ai_counterparty_candidate_count: int = 0
     ai_quality_scorecard: dict[str, object] = field(default_factory=dict)
+    ai_resolution_status: str = "resolved"
+    ai_retry_reason: str = ""
+    static_fallback_account: str = ""
+    static_fallback_suppressed: bool = False
 
 
 @dataclass(frozen=True)
@@ -371,6 +375,18 @@ def _purchase_stock_account_for_line(selection: AccountSelection, raw_line: str)
     candidates = _candidate_accounts_as_chart_accounts(selection.account_candidates.get("purchase_stock"))
     selected = select_usage_account(candidates, raw_line, "purchase", account_treatment="stock")
     return selected.normalized_account_code if selected else selection.stock_account
+
+
+def _ai_retry_reason(*, ai_skipped_reason: str, ai_used: bool, ai_suggested_account_code: str, ai_research_requested: bool) -> str:
+    if ai_suggested_account_code:
+        return ""
+    if ai_skipped_reason:
+        return ai_skipped_reason
+    if ai_research_requested:
+        return "research_required"
+    if ai_used:
+        return "ai_account_missing"
+    return "ai_not_resolved"
 
 
 def _normalize_intended_direction(value: str | None) -> str:
@@ -1631,17 +1647,46 @@ def simulate_invoice(
     elif client_profile:
         ai_skipped_reason = "classifier_not_configured"
     guarded_ai_account = ai_suggested_account_code
+    static_fallback_account = ""
+    static_fallback_suppressed = False
+    ai_resolution_status = "resolved"
+    ai_retry_reason = ""
+    return_invoice = _is_return_invoice(invoice)
+    suppress_static_purchase_fallback = (
+        direction == "purchase"
+        and not return_invoice
+        and ai_gate.needs_ai
+        and client_profile is not None
+        and product_classifier is not None
+        and not guarded_ai_account
+        and relevance.account_treatment not in {"non_deductible_review", "stock_or_cogs"}
+    )
     if relevance.account_treatment == "stock_or_cogs":
-        purchase_account = guarded_ai_account or _purchase_stock_account_for_line(selection, raw_line)
+        static_fallback_account = _purchase_stock_account_for_line(selection, raw_line)
+        purchase_account = guarded_ai_account or ("" if suppress_static_purchase_fallback else static_fallback_account)
     elif relevance.account_treatment == "non_deductible_review":
         purchase_account = selection.non_deductible_account
     else:
-        purchase_account = guarded_ai_account or _purchase_expense_account_for_line(selection, raw_line)
+        static_fallback_account = _purchase_expense_account_for_line(selection, raw_line)
+        purchase_account = guarded_ai_account or ("" if suppress_static_purchase_fallback else static_fallback_account)
+    if suppress_static_purchase_fallback:
+        static_fallback_suppressed = True
+        ai_resolution_status = "ai_retry_required"
+        ai_retry_reason = _ai_retry_reason(
+            ai_skipped_reason=ai_skipped_reason,
+            ai_used=ai_used,
+            ai_suggested_account_code=ai_suggested_account_code,
+            ai_research_requested=ai_research_requested,
+        )
     hearing_device_vat_review = direction == "sales" and _sales_hearing_device_vat_review_needed(invoice)
     if hearing_device_vat_review:
         reasons = tuple(dict.fromkeys((*reasons, "hearing_device_vat_should_be_zero")))
 
-    if _is_return_invoice(invoice) and amount is not None and amount > 0:
+    if static_fallback_suppressed:
+        reasons = tuple(dict.fromkeys((*reasons, "ai_retry_required")))
+        status = "review_required"
+        draft_quality = "ai_retry_required"
+    elif return_invoice and amount is not None and amount > 0:
         reasons = tuple(dict.fromkeys((*reasons, "return_invoice_manual_review")))
         vat_rate = _single_vat_rate(invoice) if len(invoice.vat_rates) <= 1 else Decimal("0.00")
         if direction == "sales":
@@ -1897,6 +1942,8 @@ def simulate_invoice(
         risk_flags=all_reasons,
         relevance=relevance,
     )
+    if static_fallback_suppressed:
+        export_status = "review_required"
     mode_reasons: tuple[str, ...] = ()
     if mode == "conservative" and export_status == "export_ready":
         mode_reasons = ("conservative_mode_requires_review",)
@@ -1922,6 +1969,8 @@ def simulate_invoice(
         counterparty_match=counterparty_match,
         entry=entry,
     )
+    if static_fallback_suppressed:
+        export_gate_reason = "AI ajani karar tamamlayamadi; belge tekrar denenecek."
     accountant_explanation = _accountant_explanation(
         direction=direction,
         direction_evidence=direction_evidence,
@@ -2059,6 +2108,10 @@ def simulate_invoice(
         ai_account_candidate_count=ai_account_candidate_count,
         ai_counterparty_candidate_count=ai_counterparty_candidate_count,
         ai_quality_scorecard=ai_quality_scorecard,
+        ai_resolution_status=ai_resolution_status,
+        ai_retry_reason=ai_retry_reason,
+        static_fallback_account=static_fallback_account,
+        static_fallback_suppressed=static_fallback_suppressed,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",

@@ -608,7 +608,9 @@ export function JournalPanel({
 }
 
 function DecisionChainPanel({ document }: { document: PilotDocument }) {
-  const aiStatus = document.aiProvider && document.aiProvider !== "-" ? document.aiProvider : "Gerekmedi";
+  const aiStatus = document.aiResolutionStatus === "ai_retry_required"
+    ? "Tekrar denenecek"
+    : document.aiProvider && document.aiProvider !== "-" ? document.aiProvider : "Gerekmedi";
   const researchStatus = document.reviewReasons.includes("research_low_confidence")
     || document.reviewReasons.includes("research_source_rejected")
     ? "Kontrol"
@@ -628,6 +630,9 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
     document.aiSuggestedCounterpartyCode,
     document.suggestedCounterpartyAccount,
   ].filter(Boolean).join(" / ");
+  const staticFallbackTrace = document.staticFallbackSuppressed
+    ? `Bastirildi: ${document.staticFallbackAccount || "-"}`
+    : document.staticFallbackAccount || "-";
   return (
     <section className="decision-chain-panel" aria-label="Karar ve gerekçe">
       <div className="statement-review-heading">
@@ -649,6 +654,8 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
           <ReasonCard label="Ürün kimliği" value={document.aiProductIdentity || document.productLine || "-"} />
           <ReasonCard label="NACE/faaliyet" value={activityContext || "-"} />
           <ReasonCard label="Research ihtiyacı" value={document.aiResearchRequested ? (document.aiResearchQuery || "AI araştırma istedi") : researchStatus} />
+          <ReasonCard label="AI tekrar durumu" value={document.aiResolutionStatus === "ai_retry_required" ? (document.aiRetryReason || "Tekrar denenecek") : "Gerekmedi"} />
+          <ReasonCard label="Statik fallback izi" value={staticFallbackTrace} />
           <ReasonCard label="Cari aday izi" value={counterpartyIntent || "-"} />
           <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
           <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />

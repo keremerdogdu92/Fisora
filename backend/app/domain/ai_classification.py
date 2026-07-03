@@ -350,7 +350,7 @@ class StaticFirstClassifier:
                 skipped_reason="provider_missing",
                 estimated_input_chars=estimated_chars,
             )
-        if self.provider_calls >= self.policy.max_provider_calls:
+        if self.policy.max_provider_calls <= 0:
             return AiClassificationResult(
                 classification=static,
                 ai_used=False,

@@ -3139,7 +3139,11 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.ai_research_requested)
         self.assertEqual(result.ai_research_query, "ZX Sonic Pro 9")
         self.assertEqual(result.export_status, "review_required")
-        self.assertTrue(result.draft_lines)
+        self.assertEqual(result.ai_resolution_status, "ai_retry_required")
+        self.assertEqual(result.ai_retry_reason, "research_required")
+        self.assertTrue(result.static_fallback_suppressed)
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.draft_lines, ())
 
     def test_ai_account_candidate_is_not_overridden_by_account_family_guardrail(self) -> None:
         invoice = ParsedInvoice(
@@ -3211,6 +3215,145 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_expense_account, "770.01")
         self.assertEqual(result.draft_lines[0]["account_code"], "770.01")
         self.assertEqual(result.export_status, "review_required")
+
+    def test_uncertain_purchase_without_ai_provider_suppresses_generic_expense_fallback(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="unknown-device.pdf",
+            provider_hint="Belirsiz Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="UNK2026000000100",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("ZX Sonic Pro 9 receiver unit",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01", "name": "Cihaz stoku", "reason": ""},),
+                "purchase_expense": ({"code": "770.01", "name": "Genel gider", "reason": ""},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        classifier = StaticFirstClassifier(
+            provider=None,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertFalse(result.ai_classification_used)
+        self.assertEqual(result.ai_classification_skipped_reason, "provider_missing")
+        self.assertEqual(result.ai_resolution_status, "ai_retry_required")
+        self.assertEqual(result.ai_retry_reason, "provider_missing")
+        self.assertEqual(result.static_fallback_account, "770.01")
+        self.assertTrue(result.static_fallback_suppressed)
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.draft_lines, ())
+        self.assertIn("ai_retry_required", result.review_reason_codes)
+
+    def test_ai_provider_call_limit_does_not_starve_later_invoices_in_batch(self) -> None:
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01", "name": "Cihaz stoku", "reason": ""},),
+                "purchase_expense": ({"code": "770.01", "name": "Genel gider", "reason": ""},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 86,
+                "reason": "Model isitme cihazi ailesine benziyor.",
+                "evidence": ["ai:model_family"],
+                "suggested_account_code": "153.01",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Stok hesabi onerildi.",
+                "product_identity": "ZX Sonic Pro 9",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=1),
+        )
+        invoices = [
+            ParsedInvoice(
+                file_name=f"device-{index}.pdf",
+                provider_hint="Medikal Tedarik",
+                page_count=1,
+                text_extractable=True,
+                extracted_char_count=1200,
+                scenario="TEMELFATURA",
+                invoice_type="ALIS",
+                invoice_no=f"BRD202600000010{index}",
+                ettn="",
+                issue_date="01.05.2026",
+                tax_ids=("9999999999", "1234567890"),
+                vat_rates=("20",),
+                goods_services_total="1000.00",
+                vat_total="200.00",
+                special_tax_total="",
+                tax_inclusive_total="1200.00",
+                payable_total="1200.00",
+                risk_flags=(),
+                suggested_route="journal_candidate",
+                parse_notes=(),
+                line_items=(f"ZX Sonic Pro 9 receiver unit {index}",),
+            )
+            for index in range(3)
+        ]
+
+        results = [
+            simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+            for invoice in invoices
+        ]
+
+        self.assertEqual(len(provider.requests), 3)
+        self.assertEqual([result.selected_expense_account for result in results], ["153.01", "153.01", "153.01"])
+        self.assertNotIn("provider_call_budget_exhausted", [result.ai_classification_skipped_reason for result in results])
 
     def test_large_candidate_set_uses_family_stage_then_final_account_stage(self) -> None:
         invoice = ParsedInvoice(

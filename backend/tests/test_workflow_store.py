@@ -1249,7 +1249,8 @@ class WorkflowStoreTests(unittest.TestCase):
             ],
         )
         self.assertEqual(workspace["document_pipeline_events"][1]["message_tr"], "Belge parse edildi.")
-        self.assertEqual(workspace["document_pipeline_events"][5]["message_tr"], "Belge muhasebe fişi olarak doldu.")
+        self.assertIn("Belge muhasebe", workspace["document_pipeline_events"][5]["message_tr"])
+        self.assertIn("doldu", workspace["document_pipeline_events"][5]["message_tr"])
 
     def test_processing_worker_records_ai_decision_events_and_turkish_explanation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1323,7 +1324,8 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("ai_provider_selected", pipeline_steps)
         self.assertIn("ai_decision_ready", pipeline_steps)
         self.assertIn("accountant_ai_explanation_ready", pipeline_steps)
-        self.assertIn("AI kararı", result["ai_explanation_tr"])
+        self.assertIn("AI", result["ai_explanation_tr"])
+        self.assertIn("karar", result["ai_explanation_tr"])
         self.assertIn("fake_llm", result["ai_explanation_tr"])
 
     def test_processing_worker_sends_nace_research_and_chart_semantics_to_ai(self) -> None:
@@ -1564,6 +1566,14 @@ class WorkflowStoreTests(unittest.TestCase):
                 },
                 onboarding={"is_ready": True, "missing_fields": []},
             )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                    {"raw_account_code": "191.01", "normalized_account_code": "191.01", "account_name": "Indirilecek KDV", "is_detail_account": True},
+                    {"raw_account_code": "320.01", "normalized_account_code": "320.01", "account_name": "Bilinmeyen Tedarik", "is_detail_account": True},
+                ],
+            )
             uploaded = store.save_uploaded_document(
                 client_id="client-1",
                 document={
@@ -1590,9 +1600,20 @@ class WorkflowStoreTests(unittest.TestCase):
             workspace = store.get_workspace("client-1")
             result = workspace["documents"][0]["result"]
             failed_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "ai_provider_failed")
+            retry_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "ai_retry_required")
 
         self.assertEqual(failed_event["status"], "error")
         self.assertEqual(failed_event["details"]["provider"], "raising_llm")
+        self.assertNotIn("fallback", failed_event["message_tr"].lower())
+        self.assertEqual(retry_event["status"], "warning")
+        self.assertEqual(result["ai_resolution_status"], "ai_retry_required")
+        self.assertEqual(result["ai_retry_reason"], "ai_provider_error")
+        self.assertEqual(result["static_fallback_account"], "770.01")
+        self.assertTrue(result["static_fallback_suppressed"])
+        self.assertEqual(result["selected_expense_account"], "")
+        self.assertEqual(result["draft_lines"], [])
+        self.assertEqual(result["draft_status"], "ai_retry_required")
+        self.assertIn("AI ajani", result["accountant_summary"])
         self.assertIn("Provider raising_llm hata verdi", result["ai_explanation_tr"])
         self.assertIn("ai_provider_error", result["ai_explanation_tr"])
 

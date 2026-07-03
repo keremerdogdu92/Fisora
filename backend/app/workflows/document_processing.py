@@ -239,6 +239,10 @@ def _serializable_simulation(
         "review_reason_codes",
         "deterministic_checks",
         "business_relevance_evidence",
+        "ai_selected_account_families",
+        "ai_stage_evidence",
+        "ai_account_stage_evidence",
+        "ai_counterparty_stage_evidence",
         "draft_lines",
     ):
         data[key] = list(data[key])
@@ -386,6 +390,9 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "ai_reason": str(result.get("ai_classification_reason") or ""),
         "ai_resolution_status": str(result.get("ai_resolution_status") or ""),
         "ai_retry_reason": str(result.get("ai_retry_reason") or ""),
+        "ai_stage_evidence": list(result.get("ai_stage_evidence") or []),
+        "ai_account_stage_evidence": list(result.get("ai_account_stage_evidence") or []),
+        "ai_counterparty_stage_evidence": list(result.get("ai_counterparty_stage_evidence") or []),
         "static_fallback_account": str(result.get("static_fallback_account") or ""),
         "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
     }

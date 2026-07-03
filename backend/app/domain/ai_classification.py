@@ -78,6 +78,8 @@ class AiClassificationRequest:
     def to_schema_payload(self) -> dict[str, object]:
         if self.context.candidate_strategy.stage == "family_select":
             return self._to_family_select_payload()
+        if self.context.candidate_strategy.stage == "counterparty_resolve":
+            return self._to_counterparty_resolve_payload()
         account_candidates = _limited_strings(self.context.account_candidates, limit=max(self.context.account_candidate_limit, 0))
         counterparty_candidates = _limited_strings(self.context.counterparty_candidates, limit=max(self.context.counterparty_candidate_limit, 0))
         return {
@@ -170,6 +172,66 @@ class AiClassificationRequest:
                         "type": "array",
                         "items": {"type": "string", "enum": list(allowed_families)},
                         "maxItems": 8,
+                    },
+                    "primary_account_families": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(allowed_families)},
+                        "maxItems": 8,
+                    },
+                    "alternative_account_families": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(allowed_families)},
+                        "maxItems": 8,
+                    },
+                    "direction_assessment": {"type": "string", "maxLength": 80},
+                    "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+                    "account_reason": {"type": "string", "maxLength": 240},
+                    "product_identity": {"type": "string", "maxLength": 160},
+                    "needs_research": {"type": "boolean"},
+                    "research_query": {"type": "string", "maxLength": 160},
+                },
+                "additionalProperties": False,
+            },
+        }
+
+    def _to_counterparty_resolve_payload(self) -> dict[str, object]:
+        counterparty_candidates = _limited_strings(
+            self.context.counterparty_candidates,
+            limit=len(self.context.counterparty_candidates),
+        )
+        return {
+            "raw_line": self.raw_line[: self.max_input_chars].strip(),
+            "supplier_hint": self.supplier_hint[: self.max_input_chars].strip(),
+            "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
+            "nace_code": self.context.nace_code[:64].strip(),
+            "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
+            "candidate_strategy": _candidate_strategy_payload(self.context.candidate_strategy),
+            "counterparty_candidates": list(counterparty_candidates),
+            "allowed_categories": list(self.allowed_categories),
+            "output_schema": {
+                "type": "object",
+                "required": [
+                    "category",
+                    "confidence",
+                    "reason",
+                    "evidence",
+                    "suggested_account_code",
+                    "suggested_counterparty_code",
+                    "risk_flags",
+                    "account_reason",
+                    "product_identity",
+                    "needs_research",
+                    "research_query",
+                ],
+                "properties": {
+                    "category": {"type": "string", "enum": list(self.allowed_categories)},
+                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "reason": {"type": "string", "maxLength": 240},
+                    "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
+                    "suggested_account_code": {"type": "string", "enum": [""]},
+                    "suggested_counterparty_code": {
+                        "type": "string",
+                        "enum": ["", *counterparty_candidates],
                     },
                     "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
                     "account_reason": {"type": "string", "maxLength": 240},
@@ -289,6 +351,10 @@ def _validate_provider_payload(payload: dict[str, Any], request: AiClassificatio
     else:
         evidence = ()
     risk_flags = _limited_strings(payload.get("risk_flags") or [], limit=8) if isinstance(payload.get("risk_flags"), list) else ()
+    selected_families = _validated_families(payload.get("selected_account_families"), _allowed_family_values(request))
+    primary_families = _validated_families(payload.get("primary_account_families"), _allowed_family_values(request))
+    alternative_families = _validated_families(payload.get("alternative_account_families"), _allowed_family_values(request))
+    resolved_families = tuple(dict.fromkeys((*primary_families, *alternative_families, *selected_families)))
     return AiProviderClassification(
         category=category,
         confidence=confidence,
@@ -301,7 +367,7 @@ def _validate_provider_payload(payload: dict[str, Any], request: AiClassificatio
         product_identity=str(payload.get("product_identity") or "").strip()[:160],
         needs_research=bool(payload.get("needs_research")),
         research_query=str(payload.get("research_query") or "").strip()[:160],
-        selected_account_families=_validated_families(payload.get("selected_account_families"), _allowed_family_values(request)),
+        selected_account_families=resolved_families,
     )
 
 

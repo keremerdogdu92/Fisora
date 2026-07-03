@@ -155,6 +155,8 @@ class SimulatedInvoiceResult:
     ai_candidate_strategy: str = "single_stage"
     ai_selected_account_families: tuple[str, ...] = ()
     ai_stage_evidence: tuple[dict[str, object], ...] = ()
+    ai_account_stage_evidence: tuple[dict[str, object], ...] = ()
+    ai_counterparty_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_account_candidate_count: int = 0
     ai_counterparty_candidate_count: int = 0
     ai_quality_scorecard: dict[str, object] = field(default_factory=dict)
@@ -1082,10 +1084,29 @@ def _is_main_account_candidate(detail: dict[str, Any]) -> bool:
     return bool(str(detail.get("code") or "").strip())
 
 
+def _is_family_stage_candidate(detail: dict[str, Any]) -> bool:
+    group = str(detail.get("group") or "")
+    if group in {"customer", "supplier"}:
+        return False
+    return bool(str(detail.get("code") or "").strip())
+
+
+def _direction_role_for_group(group: str) -> str:
+    if group in {"purchase_stock", "fixed_asset", "purchase_expense", "non_deductible"}:
+        return "purchase_account"
+    if group == "purchase_vat":
+        return "purchase_vat"
+    if group in {"sales_revenue", "zero_vat_revenue"}:
+        return "sales_account"
+    if group == "sales_vat":
+        return "sales_vat"
+    return "account"
+
+
 def _account_family_candidates(details: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
     families: dict[str, dict[str, Any]] = {}
     for detail in details:
-        if not _is_main_account_candidate(detail):
+        if not _is_family_stage_candidate(detail):
             continue
         code = str(detail.get("code") or "").strip()
         family = _account_family_for_ai(code)
@@ -1096,6 +1117,7 @@ def _account_family_candidates(details: tuple[dict[str, Any], ...]) -> tuple[dic
             {
                 "family": family,
                 "label": str(detail.get("name") or "").strip() or family,
+                "direction_role": _direction_role_for_group(str(detail.get("group") or "").strip()),
                 "groups": [],
                 "candidate_count": 0,
                 "examples": [],
@@ -1136,15 +1158,37 @@ def _filter_context_for_families(
         context,
         account_candidates=account_candidates,
         account_candidate_details=details,
-        account_candidate_limit=policy.final_stage_account_limit,
+        account_candidate_limit=len(account_candidates),
         counterparty_candidate_limit=policy.counterparty_limit,
-        account_candidate_details_limit=policy.final_stage_account_limit,
+        account_candidate_details_limit=len(details),
         candidate_strategy=AiCandidateStrategy(
             mode="two_stage",
             stage="final_account",
             account_candidate_count=len(account_candidates),
             counterparty_candidate_count=len(context.counterparty_candidates),
             selected_families=selected_families,
+        ),
+    )
+
+
+def _counterparty_resolution_context(
+    context: AiClassificationContext,
+    *,
+    policy: AiClassificationPolicy,
+    mode: str,
+) -> AiClassificationContext:
+    return replace(
+        context,
+        account_candidates=(),
+        account_candidate_details=(),
+        account_candidate_limit=0,
+        account_candidate_details_limit=0,
+        counterparty_candidate_limit=len(context.counterparty_candidates),
+        candidate_strategy=AiCandidateStrategy(
+            mode=mode,
+            stage="counterparty_resolve",
+            account_candidate_count=0,
+            counterparty_candidate_count=len(context.counterparty_candidates),
         ),
     )
 
@@ -1619,6 +1663,28 @@ def simulate_invoice(
                 context=single_context,
             )
             stage_records.append(_stage_evidence(classification_result))
+        if len(base_context.counterparty_candidates) > policy.counterparty_limit:
+            counterparty_context = _counterparty_resolution_context(
+                base_context,
+                policy=policy,
+                mode=ai_candidate_strategy,
+            )
+            counterparty_result = product_classifier.classify(
+                raw_line,
+                supplier_hint=invoice.provider_hint,
+                context=counterparty_context,
+            )
+            stage_records.append(_stage_evidence(counterparty_result))
+            if counterparty_result.suggested_counterparty_code:
+                classification_result = replace(
+                    classification_result,
+                    suggested_counterparty_code=counterparty_result.suggested_counterparty_code,
+                    risk_flags=tuple(
+                        dict.fromkeys((*classification_result.risk_flags, *counterparty_result.risk_flags))
+                    ),
+                    account_reason=classification_result.account_reason or counterparty_result.account_reason,
+                    provider_reason=classification_result.provider_reason or counterparty_result.provider_reason,
+                )
         ai_stage_evidence = tuple(stage_records)
         relevance = assess_business_relevance(
             raw_line,
@@ -2105,6 +2171,12 @@ def simulate_invoice(
         ai_candidate_strategy=ai_candidate_strategy,
         ai_selected_account_families=ai_selected_account_families,
         ai_stage_evidence=ai_stage_evidence,
+        ai_account_stage_evidence=tuple(
+            record for record in ai_stage_evidence if record.get("ai_stage") in {"family_select", "final_account"}
+        ),
+        ai_counterparty_stage_evidence=tuple(
+            record for record in ai_stage_evidence if record.get("ai_stage") == "counterparty_resolve"
+        ),
         ai_account_candidate_count=ai_account_candidate_count,
         ai_counterparty_candidate_count=ai_counterparty_candidate_count,
         ai_quality_scorecard=ai_quality_scorecard,

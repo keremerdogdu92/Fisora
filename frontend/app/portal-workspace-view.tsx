@@ -7,7 +7,7 @@ import {
   reviewCockpitQueues,
 } from "./features/documents/document-workflow-model";
 import { reviewReasonLabel } from "./portal-normalization";
-import { DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
+import { AiTracePanel, DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import type {
   CancellationRequest,
   CorrectionDraft,
@@ -323,6 +323,7 @@ export function AccountantWorkspace({
           <strong>Debug için aç</strong>
         </summary>
         <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
+        <AiTracePanel document={selectedDocument} />
       </details>
 
       <section className="document-review-main">

@@ -205,6 +205,86 @@ export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineE
   );
 }
 
+function aiTraceStages(document?: PilotDocument) {
+  const technicalDetails = asRecord(document?.technicalDetails);
+  const trace = technicalDetails.ai_trace;
+  return Array.isArray(trace) ? trace.map(asRecord).filter((stage) => Object.keys(stage).length) : [];
+}
+
+function traceText(value: unknown, fallback = "-") {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join(", ") || fallback;
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value);
+}
+
+function traceStageLabel(stage: Record<string, unknown>) {
+  const value = traceText(stage.stage);
+  const labels: Record<string, string> = {
+    family_select: "Aile seçimi",
+    final_account: "Hesap seçimi",
+    counterparty_resolve: "Cari seçimi",
+  };
+  return labels[value] ?? value;
+}
+
+function JsonTraceBlock({ label, value }: { label: string; value: unknown }) {
+  const hasValue = typeof value === "string"
+    ? Boolean(value.trim())
+    : Boolean(value && (typeof value !== "object" || Object.keys(asRecord(value)).length || Array.isArray(value)));
+  if (!hasValue) return null;
+  return (
+    <details className="json-trace-block">
+      <summary>{label}</summary>
+      <pre>{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</pre>
+    </details>
+  );
+}
+
+export function AiTracePanel({ document }: { document?: PilotDocument }) {
+  const stages = aiTraceStages(document);
+  return (
+    <details className="ai-trace-panel">
+      <summary>
+        <span>AI karar izi</span>
+        <strong>{stages.length ? `${stages.length} AI adımı` : "Kayıt yok"}</strong>
+      </summary>
+      {stages.length ? (
+        <div className="ai-trace-stage-list">
+          {stages.map((stage, index) => {
+            const requestPayload = asRecord(stage.request_payload);
+            const providerResponse = asRecord(stage.provider_response);
+            const acceptedResult = asRecord(stage.accepted_result);
+            return (
+              <article className="ai-trace-stage" key={`${traceText(stage.stage)}-${index}`}>
+                <div className="ai-trace-stage-header">
+                  <div>
+                    <strong>{traceStageLabel(stage)}</strong>
+                    <span>{traceText(stage.provider)} / {traceText(stage.model, "model yok")}</span>
+                  </div>
+                  <span className={`ai-trace-status ${traceText(stage.validation_status)}`}>{traceText(stage.validation_status)}</span>
+                </div>
+                <div className="ai-trace-summary-grid">
+                  <Info label="Aday stratejisi" value={traceText(asRecord(stage.candidate_strategy).mode)} />
+                  <Info label="Input boyutu" value={traceText(stage.estimated_input_chars)} />
+                  <Info label="Seçilen hesap" value={traceText(acceptedResult.selected_account_code)} />
+                  <Info label="Seçilen cari" value={traceText(acceptedResult.selected_counterparty_code)} />
+                </div>
+                <JsonTraceBlock label="Sistem promptu" value={stage.system_prompt} />
+                <JsonTraceBlock label="AI'a ne sorduk?" value={requestPayload} />
+                <JsonTraceBlock label="AI ne cevap verdi?" value={providerResponse} />
+                <JsonTraceBlock label="Biz neyi kabul ettik?" value={acceptedResult} />
+                <JsonTraceBlock label="Hata / red gerekçesi" value={stage.error} />
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="empty">Bu belge için AI trace kaydı yok.</p>
+      )}
+    </details>
+  );
+}
+
 export function DocumentPreview({ document, session }: { document?: PilotDocument; session?: LocalSession | null }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -566,6 +646,7 @@ export function JournalPanel({
         {activeReviewTab === "history" ? (
           <section className="journal-tab-panel" role="tabpanel">
             <DocumentPipelineTimeline events={document.pipelineEvents ?? []} />
+            <AiTracePanel document={document} />
             <div className="accountant-guidance">
               <details>
                 <summary>Teknik detay</summary>

@@ -4543,6 +4543,54 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(provider.requests[0].to_schema_payload()["raw_line"], "ZX Sonic Pro 9 receiver")
         self.assertEqual(provider.requests[0].to_schema_payload()["account_candidates"], ["770.01", "760.01"])
 
+    def test_static_first_classifier_records_ai_trace_payload_response_and_validation(self) -> None:
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 84,
+                "reason": "Model odyoloji cihaz ailesine benziyor.",
+                "evidence": ["ai:model_family"],
+                "suggested_account_code": "770.01",
+                "suggested_counterparty_code": "320.01.015",
+                "risk_flags": [],
+                "account_reason": "Mevcut adaylar icinden cihaz gider hesabi secildi.",
+                "product_identity": "ZX Sonic Pro receiver",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        provider.product_classification_instructions = "AI accounting prompt"
+        provider.model = "fake-model"
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, max_input_chars=64),
+        )
+
+        result = classifier.classify(
+            "ZX Sonic Pro 9 receiver unit",
+            supplier_hint="Medikal Tedarik",
+            context=AiClassificationContext(
+                client_activity="Isitme cihazi satis ve servis",
+                account_candidates=("770.01", "760.01"),
+                counterparty_candidates=("320.01.015",),
+            ),
+        )
+
+        self.assertTrue(result.ai_trace)
+        trace = result.ai_trace[0]
+        self.assertEqual(trace["stage"], "final_account")
+        self.assertEqual(trace["provider"], "fake_llm")
+        self.assertEqual(trace["model"], "fake-model")
+        self.assertEqual(trace["validation_status"], "accepted")
+        self.assertEqual(trace["system_prompt"], "AI accounting prompt")
+        self.assertEqual(trace["request_payload"]["raw_line"], "ZX Sonic Pro 9 receiver unit")
+        self.assertEqual(trace["request_payload"]["account_candidates"], ["770.01", "760.01"])
+        self.assertEqual(trace["provider_response"]["suggested_account_code"], "770.01")
+        self.assertEqual(trace["accepted_result"]["selected_account_code"], "770.01")
+        self.assertEqual(trace["accepted_result"]["selected_counterparty_code"], "320.01.015")
+        self.assertNotIn("api_key", trace)
+        self.assertNotIn("Authorization", str(trace))
+
     def test_ai_schema_payload_keeps_configured_account_candidate_limit(self) -> None:
         account_codes = tuple(f"770.{index:02d}" for index in range(1, 21))
         request = AiClassificationRequest(
@@ -4572,6 +4620,8 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.ai_used)
         self.assertEqual(result.classification.category, "bilinmeyen")
         self.assertIn("ai_invalid_schema", result.classification.evidence)
+        self.assertEqual(result.ai_trace[0]["validation_status"], "invalid_schema")
+        self.assertEqual(result.ai_trace[0]["provider_response"]["category"], "serbest")
 
     def test_static_first_classifier_falls_back_when_provider_raises(self) -> None:
         class RaisingProductProvider:
@@ -4593,6 +4643,8 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.classification.category, "bilinmeyen")
         self.assertIn("ai_provider_error", result.classification.evidence)
         self.assertIn("provider unavailable", result.provider_reason)
+        self.assertEqual(result.ai_trace[0]["validation_status"], "provider_error")
+        self.assertIn("provider unavailable", result.ai_trace[0]["error"])
 
     def test_openai_accounting_provider_posts_limited_structured_payload(self) -> None:
         captured: dict[str, object] = {}

@@ -142,6 +142,22 @@ const workspaceRecord = {
         technical_details: {
           parse_notes: [],
           review_reason_codes: [],
+          ai_trace: [
+            {
+              stage: "final_account",
+              provider: "fake_llm",
+              validation_status: "accepted",
+              request_payload: {
+                candidate_strategy: { stage: "final_account" },
+              },
+              provider_response: {
+                suggested_account_code: "600.20",
+              },
+              accepted_result: {
+                selected_account_code: "600.20",
+              },
+            },
+          ],
         },
         ai_quality_scorecard: {
           static: { category: "Satis", confidence: 82 },
@@ -331,6 +347,22 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.deepEqual(data.documents[0].technicalDetails, {
     parse_notes: [],
     review_reason_codes: [],
+    ai_trace: [
+      {
+        stage: "final_account",
+        provider: "fake_llm",
+        validation_status: "accepted",
+        request_payload: {
+          candidate_strategy: { stage: "final_account" },
+        },
+        provider_response: {
+          suggested_account_code: "600.20",
+        },
+        accepted_result: {
+          selected_account_code: "600.20",
+        },
+      },
+    ],
   });
   assert.deepEqual(data.documents[0].aiQualityScorecard.final, {
     selected_account_code: "600.20",

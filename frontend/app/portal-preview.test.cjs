@@ -36,3 +36,15 @@ test("journal totals keep dot-decimal amounts as decimals", () => {
   assert.match(reviewPanels, /decimalSeparator/);
   assert.doesNotMatch(reviewPanels, /replace\(\/\\\\\\.\/g, ""\)/);
 });
+
+test("review history includes a collapsed ai trace panel with wrapped json", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+  const styles = readFileSync(join(__dirname, "styles.css"), "utf8");
+
+  assert.match(reviewPanels, /AiTracePanel/);
+  assert.match(reviewPanels, /AI karar izi/);
+  assert.match(reviewPanels, /JsonTraceBlock/);
+  assert.match(styles, /\.ai-trace-panel/);
+  assert.match(styles, /overflow-wrap:\s*anywhere/);
+  assert.match(styles, /white-space:\s*pre-wrap/);
+});

@@ -301,6 +301,7 @@ class AiClassificationResult:
     research_query: str = ""
     selected_account_families: tuple[str, ...] = ()
     candidate_strategy: AiCandidateStrategy = field(default_factory=AiCandidateStrategy)
+    ai_trace: tuple[dict[str, Any], ...] = ()
 
 
 class ProductClassifier(Protocol):
@@ -339,6 +340,88 @@ def _candidate_strategy_payload(strategy: AiCandidateStrategy) -> dict[str, obje
         "account_candidate_count": strategy.account_candidate_count,
         "counterparty_candidate_count": strategy.counterparty_candidate_count,
         "selected_families": list(strategy.selected_families),
+    }
+
+
+TRACE_MAX_STRING_CHARS = 4000
+TRACE_MAX_LIST_ITEMS = 250
+TRACE_SECRET_KEYS = {"authorization", "api_key", "key", "token", "secret", "password"}
+
+
+def _trace_safe_value(value: Any) -> Any:
+    if isinstance(value, str):
+        if len(value) <= TRACE_MAX_STRING_CHARS:
+            return value
+        return f"{value[:TRACE_MAX_STRING_CHARS]}... [truncated {len(value) - TRACE_MAX_STRING_CHARS} chars]"
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    if isinstance(value, tuple):
+        return _trace_safe_value(list(value))
+    if isinstance(value, list):
+        safe_items = [_trace_safe_value(item) for item in value[:TRACE_MAX_LIST_ITEMS]]
+        if len(value) > TRACE_MAX_LIST_ITEMS:
+            safe_items.append({"truncated_items": len(value) - TRACE_MAX_LIST_ITEMS})
+        return safe_items
+    if isinstance(value, dict):
+        safe: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if key_text.strip().lower() in TRACE_SECRET_KEYS:
+                safe[key_text] = "[redacted]"
+            else:
+                safe[key_text] = _trace_safe_value(item)
+        return safe
+    return str(value)
+
+
+def _provider_model(provider: ProductClassificationProvider) -> str:
+    return str(getattr(provider, "model", "") or "")
+
+
+def _provider_prompt(provider: ProductClassificationProvider) -> str:
+    return str(getattr(provider, "product_classification_instructions", "") or "")
+
+
+def _ai_trace_record(
+    *,
+    request: AiClassificationRequest,
+    provider: ProductClassificationProvider,
+    provider_name: str,
+    request_payload: dict[str, object],
+    estimated_chars: int,
+    validation_status: str,
+    provider_response: dict[str, Any] | None = None,
+    accepted_result: AiProviderClassification | None = None,
+    error: str = "",
+) -> dict[str, Any]:
+    accepted_payload: dict[str, Any] = {}
+    if accepted_result is not None:
+        accepted_payload = {
+            "category": accepted_result.category,
+            "confidence": accepted_result.confidence,
+            "reason": accepted_result.reason,
+            "selected_account_code": accepted_result.suggested_account_code,
+            "selected_counterparty_code": accepted_result.suggested_counterparty_code,
+            "selected_account_families": list(accepted_result.selected_account_families),
+            "risk_flags": list(accepted_result.risk_flags),
+            "account_reason": accepted_result.account_reason,
+            "product_identity": accepted_result.product_identity,
+            "needs_research": accepted_result.needs_research,
+            "research_query": accepted_result.research_query,
+        }
+    return {
+        "stage": request.context.candidate_strategy.stage,
+        "candidate_strategy": _candidate_strategy_payload(request.context.candidate_strategy),
+        "provider": provider_name,
+        "model": _provider_model(provider),
+        "estimated_input_chars": estimated_chars,
+        "system_prompt": _provider_prompt(provider),
+        "request_payload": _trace_safe_value(request_payload),
+        "output_schema": _trace_safe_value(request_payload.get("output_schema") or {}),
+        "provider_response": _trace_safe_value(provider_response or {}),
+        "validation_status": validation_status,
+        "accepted_result": _trace_safe_value(accepted_payload),
+        "error": error[:400],
     }
 
 
@@ -457,10 +540,12 @@ class StaticFirstClassifier:
             max_input_chars=self.policy.max_input_chars,
             context=resolved_context,
         )
-        estimated_chars = len(json.dumps(request.to_schema_payload(), ensure_ascii=False))
+        request_payload = request.to_schema_payload()
+        estimated_chars = len(json.dumps(request_payload, ensure_ascii=False))
         try:
             provider_payload = self.provider.classify_product(request)
         except Exception as exc:  # noqa: BLE001 - provider boundaries must not fail document processing
+            provider_name = str(getattr(self.provider, "last_provider_name", "") or self.provider.provider_name)
             return AiClassificationResult(
                 classification=ProductClassification(
                     raw_line=raw_line,
@@ -469,11 +554,23 @@ class StaticFirstClassifier:
                     evidence=(*static.evidence, "ai_provider_error"),
                 ),
                 ai_used=False,
-                provider=self.provider.provider_name,
+                provider=provider_name,
                 skipped_reason="ai_provider_error",
                 provider_reason=f"{type(exc).__name__}: {str(exc)[:200]}",
                 estimated_input_chars=estimated_chars,
                 risk_flags=("ai_provider_error",),
+                candidate_strategy=resolved_context.candidate_strategy,
+                ai_trace=(
+                    _ai_trace_record(
+                        request=request,
+                        provider=self.provider,
+                        provider_name=provider_name,
+                        request_payload=request_payload,
+                        estimated_chars=estimated_chars,
+                        validation_status="provider_error",
+                        error=f"{type(exc).__name__}: {str(exc)[:200]}",
+                    ),
+                ),
             )
         provider_result = _validate_provider_payload(provider_payload, request)
         provider_name = str(getattr(self.provider, "last_provider_name", "") or self.provider.provider_name)
@@ -490,6 +587,18 @@ class StaticFirstClassifier:
                 skipped_reason="",
                 provider_reason="AI response schema validation failed.",
                 estimated_input_chars=estimated_chars,
+                candidate_strategy=resolved_context.candidate_strategy,
+                ai_trace=(
+                    _ai_trace_record(
+                        request=request,
+                        provider=self.provider,
+                        provider_name=provider_name,
+                        request_payload=request_payload,
+                        estimated_chars=estimated_chars,
+                        validation_status="invalid_schema",
+                        provider_response=provider_payload,
+                    ),
+                ),
             )
 
         return AiClassificationResult(
@@ -512,6 +621,18 @@ class StaticFirstClassifier:
             research_query=provider_result.research_query,
             selected_account_families=provider_result.selected_account_families,
             candidate_strategy=resolved_context.candidate_strategy,
+            ai_trace=(
+                _ai_trace_record(
+                    request=request,
+                    provider=self.provider,
+                    provider_name=provider_name,
+                    request_payload=request_payload,
+                    estimated_chars=estimated_chars,
+                    validation_status="accepted",
+                    provider_response=provider_payload,
+                    accepted_result=provider_result,
+                ),
+            ),
         )
 
 

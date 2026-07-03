@@ -26,6 +26,21 @@ class OpenAiAccountingProvider:
     """OpenAI Responses API adapter for schema-validated accounting suggestions."""
 
     provider_name = "openai"
+    product_classification_instructions = (
+        "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
+        "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
+        "Internet aramasi yapma veya kaynak biliyormus gibi davranma. "
+        "Egitiminden biliyorsan marka/modelin urun kategorisini soyle. "
+        "Emin degilsen needs_research=true ve kisa research_query don. "
+        "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
+        "Kanuni KDV ve hesap ailesi kurallarini ezme. "
+        "Export izni verme; bu cikti sadece mustavir review taslagidir."
+    )
+    statement_suggestion_instructions = (
+        "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
+        "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
+        "Export izni verme; mustavir onayi gerektigini koru."
+    )
 
     def __init__(
         self,
@@ -52,16 +67,7 @@ class OpenAiAccountingProvider:
         payload = request.to_schema_payload()
         return self._post_structured_json(
             schema_name="fisora_invoice_ai_draft",
-            instructions=(
-                "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
-                "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
-                "Internet aramasi yapma veya kaynak biliyormus gibi davranma. "
-                "Egitiminden biliyorsan marka/modelin urun kategorisini soyle. "
-                "Emin degilsen needs_research=true ve kisa research_query don. "
-                "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
-                "Kanuni KDV ve hesap ailesi kurallarini ezme. "
-                "Export izni verme; bu cikti sadece mustavir review taslagidir."
-            ),
+            instructions=self.product_classification_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
         )
@@ -70,11 +76,7 @@ class OpenAiAccountingProvider:
         payload = request.to_schema_payload()
         return self._post_structured_json(
             schema_name="fisora_statement_ai_suggestion",
-            instructions=(
-                "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
-                "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
-                "Export izni verme; mustavir onayi gerektigini koru."
-            ),
+            instructions=self.statement_suggestion_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
         )
@@ -147,6 +149,17 @@ class ChatCompletionsAccountingProvider:
     """OpenAI-compatible chat-completions adapter for fallback providers."""
 
     provider_name = "chat_completions"
+    product_classification_instructions = (
+        "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
+        "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
+        "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
+        "Export izni verme; bu cikti sadece mustavir review taslagidir."
+    )
+    statement_suggestion_instructions = (
+        "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
+        "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
+        "Export izni verme; mustavir onayi gerektigini koru."
+    )
 
     def __init__(
         self,
@@ -175,12 +188,7 @@ class ChatCompletionsAccountingProvider:
         payload = request.to_schema_payload()
         return self._post_structured_json(
             schema_name="fisora_invoice_ai_draft",
-            instructions=(
-                "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
-                "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
-                "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
-                "Export izni verme; bu cikti sadece mustavir review taslagidir."
-            ),
+            instructions=self.product_classification_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
         )
@@ -189,11 +197,7 @@ class ChatCompletionsAccountingProvider:
         payload = request.to_schema_payload()
         return self._post_structured_json(
             schema_name="fisora_statement_ai_suggestion",
-            instructions=(
-                "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
-                "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
-                "Export izni verme; mustavir onayi gerektigini koru."
-            ),
+            instructions=self.statement_suggestion_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
         )

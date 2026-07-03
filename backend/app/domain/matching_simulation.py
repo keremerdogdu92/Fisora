@@ -159,6 +159,7 @@ class SimulatedInvoiceResult:
     ai_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_account_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_counterparty_stage_evidence: tuple[dict[str, object], ...] = ()
+    ai_trace: tuple[dict[str, object], ...] = ()
     ai_account_candidate_count: int = 0
     ai_counterparty_candidate_count: int = 0
     ai_quality_scorecard: dict[str, object] = field(default_factory=dict)
@@ -1743,6 +1744,7 @@ def simulate_invoice(
     ai_candidate_strategy = "single_stage"
     ai_selected_account_families: tuple[str, ...] = ()
     ai_stage_evidence: tuple[dict[str, object], ...] = ()
+    ai_trace_records: list[dict[str, object]] = []
     ai_account_candidate_count = 0
     ai_counterparty_candidate_count = 0
     if client_profile and product_classifier and ai_gate.needs_ai and classification_override is None:
@@ -1784,6 +1786,7 @@ def simulate_invoice(
                 context=family_context,
             )
             selected_families = family_result.selected_account_families
+            ai_trace_records.extend(family_result.ai_trace)
             fallback_reason = ""
             if not selected_families:
                 selected_families = tuple(
@@ -1800,6 +1803,7 @@ def simulate_invoice(
                 supplier_hint=invoice.provider_hint,
                 context=final_context,
             )
+            ai_trace_records.extend(classification_result.ai_trace)
             stage_records.append(_stage_evidence(classification_result))
         else:
             single_context = replace(
@@ -1819,6 +1823,7 @@ def simulate_invoice(
                 supplier_hint=invoice.provider_hint,
                 context=single_context,
             )
+            ai_trace_records.extend(classification_result.ai_trace)
             stage_records.append(_stage_evidence(classification_result))
         if len(base_context.counterparty_candidates) > policy.counterparty_limit:
             counterparty_context = _counterparty_resolution_context(
@@ -1831,6 +1836,7 @@ def simulate_invoice(
                 supplier_hint=invoice.provider_hint,
                 context=counterparty_context,
             )
+            ai_trace_records.extend(counterparty_result.ai_trace)
             stage_records.append(_stage_evidence(counterparty_result))
             if counterparty_result.suggested_counterparty_code:
                 classification_result = replace(
@@ -2334,6 +2340,7 @@ def simulate_invoice(
         ai_counterparty_stage_evidence=tuple(
             record for record in ai_stage_evidence if record.get("ai_stage") == "counterparty_resolve"
         ),
+        ai_trace=tuple(ai_trace_records),
         ai_account_candidate_count=ai_account_candidate_count,
         ai_counterparty_candidate_count=ai_counterparty_candidate_count,
         ai_quality_scorecard=ai_quality_scorecard,
@@ -2561,6 +2568,7 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "aiCandidateStrategy": result.ai_candidate_strategy,
                     "aiSelectedAccountFamilies": list(result.ai_selected_account_families),
                     "aiStageEvidence": list(result.ai_stage_evidence),
+                    "aiTrace": list(result.ai_trace),
                     "aiAccountCandidateCount": result.ai_account_candidate_count,
                     "aiCounterpartyCandidateCount": result.ai_counterparty_candidate_count,
                     "aiProviderStatus": result.ai_classification_skipped_reason or ("used" if result.ai_classification_used else "not_used"),

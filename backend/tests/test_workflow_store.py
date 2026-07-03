@@ -1448,6 +1448,12 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("AI", result["ai_explanation_tr"])
         self.assertIn("karar", result["ai_explanation_tr"])
         self.assertIn("fake_llm", result["ai_explanation_tr"])
+        self.assertTrue(result["ai_trace"])
+        self.assertEqual(result["ai_trace"][0]["stage"], "final_account")
+        self.assertEqual(result["ai_trace"][0]["provider"], "fake_llm")
+        self.assertEqual(result["ai_trace"][0]["validation_status"], "accepted")
+        self.assertEqual(result["ai_trace"][0]["request_payload"]["candidate_strategy"]["stage"], "final_account")
+        self.assertEqual(result["technical_details"]["ai_trace"], result["ai_trace"])
 
     def test_processing_worker_sends_nace_research_and_chart_semantics_to_ai(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -243,6 +243,7 @@ def _serializable_simulation(
         "ai_stage_evidence",
         "ai_account_stage_evidence",
         "ai_counterparty_stage_evidence",
+        "ai_trace",
         "draft_lines",
     ):
         data[key] = list(data[key])
@@ -393,6 +394,7 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "ai_stage_evidence": list(result.get("ai_stage_evidence") or []),
         "ai_account_stage_evidence": list(result.get("ai_account_stage_evidence") or []),
         "ai_counterparty_stage_evidence": list(result.get("ai_counterparty_stage_evidence") or []),
+        "ai_trace": list(result.get("ai_trace") or []),
         "direction_uncertainty": bool(result.get("direction_uncertainty")),
         "static_fallback_account": str(result.get("static_fallback_account") or ""),
         "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),

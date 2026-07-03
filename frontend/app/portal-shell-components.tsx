@@ -1,6 +1,7 @@
 import {
   Activity,
   BookOpen,
+  Bot,
   CircleCheckBig,
   FileText,
   Files,
@@ -32,6 +33,7 @@ const sidebarItems: {
   icon: LucideIcon;
 }[] = [
   { key: "workspace", label: "Çalışma Alanı", mode: "accountant", fallbackHref: "/portal/musavir", icon: LayoutDashboard },
+  { key: "agents", label: "AI Ajanları", mode: "agents", fallbackHref: "/portal/ajanlar", icon: Bot },
   { key: "clients", label: "Mükellefler", mode: "clients", fallbackHref: "/portal/mukellefler", icon: Users },
   { key: "documents", label: "Belgeler", mode: "documents", segment: "invoices", fallbackHref: "/portal/belgeler", icon: FileText },
   { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", fallbackHref: "/portal/belgeler", icon: Landmark },

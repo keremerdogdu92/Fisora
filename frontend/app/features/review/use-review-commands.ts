@@ -13,6 +13,7 @@ import type { CorrectionDraft, LocalSession, PilotData, PilotDocument } from "..
 export function emptyCorrectionDraft(): CorrectionDraft {
   return {
     accountCode: "",
+    applyToSimilar: false,
     counterpartyCode: "",
     manualDraftLines: [],
     reason: "",
@@ -23,6 +24,7 @@ export function emptyCorrectionDraft(): CorrectionDraft {
 export function useReviewCommands({
   activeReviewDocuments,
   correctionDraft,
+  hasUnsavedReviewChanges,
   localFallbackAllowed,
   loginUserId,
   refreshBackendPilotData,
@@ -37,6 +39,7 @@ export function useReviewCommands({
 }: {
   activeReviewDocuments: PilotDocument[];
   correctionDraft: CorrectionDraft;
+  hasUnsavedReviewChanges: boolean;
   localFallbackAllowed: boolean;
   loginUserId: string;
   refreshBackendPilotData: () => Promise<boolean>;
@@ -143,11 +146,12 @@ export function useReviewCommands({
 
   const approveSelectedAndMoveNext = useCallback(async () => {
     if (!selectedDocument) return;
+    const approveAction = hasUnsavedReviewChanges ? "approve_with_changes" : "approve";
     const selectedLineIndex = selectedDocument.statementLines.findIndex(
       (line) => line.line_no === selectedStatementLineNo,
     );
     if (selectedDocument.statementLines.length && selectedLineIndex >= 0) {
-      await saveStatementLineDecision("approve");
+      await saveStatementLineDecision(approveAction);
       const nextLine = selectedDocument.statementLines[selectedLineIndex + 1];
       if (nextLine) {
         setSelectedStatementLineNo(nextLine.line_no);
@@ -156,9 +160,10 @@ export function useReviewCommands({
       selectAdjacentReviewDocument(1);
       return;
     }
-    await saveDecision("approve");
+    await saveDecision(approveAction);
     selectAdjacentReviewDocument(1);
   }, [
+    hasUnsavedReviewChanges,
     saveDecision,
     saveStatementLineDecision,
     selectAdjacentReviewDocument,

@@ -43,29 +43,36 @@ test("same-domain portal paths open the correct private pilot screen", () => {
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",
-    visibleModes: ["accountant", "documents", "clients", "research", "exports", "operations", "settings"],
+    visibleModes: ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"],
   });
 });
 
 test("accountant subpaths stay under the accountant link family", () => {
+  assert.equal(portalConfigForPath("/portal/ajanlar").initialMode, "agents");
   assert.equal(portalConfigForPath("/portal/belgeler").initialMode, "documents");
   assert.equal(portalConfigForPath("/portal/mukellefler").initialMode, "clients");
   assert.equal(portalConfigForPath("/portal/bilgi-havuzu").initialMode, "research");
   assert.equal(portalConfigForPath("/portal/ayarlar").initialMode, "settings");
   assert.equal(portalConfigForPath("/portal/cikti").initialMode, "exports");
   assert.equal(portalConfigForPath("/portal/operasyon").initialMode, "operations");
-  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "documents", "clients", "research", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "documents", "clients", "research", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ajanlar").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
 });
 
-test("research knowledge hub is visible to accountant users", () => {
+test("research knowledge hub and agent training center are visible to accountant users", () => {
   const {
     ACCOUNTANT_MODES,
     PORTAL_NAV_ITEMS,
   } = require("./portal-routes");
 
+  assert.equal(ACCOUNTANT_MODES.includes("agents"), true);
   assert.equal(ACCOUNTANT_MODES.includes("research"), true);
+  assert.deepEqual(
+    PORTAL_NAV_ITEMS.find((item) => item.mode === "agents"),
+    { mode: "agents", label: "AI ajanları", href: "/portal/ajanlar" },
+  );
   assert.deepEqual(
     PORTAL_NAV_ITEMS.find((item) => item.mode === "research"),
     { mode: "research", label: "Bilgi havuzu", href: "/portal/bilgi-havuzu" },
@@ -83,6 +90,7 @@ test("website entry paths have Next app route files", () => {
 
   assert.equal(existsSync(join(__dirname, "portal", "mukellef", "page.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal", "musavir", "page.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal", "ajanlar", "page.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal", "belgeler", "page.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal", "mukellefler", "page.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal", "bilgi-havuzu", "page.tsx")), true);
@@ -94,6 +102,7 @@ test("portal implementation is split into route view modules", () => {
   const workspaceView = require("node:fs").readFileSync(join(__dirname, "portal-workspace-view.tsx"), "utf8");
 
   assert.match(portalApp, /portal-dashboard-view/);
+  assert.match(portalApp, /portal-agents-view/);
   assert.match(portalApp, /portal-client-view/);
   assert.match(portalApp, /portal-clients-view/);
   assert.match(portalApp, /portal-documents-view/);
@@ -113,6 +122,7 @@ test("portal implementation is split into route view modules", () => {
   assert.doesNotMatch(portalApp, /function SessionPanel/);
   assert.equal(existsSync(join(__dirname, "portal-types.ts")), true);
   assert.equal(existsSync(join(__dirname, "portal-dashboard-view.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal-agents-view.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal-client-view.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal-clients-view.tsx")), true);
   assert.equal(existsSync(join(__dirname, "portal-documents-view.tsx")), true);
@@ -141,6 +151,7 @@ test("portal shell delegates session and review helpers to feature modules", () 
   assert.match(portalApp, /features\/documents/);
   assert.match(portalApp, /features\/export/);
   assert.match(portalApp, /features\/workspace/);
+  assert.match(portalApp, /mode === "agents"/);
   assert.match(portalApp, /aiCapacity=\{aiCapacityQuery\.data\}/);
   assert.match(portalApp, /capacityPending=\{aiCapacityQuery\.isPending\}/);
   assert.match(portalApp, /capacityError=\{aiCapacityQuery\.isError\}/);

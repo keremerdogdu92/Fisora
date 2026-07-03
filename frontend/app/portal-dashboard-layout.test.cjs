@@ -57,12 +57,15 @@ test("document processing workspace uses the approved bottom-list review layout"
   const styles = source("styles.css");
 
   assert.match(workspace, /className="document-review-toolbar"/);
+  assert.match(workspace, /className="document-agent-strip"/);
   assert.match(workspace, /className="document-review-main"/);
   assert.match(workspace, /className="bottom-document-queue"/);
   assert.match(workspace, /Belge listesi/);
+  assert.match(workspace, /Teknik ge/);
   assert.match(workspace, /<DocumentPreview document=\{selectedDocument\} session=\{session\} \/>[\s\S]*<JournalPanel/);
   assert.doesNotMatch(workspace, /<aside className="document-queue-panel"/);
   assert.match(styles, /\.accountant-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+  assert.match(styles, /\.document-agent-strip\s*\{/);
   assert.match(styles, /\.document-review-main\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1\.05fr\) minmax\(0,\s*0\.95fr\);/);
   assert.match(styles, /\.bottom-document-queue\s*\{/);
 });
@@ -111,4 +114,46 @@ test("global controls have focus-visible and minimum target contracts", () => {
   assert.match(styles, /:where\(button,\s*a,\s*input,\s*select,\s*textarea,\s*summary\):focus-visible/);
   assert.match(styles, /min-height:\s*44px/);
   assert.match(styles, /\.topbar-popover/);
+});
+
+test("accountant dashboard exposes agent workbench and short priority list instead of a crowded document table", () => {
+  const dashboard = source("portal-dashboard-view.tsx");
+  const styles = source("styles.css");
+
+  assert.match(dashboard, /agent-workbench-panel/);
+  assert.match(dashboard, /priority-work-list/);
+  assert.match(dashboard, /className="duration-metrics"/);
+  assert.match(dashboard, /learning-prep-panel/);
+  assert.match(dashboard, /Eğitim hazırlığı/);
+  assert.match(dashboard, /Müşavirce değişmeden onaylandı/);
+  assert.doesNotMatch(dashboard, /Doğruluk/);
+  assert.doesNotMatch(dashboard, /Yeni ajan oluştur/);
+  assert.match(styles, /\.dashboard-workbench-grid\s*\{/);
+  assert.match(styles, /\.priority-work-list\s*\{/);
+  assert.match(styles, /\.learning-prep-panel\s*\{/);
+  assert.match(styles, /\.duration-metrics\s*\{/);
+});
+
+test("document cockpit keeps corrections inline with dirty-state reset and no primary Duzelt action", () => {
+  const reviewPanels = source("portal-review-panels.tsx");
+  const workspace = source("portal-workspace-view.tsx");
+
+  assert.match(reviewPanels, /Değişiklik var/);
+  assert.match(reviewPanels, /İlk taslağa dön/);
+  assert.match(reviewPanels, /Benzerleri için öneri olarak kullan/);
+  assert.doesNotMatch(reviewPanels, /Düzelt ve onayla/);
+  assert.doesNotMatch(workspace, />Düzelt<\/button>/);
+});
+
+test("agent training page is read-only and uses learning evidence language", () => {
+  const agentsView = source("portal-agents-view.tsx");
+  const styles = source("styles.css");
+
+  assert.match(agentsView, /agent-training-page/);
+  assert.match(agentsView, /Eğitim notları/);
+  assert.match(agentsView, /Kural adayları/);
+  assert.match(agentsView, /Kontrollü otomasyon adayları/);
+  assert.doesNotMatch(agentsView, /Yeni ajan oluştur/);
+  assert.match(styles, /\.agent-training-page\s*\{/);
+  assert.match(styles, /\.agent-training-grid\s*\{/);
 });

@@ -146,6 +146,7 @@ export type PilotDocument = {
   accountantActionHint?: string;
   accountantSummary: string;
   accountantExplanation?: string;
+  aiQualityScorecard?: Record<string, unknown>;
   technicalDetails: Record<string, unknown>;
   pipelineEvents: DocumentPipelineEvent[];
   accountingDirection?: string;
@@ -185,6 +186,14 @@ export type PilotClient = {
   userLabel: string;
   portalUserId: string;
   onboardingStatus: string;
+  onboardingAttachments?: {
+    ref: string;
+    type: string;
+    label: string;
+    fileName: string;
+    status: string;
+    createdAt: string;
+  }[];
 };
 
 export type CancellationRequest = {
@@ -446,8 +455,8 @@ export type ReviewData = {
   }[];
 };
 
-export type PilotMode = "client" | "accountant" | "documents" | "clients" | "research" | "settings" | "exports" | "operations";
-export type PortalRouteKey = "home" | "mukellef" | "musavir" | "belgeler" | "mukellefler" | "bilgi-havuzu" | "ayarlar" | "cikti" | "operasyon";
+export type PilotMode = "client" | "accountant" | "agents" | "documents" | "clients" | "research" | "settings" | "exports" | "operations";
+export type PortalRouteKey = "home" | "mukellef" | "musavir" | "ajanlar" | "belgeler" | "mukellefler" | "bilgi-havuzu" | "ayarlar" | "cikti" | "operasyon";
 export type DocumentSegment = "sales_invoices" | "purchase_invoices" | "invoices" | "bank_statements" | "other_documents";
 export type PortalNavItem = { mode: PilotMode; label: string; href: string };
 export type ReviewFilter = "all" | "review_required" | "export_ready" | "cancel_requested";
@@ -455,6 +464,7 @@ export type ExportMode = "bulk" | "by_client";
 
 export type CorrectionDraft = {
   accountCode: string;
+  applyToSimilar: boolean;
   counterpartyCode: string;
   manualDraftLines: DraftLine[];
   reason: string;

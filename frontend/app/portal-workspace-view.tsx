@@ -40,6 +40,60 @@ function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
 }
 
+function documentAgentSteps(document?: PilotDocument) {
+  if (!document) {
+    return [
+      { key: "document", name: "Belge ajanı", status: "Belge seçin", detail: "Önizleme ve ayrıştırma bekliyor" },
+      { key: "account", name: "Hesap ajanı", status: "Beklemede", detail: "Fiş taslağı yok" },
+      { key: "counterparty", name: "Cari ajanı", status: "Beklemede", detail: "Cari eşleşmesi yok" },
+      { key: "research", name: "Araştırma ajanı", status: "Gerekmedi", detail: "Araştırma sinyali yok" },
+    ];
+  }
+  const accountValue = document.selectedRevenueAccount || document.selectedExpenseAccount || document.draftLines[0]?.account_code || "";
+  const counterpartyValue = document.selectedCustomerAccount || document.selectedCounterpartyAccount || document.suggestedCounterpartyAccount || "";
+  return [
+    {
+      key: "document",
+      name: "Belge ajanı",
+      status: formatStatus(document.status),
+      detail: document.provider || document.originalDocumentMimeType || "Belge okunuyor",
+    },
+    {
+      key: "account",
+      name: "Hesap ajanı",
+      status: accountValue ? "Fiş taslağı hazır" : "Hesap bekliyor",
+      detail: accountValue || document.draftStatus || "Taslak yok",
+    },
+    {
+      key: "counterparty",
+      name: "Cari ajanı",
+      status: counterpartyValue ? "Cari önerildi" : "Cari bekliyor",
+      detail: counterpartyValue || "Eşleşme yok",
+    },
+    {
+      key: "research",
+      name: "Araştırma ajanı",
+      status: document.aiResearchRequested ? "Araştırma sinyali var" : "Gerekmedi",
+      detail: document.aiResearchQuery || "Yalnızca belirsizlikte çalışır",
+    },
+  ];
+}
+
+function DocumentAgentStrip({ document }: { document?: PilotDocument }) {
+  const agents = documentAgentSteps(document);
+  return (
+    <section className="document-agent-strip" aria-label="Belge ajan şeridi">
+      {agents.map((agent) => (
+        <div className="document-agent-card" key={agent.key}>
+          <span>{agent.name}</span>
+          <strong>{agent.status}</strong>
+          <small>{agent.detail}</small>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function AccountantWorkspace({
   cancellationRequests,
   statementAiStatus,
@@ -51,6 +105,7 @@ export function AccountantWorkspace({
   decisionStatus,
   documents,
   allClientDocuments,
+  hasUnsavedReviewChanges,
   newClientDraft,
   newClientStatus,
   newClientTaxCertificateFile,
@@ -96,6 +151,7 @@ export function AccountantWorkspace({
   decisionStatus: string;
   documents: PilotDocument[];
   allClientDocuments: PilotDocument[];
+  hasUnsavedReviewChanges: boolean;
   newClientDraft: NewClientDraft;
   newClientStatus: string;
   newClientTaxCertificateFile: File | null;
@@ -259,9 +315,11 @@ export function AccountantWorkspace({
         </div>
       </section>
 
+      <DocumentAgentStrip document={selectedDocument} />
+
       <details className="debug-accordion">
         <summary>
-          <span>Teknik açıklama ve pipeline</span>
+          <span>Teknik geçmiş</span>
           <strong>Debug için aç</strong>
         </summary>
         <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
@@ -273,7 +331,9 @@ export function AccountantWorkspace({
           correctionDraft={correctionDraft}
           decisionStatus={decisionStatus}
           document={selectedDocument}
+          hasUnsavedReviewChanges={hasUnsavedReviewChanges}
           onApproveAndNext={onApproveAndNext}
+          onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
           onReprocessDocument={onReprocessDocument}
           onRequestStatementAi={onRequestStatementAi}
           onSaveDecision={onSaveDecision}
@@ -337,10 +397,7 @@ export function AccountantWorkspace({
                     document.directionConflict?.status === "needs_review" ? (
                       <button disabled type="button">Önce yönü yanıtla</button>
                     ) : (
-                      <>
-                        <button onClick={() => void onApproveAndNext()} type="button">Onayla</button>
-                        <button onClick={() => void onSaveDecision("approve_with_changes")} type="button">Düzelt</button>
-                      </>
+                      <button onClick={() => void onApproveAndNext()} type="button">Onayla</button>
                     )
                   ) : (
                     <button onClick={() => selectDocument(document)} type="button">Aç</button>

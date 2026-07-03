@@ -3,11 +3,16 @@ const test = require("node:test");
 
 const {
   buildClientCancellationViewModel,
+  buildAgentSummaries,
+  buildAgentLearningInsights,
+  buildDashboardDurationMetrics,
   buildPortalDashboard,
+  buildPortalDashboardViewModels,
   clientDashboardRows,
   clientUploadTracking,
   documentIntakeDistribution,
   documentsForProcessing,
+  priorityWorkItems,
   statusFunnel,
 } = require("./portal-dashboard");
 
@@ -155,4 +160,168 @@ test("clientDashboardRows derives per-client follow-up status", () => {
   });
   assert.equal(rows[1].inProgressCount, 2);
   assert.equal(rows[2].documentCount, 0);
+});
+
+test("buildAgentSummaries exposes the four accountant-facing agents with safe metrics", () => {
+  const agentDocuments = [
+    {
+      id: "accepted",
+      status: "export_ready",
+      draftLines: [{ account_code: "770", description: "Gider", debit: "100", credit: "0" }],
+      selectedExpenseAccount: "770",
+      selectedCounterpartyAccount: "320.01",
+      aiResearchRequested: false,
+      aiQualityScorecard: { quality_delta: { decision: "accepted", changed_fields: [] } },
+    },
+    {
+      id: "changed",
+      status: "review_required",
+      draftLines: [],
+      selectedExpenseAccount: "",
+      selectedCounterpartyAccount: "",
+      aiResearchRequested: true,
+      aiQualityScorecard: { quality_delta: { decision: "changed", changed_fields: ["account"] } },
+    },
+  ];
+
+  const agents = buildAgentSummaries({
+    documents: agentDocuments,
+    aiCapacity: {
+      agents: [
+        { kind: "document", label: "Document provider", remaining: 18, configured: true, status: "ready" },
+        { kind: "research", label: "Research provider", remaining: null, configured: true, status: "ready" },
+      ],
+    },
+  });
+
+  assert.deepEqual(agents.map((agent) => agent.name), ["Belge ajanı", "Hesap ajanı", "Cari ajanı", "Araştırma ajanı"]);
+  assert.equal(agents[0].capacityLabel, "18 kaldı");
+  assert.equal(agents[1].unchangedApprovalRateLabel, "Müşavirce değişmeden onaylandı %50");
+  assert.equal(agents[1].correctionCount, 1);
+  assert.equal(agents[3].capacityLabel, "ölçülemiyor");
+  assert.equal(agents[3].learningLabel, "Öğrenme sinyali kaydedildi");
+});
+
+test("buildAgentLearningInsights normalizes learning signals for the future training center", () => {
+  const insights = buildAgentLearningInsights({
+    documents: [
+      {
+        id: "signal",
+        clientName: "A Isitme",
+        fileName: "Kolaysoft.pdf",
+        learningRuleReason: "Müşavir 770.05 hesabına aldı.",
+        learningRuleSourceSummary: "",
+        rulePrompt: { show: false },
+      },
+      {
+        id: "candidate",
+        clientName: "A Isitme",
+        fileName: "Rexton.pdf",
+        learningRuleSourceSummary: "Benzer kararlar kural adayına dönüştü.",
+        rulePrompt: {
+          show: true,
+          message: "Rexton işitme cihazı alımlarında stok hesabı öner.",
+          clientConsistentDecisionCount: 2,
+          officeConsistentDecisionCount: 3,
+          officeDistinctClientCount: 2,
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(insights.map((item) => item.stageLabel), [
+    "Öğrenme sinyali kaydedildi",
+    "Kural adayı oluştu",
+    "2/3 tutarlı onay",
+    "Kontrollü otomasyon adayı",
+  ]);
+  assert.equal(insights[0].documentLabel, "A Isitme / Kolaysoft.pdf");
+  assert.match(insights[1].summary, /Rexton/);
+  assert.equal(insights[3].confidenceLabel, "2 mükellef / 3 onay");
+});
+
+test("buildAgentLearningInsights stays neutral without evidence", () => {
+  assert.deepEqual(buildAgentLearningInsights({ documents: [{ id: "empty", rulePrompt: { show: false } }] }), []);
+});
+
+test("buildDashboardDurationMetrics only derives time from existing timestamps", () => {
+  const metrics = buildDashboardDurationMetrics({
+    documents: [
+      {
+        id: "timed-1",
+        clientId: "client-1",
+        uploadedAt: "2026-06-08T10:00:00Z",
+        pipelineEvents: [
+          { step: "uploaded", createdAt: "2026-06-08T10:00:00Z" },
+          { step: "journal_saved", createdAt: "2026-06-08T10:04:00Z" },
+          { step: "review_decision", createdAt: "2026-06-08T10:10:00Z" },
+        ],
+      },
+      {
+        id: "timed-2",
+        clientId: "client-1",
+        uploadedAt: "2026-06-08T11:00:00Z",
+        pipelineEvents: [
+          { step: "processing_completed", createdAt: "2026-06-08T11:08:00Z" },
+          { step: "export_package", createdAt: "2026-06-08T11:20:00Z" },
+        ],
+      },
+      { id: "missing", clientId: "client-2", uploadedAt: "", pipelineEvents: [] },
+    ],
+  });
+
+  assert.equal(metrics.averageDocumentTimeLabel, "6 dk");
+  assert.equal(metrics.uploadToDecisionTimeLabel, "15 dk");
+  assert.equal(metrics.clientAverageCompletionTimeLabel, "20 dk");
+});
+
+test("buildDashboardDurationMetrics stays neutral when timestamps are missing", () => {
+  const metrics = buildDashboardDurationMetrics({ documents: [{ id: "missing", uploadedAt: "", pipelineEvents: [] }] });
+
+  assert.equal(metrics.averageDocumentTimeLabel, "ölçülemiyor");
+  assert.equal(metrics.uploadToDecisionTimeLabel, "ölçülemiyor");
+  assert.equal(metrics.clientAverageCompletionTimeLabel, "ölçülemiyor");
+});
+
+test("priorityWorkItems keeps the accountant workbench short and ordered by action need", () => {
+  const manyDocuments = Array.from({ length: 12 }, (_, index) => ({
+    id: `doc-${index}`,
+    clientId: index % 2 ? "client-1" : "client-2",
+    clientName: index % 2 ? "A Isitme" : "B Klinik",
+    fileName: `Belge ${index}`,
+    status: index < 6 ? "review_required" : "queued",
+    reviewReasons: index === 0 ? ["manual_draft_required"] : [],
+    uploadedAt: `2026-06-08T10:${String(index).padStart(2, "0")}:00Z`,
+  }));
+
+  const items = priorityWorkItems({ clients, documents: manyDocuments, cancellationRequests, limit: 8 });
+
+  assert.equal(items.length, 8);
+  assert.equal(items[0].kind, "request");
+  assert.equal(items[1].kind, "document");
+  assert.equal(items[1].label, "A Isitme");
+  assert.match(items[1].detail, /Belge/);
+});
+
+test("buildPortalDashboardViewModels includes learning insights without opening a new agent page", () => {
+  const view = buildPortalDashboardViewModels({
+    data: {
+      clients,
+      cancellationRequests: [],
+      documents: [
+        {
+          id: "candidate",
+          clientId: "client-1",
+          clientName: "A Isitme",
+          fileName: "Kural.pdf",
+          status: "review_required",
+          learningRuleSourceSummary: "2/3 tutarlı onay bekleniyor.",
+          rulePrompt: { show: true, clientConsistentDecisionCount: 2 },
+        },
+      ],
+    },
+  });
+
+  assert.equal(view.learningInsights.length, 3);
+  assert.equal(view.learningInsights[0].stageLabel, "Öğrenme sinyali kaydedildi");
 });

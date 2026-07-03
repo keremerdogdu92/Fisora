@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { AgentTrainingView } from "./portal-agents-view";
 import { AccountantDashboard } from "./portal-dashboard-view";
 import { ClientPortal } from "./portal-client-view";
 import { ClientManagementView } from "./portal-clients-view";
@@ -31,13 +32,7 @@ import {
   useDocumentWorkflow,
 } from "./features/documents";
 import { useExportCommands } from "./features/export";
-import {
-  buildPortalDashboard,
-  clientDashboardRows,
-  clientUploadTracking,
-  documentIntakeDistribution,
-  statusFunnel,
-} from "./portal-dashboard";
+import { buildPortalDashboardViewModels } from "./portal-dashboard";
 import {
   normalizeSessionForPortalConfig,
   PORTAL_NAV_ITEMS,
@@ -262,19 +257,15 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     return clients.filter((client) => `${client.clientName} ${client.clientId} ${client.taxId}`.toLocaleLowerCase("tr-TR").includes(query));
   }, [clientSearch, clients]);
   const openCancellationRequests = data.cancellationRequests.filter((request) => request.status === "open");
-  const dashboardMetrics = useMemo(() => buildPortalDashboard(data), [data]);
-  const dashboardClientRows = useMemo(() => clientDashboardRows(data), [data]);
-  const intakeDistribution = useMemo(() => documentIntakeDistribution(data.documents), [data.documents]);
-  const funnelRows = useMemo(() => statusFunnel(data.documents), [data.documents]);
-  const uploadTrackingRows = useMemo(() => clientUploadTracking(data), [data]);
+  const dashboardView = useMemo(() => buildPortalDashboardViewModels({ data, aiCapacity: aiCapacityQuery.data }), [aiCapacityQuery.data, data]);
   const readinessView = useMemo(
     () => buildPilotReadinessView(readinessPayload) as PilotReadinessView,
     [readinessPayload],
   );
   const visibleDashboardClientRows = useMemo(() => {
     const visibleIds = new Set(filteredClients.map((client) => client.clientId));
-    return dashboardClientRows.filter((row: { clientId: string }) => visibleIds.has(row.clientId));
-  }, [dashboardClientRows, filteredClients]);
+    return dashboardView.dashboardClientRows.filter((row: { clientId: string }) => visibleIds.has(row.clientId));
+  }, [dashboardView.dashboardClientRows, filteredClients]);
 
   function setMode(nextMode: PilotMode) {
     if (portalConfig.visibleModes.includes(nextMode)) setModeState(nextMode);
@@ -363,6 +354,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     setExportStatus,
     setSelectedDocumentId,
   });
+  const selectedDocumentDraftLines = selectedDocument ? journalDraftLinesForDocument(selectedDocument, selectedStatementLineNo) : [];
+  const hasUnsavedReviewChanges = useMemo(() => Boolean(correctionDraft.accountCode.trim() || correctionDraft.counterpartyCode.trim() || correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim() || correctionDraft.applyToSimilar || correctionDraft.manualDraftLines.length), [correctionDraft]);
   const {
     approveSelectedAndMoveNext,
     reprocessSelectedDocument,
@@ -372,6 +365,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   } = useReviewCommands({
     activeReviewDocuments,
     correctionDraft,
+    hasUnsavedReviewChanges,
     localFallbackAllowed,
     loginUserId,
     refreshBackendPilotData: () => refreshBackendPilotData(),
@@ -387,7 +381,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const testDataReset = useTestDataReset({ loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session, setSelectedClientId, setSelectedDocumentId });
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
   const showSidebar = visibleNavItems.length > 1;
-  const selectedDocumentDraftLines = selectedDocument ? journalDraftLinesForDocument(selectedDocument, selectedStatementLineNo) : [];
   const selectedPeriodTitle = selectedPeriod ? new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(new Date(`${selectedPeriod}-01T00:00:00`)) : "";
 
   return (
@@ -458,19 +451,25 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         />
       ) : null}
 
+      {mode === "agents" ? <AgentTrainingView agentSummaries={dashboardView.agentSummaries} learningInsights={dashboardView.learningInsights} /> : null}
+
       {mode === "accountant" ? (
         <AccountantDashboard
+          agentSummaries={dashboardView.agentSummaries}
           clientRows={visibleDashboardClientRows}
-          dashboardMetrics={dashboardMetrics}
+          dashboardMetrics={dashboardView.dashboardMetrics}
           documents={data.documents}
-          funnelRows={funnelRows}
-          intakeDistribution={intakeDistribution}
+          durationMetrics={dashboardView.durationMetrics}
+          funnelRows={dashboardView.funnelRows}
+          intakeDistribution={dashboardView.intakeDistribution}
+          learningInsights={dashboardView.learningInsights}
           onClientSelect={(clientId) => {
             setSelectedClientId(clientId);
             setSelectedDocumentId("");
           }}
+          priorityItems={dashboardView.priorityItems}
           selectedClientId={selectedClient?.clientId ?? ""}
-          uploadTrackingRows={uploadTrackingRows}
+          uploadTrackingRows={dashboardView.uploadTrackingRows}
         />
       ) : null}
 
@@ -487,10 +486,11 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           clientRows={visibleDashboardClientRows}
           clients={filteredClients}
           correctionDraft={correctionDraft}
-          dashboardMetrics={dashboardMetrics}
+          dashboardMetrics={dashboardView.dashboardMetrics}
           decisionStatus={decisionStatus}
           documents={activeReviewDocuments}
           allClientDocuments={clientDocuments}
+          hasUnsavedReviewChanges={hasUnsavedReviewChanges}
           newClientDraft={newClientDraft}
           newClientStatus={newClientStatus}
           newClientTaxCertificateFile={newClientTaxCertificateFile}
@@ -571,7 +571,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
       {mode === "settings" ? (
         <SettingsView
-          dashboardMetrics={dashboardMetrics}
+          dashboardMetrics={dashboardView.dashboardMetrics}
           loginPassword={loginPassword}
           loginRole={loginRole}
           loginStatus={loginStatus}

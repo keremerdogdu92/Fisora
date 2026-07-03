@@ -25,3 +25,14 @@ test("unsaved journal corrections reset when the selected document changes", () 
     "manual journal draft state must be scoped to the active document",
   );
 });
+
+test("approve and next sends approve_with_changes only when the current draft is dirty", () => {
+  const portalApp = readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+  const reviewCommands = readFileSync(join(__dirname, "features", "review", "use-review-commands.ts"), "utf8");
+
+  assert.match(portalApp, /const hasUnsavedReviewChanges = useMemo/);
+  assert.match(reviewCommands, /hasUnsavedReviewChanges:\s*boolean/);
+  assert.match(reviewCommands, /const approveAction = hasUnsavedReviewChanges \? "approve_with_changes" : "approve";/);
+  assert.match(reviewCommands, /saveDecision\(approveAction\)/);
+  assert.match(reviewCommands, /saveStatementLineDecision\(approveAction\)/);
+});

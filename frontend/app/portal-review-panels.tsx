@@ -131,6 +131,17 @@ function directionLabel(direction: string) {
   return direction || "-";
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function qualityText(record: Record<string, unknown>, key: string, fallback = "-") {
+  const value = record[key];
+  if (Array.isArray(value)) return value.map(String).filter(Boolean).join(", ") || fallback;
+  if (value === undefined || value === null || value === "") return fallback;
+  return String(value);
+}
+
 function uploadDirectionForDocument(document: PilotDocument) {
   if (document.intakeCategory === "sales_invoice") return "sales";
   if (document.intakeCategory === "purchase_invoice") return "purchase";
@@ -253,25 +264,35 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
         </div>
         <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
       </div>
-      <div className="document-canvas">
-        {previewUrl ? (
-          isImageMime(document.originalDocumentMimeType) ? (
-            <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
-          ) : canFramePreview ? (
-            <iframe className="original-document-frame" src={previewUrl} title={`${document.fileName} orijinal belge`} />
+      <div className="document-preview-layout">
+        <div className="document-canvas">
+          {previewUrl ? (
+            isImageMime(document.originalDocumentMimeType) ? (
+              <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
+            ) : canFramePreview ? (
+              <iframe className="original-document-frame" src={previewUrl} title={`${document.fileName} orijinal belge`} />
+            ) : (
+              <div className="preview-error-panel">
+                <strong>Bu dosya tarayıcı içinde önizlenemiyor.</strong>
+                <p>Gerçek belge indirilebilir; mock belge gösterilmedi.</p>
+                <a href={previewUrl} download={document.fileName}>Belgeyi indir</a>
+              </div>
+            )
           ) : (
             <div className="preview-error-panel">
-              <strong>Bu dosya tarayıcı içinde önizlenemiyor.</strong>
-              <p>Gerçek belge indirilebilir; mock belge gösterilmedi.</p>
-              <a href={previewUrl} download={document.fileName}>Belgeyi indir</a>
+              <strong>{errorMessage}</strong>
+              <p>Mock belge çizimi kapalı. Hangi adımda kırıldığını işlem geçmişinden takip edin.</p>
             </div>
-          )
-        ) : (
-          <div className="preview-error-panel">
-            <strong>{errorMessage}</strong>
-            <p>Mock belge çizimi kapalı. Hangi adımda kırıldığını işlem geçmişinden takip edin.</p>
-          </div>
-        )}
+          )}
+        </div>
+        <aside className="document-info-panel" aria-label="Belge bilgileri">
+          <Info label="Belge türü" value={document.documentType || document.intakeCategory} />
+          <Info label="Tarih" value={document.issueDate || "-"} />
+          <Info label="Tutar" value={document.amount || "-"} />
+          <Info label="KDV" value={document.vatRates.length ? document.vatRates.join(", ") : "-"} />
+          <Info label="Sağlayıcı" value={document.provider || document.aiProvider || "-"} />
+          <Info label="Orijinal ref" value={document.originalDocumentRef || "-"} />
+        </aside>
       </div>
     </section>
   );
@@ -281,7 +302,9 @@ export function JournalPanel({
   correctionDraft,
   decisionStatus,
   document,
+  hasUnsavedReviewChanges,
   onApproveAndNext,
+  onResetDraft,
   onReprocessDocument,
   onRequestStatementAi,
   onSaveDecision,
@@ -294,7 +317,9 @@ export function JournalPanel({
   correctionDraft: CorrectionDraft;
   decisionStatus: string;
   document?: PilotDocument;
+  hasUnsavedReviewChanges: boolean;
   onApproveAndNext: () => void | Promise<void>;
+  onResetDraft: () => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onSaveDecision: (action: string) => void | Promise<void>;
@@ -384,6 +409,15 @@ export function JournalPanel({
         <Info label="Alacak toplamı" value={totals.credit.toFixed(2)} />
         <Info label="Denge" value={activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"} />
       </section>
+      {hasUnsavedReviewChanges ? (
+        <section className="dirty-state-strip" aria-label="Kaydedilmemiş fiş değişikliği">
+          <div>
+            <strong>Değişiklik var</strong>
+            <span>Onayla ve sonraki belgeye geç dediğinizde bu fiş kararın içinde kaydedilir.</span>
+          </div>
+          <button onClick={onResetDraft} type="button">İlk taslağa dön</button>
+        </section>
+      ) : null}
       <p className="accountant-summary">
         {document.accountantSummary || (needsManualDraft ? "Fiş taslağı çıkarılamadı; manuel satır girerek belgeyi tamamlayın." : "Fiş taslağı kontrol için hazır.")}
       </p>
@@ -518,6 +552,14 @@ export function JournalPanel({
                   value={correctionDraft.ruleInstruction}
                 />
               </label>
+              <label className="checkbox-row wide">
+                <input
+                  checked={correctionDraft.applyToSimilar}
+                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, applyToSimilar: event.target.checked })}
+                  type="checkbox"
+                />
+                <span>Benzerleri için öneri olarak kullan</span>
+              </label>
             </div>
           </section>
         ) : null}
@@ -553,10 +595,9 @@ export function JournalPanel({
           </>
         ) : (
           <div className="decision-actions">
-            <button onClick={onApproveAndNext} type="button">Onayla ve çıktılara gönder</button>
+            <button onClick={onApproveAndNext} type="button">Onayla ve sonraki belgeye geç</button>
             <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
-            <button onClick={() => onSaveDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
-            <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
+            <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
             <button onClick={onReprocessDocument} type="button">Yeniden işle</button>
             <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
           </div>
@@ -614,7 +655,39 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
           <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
         </div>
       </details>
+      <QualityScorecardPanel document={document} />
       <LearningRuleCard document={document} />
+    </section>
+  );
+}
+
+function QualityScorecardPanel({ document }: { document: PilotDocument }) {
+  const scorecard = asRecord(document.aiQualityScorecard);
+  if (!Object.keys(scorecard).length) return null;
+  const staticDecision = asRecord(scorecard.static);
+  const aiDecision = asRecord(scorecard.ai);
+  const finalDecision = asRecord(scorecard.final);
+  const accountantFinal = asRecord(scorecard.accountant_final_decision);
+  const delta = asRecord(scorecard.quality_delta);
+  const finalValue = [
+    qualityText(finalDecision, "direction"),
+    qualityText(finalDecision, "selected_account_code"),
+    qualityText(finalDecision, "selected_counterparty_account"),
+  ].filter((value) => value !== "-").join(" / ") || "-";
+  const accountantValue = Object.keys(accountantFinal).length
+    ? [
+        qualityText(accountantFinal, "action"),
+        qualityText(accountantFinal, "selected_account_code"),
+        qualityText(accountantFinal, "selected_counterparty_account"),
+      ].filter((value) => value !== "-").join(" / ")
+    : "Henüz karar yok";
+  return (
+    <section className="ai-guidance compact" aria-label="Karar kalitesi">
+      <ReasonCard label="Statik motor" value={`${qualityText(staticDecision, "category")} / %${qualityText(staticDecision, "confidence", "0")}`} />
+      <ReasonCard label="AI" value={`${qualityText(aiDecision, "provider", "Gerekmedi")} / ${qualityText(aiDecision, "category")} / %${qualityText(aiDecision, "confidence", "0")}`} />
+      <ReasonCard label="Sistem final taslağı" value={finalValue} />
+      <ReasonCard label="Müşavir finali" value={accountantValue} />
+      <ReasonCard label="Fark" value={`${qualityText(delta, "decision", "bekliyor")} / değişen: ${qualityText(delta, "changed_fields", "Yok")}`} />
     </section>
   );
 }
@@ -797,8 +870,8 @@ function StatementReviewPanel({
           </div>
           <div className="statement-actions">
             <button onClick={() => onSaveStatementDecision("approve")} type="button">Satırı onayla</button>
-            <button onClick={() => onSaveStatementDecision("approve_with_changes")} type="button">Düzelt ve onayla</button>
-            <button onClick={() => onSaveStatementDecision("suggest_for_similar")} type="button">Kural olarak kullan</button>
+            <button onClick={() => onSaveStatementDecision("approve_with_changes")} type="button">Değişiklikle kaydet</button>
+            <button onClick={() => onSaveStatementDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
             <button onClick={() => onSaveStatementDecision("exclude_from_export")} type="button">Çıktı listesine ekleme</button>
             <button onClick={() => onSaveStatementDecision("wrong_account")} type="button">Kontrolde tut</button>
           </div>

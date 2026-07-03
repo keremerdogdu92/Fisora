@@ -246,6 +246,7 @@ export async function saveStatementLineDecisionAction({
   const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim() || "mali-musavir";
   const reason = correctionDraft.reason.trim();
   const ruleInstruction = correctionDraft.ruleInstruction.trim();
+  const applyToSimilar = Boolean(correctionDraft.applyToSimilar || action === "suggest_for_similar");
   setData((current) => ({
     ...current,
     documents: current.documents.map((document) =>
@@ -264,7 +265,7 @@ export async function saveStatementLineDecisionAction({
       documentRef: selectedDocument.id,
       action,
       reviewer,
-      applyToSimilar: action === "suggest_for_similar",
+      applyToSimilar,
       statementLineNo: lineNo,
       correctedAccountCode,
       correctedCounterpartyCode,
@@ -316,6 +317,7 @@ export async function saveDecisionAction({
   const manualDraftLines = correctionDraft.manualDraftLines.filter(
     (line) => line.account_code.trim() || line.description.trim() || line.debit.trim() || line.credit.trim(),
   );
+  const applyToSimilar = Boolean(correctionDraft.applyToSimilar || action === "suggest_for_similar");
   const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar" ? "export_ready" : "review_required";
   const label = reviewActionLabel(action);
   setData((current) => ({
@@ -346,7 +348,7 @@ export async function saveDecisionAction({
       documentRef: selectedDocument.id,
       action,
       reviewer,
-      applyToSimilar: action === "suggest_for_similar",
+      applyToSimilar,
       correctedAccountCode,
       correctedCounterpartyCode,
       category: selectedDocument.productCategory,

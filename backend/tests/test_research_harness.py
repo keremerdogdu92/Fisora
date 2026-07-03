@@ -724,6 +724,51 @@ class ResearchHarnessTests(unittest.TestCase):
         self.assertEqual(result["draft_lines"][0]["account_code"], "153.01")
         self.assertEqual(result["research_profile"]["accounting_impact_confidence"], 90)
 
+    def test_nace_profile_cache_does_not_block_uncertain_invoice_line_research(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "nace-cached-uncertain.xml"
+            write_invoice_xml(xml_path, line_name="Mystery Sonic Pro bakim seti", supplier_name="Acme A.S.")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            queue_invoice(store, xml_path)
+            workspace = store.get_workspace("client-1")
+            profile = dict(workspace["client"]["profile"])
+            store.upsert_client(
+                client_id="client-1",
+                profile={**profile, "nace_code": "477401"},
+                onboarding=workspace["client"]["onboarding"],
+            )
+            store.save_nace_research_profile(
+                nace_code="477401",
+                profile={
+                    "activity_title": "Tibbi perakende",
+                    "scope_summary": "Cache profil",
+                    "activity_tags": ["hearing_aid", "medical_retail"],
+                    "source_urls": ["https://example.test/nace"],
+                    "research_confidence": 85,
+                    "accounting_impact_confidence": 90,
+                },
+            )
+            provider = FakeResearchProvider(
+                {
+                    "display_name": "Mystery Sonic",
+                    "summary_tr": "Isitme cihazi aksesuaridir.",
+                    "common_product_categories": ["isitme_cihazi"],
+                    "account_treatment": "stock_or_cogs",
+                    "research_confidence": 85,
+                    "accounting_impact_confidence": 90,
+                    "evidence": [{"url": "https://manufacturer.example/mystery", "summary_tr": "Uretici sayfasi."}],
+                }
+            )
+
+            process_queued_documents(
+                store,
+                research_runtime={"provider": provider, "policy": ResearchPolicy(enabled=True, confidence_threshold=70)},
+            )
+            result = store.get_workspace("client-1")["documents"][0]["result"]
+
+        self.assertEqual(len(provider.queries), 1)
+        self.assertEqual(result["research_profile"]["display_name"], "Mystery Sonic")
+
     def test_worker_uses_ai_research_query_before_raw_invoice_line(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "ai-query.xml"

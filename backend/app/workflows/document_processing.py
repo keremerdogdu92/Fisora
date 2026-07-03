@@ -6,6 +6,7 @@ from decimal import Decimal
 from os import environ
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 from app.domain.ai_classification import AiClassificationPolicy, ProductClassifier, StaticFirstClassifier
@@ -921,6 +922,23 @@ def _record_research_usage(
     store.record_ai_usage(client_id=client_id, event=event)
 
 
+def _duration_ms(start: float) -> int:
+    return max(int((time.perf_counter() - start) * 1000), 0)
+
+
+def _timestamp_to_ms(value: object) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        timestamp = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=UTC)
+    return max(int((datetime.now(UTC) - timestamp).total_seconds() * 1000), 0)
+
+
 def process_next_job_once(
     store: Any,
     *,
@@ -934,6 +952,13 @@ def process_next_job_once(
         return {"processed_count": 0, "completed_count": 0, "failed_count": 0}
     client_id = str(job["client_id"])
     document_ref = str(job.get("document_ref") or "")
+    total_start = time.perf_counter()
+    parse_ms = 0
+    ai_ms = 0
+    research_ms = 0
+    selected_provider = ""
+    research_cache_hit = False
+    nace_cache_hit = False
 
     def pipeline_event(step: str, status: str, message_tr: str, debug_code: str, details: dict[str, Any] | None = None) -> None:
         if not hasattr(store, "record_document_pipeline_event"):
@@ -957,6 +982,11 @@ def process_next_job_once(
             {"parser_kind": str(job.get("parser_kind") or "")},
         )
         workspace = store.get_workspace(client_id)
+        profile = (workspace.get("client") or {}).get("profile") or {}
+        nace_code = str(profile.get("nace_code") or "").strip()
+        nace_cache_hit = bool(profile.get("activity_tags")) or bool(
+            nace_code and hasattr(store, "get_nace_research_profile") and store.get_nace_research_profile(nace_code)
+        )
         document = next(
             (
                 item
@@ -987,6 +1017,7 @@ def process_next_job_once(
                 {"provider": selected_provider},
             )
         workspace = _workspace_with_nace_research(workspace, store)
+        parse_start = time.perf_counter()
         result = build_processing_result(
             document,
             job,
@@ -995,7 +1026,10 @@ def process_next_job_once(
             statement_ai_provider=runtime["statement_ai_provider"],
             statement_ai_policy=runtime["statement_ai_policy"],
         )
+        parse_ms = _duration_ms(parse_start)
         product_provider = getattr(runtime["product_classifier"], "provider", None)
+        if str(result.get("ai_classification_provider") or "") not in {"", "static_rules"}:
+            ai_ms = parse_ms
         _record_ai_capacity_snapshot(store, product_provider)
         _record_ai_capacity_snapshot(store, runtime["statement_ai_provider"])
         pipeline_event(
@@ -1120,6 +1154,7 @@ def process_next_job_once(
                 )
                 cache_key = normalize_product_research_key(query.search_text or query.key)
                 cached = store.get_brand_research_profile(cache_key) if hasattr(store, "get_brand_research_profile") else None
+                research_cache_hit = bool(cached)
                 pipeline_event(
                     "research_cache_hit" if cached else "research_started",
                     "ok",
@@ -1136,11 +1171,13 @@ def process_next_job_once(
                     provider=effective_research_runtime.get("provider"),  # type: ignore[arg-type]
                     policy=effective_research_runtime.get("policy"),  # type: ignore[arg-type]
                 )
+                research_start = time.perf_counter()
                 profile = harness.research_brand(
                     raw_line=raw_line,
                     supplier_hint=str(result.get("provider_hint") or ""),
                     activity_context=activity_context,
                 )
+                research_ms += _duration_ms(research_start)
                 if harness.call_count > 0:
                     _record_research_usage(
                         store,
@@ -1224,7 +1261,17 @@ def process_next_job_once(
             result=result,
         )
         _record_ai_usage_from_result(store, client_id=client_id, result=result)
-        store.update_processing_job(job_id=str(job["id"]), status="completed")
+        processing_metrics = {
+            "queue_wait_ms": _timestamp_to_ms(job.get("created_at")),
+            "parse_ms": parse_ms,
+            "ai_ms": ai_ms,
+            "research_ms": research_ms,
+            "total_ms": _duration_ms(total_start),
+            "provider": selected_provider or str(result.get("ai_classification_provider") or ""),
+            "research_cache_hit": research_cache_hit,
+            "nace_cache_hit": nace_cache_hit,
+        }
+        store.update_processing_job(job_id=str(job["id"]), status="completed", processing_metrics=processing_metrics)
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
         pipeline_event(
@@ -1234,7 +1281,22 @@ def process_next_job_once(
             "parser_failed",
             {"error": str(exc)},
         )
-        store.update_processing_job(job_id=str(job.get("id") or ""), status="failed", error_message=str(exc))
+        processing_metrics = {
+            "queue_wait_ms": _timestamp_to_ms(job.get("created_at")),
+            "parse_ms": parse_ms,
+            "ai_ms": ai_ms,
+            "research_ms": research_ms,
+            "total_ms": _duration_ms(total_start),
+            "provider": selected_provider,
+            "research_cache_hit": research_cache_hit,
+            "nace_cache_hit": nace_cache_hit,
+        }
+        store.update_processing_job(
+            job_id=str(job.get("id") or ""),
+            status="failed",
+            error_message=str(exc),
+            processing_metrics=processing_metrics,
+        )
         return {"processed_count": 1, "completed_count": 0, "failed_count": 1}
 
 

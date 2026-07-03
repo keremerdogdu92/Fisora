@@ -272,6 +272,89 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(workspace["processing_jobs"][-1]["document_ref"], document["document_ref"])
         self.assertEqual(workspace["processing_jobs"][-1]["status"], "queued")
 
+    def test_client_reprocess_reuses_cached_tax_certificate_and_nace_profile_when_file_unchanged(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.domain.tax_certificates import TaxCertificateExtraction
+        from app.persistence.workflow_store import JsonWorkflowStore
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store_path = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_STORE_PATH = store_path
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": False},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                return_value=TaxCertificateExtraction(
+                    title="Demo Mukellef",
+                    tax_id="1111111111",
+                    vkn="1111111111",
+                    tax_office="Kadikoy",
+                    activity_description="Tibbi ve ortopedik urunlerin perakende ticareti",
+                    nace_code="477401",
+                    workplace_addresses=("Istanbul",),
+                    confidence=95,
+                ),
+            ):
+                upload_response = client.post(
+                    "/phase0/store/client-onboarding-attachment",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    data={
+                        "client_id": "client-1",
+                        "attachment_type": "tax_certificate",
+                        "uploaded_by": "mali-musavir",
+                        "uploaded_by_user_id": "mali-musavir",
+                    },
+                    files={"file": ("vergi-levhasi.pdf", b"%PDF-1.7 fixed", "application/pdf")},
+                )
+            store = JsonWorkflowStore(store_path)
+            store.save_nace_research_profile(
+                nace_code="477401",
+                profile={
+                    "nace_code": "477401",
+                    "activity_title": "Tibbi perakende",
+                    "scope_summary": "Cache profil",
+                    "activity_tags": ["hearing_aid", "medical_retail"],
+                    "source_urls": ["https://example.test/nace"],
+                    "research_confidence": 85,
+                    "accounting_impact_confidence": 90,
+                },
+            )
+
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                side_effect=AssertionError("unchanged tax certificate must use cached extraction"),
+            ):
+                with patch(
+                    "app.services.document_service.build_research_runtime_from_env",
+                    side_effect=AssertionError("cached NACE profile must not call research runtime"),
+                ):
+                    response = client.post(
+                        "/phase0/store/client-reprocess",
+                        headers={"X-Fisora-User-Id": "mali-musavir"},
+                        json={"client_id": "client-1", "max_jobs": 5},
+                    )
+
+        payload = response.json()
+        self.assertEqual(upload_response.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["tax_certificate"]["nace_code"], "477401")
+        self.assertEqual(payload["nace_research_profile"]["activity_tags"], ["hearing_aid", "medical_retail"])
+        self.assertEqual(payload["processing_summary"]["current_status"], "idle")
+
     def test_onboarding_attachment_does_not_create_processing_job(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

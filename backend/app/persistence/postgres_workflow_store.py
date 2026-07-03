@@ -754,17 +754,49 @@ class PostgresWorkflowStore:
         ]
 
     def claim_next_processing_job(self) -> dict[str, Any] | None:
-        rows = self._list_records("processing_job")
-        queued = [row for row in rows if row["payload"].get("status") == "queued"]
-        if not queued:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    with next_job as (
+                        select client_id, record_key, payload
+                        from workflow_records
+                        where tenant_id = %s
+                          and record_type = 'processing_job'
+                          and payload->>'status' = 'queued'
+                        order by payload->>'created_at' asc, created_at asc
+                        limit 1
+                        for update skip locked
+                    )
+                    update workflow_records as records
+                    set payload = jsonb_set(
+                            jsonb_set(
+                                jsonb_set(
+                                    next_job.payload,
+                                    '{status}',
+                                    to_jsonb('processing'::text)
+                                ),
+                                '{attempt_count}',
+                                to_jsonb(coalesce((next_job.payload->>'attempt_count')::int, 0) + 1)
+                            ),
+                            '{updated_at}',
+                            to_jsonb(%s::text)
+                        ),
+                        updated_at = now()
+                    from next_job
+                    where records.tenant_id = %s
+                      and records.client_id = next_job.client_id
+                      and records.record_type = 'processing_job'
+                      and records.record_key = next_job.record_key
+                    returning records.client_id, records.record_key, records.payload
+                    """,
+                    (self.tenant_id, utc_now(), self.tenant_id),
+                )
+                row = cursor.fetchone()
+        if not row:
             return None
-        queued.sort(key=lambda row: str(row["payload"].get("created_at") or ""))
-        row = queued[0]
-        payload = row["payload"]
-        payload["status"] = "processing"
-        payload["attempt_count"] = int(payload.get("attempt_count") or 0) + 1
-        payload["updated_at"] = utc_now()
-        return self._upsert_record(str(row["client_id"]), "processing_job", str(row["record_key"]), payload)
+        return deepcopy(row[2])
 
     def update_processing_job(
         self,
@@ -772,6 +804,7 @@ class PostgresWorkflowStore:
         job_id: str,
         status: str,
         error_message: str = "",
+        processing_metrics: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         row = self._get_record_by_key("processing_job", job_id)
         if row is None:
@@ -779,6 +812,8 @@ class PostgresWorkflowStore:
         payload = row["payload"]
         payload["status"] = status
         payload["error_message"] = error_message
+        if processing_metrics is not None:
+            payload["processing_metrics"] = processing_metrics
         payload["updated_at"] = utc_now()
         return self._upsert_record(str(row["client_id"]), "processing_job", job_id, payload)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
+import hashlib
 import mimetypes
 from os import environ
 from pathlib import Path
@@ -18,6 +19,21 @@ from app.workflows.document_processing import parser_kind_for_document_type, pro
 
 OperationRecorder = Callable[..., dict[str, object]]
 AccessChecker = Callable[..., dict[str, object]]
+
+
+def file_fingerprint(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def has_tax_certificate_core_fields(tax_certificate: dict[str, object]) -> bool:
+    return any(
+        str(tax_certificate.get(field) or "").strip()
+        for field in ("nace_code", "tax_id", "tckn", "vkn", "tax_identifier", "title", "legal_name", "activity_description")
+    )
 
 
 class DocumentService:
@@ -319,6 +335,7 @@ class DocumentService:
         if normalized_type == "tax_certificate":
             try:
                 storage_path = Path(str(payload.get("storage_path") or ""))
+                payload["tax_certificate_fingerprint"] = file_fingerprint(storage_path)
                 tax_certificate = parse_tax_certificate_file(storage_path).to_payload()
                 payload.update(
                     {
@@ -523,12 +540,26 @@ class DocumentService:
         path = Path(str(latest.get("storage_path") or ""))
         if not path.exists() or not path.is_file():
             return {}
+        current_fingerprint = file_fingerprint(path)
+        cached_fingerprint = str(latest.get("tax_certificate_fingerprint") or "").strip()
+        cached_tax_certificate = latest.get("tax_certificate") if isinstance(latest.get("tax_certificate"), dict) else {}
+        if (
+            cached_tax_certificate
+            and has_tax_certificate_core_fields(cached_tax_certificate)
+            and cached_fingerprint
+            and cached_fingerprint == current_fingerprint
+        ):
+            return dict(cached_tax_certificate)
         return parse_tax_certificate_file(path).to_payload()
 
     def _research_nace_for_tax_certificate(self, tax_certificate: dict[str, object]) -> dict[str, object]:
         nace_code = str(tax_certificate.get("nace_code") or "").strip()
         if not nace_code:
             return {}
+        if hasattr(self.store, "get_nace_research_profile"):
+            cached = self.store.get_nace_research_profile(nace_code)
+            if cached:
+                return cached
         runtime = build_research_runtime_from_env(environ)
         if not runtime:
             return {}
@@ -540,7 +571,7 @@ class DocumentService:
         return harness.research_nace(
             nace_code=nace_code,
             activity_context=str(tax_certificate.get("activity_description") or ""),
-            bypass_cache=True,
+            bypass_cache=False,
         )
 
     def _update_client_from_tax_certificate(

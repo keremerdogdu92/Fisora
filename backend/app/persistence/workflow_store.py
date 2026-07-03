@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,6 +69,7 @@ class JsonWorkflowStore:
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
+        self._lock = threading.RLock()
 
     def upsert_client(self, *, client_id: str, profile: dict[str, Any], onboarding: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -759,16 +761,17 @@ class JsonWorkflowStore:
         ]
 
     def claim_next_processing_job(self) -> dict[str, Any] | None:
-        data = self._read()
-        for job in data["processing_jobs"]:
-            if job.get("status") != "queued":
-                continue
-            job["status"] = "processing"
-            job["attempt_count"] = int(job.get("attempt_count") or 0) + 1
-            job["updated_at"] = utc_now()
-            self._write(data)
-            return deepcopy(job)
-        return None
+        with self._lock:
+            data = self._read()
+            for job in data["processing_jobs"]:
+                if job.get("status") != "queued":
+                    continue
+                job["status"] = "processing"
+                job["attempt_count"] = int(job.get("attempt_count") or 0) + 1
+                job["updated_at"] = utc_now()
+                self._write(data)
+                return deepcopy(job)
+            return None
 
     def update_processing_job(
         self,
@@ -776,6 +779,7 @@ class JsonWorkflowStore:
         job_id: str,
         status: str,
         error_message: str = "",
+        processing_metrics: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         data = self._read()
         for job in data["processing_jobs"]:
@@ -783,6 +787,8 @@ class JsonWorkflowStore:
                 continue
             job["status"] = status
             job["error_message"] = error_message
+            if processing_metrics is not None:
+                job["processing_metrics"] = processing_metrics
             job["updated_at"] = utc_now()
             self._write(data)
             return deepcopy(job)

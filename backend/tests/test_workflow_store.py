@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +18,7 @@ from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.postgres_workflow_store import PostgresWorkflowStore
 from app.persistence.store_factory import build_workflow_store
+from app.worker import worker_concurrency_from_env
 from backend.scripts.import_private_intake_manifest import import_manifest
 from app.workflows.document_processing import build_ai_runtime_from_env, build_statement_processing_result, parser_kind_for_document_type, process_queued_documents
 
@@ -53,6 +55,12 @@ class RaisingProductProvider:
 
 
 class WorkflowStoreTests(unittest.TestCase):
+    def test_worker_concurrency_defaults_to_single_slot_outside_production_env(self) -> None:
+        self.assertEqual(worker_concurrency_from_env({}), 1)
+
+    def test_worker_concurrency_uses_configured_positive_slot_count(self) -> None:
+        self.assertEqual(worker_concurrency_from_env({"FISORA_WORKER_CONCURRENCY": "3"}), 3)
+
     def test_ai_runtime_from_env_builds_groq_provider_for_worker(self) -> None:
         runtime = build_ai_runtime_from_env(
             {
@@ -186,6 +194,52 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(summary["completed_count"], 0)
         self.assertEqual(summary["failed_count"], 0)
         self.assertEqual(summary["current_status"], "idle")
+
+    def test_processing_run_records_job_timing_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            document_path = Path(temp_dir) / "manual.txt"
+            document_path.write_text("manual review", encoding="utf-8")
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_ref": "doc-1",
+                    "document_type": "special_document",
+                    "intake_category": "special_document",
+                    "storage_path": str(document_path),
+                    "original_file_name": "manual.txt",
+                },
+            )
+            job = store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="special_document",
+                parser_kind="manual_review",
+                intake_category="special_document",
+            )
+
+            summary = process_queued_documents(store, max_jobs=1)
+            workspace = store.get_workspace("client-1")
+
+        updated_job = workspace["processing_jobs"][0]
+        metrics = updated_job["processing_metrics"]
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertEqual(updated_job["id"], job["id"])
+        self.assertIn("queue_wait_ms", metrics)
+        self.assertIn("parse_ms", metrics)
+        self.assertIn("ai_ms", metrics)
+        self.assertIn("research_ms", metrics)
+        self.assertIn("total_ms", metrics)
+        self.assertIn("provider", metrics)
+        self.assertIn("research_cache_hit", metrics)
+        self.assertIn("nace_cache_hit", metrics)
+        self.assertGreaterEqual(metrics["total_ms"], 0)
 
     def test_json_store_is_scoped_by_client_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -492,6 +546,30 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(claimed["status"], "processing")
         self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
 
+    def test_json_store_concurrent_claims_do_not_claim_same_job_twice(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="invoice",
+                parser_kind="text_pdf_invoice",
+            )
+            claimed: list[str] = []
+
+            def claim_once() -> None:
+                job = store.claim_next_processing_job()
+                if job:
+                    claimed.append(str(job["id"]))
+
+            threads = [threading.Thread(target=claim_once) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+
+        self.assertEqual(len(claimed), 1)
+
     def test_json_store_tracks_operation_events_in_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
@@ -648,6 +726,49 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(store.get_research_profile(kind="brand", key="Rexton")["kind"], "brand")
         self.assertEqual(store.get_research_profile(kind="nace", key="477401")["kind"], "nace")
         self.assertIsNone(store.get_research_profile(kind="other", key="x"))
+
+    def test_postgres_claim_next_processing_job_uses_atomic_update(self) -> None:
+        executed_sql: list[str] = []
+
+        class FakeCursor:
+            def __enter__(self) -> "FakeCursor":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def execute(self, sql: str, params: object = None) -> None:
+                executed_sql.append(sql)
+
+            def fetchone(self) -> tuple[str, str, dict[str, object]] | None:
+                return (
+                    "client-1",
+                    "job-1",
+                    {
+                        "id": "job-1",
+                        "client_id": "client-1",
+                        "status": "processing",
+                        "attempt_count": 1,
+                    },
+                )
+
+        class FakeConnection:
+            def __enter__(self) -> "FakeConnection":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def cursor(self) -> FakeCursor:
+                return FakeCursor()
+
+        store = PostgresWorkflowStore("postgresql://example", connect=lambda: FakeConnection())
+        store.claim_next_processing_job()
+
+        claim_sql = "\n".join(executed_sql).lower()
+        self.assertIn("for update skip locked", claim_sql)
+        self.assertIn("update workflow_records", claim_sql)
+        self.assertIn("returning records.client_id, records.record_key, records.payload", claim_sql)
 
     def test_postgres_store_lists_research_profiles_and_benchmark_runs(self) -> None:
         class FakePostgresStore(PostgresWorkflowStore):

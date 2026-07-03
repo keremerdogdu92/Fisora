@@ -157,6 +157,7 @@ class SimulatedInvoiceResult:
     ai_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_account_candidate_count: int = 0
     ai_counterparty_candidate_count: int = 0
+    ai_quality_scorecard: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1380,6 +1381,75 @@ def _primary_suggestion(
     }
 
 
+def _ai_quality_scorecard(
+    *,
+    raw_line: str,
+    supplier_hint: str,
+    relevance: BusinessRelevance,
+    ai_used: bool,
+    ai_provider: str,
+    ai_skipped_reason: str,
+    ai_reason: str,
+    ai_suggested_account_code: str,
+    ai_suggested_counterparty_code: str,
+    ai_product_identity: str,
+    ai_research_requested: bool,
+    ai_research_query: str,
+    ai_risk_flags: tuple[str, ...],
+    client_profile: ClientProfile | None,
+    selected_account_code: str,
+    selected_vat_account: str,
+    selected_counterparty_account: str,
+    direction: str,
+    direction_confidence: int,
+    deterministic_checks: tuple[str, ...],
+    export_status: str,
+    review_reason_codes: tuple[str, ...],
+    draft_confidence: int,
+    ai_account_candidate_count: int,
+    ai_counterparty_candidate_count: int,
+) -> dict[str, object]:
+    static_classification = classify_product_line(raw_line, supplier_hint)
+    return {
+        "static": {
+            "category": static_classification.category,
+            "confidence": static_classification.confidence,
+            "evidence": list(static_classification.evidence),
+        },
+        "ai": {
+            "used": ai_used,
+            "provider": ai_provider,
+            "skipped_reason": ai_skipped_reason,
+            "category": relevance.classification.category,
+            "confidence": relevance.classification.confidence,
+            "reason": ai_reason,
+            "suggested_account_code": ai_suggested_account_code,
+            "suggested_counterparty_code": ai_suggested_counterparty_code,
+            "product_identity": ai_product_identity,
+            "needs_research": ai_research_requested,
+            "research_query": ai_research_query,
+            "risk_flags": list(ai_risk_flags),
+        },
+        "final": {
+            "selected_account_code": selected_account_code,
+            "selected_vat_account": selected_vat_account,
+            "selected_counterparty_account": selected_counterparty_account,
+            "direction": direction,
+            "export_status": export_status,
+            "review_reason_codes": list(review_reason_codes),
+            "draft_confidence": draft_confidence,
+        },
+        "context": {
+            "client_nace_code": client_profile.nace_code if client_profile else "",
+            "client_activity_tags": list(client_profile.activity_tags) if client_profile else [],
+            "direction_confidence": direction_confidence,
+            "deterministic_checks": list(deterministic_checks),
+            "account_candidate_count": ai_account_candidate_count,
+            "counterparty_candidate_count": ai_counterparty_candidate_count,
+        },
+    }
+
+
 def simulate_invoice(
     invoice: ParsedInvoice,
     selection: AccountSelection,
@@ -1893,6 +1963,40 @@ def simulate_invoice(
         ai_reason=ai_reason or relevance.reason,
         export_gate_reason=export_gate_reason,
     )
+    selected_account_code = selected_revenue_account if direction == "sales" else purchase_account
+    selected_vat_account = selected_sales_vat_account if direction == "sales" else selected_purchase_vat_account
+    selected_counterparty_account = (
+        selected_customer_account
+        if direction == "sales"
+        else counterparty_match.account_code if counterparty_match and counterparty_match.account_code else suggested_counterparty
+    )
+    ai_quality_scorecard = _ai_quality_scorecard(
+        raw_line=raw_line,
+        supplier_hint=invoice.provider_hint,
+        relevance=relevance,
+        ai_used=ai_used,
+        ai_provider=ai_provider,
+        ai_skipped_reason=ai_skipped_reason,
+        ai_reason=ai_reason,
+        ai_suggested_account_code=ai_suggested_account_code,
+        ai_suggested_counterparty_code=ai_suggested_counterparty_code,
+        ai_product_identity=ai_product_identity,
+        ai_research_requested=ai_research_requested,
+        ai_research_query=ai_research_query,
+        ai_risk_flags=ai_risk_flags,
+        client_profile=client_profile,
+        selected_account_code=selected_account_code,
+        selected_vat_account=selected_vat_account,
+        selected_counterparty_account=selected_counterparty_account,
+        direction=direction,
+        direction_confidence=direction_confidence,
+        deterministic_checks=deterministic_checks,
+        export_status=export_status,
+        review_reason_codes=all_reasons,
+        draft_confidence=draft_confidence,
+        ai_account_candidate_count=ai_account_candidate_count,
+        ai_counterparty_candidate_count=ai_counterparty_candidate_count,
+    )
 
     return SimulatedInvoiceResult(
         chart_file_name=selection.chart_file_name,
@@ -1954,6 +2058,7 @@ def simulate_invoice(
         ai_stage_evidence=ai_stage_evidence,
         ai_account_candidate_count=ai_account_candidate_count,
         ai_counterparty_candidate_count=ai_counterparty_candidate_count,
+        ai_quality_scorecard=ai_quality_scorecard,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",

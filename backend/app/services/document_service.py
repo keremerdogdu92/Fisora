@@ -45,6 +45,9 @@ class DocumentService:
         uploaded_by: str,
         uploaded_by_user_id: str = "",
         request_user_id: str | None = None,
+        session_kind: str = "",
+        delegated_by_user_id: str = "",
+        delegated_client_id: str = "",
         content: bytes | None = None,
         size_bytes: int | None = None,
         sha256: str | None = None,
@@ -69,6 +72,14 @@ class DocumentService:
         access = self.store.verify_portal_access(client_id=client_id, user_id=effective_user_id)
         if not access.get("allowed"):
             raise HTTPException(status_code=403, detail=access)
+        actor_metadata = self._upload_actor_metadata(
+            client_id=client_id,
+            access=access,
+            session_kind=session_kind,
+            delegated_by_user_id=delegated_by_user_id,
+            delegated_client_id=delegated_client_id,
+        )
+        onboarding = self._workspace_onboarding_check(client_id)
         try:
             document = store_document_content(
                 base_dir=self.document_storage_path,
@@ -88,6 +99,9 @@ class DocumentService:
         document_payload = asdict(document)
         document_payload["uploaded_by_user_id"] = effective_user_id
         document_payload["portal_access_reason"] = access.get("reason", "")
+        document_payload.update(actor_metadata)
+        document_payload["client_onboarding_ready"] = onboarding.is_ready
+        document_payload["client_onboarding_missing_fields"] = list(onboarding.missing_fields)
         saved = self.store.save_uploaded_document(
             client_id=client_id,
             document=document_payload,
@@ -106,6 +120,12 @@ class DocumentService:
                 "period": saved.get("period", ""),
                 "size_bytes": saved.get("size_bytes", 0),
                 "uploaded_by_user_id": effective_user_id,
+                "uploaded_by_role": saved.get("uploaded_by_role", ""),
+                "upload_actor_type": saved.get("upload_actor_type", ""),
+                "delegated_by_user_id": saved.get("delegated_by_user_id", ""),
+                "delegated_client_id": saved.get("delegated_client_id", ""),
+                "client_onboarding_ready": saved.get("client_onboarding_ready", False),
+                "client_onboarding_missing_fields": saved.get("client_onboarding_missing_fields", []),
             },
         )
         storage_path = Path(str(saved.get("storage_path") or ""))
@@ -154,9 +174,89 @@ class DocumentService:
                 "processing_job_id": job["id"],
                 "parser_kind": job["parser_kind"],
                 "uploaded_by_user_id": effective_user_id,
+                "uploaded_by_role": saved.get("uploaded_by_role", ""),
+                "upload_actor_type": saved.get("upload_actor_type", ""),
+                "delegated_by_user_id": saved.get("delegated_by_user_id", ""),
+                "delegated_client_id": saved.get("delegated_client_id", ""),
+                "client_onboarding_ready": saved.get("client_onboarding_ready", False),
+                "client_onboarding_missing_fields": saved.get("client_onboarding_missing_fields", []),
             },
         )
         return {**saved, "processing_job": job}
+
+    def _upload_actor_metadata(
+        self,
+        *,
+        client_id: str,
+        access: dict[str, object],
+        session_kind: str = "",
+        delegated_by_user_id: str = "",
+        delegated_client_id: str = "",
+    ) -> dict[str, object]:
+        role = str(access.get("role") or "")
+        normalized_delegated_by = delegated_by_user_id.strip()
+        normalized_delegated_client = delegated_client_id.strip()
+        if session_kind == "delegated_client" and normalized_delegated_by:
+            if normalized_delegated_client and normalized_delegated_client != client_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "allowed": False,
+                        "reason": "delegated_client_mismatch",
+                        "delegated_client_id": normalized_delegated_client,
+                        "client_id": client_id,
+                    },
+                )
+            delegate_access = self.store.verify_portal_access(client_id=client_id, user_id=normalized_delegated_by)
+            delegate_role = str(delegate_access.get("role") or "")
+            if not delegate_access.get("allowed") or delegate_role not in {"accountant", "admin"}:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        **delegate_access,
+                        "reason": "delegated_actor_not_allowed",
+                        "allowed_roles": ["accountant", "admin"],
+                    },
+                )
+            return {
+                "uploaded_by_role": role,
+                "upload_actor_type": "delegated_accountant",
+                "delegated_by_user_id": normalized_delegated_by,
+                "delegated_client_id": normalized_delegated_client or client_id,
+            }
+        return {
+            "uploaded_by_role": role,
+            "upload_actor_type": role or "portal_user",
+            "delegated_by_user_id": "",
+            "delegated_client_id": "",
+        }
+
+    def _workspace_onboarding_check(self, client_id: str):
+        workspace = self.store.get_workspace(client_id)
+        client = workspace.get("client") or {}
+        profile = dict(client.get("profile") or {})
+        chart_accounts = workspace.get("chart_accounts") or {}
+        return check_client_onboarding(
+            ClientProfile(
+                client_id=str(profile.get("client_id") or client_id),
+                title=str(profile.get("title") or ""),
+                tax_id=str(profile.get("tax_id") or ""),
+                tckn=str(profile.get("tckn") or ""),
+                vkn=str(profile.get("vkn") or ""),
+                identity_type=str(profile.get("identity_type") or ""),
+                tax_identifier=str(profile.get("tax_identifier") or ""),
+                legal_name=str(profile.get("legal_name") or ""),
+                trade_name=str(profile.get("trade_name") or ""),
+                display_title=str(profile.get("display_title") or ""),
+                tax_office=str(profile.get("tax_office") or ""),
+                activity_description=str(profile.get("activity_description") or ""),
+                nace_code=str(profile.get("nace_code") or ""),
+                activity_tags=tuple(str(tag) for tag in profile.get("activity_tags") or []),
+                nace_research_profile=dict(profile.get("nace_research_profile") or {}),
+                workplace_addresses=tuple(str(address) for address in profile.get("workplace_addresses") or []),
+                has_chart_accounts=bool(profile.get("has_chart_accounts") or chart_accounts.get("account_count")),
+            )
+        )
 
     def store_onboarding_attachment(
         self,
@@ -547,6 +647,15 @@ class DocumentService:
             ),
             None,
         )
+        if not document:
+            document = next(
+                (
+                    item
+                    for item in workspace.get("onboarding_attachments", [])
+                    if str(item.get("attachment_ref") or item.get("document_id") or item.get("original_file_name")) == normalized_ref
+                ),
+                None,
+            )
         if not document:
             self.store.record_document_pipeline_event(
                 client_id=normalized_client_id,

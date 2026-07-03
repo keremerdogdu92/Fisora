@@ -30,6 +30,7 @@ def apply_review_decision_to_document(
     if not isinstance(result, dict) or not result:
         return updated
 
+    proposal_snapshot = _decision_snapshot(result)
     action = str(decision.get("action") or "")
     corrected_account = str(decision.get("corrected_account_code") or "").strip()
     corrected_counterparty = str(decision.get("corrected_counterparty_code") or "").strip()
@@ -108,6 +109,28 @@ def apply_review_decision_to_document(
     result["accountant_decision_reason"] = reason
     result["accountant_reviewed_at"] = reviewed_at
     result["accountant_reviewed_by"] = reviewer
+    final_decision = _decision_snapshot(result)
+    final_decision.update(
+        {
+            "action": action,
+            "reviewer": reviewer,
+            "reason": reason,
+            "reviewed_at": reviewed_at,
+        }
+    )
+    quality_delta = _quality_delta(
+        proposal=proposal_snapshot,
+        final=final_decision,
+        action=action,
+    )
+    result["proposal_snapshot"] = proposal_snapshot
+    result["accountant_final_decision"] = final_decision
+    result["quality_delta"] = quality_delta
+    scorecard = result.get("ai_quality_scorecard")
+    if isinstance(scorecard, dict):
+        scorecard["accountant_final_decision"] = final_decision
+        scorecard["quality_delta"] = quality_delta
+        result["ai_quality_scorecard"] = scorecard
 
     if direction_conflict_resolved:
         result["accountant_export_override"] = False
@@ -135,6 +158,61 @@ def apply_review_decision_to_document(
     updated["result"] = result
     updated["updated_at"] = reviewed_at
     return updated
+
+
+def _decision_snapshot(result: dict[str, Any]) -> dict[str, object]:
+    direction = str(result.get("accounting_direction") or "")
+    if direction == "sales":
+        selected_account = str(result.get("selected_revenue_account") or result.get("selected_expense_account") or "").strip()
+        selected_counterparty = str(result.get("selected_customer_account") or result.get("counterparty_match_code") or "").strip()
+    else:
+        selected_account = str(result.get("selected_expense_account") or result.get("selected_revenue_account") or "").strip()
+        selected_counterparty = str(
+            result.get("selected_supplier_account") or result.get("counterparty_match_code") or result.get("selected_customer_account") or ""
+        ).strip()
+    return {
+        "selected_account_code": selected_account,
+        "selected_vat_account": str(result.get("selected_vat_account") or result.get("selected_purchase_vat_account") or result.get("selected_sales_vat_account") or "").strip(),
+        "selected_counterparty_account": selected_counterparty,
+        "direction": direction,
+        "export_status": str(result.get("export_status") or ""),
+        "draft_line_count": len(result.get("draft_lines") or []),
+        "is_balanced": bool(result.get("is_balanced")),
+    }
+
+
+def _quality_delta(*, proposal: dict[str, object], final: dict[str, object], action: str) -> dict[str, object]:
+    changed_fields: list[str] = []
+    account_from = str(proposal.get("selected_account_code") or "")
+    account_to = str(final.get("selected_account_code") or "")
+    counterparty_from = str(proposal.get("selected_counterparty_account") or "")
+    counterparty_to = str(final.get("selected_counterparty_account") or "")
+    vat_from = str(proposal.get("selected_vat_account") or "")
+    vat_to = str(final.get("selected_vat_account") or "")
+    direction_from = str(proposal.get("direction") or "")
+    direction_to = str(final.get("direction") or "")
+    if account_from != account_to:
+        changed_fields.append("selected_account_code")
+    if counterparty_from != counterparty_to:
+        changed_fields.append("counterparty_account")
+    if vat_from != vat_to:
+        changed_fields.append("selected_vat_account")
+    if direction_from != direction_to:
+        changed_fields.append("direction")
+    return {
+        "changed_fields": changed_fields,
+        "account_changed_from": account_from,
+        "account_changed_to": account_to,
+        "counterparty_changed_from": counterparty_from,
+        "counterparty_changed_to": counterparty_to,
+        "vat_changed_from": vat_from,
+        "vat_changed_to": vat_to,
+        "direction_changed_from": direction_from,
+        "direction_changed_to": direction_to,
+        "decision": "corrected" if changed_fields else "accepted",
+        "action": action,
+        "learning_candidate": action in APPROVED_EXPORT_ACTIONS and bool(changed_fields),
+    }
 
 
 def _apply_direction_conflict_decision(

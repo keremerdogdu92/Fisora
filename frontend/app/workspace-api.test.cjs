@@ -33,6 +33,22 @@ const workspaceRecord = {
       role: "client_user",
     },
   ],
+  onboarding_attachments: [
+    {
+      attachment_ref: "tax-cert-1",
+      attachment_type: "tax_certificate",
+      original_file_name: "vergi-levhasi.pdf",
+      storage_status: "stored",
+      created_at: "2026-06-06T09:00:00Z",
+    },
+    {
+      attachment_ref: "chart-1",
+      attachment_type: "chart_accounts",
+      original_file_name: "hesap-plani.xlsx",
+      storage_status: "stored",
+      created_at: "2026-06-06T09:30:00Z",
+    },
+  ],
   uploaded_documents: [
     {
       client_id: "client-1",
@@ -126,6 +142,25 @@ const workspaceRecord = {
         technical_details: {
           parse_notes: [],
           review_reason_codes: [],
+        },
+        ai_quality_scorecard: {
+          static: { category: "Satis", confidence: 82 },
+          ai: { provider: "static_rules", category: "Satis", confidence: 82 },
+          final: {
+            selected_account_code: "600.20",
+            selected_counterparty_account: "120.01",
+            direction: "sales",
+          },
+          accountant_final_decision: {
+            selected_account_code: "600.20",
+            selected_counterparty_account: "120.01",
+            action: "approve",
+          },
+          quality_delta: {
+            changed_fields: [],
+            decision: "accepted",
+            learning_candidate: false,
+          },
         },
         draft_lines: [
           { account_code: "120.01", description: "Alici", debit: "120.00", credit: "0.00" },
@@ -224,6 +259,24 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
     userLabel: "Mukellef Kullanici",
     portalUserId: "mukellef-user",
     onboardingStatus: "Çalışma alanı",
+    onboardingAttachments: [
+      {
+        ref: "tax-cert-1",
+        type: "tax_certificate",
+        label: "Vergi levhasi",
+        fileName: "vergi-levhasi.pdf",
+        status: "stored",
+        createdAt: "2026-06-06T09:00:00Z",
+      },
+      {
+        ref: "chart-1",
+        type: "chart_accounts",
+        label: "Hesap plani",
+        fileName: "hesap-plani.xlsx",
+        status: "stored",
+        createdAt: "2026-06-06T09:30:00Z",
+      },
+    ],
   });
   assert.equal(data.documents.length, 2);
   assert.equal(data.documents[0].id, "processed-1");
@@ -278,6 +331,16 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.deepEqual(data.documents[0].technicalDetails, {
     parse_notes: [],
     review_reason_codes: [],
+  });
+  assert.deepEqual(data.documents[0].aiQualityScorecard.final, {
+    selected_account_code: "600.20",
+    selected_counterparty_account: "120.01",
+    direction: "sales",
+  });
+  assert.deepEqual(data.documents[0].aiQualityScorecard.quality_delta, {
+    changed_fields: [],
+    decision: "accepted",
+    learning_candidate: false,
   });
   assert.equal(data.documents[1].id, "upload-1");
   assert.equal(data.documents[1].status, "queued");

@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from "react";
 import type { CancellationRequest, DashboardClientRow, NewClientDraft, PilotClient, PilotDocument } from "./portal-types";
+import { resolveApiBaseUrl } from "./upload-api";
 
 type ClientManagementTab = "new-client" | "client-list" | "requests";
+
+function onboardingAttachmentUrl(clientId: string, ref: string) {
+  const pageUrl = typeof window === "undefined" ? "" : window.location.href;
+  return `${resolveApiBaseUrl(pageUrl)}/phase0/store/document-file/${encodeURIComponent(clientId)}/${encodeURIComponent(ref)}`;
+}
 
 export function ClientManagementView({
   cancellationRequests,
@@ -200,6 +206,24 @@ export function ClientManagementView({
               </label>
               {!hasSelectedClient ? <small className="blocked-reason">Önce mükellef seçin.</small> : null}
               {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
+            </div>
+            <div className="settings-card">
+              <span>Onboarding dosyaları</span>
+              <strong>{selectedClient?.onboardingAttachments?.length ? `${selectedClient.onboardingAttachments.length} dosya` : "Dosya yok"}</strong>
+              <div className="client-document-delete-list">
+                {selectedClient?.onboardingAttachments?.length ? selectedClient.onboardingAttachments.map((attachment) => (
+                  <a
+                    className="client-document-delete-row"
+                    href={onboardingAttachmentUrl(selectedClient.clientId, attachment.ref)}
+                    key={`${attachment.type}-${attachment.ref}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <span>{attachment.label}</span>
+                    <small>{attachment.fileName}</small>
+                  </a>
+                )) : <p className="empty">Vergi levhası veya hesap planı dosyası yok.</p>}
+              </div>
             </div>
             <div className="settings-card">
               <span>Portal erişimi</span>

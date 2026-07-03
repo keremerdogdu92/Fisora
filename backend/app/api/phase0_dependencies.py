@@ -77,6 +77,38 @@ def request_user_id(
     return str(session.get("user_id") or "")
 
 
+def request_auth_context(
+    user_header: str | None,
+    session_header: str | None = None,
+    session_cookie: str | None = None,
+    *,
+    store_factory: StoreFactory,
+) -> dict[str, object]:
+    auth_config = build_auth_config()
+    user_id = ""
+    if auth_config.accepts_user_header:
+        user_id = mock_user_header(user_header)
+
+    token = (session_header or session_cookie or "").strip()
+    session: dict[str, object] = {}
+    if token:
+        session = store_factory().resolve_auth_session(token_hash=hash_session_token(token))
+        if not session.get("valid"):
+            raise HTTPException(status_code=401, detail=session)
+    elif auth_config.mode == "session_required":
+        raise HTTPException(status_code=401, detail={"valid": False, "reason": "session_required"})
+
+    if not user_id:
+        user_id = str(session.get("user_id") or "")
+    return {
+        "user_id": user_id,
+        "session_kind": str(session.get("session_kind") or ""),
+        "delegated_by": str(session.get("delegated_by") or ""),
+        "delegated_client_id": str(session.get("delegated_client_id") or ""),
+        "session_reason": str(session.get("reason") or ""),
+    }
+
+
 def require_mock_client_access(
     *,
     client_id: str,

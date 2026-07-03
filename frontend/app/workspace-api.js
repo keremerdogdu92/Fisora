@@ -333,12 +333,35 @@ function normalizeBackendClient(clientRecord, workspace) {
     userLabel: safeText(portalUser.display_name || portalUser.user_id, "Mükellef kullanıcısı"),
     portalUserId: safeText(portalUser.user_id, "mukellef-user"),
     onboardingStatus: "Çalışma alanı",
+    onboardingAttachments: normalizeOnboardingAttachments(workspace),
   };
 }
 
 function clientIdFromRecord(clientRecord) {
   const profile = clientRecord?.profile || {};
   return safeText(clientRecord?.client_id || profile.client_id || clientRecord?.id).trim();
+}
+
+function normalizeOnboardingAttachments(workspace) {
+  return safeList(workspace?.onboarding_attachments)
+    .map((attachment) => {
+      const type = safeText(attachment?.attachment_type, "onboarding_attachment");
+      return {
+        ref: safeText(attachment?.attachment_ref || attachment?.document_id || attachment?.original_file_name),
+        type,
+        label: onboardingAttachmentLabel(type),
+        fileName: safeText(attachment?.original_file_name || attachment?.stored_file_name, "-"),
+        status: safeText(attachment?.storage_status || attachment?.status, "-"),
+        createdAt: safeText(attachment?.created_at || attachment?.updated_at),
+      };
+    })
+    .filter((attachment) => attachment.ref);
+}
+
+function onboardingAttachmentLabel(type) {
+  if (type === "tax_certificate") return "Vergi levhasi";
+  if (type === "chart_accounts") return "Hesap plani";
+  return "Onboarding dosyasi";
 }
 
 function backendDocumentsForWorkspace(workspace, client) {
@@ -404,6 +427,7 @@ function processedBackendDocument(document, workspace, client) {
     accountantActionHint: safeText(result.accountant_action_hint),
     accountantSummary: safeText(result.accountant_summary, accountantSummaryForResult(result)),
     accountantExplanation: safeText(result.accountant_explanation_tr || result.ai_explanation_tr || result.accountant_summary),
+    aiQualityScorecard: result.ai_quality_scorecard && typeof result.ai_quality_scorecard === "object" ? result.ai_quality_scorecard : {},
     technicalDetails: result.technical_details && typeof result.technical_details === "object" ? result.technical_details : {},
     pipelineEvents: pipelineEventsForDocument(workspace, documentRef, originalDocumentRef),
     accountingDirection: safeText(result.accounting_direction || directionForBackendDocument(intakeSource)),
@@ -479,6 +503,7 @@ function pendingBackendDocument(document, workspace, client) {
     draftStatus: "processing",
     accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
     accountantExplanation: "Belge henuz muhasebe gerekcesi uretmedi.",
+    aiQualityScorecard: {},
     technicalDetails: {},
     pipelineEvents: pipelineEventsForDocument(workspace, documentRef, documentRef),
     accountingDirection: directionForBackendDocument(document?.intake_category || job.intake_category || documentType),

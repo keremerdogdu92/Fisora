@@ -315,6 +315,47 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(workspace["uploaded_documents"], [])
         self.assertEqual(workspace["processing_jobs"], [])
 
+    def test_onboarding_attachment_file_can_be_downloaded_from_client_settings(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": False},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            upload = client.post(
+                "/phase0/store/client-onboarding-attachment",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                data={
+                    "client_id": "client-1",
+                    "attachment_type": "tax_certificate",
+                    "uploaded_by": "mali-musavir",
+                    "uploaded_by_user_id": "mali-musavir",
+                },
+                files={"file": ("vergi-levhasi.pdf", b"vergi levhasi", "application/pdf")},
+            ).json()
+            response = client.get(
+                f"/phase0/store/document-file/client-1/{upload['attachment_ref']}",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"vergi levhasi")
+        self.assertIn("vergi-levhasi.pdf", response.headers.get("content-disposition", ""))
+
     def test_tax_certificate_attachment_updates_client_profile_without_processing_job(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -633,6 +674,83 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "stored")
         self.assertEqual(payload["processing_job"]["parser_kind"], "bank_statement")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "bank.csv")
+
+    def test_delegated_client_upload_records_accountant_actor_metadata(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={
+                    "client_id": "client-1",
+                    "title": "Demo Mukellef",
+                    "tax_id": "1111111111",
+                    "activity_description": "Isitme cihazi perakende satisi",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mukellef-user",
+                    "display_name": "Mukellef Kullanici",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            delegated = client.post(
+                "/phase0/store/auth/delegated-client-session",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={"client_id": "client-1", "target_user_id": "mukellef-user"},
+            ).json()
+
+            response = client.post(
+                "/phase0/store/document-upload-multipart",
+                headers={
+                    "X-Fisora-User-Id": "mukellef-user",
+                    "X-Fisora-Session": delegated["session_token"],
+                },
+                data={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
+                    "uploaded_by": "Mali Musavir",
+                    "uploaded_by_user_id": "mukellef-user",
+                },
+                files={"file": ("fatura.pdf", b"fatura", "application/pdf")},
+            )
+            workspace = client.get(
+                "/phase0/store/workspace/client-1",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["uploaded_by_user_id"], "mukellef-user")
+        self.assertEqual(payload["upload_actor_type"], "delegated_accountant")
+        self.assertEqual(payload["delegated_by_user_id"], "mali-musavir")
+        self.assertEqual(payload["delegated_client_id"], "client-1")
+        self.assertTrue(payload["client_onboarding_ready"])
+        self.assertEqual(payload["client_onboarding_missing_fields"], [])
+        saved = workspace["uploaded_documents"][0]
+        self.assertEqual(saved["upload_actor_type"], "delegated_accountant")
+        self.assertEqual(saved["delegated_by_user_id"], "mali-musavir")
+        uploaded_events = [event for event in workspace["document_pipeline_events"] if event["step"] == "uploaded"]
+        self.assertEqual(uploaded_events[0]["details"]["upload_actor_type"], "delegated_accountant")
+        self.assertEqual(uploaded_events[0]["details"]["delegated_by_user_id"], "mali-musavir")
 
     def test_special_document_upload_goes_to_manual_review_queue(self) -> None:
         if TestClient is None or phase0 is None or app is None:

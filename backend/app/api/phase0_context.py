@@ -11,6 +11,7 @@ from app.api.phase0_dependencies import (
     client_id_from_record,
     password_bootstrap_enabled,
     record_operation_event,
+    request_auth_context as _request_auth_context,
     request_user_id as _request_user_id,
     require_mock_client_access,
     set_session_cookie,
@@ -116,6 +117,19 @@ def request_user_id(
     session_cookie: str | None = None,
 ) -> str:
     return _request_user_id(
+        user_header,
+        session_header,
+        session_cookie,
+        store_factory=get_workflow_store,
+    )
+
+
+def request_auth_context(
+    user_header: str | None,
+    session_header: str | None = None,
+    session_cookie: str | None = None,
+) -> dict[str, object]:
+    return _request_auth_context(
         user_header,
         session_header,
         session_cookie,

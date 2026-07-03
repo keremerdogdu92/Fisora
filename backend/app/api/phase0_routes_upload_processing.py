@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
     get_document_service,
+    request_auth_context,
     request_user_id,
 )
 from app.api.phase0_schemas import ClientReprocessPayload, DocumentReprocessPayload, DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
@@ -25,6 +26,7 @@ def store_document_upload(
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
+    auth_context = request_auth_context(x_fisora_user_id, x_fisora_session, fisora_session)
     content = None
     if payload.content_base64:
         try:
@@ -39,7 +41,10 @@ def store_document_upload(
         file_name=payload.file_name,
         uploaded_by=payload.uploaded_by,
         uploaded_by_user_id=payload.uploaded_by_user_id,
-        request_user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+        request_user_id=str(auth_context.get("user_id") or ""),
+        session_kind=str(auth_context.get("session_kind") or ""),
+        delegated_by_user_id=str(auth_context.get("delegated_by") or ""),
+        delegated_client_id=str(auth_context.get("delegated_client_id") or ""),
         content=content,
         size_bytes=payload.size_bytes,
         sha256=payload.sha256,
@@ -61,6 +66,7 @@ async def store_document_upload_multipart(
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
+    auth_context = request_auth_context(x_fisora_user_id, x_fisora_session, fisora_session)
     content = await file.read()
     return get_document_service().store_document_upload(
         client_id=client_id,
@@ -70,7 +76,10 @@ async def store_document_upload_multipart(
         file_name=file.filename or "document.bin",
         uploaded_by=uploaded_by,
         uploaded_by_user_id=uploaded_by_user_id,
-        request_user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+        request_user_id=str(auth_context.get("user_id") or ""),
+        session_kind=str(auth_context.get("session_kind") or ""),
+        delegated_by_user_id=str(auth_context.get("delegated_by") or ""),
+        delegated_client_id=str(auth_context.get("delegated_client_id") or ""),
         content=content,
         size_bytes=len(content),
         retention_policy_days=retention_policy_days,

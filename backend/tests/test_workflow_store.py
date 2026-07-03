@@ -1229,6 +1229,11 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["product_category"], "isitme_cihazi")
         self.assertEqual(result["selected_supplier_account"], "320.01.015")
         self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["ai_quality_scorecard"]["static"]["category"], "isitme_cihazi")
+        self.assertEqual(result["ai_quality_scorecard"]["ai"]["provider"], "static_rules")
+        self.assertEqual(result["ai_quality_scorecard"]["final"]["selected_account_code"], "153.01")
+        self.assertEqual(result["ai_quality_scorecard"]["context"]["client_nace_code"], "")
+        self.assertEqual(result["ai_quality_scorecard"]["context"]["account_candidate_count"], result["ai_account_candidate_count"])
         self.assertTrue(result["draft_lines"])
         pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
         self.assertEqual(

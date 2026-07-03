@@ -131,6 +131,8 @@ def _select_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingR
             continue
         if not rule.corrected_account_code and not rule.corrected_counterparty_code:
             continue
+        if not _rule_can_override_ai(rule):
+            continue
         if _has_counterparty_scope(rule) and not _counterparty_scope_matches(result, rule):
             continue
         score = _rule_score(result, rule)
@@ -140,6 +142,16 @@ def _select_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingR
         return None
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored[0][1]
+
+
+def _rule_can_override_ai(rule: LearnedPostingRule) -> bool:
+    if rule.automation_candidate:
+        return True
+    if rule.scope == "client_rule":
+        return True
+    if rule.action == "suggest_for_similar":
+        return True
+    return False
 
 
 def _rule_score(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> int:

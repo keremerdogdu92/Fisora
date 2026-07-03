@@ -65,6 +65,7 @@ from app.domain.journal_entries import (
 from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount, parse_pdf_invoice, resolve_payable_total
 from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.domain.workspace_review_updates import apply_review_decision_to_document
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy, StatementAiSuggestionRequest, suggest_statement_lines
 from app.domain.statement_lines import StatementLine
 from app.domain.vat_split_learning import build_vat_split_review_record, vat_split_review_payload
@@ -4473,6 +4474,119 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(learned.draft_lines[0]["account_code"], "770.05")
         self.assertTrue(learned.learning_rule_applied)
         self.assertEqual(learned.learning_rule_scope, "client_rule")
+
+    def test_general_learning_signal_does_not_override_ai_before_threshold(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="kolaysoft-tekrar.pdf",
+            provider_hint="Kolay Soft",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000001",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kolay Soft e-fatura hizmeti",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        decision = ReviewDecision(
+            document_ref="kolaysoft-ilk.pdf",
+            action="approve_with_changes",
+            reviewer="mustavir",
+            corrected_account_code="770.05",
+            category="e_fatura_hizmeti",
+            reason="Bu mukellefte e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
+            apply_to_similar=False,
+        )
+
+        result = simulate_invoice(invoice, selection, profile)
+        learned = apply_learning_rules(result, [rule_from_learning_event(build_learning_event(decision))])
+
+        self.assertEqual(learned.selected_expense_account, result.selected_expense_account)
+        self.assertFalse(learned.learning_rule_applied)
+
+    def test_review_decision_records_accountant_final_decision_and_quality_delta(self) -> None:
+        document = {
+            "document_ref": "fatura-1",
+            "export_status": "review_required",
+            "result": {
+                "selected_expense_account": "770.01",
+                "selected_supplier_account": "320.NEW",
+                "counterparty_match_code": "320.NEW",
+                "selected_vat_account": "191.01",
+                "accounting_direction": "purchase",
+                "draft_lines": [
+                    {"account_code": "770.01", "description": "Hizmet", "debit": "1000.00", "credit": "0.00"},
+                    {"account_code": "191.01", "description": "KDV", "debit": "200.00", "credit": "0.00"},
+                    {"account_code": "320.NEW", "description": "Satici", "debit": "0.00", "credit": "1200.00"},
+                ],
+                "is_balanced": True,
+                "export_status": "review_required",
+                "ai_quality_scorecard": {
+                    "static": {"category": "bilinmeyen", "confidence": 35},
+                    "ai": {"category": "e_fatura_hizmeti", "confidence": 72},
+                    "final": {
+                        "selected_account_code": "770.01",
+                        "selected_counterparty_account": "320.NEW",
+                        "direction": "purchase",
+                    },
+                },
+            },
+        }
+        decision = {
+            "document_ref": "fatura-1",
+            "action": "approve_with_changes",
+            "reviewer": "mustavir",
+            "corrected_account_code": "153.01",
+            "corrected_counterparty_code": "320.01.015",
+            "reason": "Bu tedarikciden gelen cihazlar stoktur.",
+        }
+
+        updated = apply_review_decision_to_document(
+            document,
+            decision=decision,
+            learning_event={
+                "scope": "client_rule",
+                "action": "approve_with_changes",
+                "reason": "Bu tedarikciden gelen cihazlar stoktur.",
+            },
+            reviewed_at="2026-07-03T12:00:00Z",
+        )
+        result = updated["result"]
+
+        self.assertEqual(result["proposal_snapshot"]["selected_account_code"], "770.01")
+        self.assertEqual(result["accountant_final_decision"]["selected_account_code"], "153.01")
+        self.assertEqual(result["accountant_final_decision"]["selected_counterparty_account"], "320.01.015")
+        self.assertEqual(result["quality_delta"]["changed_fields"], ["selected_account_code", "counterparty_account"])
+        self.assertEqual(result["quality_delta"]["account_changed_from"], "770.01")
+        self.assertEqual(result["quality_delta"]["account_changed_to"], "153.01")
+        self.assertTrue(result["quality_delta"]["learning_candidate"])
 
     def test_learning_event_enriches_accounting_intent_and_rule_prompt_after_three_consistent_decisions(self) -> None:
         base_event = {

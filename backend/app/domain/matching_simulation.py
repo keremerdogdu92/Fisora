@@ -17,6 +17,7 @@ from app.domain.business_relevance import (
     check_client_onboarding,
     classify_product_line,
     decide_export_status,
+    normalize_text,
 )
 from app.domain.chart_accounts import (
     ChartAccount,
@@ -139,6 +140,7 @@ class SimulatedInvoiceResult:
     counterparty_creation_suggestion: dict[str, object] | None = None
     accounting_direction: str = "purchase"
     direction_confidence: int = 0
+    direction_uncertainty: bool = False
     direction_evidence: tuple[str, ...] = ()
     direction_conflict: dict[str, object] = field(default_factory=dict)
     accountant_explanation_tr: str = ""
@@ -620,6 +622,120 @@ def _counterparty_identity_key(
         return f"{direction}|tax:{tax_id}"
     normalized_title = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     return f"{direction}|title:{normalized_title}" if normalized_title else ""
+
+
+_COUNTERPARTY_LEGAL_NOISE = {
+    "anonim",
+    "as",
+    "limited",
+    "ltd",
+    "sirketi",
+    "sti",
+    "ticaret",
+    "ve",
+}
+
+
+def _normalized_title_tokens(value: str) -> tuple[str, ...]:
+    normalized = normalize_text(value).replace(".", " ")
+    return tuple(
+        dict.fromkeys(
+            token
+            for token in re.findall(r"[a-z0-9]+", normalized)
+            if len(token) >= 3 and token not in _COUNTERPARTY_LEGAL_NOISE
+        )
+    )
+
+
+def _counterparty_direction_groups(direction: str) -> tuple[str, ...]:
+    return ("customer",) if direction == "sales" else ("supplier",)
+
+
+def _counterparty_invoice_payload(
+    invoice: ParsedInvoice,
+    *,
+    direction: str,
+    direction_confidence: int,
+    direction_evidence: tuple[str, ...],
+    counterparty_title: str,
+    counterparty_tax_id: str,
+) -> dict[str, object]:
+    return {
+        "direction": direction,
+        "direction_confidence": direction_confidence,
+        "direction_evidence": list(direction_evidence),
+        "counterparty_title": counterparty_title,
+        "counterparty_tax_id": counterparty_tax_id,
+        "issuer_title": str(getattr(invoice, "issuer_title", "") or "").strip(),
+        "issuer_tax_id": str(getattr(invoice, "issuer_tax_id", "") or "").strip(),
+        "recipient_title": str(getattr(invoice, "recipient_title", "") or "").strip(),
+        "recipient_tax_id": str(getattr(invoice, "recipient_tax_id", "") or "").strip(),
+        "provider_hint": invoice.provider_hint,
+        "normalized_title_tokens": list(_normalized_title_tokens(counterparty_title)),
+        "raw_title_candidates": [
+            value
+            for value in (
+                str(getattr(invoice, "issuer_title", "") or "").strip(),
+                str(getattr(invoice, "recipient_title", "") or "").strip(),
+                invoice.provider_hint.strip(),
+            )
+            if value
+        ],
+    }
+
+
+def _counterparty_candidate_details(
+    *,
+    selection: AccountSelection,
+    direction: str,
+    counterparty_candidates: tuple[str, ...],
+    counterparty_title: str,
+    counterparty_tax_id: str,
+    suggested_counterparty: str,
+    counterparty_match: CounterpartyMatch | None,
+) -> tuple[dict[str, object], ...]:
+    source_groups = _counterparty_direction_groups(direction)
+    by_code: dict[str, tuple[str, dict[str, Any]]] = {}
+    for group in source_groups:
+        for candidate in selection.account_candidates.get(group, ()):
+            code = str(candidate.get("code") or "").strip()
+            if code and code not in by_code:
+                by_code[code] = (group, candidate)
+    title_tokens = set(_normalized_title_tokens(counterparty_title))
+    details: list[dict[str, object]] = []
+    fallback_group = source_groups[0]
+    for code in counterparty_candidates:
+        group, candidate = by_code.get(code, (fallback_group, {}))
+        name = str(candidate.get("name") or "").strip()
+        if not name and counterparty_match and code == counterparty_match.account_code:
+            name = counterparty_match.account_name
+        if not name and code == suggested_counterparty:
+            name = counterparty_title or "Yeni cari onerisi"
+        candidate_tokens = set(_normalized_title_tokens(name))
+        evidence: list[str] = []
+        reason = str(candidate.get("reason") or "").strip()
+        if reason:
+            evidence.append(reason)
+        if title_tokens and candidate_tokens and title_tokens & candidate_tokens:
+            evidence.append("title_token_overlap")
+        if counterparty_match and code == counterparty_match.account_code and counterparty_match.match_reason:
+            evidence.append(f"counterparty_match_{counterparty_match.match_reason}")
+        if counterparty_tax_id and code == suggested_counterparty and counterparty_tax_id in code:
+            evidence.append("tax_id_suggested_new_account")
+        details.append(
+            {
+                "code": code,
+                "name": name,
+                "counterparty_type": "customer" if group == "customer" else "supplier",
+                "source_group": group,
+                "candidate_type": "new_counterparty_suggestion"
+                if code == suggested_counterparty and code not in by_code
+                else "existing_counterparty",
+                "normalized_name_tokens": list(candidate_tokens),
+                "evidence": list(dict.fromkeys(evidence)),
+            }
+        )
+    return tuple(details)
 
 
 def _counterparty_account_description(
@@ -1210,17 +1326,24 @@ def _stage_evidence(result: AiClassificationResult, *, fallback_reason: str = ""
 
 def _ai_context(
     *,
+    invoice: ParsedInvoice,
     selection: AccountSelection,
     client_profile: ClientProfile | None,
     counterparty_match: CounterpartyMatch | None,
     direction: str,
+    direction_confidence: int,
+    direction_evidence: tuple[str, ...],
     suggested_counterparty: str,
+    counterparty_title: str,
+    counterparty_tax_id: str,
 ) -> AiClassificationContext:
-    main_groups = (
-        {"sales_revenue", "zero_vat_revenue"}
-        if direction == "sales"
-        else {"purchase_stock", "purchase_expense", "non_deductible", "fixed_asset"}
-    )
+    direction_uncertainty = direction_confidence < 70
+    if direction_uncertainty:
+        main_groups = {"sales_revenue", "zero_vat_revenue", "purchase_stock", "purchase_expense", "non_deductible", "fixed_asset"}
+    elif direction == "sales":
+        main_groups = {"sales_revenue", "zero_vat_revenue"}
+    else:
+        main_groups = {"purchase_stock", "purchase_expense", "non_deductible", "fixed_asset"}
     semantic_candidates = tuple(
         str(candidate.get("code") or "").strip()
         for group, candidates in (selection.account_candidates or {}).items()
@@ -1228,11 +1351,18 @@ def _ai_context(
         if group in main_groups
         if str(candidate.get("code") or "").strip()
     )
-    base_account_codes = (
-        (selection.revenue_account, selection.zero_vat_revenue_account)
-        if direction == "sales"
-        else (selection.stock_account, selection.expense_account, selection.non_deductible_account)
-    )
+    if direction_uncertainty:
+        base_account_codes = (
+            selection.revenue_account,
+            selection.zero_vat_revenue_account,
+            selection.stock_account,
+            selection.expense_account,
+            selection.non_deductible_account,
+        )
+    elif direction == "sales":
+        base_account_codes = (selection.revenue_account, selection.zero_vat_revenue_account)
+    else:
+        base_account_codes = (selection.stock_account, selection.expense_account, selection.non_deductible_account)
     account_candidates = tuple(
         dict.fromkeys(
             code
@@ -1273,14 +1403,36 @@ def _ai_context(
             if code
         )
     )
+    counterparty_candidate_details = _counterparty_candidate_details(
+        selection=selection,
+        direction=direction,
+        counterparty_candidates=counterparty_candidates,
+        counterparty_title=counterparty_title,
+        counterparty_tax_id=counterparty_tax_id,
+        suggested_counterparty=suggested_counterparty,
+        counterparty_match=counterparty_match,
+    )
     return AiClassificationContext(
         client_activity=client_profile.activity_description if client_profile else "",
         nace_code=client_profile.nace_code if client_profile else "",
         nace_research_summary=str((client_profile.nace_research_profile if client_profile else {}).get("scope_summary") or ""),
         activity_tags=client_profile.activity_tags if client_profile else (),
+        accounting_direction=direction,
+        direction_confidence=direction_confidence,
+        direction_evidence=direction_evidence,
+        direction_uncertainty=direction_uncertainty,
         account_candidates=account_candidates,
         account_candidate_details=account_candidate_details,
         counterparty_candidates=counterparty_candidates,
+        counterparty_candidate_details=counterparty_candidate_details,
+        invoice_counterparty=_counterparty_invoice_payload(
+            invoice,
+            direction=direction,
+            direction_confidence=direction_confidence,
+            direction_evidence=direction_evidence,
+            counterparty_title=counterparty_title,
+            counterparty_tax_id=counterparty_tax_id,
+        ),
     )
 
 
@@ -1596,11 +1748,16 @@ def simulate_invoice(
     if client_profile and product_classifier and ai_gate.needs_ai and classification_override is None:
         policy = _ai_policy_from_classifier(product_classifier)
         base_context = _ai_context(
+            invoice=invoice,
             selection=selection,
             client_profile=client_profile,
             counterparty_match=counterparty_match,
             direction=direction,
+            direction_confidence=direction_confidence,
+            direction_evidence=direction_evidence,
             suggested_counterparty=suggested_counterparty,
+            counterparty_title=counterparty_title,
+            counterparty_tax_id=counterparty_tax_id,
         )
         ai_account_candidate_count = len(base_context.account_candidates)
         ai_counterparty_candidate_count = len(base_context.counterparty_candidates)
@@ -2211,6 +2368,7 @@ def simulate_invoice(
         counterparty_creation_suggestion=counterparty_creation_suggestion,
         accounting_direction=direction,
         direction_confidence=direction_confidence,
+        direction_uncertainty=direction_confidence < 70,
         direction_evidence=direction_evidence,
         direction_conflict=direction_conflict,
         accountant_explanation_tr=accountant_explanation,
@@ -2289,6 +2447,7 @@ def write_simulation_csv(runs: list[SimulatedChartRun], output_path: Path) -> Pa
         "suggested_counterparty_account",
         "accounting_direction",
         "direction_confidence",
+        "direction_uncertainty",
         "direction_evidence",
         "direction_conflict",
         "counterparty_match_code",
@@ -2376,6 +2535,7 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "reviewReasonCodes": list(result.review_reason_codes),
                     "accountingDirection": result.accounting_direction,
                     "directionConfidence": result.direction_confidence,
+                    "directionUncertainty": result.direction_uncertainty,
                     "directionEvidence": list(result.direction_evidence),
                     "directionConflict": result.direction_conflict,
                     "productLineHint": result.product_line_hint,

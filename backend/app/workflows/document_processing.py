@@ -393,6 +393,7 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "ai_stage_evidence": list(result.get("ai_stage_evidence") or []),
         "ai_account_stage_evidence": list(result.get("ai_account_stage_evidence") or []),
         "ai_counterparty_stage_evidence": list(result.get("ai_counterparty_stage_evidence") or []),
+        "direction_uncertainty": bool(result.get("direction_uncertainty")),
         "static_fallback_account": str(result.get("static_fallback_account") or ""),
         "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
     }
@@ -1058,6 +1059,7 @@ def process_next_job_once(
                 {
                     "accounting_direction": str(result.get("accounting_direction") or ""),
                     "direction_confidence": int(result.get("direction_confidence") or 0),
+                    "direction_uncertainty": bool(result.get("direction_uncertainty")),
                     "direction_evidence": list(result.get("direction_evidence") or []),
                 },
             )

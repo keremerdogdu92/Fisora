@@ -3787,6 +3787,291 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual([record["ai_stage"] for record in result.ai_account_stage_evidence], ["final_account"])
         self.assertEqual([record["ai_stage"] for record in result.ai_counterparty_stage_evidence], ["counterparty_resolve"])
 
+    def test_uncertain_direction_keeps_purchase_and_sales_account_candidates_visible(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="uncertain-direction.pdf",
+            provider_hint="BELIRSIZ TEDARIKCI",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="",
+            invoice_no="AAA2026000001176",
+            ettn="",
+            issue_date="01.06.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="2500.20",
+            vat_total="500.04",
+            special_tax_total="",
+            tax_inclusive_total="3000.24",
+            payable_total="3000.24",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("BELIRSIZ CIHAZ/HIZMET KALEMI",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.010",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.001",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+            revenue_account="600.01.020",
+            sales_vat_account="391.01.020",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01.001", "name": "ALINAN CIHAZLAR", "reason": "153 stok adayi"},),
+                "purchase_expense": ({"code": "760.03.010", "name": "GIDER", "reason": "760 gider adayi"},),
+                "sales_revenue": ({"code": "600.01.020", "name": "CIHAZ SATISLARI", "reason": "600 satis adayi"},),
+                "sales_vat": ({"code": "391.01.020", "name": "HESAPLANAN KDV", "reason": "391 KDV adayi"},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="ORHAN ELIBOL",
+            tax_id="1234567890",
+            activity_description="Odyoloji ve isitme cihazi satis hizmetleri",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        provider = FakeProductProvider(
+            {
+                "category": "business_equipment",
+                "confidence": 78,
+                "reason": "Yon belirsiz oldugu icin satis hesabi secildi.",
+                "evidence": ["belirsiz_yon"],
+                "suggested_account_code": "600.01.020",
+                "suggested_counterparty_code": "",
+                "risk_flags": ["direction_uncertain"],
+                "account_reason": "Satis ailesi de gorundu.",
+                "product_identity": "Belirsiz cihaz hizmeti",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, single_stage_account_limit=40),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        payload = provider.requests[0].to_schema_payload()
+        self.assertTrue(payload["direction_uncertainty"])
+        self.assertIn("153.01.001", payload["account_candidates"])
+        self.assertIn("600.01.020", payload["account_candidates"])
+        self.assertTrue(result.direction_uncertainty)
+        self.assertEqual(result.ai_suggested_account_code, "600.01.020")
+
+    def test_counterparty_resolution_sends_all_120_candidates_for_sales(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="large-sales-counterparty-list.pdf",
+            provider_hint="ORHAN ELIBOL",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="SAT2026000001177",
+            ettn="",
+            issue_date="01.06.2026",
+            tax_ids=("1234567890", "5555555555"),
+            vat_rates=("20",),
+            goods_services_total="2500.20",
+            vat_total="500.04",
+            special_tax_total="",
+            tax_inclusive_total="3000.24",
+            payable_total="3000.24",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("ISITME CIHAZI SATISI",),
+            issuer_title="ORHAN ELIBOL",
+            issuer_tax_id="1234567890",
+            recipient_title="ACME SAGLIK LIMITED SIRKETI",
+            recipient_tax_id="5555555555",
+        )
+        customers = tuple(
+            {"code": f"120.{index:03d}", "name": f"Musteri {index}", "reason": "mevcut musteri"}
+            for index in range(1, 86)
+        ) + ({"code": "120.999", "name": "ACME SAGLIK", "reason": "unvan benzerligi"},)
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.010",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.001",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.01.020",
+            sales_vat_account="391.01.020",
+            customer_account="120.001",
+            account_candidates={
+                "sales_revenue": ({"code": "600.01.020", "name": "CIHAZ SATISLARI", "reason": "600 satis adayi"},),
+                "customer": customers,
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="ORHAN ELIBOL",
+            tax_id="1234567890",
+            activity_description="Odyoloji ve isitme cihazi satis hizmetleri",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        provider = SequentialFakeProductProvider(
+            [
+                {
+                    "category": "business_equipment",
+                    "confidence": 88,
+                    "reason": "Satis hesabi uygun.",
+                    "evidence": ["satis"],
+                    "suggested_account_code": "600.01.020",
+                    "suggested_counterparty_code": "",
+                    "risk_flags": [],
+                    "account_reason": "Satis",
+                    "product_identity": "Isitme cihazi",
+                    "needs_research": False,
+                    "research_query": "",
+                },
+                {
+                    "category": "business_equipment",
+                    "confidence": 91,
+                    "reason": "ACME unvani mevcut 120.999 ile eslesiyor.",
+                    "evidence": ["recipient_title"],
+                    "suggested_account_code": "",
+                    "suggested_counterparty_code": "120.999",
+                    "risk_flags": [],
+                    "account_reason": "Cari unvan eslesmesi.",
+                    "product_identity": "ACME SAGLIK",
+                    "needs_research": False,
+                    "research_query": "",
+                },
+            ]
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
+        )
+
+        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "counterparty_resolve")
+        counterparty_payload = provider.requests[1].to_schema_payload()
+        self.assertEqual(len(counterparty_payload["counterparty_candidates"]), 87)
+        self.assertIn("120.001", counterparty_payload["counterparty_candidates"])
+        self.assertIn("120.999", counterparty_payload["counterparty_candidates"])
+        self.assertIn("120.5555555555", counterparty_payload["counterparty_candidates"])
+        self.assertEqual(result.ai_suggested_counterparty_code, "120.999")
+
+    def test_counterparty_resolution_payload_includes_titles_tokens_and_identity_evidence(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="counterparty-evidence.pdf",
+            provider_hint="BERA ODYOLOJI TICARET LIMITED SIRKETI",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="AAA2026000001178",
+            ettn="",
+            issue_date="01.06.2026",
+            tax_ids=("1640731289", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="2500.20",
+            vat_total="500.04",
+            special_tax_total="",
+            tax_inclusive_total="3000.24",
+            payable_total="3000.24",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("MODEL X RECEIVER UNIT",),
+            issuer_title="BERA ODYOLOJI TICARET LIMITED SIRKETI",
+            issuer_tax_id="1640731289",
+            recipient_title="ORHAN ELIBOL",
+            recipient_tax_id="1234567890",
+        )
+        suppliers = tuple(
+            {"code": f"320.{index:03d}", "name": f"Satici {index}", "reason": "mevcut satici"}
+            for index in range(1, 82)
+        ) + ({"code": "320.999", "name": "BERA ODYOLOJI", "reason": "unvan benzerligi"},)
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.010",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.001",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01.001", "name": "ALINAN CIHAZLAR", "reason": "153 stok adayi"},),
+                "supplier": suppliers,
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="ORHAN ELIBOL",
+            tax_id="1234567890",
+            activity_description="Odyoloji ve isitme cihazi satis hizmetleri",
+            nace_code="477401",
+            activity_tags=("hearing_aid", "medical_retail", "retail_trade"),
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        provider = SequentialFakeProductProvider(
+            [
+                {
+                    "category": "business_equipment",
+                    "confidence": 88,
+                    "reason": "Stok hesabi uygun.",
+                    "evidence": ["receiver"],
+                    "suggested_account_code": "153.01.001",
+                    "suggested_counterparty_code": "",
+                    "risk_flags": [],
+                    "account_reason": "Stok",
+                    "product_identity": "Receiver",
+                    "needs_research": False,
+                    "research_query": "",
+                },
+                {
+                    "category": "business_equipment",
+                    "confidence": 90,
+                    "reason": "Unvan kaniti ile cari eslesti.",
+                    "evidence": ["title_overlap"],
+                    "suggested_account_code": "",
+                    "suggested_counterparty_code": "320.999",
+                    "risk_flags": [],
+                    "account_reason": "Cari",
+                    "product_identity": "BERA ODYOLOJI",
+                    "needs_research": False,
+                    "research_query": "",
+                },
+            ]
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
+        )
+
+        simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        payload = provider.requests[1].to_schema_payload()
+        party = payload["invoice_counterparty"]
+        self.assertEqual(party["direction"], "purchase")
+        self.assertEqual(party["counterparty_tax_id"], "1640731289")
+        self.assertEqual(party["counterparty_title"], "BERA ODYOLOJI TICARET LIMITED SIRKETI")
+        self.assertIn("bera", party["normalized_title_tokens"])
+        details = {record["code"]: record for record in payload["counterparty_candidate_details"]}
+        self.assertEqual(details["320.999"]["name"], "BERA ODYOLOJI")
+        self.assertIn("title_token_overlap", details["320.999"]["evidence"])
+        self.assertIn("tax_id_suggested_new_account", details["320.1640731289"]["evidence"])
+
     def test_ai_can_route_business_equipment_to_stock_account_for_review_draft(self) -> None:
         invoice = ParsedInvoice(
             file_name="ai-business-equipment-stock.pdf",

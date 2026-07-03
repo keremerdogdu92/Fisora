@@ -57,9 +57,15 @@ class AiClassificationContext:
     nace_code: str = ""
     nace_research_summary: str = ""
     activity_tags: tuple[str, ...] = ()
+    accounting_direction: str = ""
+    direction_confidence: int = 0
+    direction_evidence: tuple[str, ...] = ()
+    direction_uncertainty: bool = False
     account_candidates: tuple[str, ...] = ()
     account_candidate_details: tuple[dict[str, Any], ...] = ()
     counterparty_candidates: tuple[str, ...] = ()
+    counterparty_candidate_details: tuple[dict[str, Any], ...] = ()
+    invoice_counterparty: dict[str, Any] = field(default_factory=dict)
     account_family_candidates: tuple[dict[str, Any], ...] = ()
     candidate_strategy: AiCandidateStrategy = field(default_factory=AiCandidateStrategy)
     account_candidate_limit: int = 40
@@ -89,10 +95,18 @@ class AiClassificationRequest:
             "nace_code": self.context.nace_code[:64].strip(),
             "nace_research_summary": self.context.nace_research_summary[: self.max_input_chars].strip(),
             "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
+            "accounting_direction": self.context.accounting_direction,
+            "direction_confidence": self.context.direction_confidence,
+            "direction_evidence": list(_limited_strings(self.context.direction_evidence, limit=8)),
+            "direction_uncertainty": self.context.direction_uncertainty,
             "candidate_strategy": _candidate_strategy_payload(self.context.candidate_strategy),
             "account_candidates": list(account_candidates),
             "account_candidate_details": list(self.context.account_candidate_details[: max(self.context.account_candidate_details_limit, 0)]),
             "counterparty_candidates": list(counterparty_candidates),
+            "counterparty_candidate_details": list(
+                self.context.counterparty_candidate_details[: max(self.context.counterparty_candidate_limit, 0)]
+            ),
+            "invoice_counterparty": self.context.invoice_counterparty,
             "allowed_categories": list(self.allowed_categories),
             "output_schema": {
                 "type": "object",
@@ -145,6 +159,10 @@ class AiClassificationRequest:
             "nace_code": self.context.nace_code[:64].strip(),
             "nace_research_summary": self.context.nace_research_summary[: self.max_input_chars].strip(),
             "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
+            "accounting_direction": self.context.accounting_direction,
+            "direction_confidence": self.context.direction_confidence,
+            "direction_evidence": list(_limited_strings(self.context.direction_evidence, limit=8)),
+            "direction_uncertainty": self.context.direction_uncertainty,
             "candidate_strategy": _candidate_strategy_payload(self.context.candidate_strategy),
             "account_family_candidates": list(family_candidates),
             "allowed_account_families": list(allowed_families),
@@ -205,8 +223,14 @@ class AiClassificationRequest:
             "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
             "nace_code": self.context.nace_code[:64].strip(),
             "activity_tags": list(_limited_strings(self.context.activity_tags, limit=8)),
+            "accounting_direction": self.context.accounting_direction,
+            "direction_confidence": self.context.direction_confidence,
+            "direction_evidence": list(_limited_strings(self.context.direction_evidence, limit=8)),
+            "direction_uncertainty": self.context.direction_uncertainty,
             "candidate_strategy": _candidate_strategy_payload(self.context.candidate_strategy),
             "counterparty_candidates": list(counterparty_candidates),
+            "counterparty_candidate_details": list(self.context.counterparty_candidate_details),
+            "invoice_counterparty": self.context.invoice_counterparty,
             "allowed_categories": list(self.allowed_categories),
             "output_schema": {
                 "type": "object",

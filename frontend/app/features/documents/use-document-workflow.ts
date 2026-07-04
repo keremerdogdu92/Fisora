@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { documentsForProcessing } from "../../portal-dashboard";
 import type { DocumentSegment, PilotDocument, ReviewFilter } from "../../portal-types";
 import {
+  firstInvoiceSelection,
   reviewFilteredDocuments,
   selectedDocumentFromState,
 } from "./document-workflow-model";
@@ -20,9 +21,10 @@ export function useDocumentWorkflow({
   selectedClientId?: string;
 }) {
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
-  const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("invoices");
+  const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("purchase_invoices");
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("review_required");
   const [selectedStatementLineNo, setSelectedStatementLineNo] = useState(0);
+  const didAutoSelectInitialDocument = useRef(false);
 
   const segmentedClientDocuments = useMemo(() => {
     return documentsForProcessing({
@@ -47,6 +49,29 @@ export function useDocumentWorkflow({
     selectedDocumentSegment,
   }) as PilotDocument | undefined;
   const selectedStatementLineKey = selectedDocument?.statementLines.map((line) => line.line_no).join("|") ?? "";
+
+  useEffect(() => {
+    didAutoSelectInitialDocument.current = false;
+  }, [selectedClientId]);
+
+  useEffect(() => {
+    if (mode !== "documents" || selectedDocumentId || didAutoSelectInitialDocument.current) return;
+    const nextSelection = firstInvoiceSelection({
+      documents: clientDocuments,
+      reviewFilter,
+      selectedDocumentSegment,
+    }) as {
+      selectedDocumentId: string;
+      selectedDocumentSegment: DocumentSegment;
+    };
+    if (!nextSelection.selectedDocumentId) return;
+
+    didAutoSelectInitialDocument.current = true;
+    if (nextSelection.selectedDocumentSegment !== selectedDocumentSegment) {
+      setSelectedDocumentSegment(nextSelection.selectedDocumentSegment);
+    }
+    setSelectedDocumentId(nextSelection.selectedDocumentId);
+  }, [clientDocuments, mode, reviewFilter, selectedClientId, selectedDocumentId, selectedDocumentSegment]);
 
   useEffect(() => {
     const firstLineNo = selectedDocument?.statementLines[0]?.line_no ?? 0;

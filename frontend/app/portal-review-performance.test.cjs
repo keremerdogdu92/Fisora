@@ -17,7 +17,7 @@ test("unsaved journal corrections reset when the selected document changes", () 
   const portalApp = readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
   const reviewIndex = readFileSync(join(__dirname, "features", "review", "index.ts"), "utf8");
 
-  assert.match(portalApp, /import \{ emptyCorrectionDraft, journalDraftLinesForDocument, useReviewCommands \} from "\.\/features\/review";/);
+  assert.match(portalApp, /import \{ emptyCorrectionDraft, useReviewCommands \} from "\.\/features\/review";/);
   assert.match(reviewIndex, /emptyCorrectionDraft/);
   assert.match(
     portalApp,

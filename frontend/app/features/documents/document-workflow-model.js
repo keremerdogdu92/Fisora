@@ -76,6 +76,37 @@ function selectedDocumentFromState({ clientDocuments, selectedDocumentId, select
   return segmentDocuments.find((document) => document.id === selectedDocumentId);
 }
 
+function firstInvoiceSelection({ documents, reviewFilter, selectedDocumentSegment }) {
+  const visibleInSelectedSegment = reviewFilteredDocuments({
+    documents: documents.filter((document) => documentMatchesSegment(document, selectedDocumentSegment)),
+    reviewFilter,
+  });
+  if (visibleInSelectedSegment.length > 0) {
+    return {
+      selectedDocumentId: visibleInSelectedSegment[0].id,
+      selectedDocumentSegment,
+    };
+  }
+
+  for (const segment of ["purchase_invoices", "sales_invoices"]) {
+    const visibleInSegment = reviewFilteredDocuments({
+      documents: documents.filter((document) => documentMatchesSegment(document, segment)),
+      reviewFilter,
+    });
+    if (visibleInSegment.length > 0) {
+      return {
+        selectedDocumentId: visibleInSegment[0].id,
+        selectedDocumentSegment: segment,
+      };
+    }
+  }
+
+  return {
+    selectedDocumentId: "",
+    selectedDocumentSegment,
+  };
+}
+
 function nextDocumentSelection(document) {
   return {
     selectedDocumentId: document.id,
@@ -85,6 +116,7 @@ function nextDocumentSelection(document) {
 
 module.exports = {
   documentMatchesSegment,
+  firstInvoiceSelection,
   nextDocumentSelection,
   reviewCockpitQueues,
   reviewFilteredDocuments,

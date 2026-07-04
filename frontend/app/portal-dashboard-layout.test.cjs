@@ -57,17 +57,45 @@ test("document processing workspace uses the approved bottom-list review layout"
   const styles = source("styles.css");
 
   assert.match(workspace, /className="document-review-toolbar"/);
+  assert.match(workspace, /className="document-agent-row"/);
   assert.match(workspace, /className="document-agent-strip"/);
   assert.match(workspace, /className="document-review-main"/);
   assert.match(workspace, /className="bottom-document-queue"/);
   assert.match(workspace, /Belge listesi/);
   assert.match(workspace, /Teknik ge/);
   assert.match(workspace, /<DocumentPreview document=\{selectedDocument\} session=\{session\} \/>[\s\S]*<JournalPanel/);
+  assert.match(workspace, /<section className="document-review-main">[\s\S]*<\/section>\s*<details className="debug-accordion">/);
   assert.doesNotMatch(workspace, /<aside className="document-queue-panel"/);
   assert.match(styles, /\.accountant-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+  assert.match(styles, /\.document-agent-row\s*\{/);
   assert.match(styles, /\.document-agent-strip\s*\{/);
   assert.match(styles, /\.document-review-main\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1\.05fr\) minmax\(0,\s*0\.95fr\);/);
   assert.match(styles, /\.bottom-document-queue\s*\{/);
+});
+
+test("invoice review first viewport removes duplicate context and keeps invoice navigation compact", () => {
+  const portalApp = source("portal-app.tsx");
+  const shell = source("portal-shell-components.tsx");
+  const workspace = source("portal-workspace-view.tsx");
+  const workflow = source("features/documents/use-document-workflow.ts");
+  const styles = source("styles.css");
+
+  assert.doesNotMatch(portalApp, /<DocumentContextBar/);
+  assert.doesNotMatch(portalApp, /title=\{mode === "client"[\s\S]*?"Belge İşleme"/);
+  assert.match(portalApp, /"Fatura İşleme"/);
+  assert.match(shell, /label: "Faturalar"/);
+  assert.doesNotMatch(shell, /label: "Belgeler"/);
+  assert.match(workflow, /useState<DocumentSegment>\("purchase_invoices"\)/);
+  assert.match(workspace, /\{ id: "purchase_invoices", label: "Alış" \}/);
+  assert.match(workspace, /\{ id: "sales_invoices", label: "Satış" \}/);
+  assert.doesNotMatch(workspace, /\{ id: "invoices", label: "Faturalar" \}/);
+  assert.doesNotMatch(workspace, /\{ id: "bank_statements", label: "Ekstreler" \}/);
+  assert.doesNotMatch(workspace, /\{ id: "other_documents", label: "Diğer" \}/);
+  assert.doesNotMatch(workspace, /<span>Kontrol filtresi<\/span>/);
+  assert.match(workspace, /İş kuyruğu/);
+  assert.match(workspace, /Onaylanabilir/);
+  assert.match(styles, /\.document-review-toolbar \.queue-segment-tabs button\s*\{[\s\S]*?min-height:\s*54px;/);
+  assert.match(styles, /\.document-review-toolbar \.queue-segment-tabs button\.active\s*\{[\s\S]*?box-shadow:\s*inset 0 -3px 0 var\(--accent\);/);
 });
 
 test("document review toolbar and main workspace can wrap before desktop overflow", () => {

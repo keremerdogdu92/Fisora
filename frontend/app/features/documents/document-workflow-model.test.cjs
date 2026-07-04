@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   documentMatchesSegment,
+  firstInvoiceSelection,
   reviewCockpitQueues,
   nextDocumentSelection,
   reviewFilteredDocuments,
@@ -47,6 +48,34 @@ test("selected document is found from the segment source even when the visible r
       selectedDocumentSegment: "purchase_invoices",
     })?.id,
     "purchase-1",
+  );
+});
+
+test("invoice page opens the first visible document in the active invoice segment", () => {
+  assert.deepEqual(
+    firstInvoiceSelection({
+      documents: docs,
+      reviewFilter: "review_required",
+      selectedDocumentSegment: "purchase_invoices",
+    }),
+    {
+      selectedDocumentId: "purchase-1",
+      selectedDocumentSegment: "purchase_invoices",
+    },
+  );
+});
+
+test("invoice page initial open can fall back from an empty invoice segment to the other invoice segment", () => {
+  assert.deepEqual(
+    firstInvoiceSelection({
+      documents: docs.filter((document) => document.id !== "purchase-1"),
+      reviewFilter: "review_required",
+      selectedDocumentSegment: "purchase_invoices",
+    }),
+    {
+      selectedDocumentId: "sale-1",
+      selectedDocumentSegment: "sales_invoices",
+    },
   );
 });
 

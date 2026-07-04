@@ -36,6 +36,8 @@ const statusLabels: Record<PilotStatus, string> = {
   post_export_correction_requested: "Aktarım sonrası düzeltme",
 };
 
+type WorkQueueFilter = "all" | "oneClickApproval" | "minorEdit" | "manualRisk";
+
 function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
 }
@@ -191,41 +193,58 @@ export function AccountantWorkspace({
   void onClientSearchChange;
   void onCreateNewClient;
   void onTaxCertificateFileChange;
+  void reviewFilter;
+  void setReviewFilter;
   void setNewClientDraft;
 
   const [documentQuery, setDocumentQuery] = useState("");
+  const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>("all");
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
     : undefined;
   const segmentOptions: { id: DocumentSegment; label: string }[] = [
-    { id: "invoices", label: "Faturalar" },
-    { id: "sales_invoices", label: "Satış" },
     { id: "purchase_invoices", label: "Alış" },
-    { id: "bank_statements", label: "Ekstreler" },
-    { id: "other_documents", label: "Diğer" },
+    { id: "sales_invoices", label: "Satış" },
   ];
-  const queueDocuments = useMemo(() => {
+  const filteredSegmentDocuments = useMemo(() => {
     const query = documentQuery.trim().toLocaleLowerCase("tr-TR");
-    return allClientDocuments
+    return documents
       .filter((document) => documentMatchesSegment(document, selectedDocumentSegment))
-      .filter((document) => {
-        if (reviewFilter === "all") return true;
-        if (reviewFilter === "cancel_requested") return document.status === "cancel_requested" || document.status === "post_export_correction_requested";
-        return document.status === reviewFilter;
-      })
       .filter((document) => {
         if (!query) return true;
         return `${document.fileName} ${document.provider} ${document.amount} ${formatStatus(document.status)}`.toLocaleLowerCase("tr-TR").includes(query);
       });
-  }, [allClientDocuments, documentQuery, reviewFilter, selectedDocumentSegment]);
-  const cockpitQueues = useMemo(() => reviewCockpitQueues(queueDocuments), [queueDocuments]);
-  const navigationDocuments = selectedDocument && !documents.some((document) => document.id === selectedDocument.id)
-    ? queueDocuments
-    : documents;
+  }, [documentQuery, documents, selectedDocumentSegment]);
+  const cockpitQueues = useMemo(() => reviewCockpitQueues(filteredSegmentDocuments), [filteredSegmentDocuments]);
+  const queueDocuments = useMemo(() => {
+    if (workQueueFilter === "oneClickApproval") return cockpitQueues.oneClickApproval;
+    if (workQueueFilter === "minorEdit") return cockpitQueues.minorEdit;
+    if (workQueueFilter === "manualRisk") return cockpitQueues.manualRisk;
+    return filteredSegmentDocuments;
+  }, [cockpitQueues, filteredSegmentDocuments, workQueueFilter]);
+  const navigationDocuments = queueDocuments;
   const selectedDocumentPosition = selectedDocument
     ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
     : 0;
   const safeDocumentPosition = Math.max(selectedDocumentPosition, 1);
+  const workQueueOptions: { id: WorkQueueFilter; label: string; count: number }[] = [
+    { id: "oneClickApproval", label: "Onaylanabilir", count: cockpitQueues.oneClickApproval.length },
+    { id: "minorEdit", label: "Küçük düzeltme", count: cockpitQueues.minorEdit.length },
+    { id: "manualRisk", label: "Manuel / riskli", count: cockpitQueues.manualRisk.length },
+    { id: "all", label: "Tümü", count: filteredSegmentDocuments.length },
+  ];
+
+  function applyWorkQueueFilter(nextFilter: WorkQueueFilter) {
+    setWorkQueueFilter(nextFilter);
+    const nextDocuments =
+      nextFilter === "oneClickApproval" ? cockpitQueues.oneClickApproval
+        : nextFilter === "minorEdit" ? cockpitQueues.minorEdit
+          : nextFilter === "manualRisk" ? cockpitQueues.manualRisk
+            : filteredSegmentDocuments;
+    if (nextDocuments.length && !nextDocuments.some((document) => document.id === selectedDocument?.id)) {
+      setSelectedDocumentId(nextDocuments[0].id);
+    }
+  }
 
   function selectDocument(document: PilotDocument) {
     const nextSelection = nextDocumentSelection(document);
@@ -251,15 +270,6 @@ export function AccountantWorkspace({
                   {client.clientName}
                 </option>
               ))}
-            </select>
-          </label>
-          <label className="compact-field">
-            <span>Kontrol filtresi</span>
-            <select onChange={(event) => setReviewFilter(event.target.value as ReviewFilter)} value={reviewFilter}>
-              <option value="review_required">Kontrol gerekli</option>
-              <option value="export_ready">Aktarıma hazır</option>
-              <option value="cancel_requested">İptal talepleri</option>
-              <option value="all">Tüm belgeler</option>
             </select>
           </label>
           <label className="compact-field">
@@ -292,39 +302,30 @@ export function AccountantWorkspace({
             ))}
           </div>
         </div>
-        <div className="document-review-toolbar-stepper">
-          <div className="queue-stepper">
-            <span>{selectedDocument ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
-            <button disabled={!selectedDocument} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
-          </div>
-        </div>
-        <div className="review-cockpit-queues" aria-label="Mustavir karar kuyruklari">
-          <div>
-            <span>Tek tik onay</span>
-            <strong>{cockpitQueues.oneClickApproval.length}</strong>
-          </div>
-          <div>
-            <span>Kucuk duzeltme</span>
-            <strong>{cockpitQueues.minorEdit.length}</strong>
-          </div>
-          <div>
-            <span>Manuel/riskli</span>
-            <strong>{cockpitQueues.manualRisk.length}</strong>
-          </div>
+        <div className="review-cockpit-queues" aria-label="İş kuyruğu">
+          <span>İş kuyruğu</span>
+          {workQueueOptions.map((option) => (
+            <button
+              className={workQueueFilter === option.id ? "active" : ""}
+              key={option.id}
+              onClick={() => applyWorkQueueFilter(option.id)}
+              type="button"
+            >
+              <span>{option.label}</span>
+              <strong>{option.count}</strong>
+            </button>
+          ))}
         </div>
       </section>
 
-      <DocumentAgentStrip document={selectedDocument} />
-
-      <details className="debug-accordion">
-        <summary>
-          <span>Teknik geçmiş</span>
-          <strong>Debug için aç</strong>
-        </summary>
-        <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
-        <AiTracePanel document={selectedDocument} />
-      </details>
+      <section className="document-agent-row" aria-label="Belge durumu ve gezinme">
+        <DocumentAgentStrip document={selectedDocument} />
+        <div className="queue-stepper">
+          <span>{selectedDocument && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
+          <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
+          <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+        </div>
+      </section>
 
       <section className="document-review-main">
         <DocumentPreview document={selectedDocument} session={session} />
@@ -345,6 +346,15 @@ export function AccountantWorkspace({
           statementAiStatus={statementAiStatus}
         />
       </section>
+
+      <details className="debug-accordion">
+        <summary>
+          <span>Teknik geçmiş</span>
+          <strong>Debug için aç</strong>
+        </summary>
+        <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
+        <AiTracePanel document={selectedDocument} />
+      </details>
 
       <section className="bottom-document-queue" aria-label="Belge listesi">
         <div className="bottom-queue-heading">

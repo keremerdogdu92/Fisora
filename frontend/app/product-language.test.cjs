@@ -43,7 +43,7 @@ test("portal visible copy presents AI agent automation without internal implemen
   assert.match(visibleSource, /AI ajan destekli fiş taslağı/);
   assert.match(visibleSource, /Otomasyon adayı/);
   assert.match(visibleSource, /Güven düzeyi/);
-  assert.match(visibleSource, /Düzeltme notu/);
+  assert.match(visibleSource, /Müşavir notu/);
 
   assert.doesNotMatch(
     visibleSource,
@@ -112,28 +112,52 @@ test("document processing workbench keeps the journal review explicit", () => {
   const reviewSource = source("portal-review-panels.tsx");
   const stylesSource = source("styles.css");
   const draftEditorIndex = reviewSource.indexOf("<ManualDraftEditor");
-  const decisionChainIndex = reviewSource.indexOf("<DecisionChainPanel");
+  const reasonDisclosureIndex = reviewSource.indexOf("journal-reason-disclosure");
+  const decisionBarIndex = reviewSource.indexOf("journal-decision-bar");
+  const primaryApproveIndex = reviewSource.indexOf("journal-primary-approve");
+  const correctionPanelIndex = reviewSource.indexOf("journal-correction-panel");
+  const scrollAreaIndex = reviewSource.indexOf("journal-scroll-area");
+  const journalPanelSource = reviewSource.slice(
+    reviewSource.indexOf("export function JournalPanel"),
+    reviewSource.indexOf("function JournalReasonDisclosure"),
+  );
 
   assert.match(reviewSource, /safeHeaderValue/);
-  assert.match(reviewSource, /reviewWorkspaceTabs/);
+  assert.doesNotMatch(journalPanelSource, /activeReviewTab|reviewWorkspaceTabs/);
+  assert.doesNotMatch(journalPanelSource, /journal-account-summary|<h3>Hesap ve cari<\/h3>/);
+  assert.doesNotMatch(journalPanelSource, /correctionAccountLabel|correctionAccountPlaceholder|Yeni gider\/stok hesabı|Yeni gelir hesabı|Yeni cari/);
   assert.notEqual(draftEditorIndex, -1);
-  assert.notEqual(decisionChainIndex, -1);
-  assert.ok(draftEditorIndex < decisionChainIndex, "journal line editor should appear before decision chain details");
-  assert.match(reviewSource, /Karar ve gerekçe/);
-  assert.match(reviewSource, /Düzeltme notu/);
-  assert.match(reviewSource, /Kural talimatı/);
+  assert.notEqual(scrollAreaIndex, -1);
+  assert.notEqual(primaryApproveIndex, -1);
+  assert.notEqual(decisionBarIndex, -1);
+  assert.notEqual(reasonDisclosureIndex, -1);
+  assert.ok(draftEditorIndex < reasonDisclosureIndex, "journal line editor should appear before decision details");
+  assert.ok(draftEditorIndex < primaryApproveIndex, "primary approval should follow the journal line editor");
+  assert.ok(primaryApproveIndex < correctionPanelIndex, "notes should stay below the primary approval path");
+  assert.ok(scrollAreaIndex < decisionBarIndex, "decision actions should sit outside the scrollable journal content");
+  assert.doesNotMatch(journalPanelSource, /DocumentPipelineTimeline|AiTracePanel/);
+  assert.match(reviewSource, /Müşavir notu/);
+  assert.match(reviewSource, /Benzer belge öğrenme talimatı/);
+  assert.doesNotMatch(journalPanelSource, /className="accountant-summary"/);
   assert.match(reviewSource, /Yeniden işle/);
-  assert.match(stylesSource, /\.decision-chain-panel/);
-  assert.match(reviewSource, /Ürün kimliği/);
-  assert.match(reviewSource, /NACE\/faaliyet/);
-  assert.match(reviewSource, /Research ihtiyacı/);
-  assert.match(reviewSource, /Cari aday izi/);
+  assert.match(stylesSource, /\.journal-scroll-area/);
+  assert.match(stylesSource, /\.journal-primary-approve/);
+  assert.match(stylesSource, /\.journal-decision-bar/);
+  assert.match(stylesSource, /\.journal-status-primary/);
+  assert.match(stylesSource, /\.journal-status-metrics/);
+  assert.match(stylesSource, /align-items:\s*stretch/);
+  assert.match(stylesSource, /aspect-ratio:\s*210 \/ 297/);
+  assert.match(stylesSource, /\.journal-reason-disclosure/);
+  assert.match(reviewSource, /Bu hesap neden seçildi/);
+  assert.match(reviewSource, /Cari nasıl eşleşti/);
+  assert.match(reviewSource, /Mükellef faaliyetiyle ilişkisi/);
+  assert.match(reviewSource, /Kontrol gerektiren nokta/);
   assert.match(reviewSource, /Fiş durumu/);
-  assert.match(reviewSource, /Muhasebe fişi detayları/);
   assert.match(reviewSource, /AI muhasebe gerekçesi/);
-  assert.match(reviewSource, /Düzeltme/);
-  assert.match(reviewSource, /Geçmiş/);
-  assert.match(reviewSource, /Kararı etkileyen açıklamaları göster/);
-  assert.match(stylesSource, /\.journal-workspace-tabs/);
+  assert.match(reviewSource, /Neden böyle önerildi/);
+  assert.doesNotMatch(reviewSource, /Research ihtiyacı|AI tekrar durumu|Statik fallback izi|Cari aday izi/);
+  assert.doesNotMatch(reviewSource, /Muhasebe fişi çalışma sekmeleri/);
+  assert.doesNotMatch(stylesSource, /\.journal-account-summary/);
+  assert.doesNotMatch(stylesSource, /\.journal-workspace-tabs/);
   assert.match(stylesSource, /\.journal-ledger/);
 });

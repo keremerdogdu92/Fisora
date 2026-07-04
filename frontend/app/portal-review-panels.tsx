@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Info, ReasonCard } from "./portal-shared";
-import type { AccountCandidate, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
+import type { CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
 import { resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
@@ -89,19 +89,6 @@ function blankDraftLine(): DraftLine {
   return { account_code: "", description: "", debit: "0.00", credit: "0.00" };
 }
 
-function uniqueAccountCandidates(candidates: AccountCandidate[]) {
-  const seen = new Set<string>();
-  return candidates.filter((candidate) => {
-    if (!candidate.code || seen.has(candidate.code)) return false;
-    seen.add(candidate.code);
-    return true;
-  });
-}
-
-function candidateLabel(candidate: AccountCandidate) {
-  return `${candidate.code} - ${candidate.name || "Hesap"}${candidate.reason ? ` (${candidate.reason})` : ""}`;
-}
-
 function isImageMime(value: string) {
   return String(value || "").toLowerCase().startsWith("image/");
 }
@@ -164,15 +151,6 @@ function safeHeaderValue(value: string) {
   if (!trimmed) return "";
   return /^[\x00-\xff]*$/.test(trimmed) ? trimmed : encodeURIComponent(trimmed);
 }
-
-type ReviewWorkspaceTab = "summary" | "journal" | "candidates" | "history";
-
-const reviewWorkspaceTabs: { id: ReviewWorkspaceTab; label: string }[] = [
-  { id: "summary", label: "Karar ve gerekçe" },
-  { id: "journal", label: "Hesap detayı" },
-  { id: "candidates", label: "Düzeltme" },
-  { id: "history", label: "Geçmiş" },
-];
 
 export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineEvent[] }) {
   return (
@@ -409,8 +387,6 @@ export function JournalPanel({
   setSelectedStatementLineNo: (value: number) => void;
   statementAiStatus: string;
 }) {
-  const [activeReviewTab, setActiveReviewTab] = useState<ReviewWorkspaceTab>("summary");
-
   if (!document) {
     return (
       <section className="panel review-panel">
@@ -427,28 +403,10 @@ export function JournalPanel({
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
   const pendingDirectionConflict = hasPendingDirectionConflict(document);
-  const isSales = accountingDirection === "sales";
-  const primaryAccountLabel = isStatement ? "Banka hesabı" : isSales ? "Gelir hesabı" : "Gider/stok hesabı";
-  const primaryAccountValue = isStatement ? document.selectedExpenseAccount : isSales ? (document.selectedRevenueAccount || "-") : document.selectedExpenseAccount;
-  const vatAccountLabel = isStatement ? "Fiş KDV" : isSales ? "Hesaplanan KDV" : "İndirilecek KDV";
-  const vatAccountValue = isSales
-    ? (document.selectedSalesVatAccount && document.selectedSalesVatAccount !== "-" ? document.selectedSalesVatAccount : "KDV satırı yok")
-    : (document.selectedPurchaseVatAccount || document.selectedVatAccount);
-  const counterpartyLabel = isStatement ? "Karşı hesap" : isSales ? "Müşteri cari" : "Satıcı cari";
-  const counterpartyValue = isSales
-    ? (document.selectedCustomerAccount || document.suggestedCounterpartyAccount || document.selectedCounterpartyAccount)
-    : (document.selectedCounterpartyAccount || document.suggestedCounterpartyAccount || "-");
-  const correctionAccountLabel = isStatement ? "Yeni işlem hesabı" : isSales ? "Yeni gelir hesabı" : "Yeni gider/stok hesabı";
-  const correctionAccountPlaceholder = isSales ? (document.selectedRevenueAccount || "") : document.selectedExpenseAccount;
-  const candidateGroups = document.accountCandidates;
-  const accountCandidateOptions = uniqueAccountCandidates(
-    isSales
-      ? [...(candidateGroups?.salesRevenue ?? []), ...(candidateGroups?.zeroVatRevenue ?? [])]
-      : document.selectedExpenseAccount?.startsWith("153")
-        ? [...(candidateGroups?.purchaseStock ?? []), ...(candidateGroups?.purchaseExpense ?? [])]
-        : [...(candidateGroups?.purchaseExpense ?? []), ...(candidateGroups?.purchaseStock ?? [])],
-  );
-  const counterpartyCandidateOptions = uniqueAccountCandidates(isSales ? (candidateGroups?.customer ?? []) : (candidateGroups?.supplier ?? []));
+  const directionSummary = [
+    `Yükleme: ${directionLabel(uploadDirection)}`,
+    `Mükellef açısından: ${directionLabel(accountingDirection)}`,
+  ].join(" / ");
 
   function setManualDraftLine(index: number, patch: Partial<DraftLine>) {
     const lines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : (generatedDraftLines.length ? generatedDraftLines : [blankDraftLine(), blankDraftLine()]);
@@ -474,221 +432,153 @@ export function JournalPanel({
 
   return (
     <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}`}>
-      <div className="panel-heading">
-        <div>
-          <h2>Muhasebe fişi</h2>
-          <span>{document.clientName} için belge, fiş ve kontrol kararları</span>
-        </div>
-      </div>
-      <section className="draft-summary journal-summary-strip" aria-label="Fiş durumu">
-        <div className="journal-summary-title">
-          <span>Fiş durumu</span>
-          <strong>{formatDraftStatus(document.draftStatus)}</strong>
-        </div>
-        <Info label="Borç toplamı" value={totals.debit.toFixed(2)} />
-        <Info label="Alacak toplamı" value={totals.credit.toFixed(2)} />
-        <Info label="Denge" value={activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"} />
-      </section>
-      {hasUnsavedReviewChanges ? (
-        <section className="dirty-state-strip" aria-label="Kaydedilmemiş fiş değişikliği">
+      <div className="journal-scroll-area">
+        <div className="panel-heading">
           <div>
-            <strong>Değişiklik var</strong>
-            <span>Onayla ve sonraki belgeye geç dediğinizde bu fiş kararın içinde kaydedilir.</span>
+            <h2>Muhasebe fişi</h2>
+            <span>{document.clientName} için belge, fiş ve kontrol kararları</span>
           </div>
-          <button onClick={onResetDraft} type="button">İlk taslağa dön</button>
+        </div>
+        <section className={`journal-status-strip ${totals.balanced ? "" : "unbalanced"}`} aria-label="Fiş durumu">
+          <div className="journal-status-primary">
+            <span>Fiş durumu</span>
+            <strong>{formatDraftStatus(document.draftStatus)}</strong>
+            <small>{directionSummary}</small>
+          </div>
+          <div className="journal-status-metrics" aria-label="Fiş toplamları">
+            <span><strong>Borç</strong> {totals.debit.toFixed(2)}</span>
+            <span><strong>Alacak</strong> {totals.credit.toFixed(2)}</span>
+            <span><strong>Denge</strong> {activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"}</span>
+          </div>
         </section>
-      ) : null}
-      <p className="accountant-summary">
-        {document.accountantSummary || (needsManualDraft ? "Fiş taslağı çıkarılamadı; manuel satır girerek belgeyi tamamlayın." : "Fiş taslağı kontrol için hazır.")}
-      </p>
-      <div className="review-reason-chips" aria-label="Belge yön bilgisi">
-        <span>Yükleme: {directionLabel(uploadDirection)}</span>
-        <span>Mükellef açısından: {directionLabel(accountingDirection)}</span>
-        {pendingDirectionConflict ? <span>Yön çakışması</span> : null}
-      </div>
-      <ManualDraftEditor
-        activeDraftLines={activeDraftLines}
-        generatedDraftLines={generatedDraftLines}
-        needsManualDraft={needsManualDraft}
-        onAddLine={addManualDraftLine}
-        onRemoveLine={removeManualDraftLine}
-        onUpdateLine={setManualDraftLine}
-      />
-      <div className="journal-workspace-tabs" role="tablist" aria-label="Muhasebe fişi çalışma sekmeleri">
-        {reviewWorkspaceTabs.map((tab) => (
-          <button
-            aria-selected={activeReviewTab === tab.id}
-            className={activeReviewTab === tab.id ? "active" : ""}
-            key={tab.id}
-            onClick={() => setActiveReviewTab(tab.id)}
-            role="tab"
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div className="journal-workspace-body">
-        {activeReviewTab === "summary" ? (
-          <section className="journal-tab-panel" role="tabpanel">
-            <DecisionChainPanel document={document} />
+        {hasUnsavedReviewChanges ? (
+          <section className="dirty-state-strip" aria-label="Kaydedilmemiş fiş değişikliği">
+            <div>
+              <strong>Değişiklik var</strong>
+              <span>Onayla ve sonraki belgeye geç dediğinizde bu fiş kararın içinde kaydedilir.</span>
+            </div>
+            <button onClick={onResetDraft} type="button">İlk taslağa dön</button>
           </section>
         ) : null}
-        {activeReviewTab === "journal" ? (
-          <section className="journal-tab-panel" role="tabpanel">
-            <div className="statement-review-heading">
-              <div>
-                <h3>Muhasebe fişi detayları</h3>
-                <span>Fiş satırlarını, borç/alacak dengesini ve banka satırı kararlarını bu alanda kontrol edin.</span>
-              </div>
+        <ManualDraftEditor
+          activeDraftLines={activeDraftLines}
+          generatedDraftLines={generatedDraftLines}
+          needsManualDraft={needsManualDraft}
+          onAddLine={addManualDraftLine}
+          onRemoveLine={removeManualDraftLine}
+          onUpdateLine={setManualDraftLine}
+        />
+        {!pendingDirectionConflict ? (
+          <section className="journal-primary-approve" aria-label="Ana fiş kararı">
+            <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
+          </section>
+        ) : null}
+        {isStatement ? (
+          <StatementReviewPanel
+            correctionDraft={correctionDraft}
+            document={document}
+            onRequestStatementAi={onRequestStatementAi}
+            onSaveStatementDecision={onSaveStatementDecision}
+            selectedStatementLineNo={selectedStatementLineNo}
+            setCorrectionDraft={setCorrectionDraft}
+            setSelectedStatementLineNo={setSelectedStatementLineNo}
+            statementAiStatus={statementAiStatus}
+          />
+        ) : null}
+        <section className="journal-correction-panel" aria-label="Fiş notu ve öğrenme talimatı">
+          <div className="statement-review-heading">
+            <div>
+              <h3>Düzeltme ve not</h3>
+              <span>Hesap ve cari değişikliği fiş satırında yapılır; not karar kaydı, öğrenme talimatı benzer belge önerisi içindir.</span>
             </div>
-            <div className="journal-meta">
-              <Info label={primaryAccountLabel} value={primaryAccountValue} />
-              <Info label={vatAccountLabel} value={vatAccountValue} />
-              <Info label={counterpartyLabel} value={`${counterpartyValue} (${document.counterpartyConfidence})`} />
-            </div>
-            {isStatement ? (
-              <StatementReviewPanel
-                correctionDraft={correctionDraft}
-                document={document}
-                onRequestStatementAi={onRequestStatementAi}
-                onSaveStatementDecision={onSaveStatementDecision}
-                selectedStatementLineNo={selectedStatementLineNo}
-                setCorrectionDraft={setCorrectionDraft}
-                setSelectedStatementLineNo={setSelectedStatementLineNo}
-                statementAiStatus={statementAiStatus}
+          </div>
+          <div className="correction-form">
+            <label className="wide">
+              <span>Müşavir notu</span>
+              <textarea
+                onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
+                placeholder="Bu fişte neyi neden değiştirdiniz?"
+                rows={3}
+                value={correctionDraft.reason}
               />
-            ) : null}
-          </section>
-        ) : null}
-        {activeReviewTab === "candidates" ? (
-          <section className="journal-tab-panel" role="tabpanel">
-            <div className="statement-review-heading">
-              <div>
-                <h3>Düzeltme ve not</h3>
-                <span>Fiş satırı, hesap/cari değişikliği ve müşavir açıklaması aynı kararda birlikte kaydedilir.</span>
-              </div>
-            </div>
-            <div className="correction-form">
-              {accountCandidateOptions.length ? (
-                <label>
-                  <span>Hesap adayları</span>
-                  <select
-                    onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
-                    value=""
-                  >
-                    <option value="">Hesap planı adaylarından seç</option>
-                    {accountCandidateOptions.map((candidate) => (
-                      <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              {counterpartyCandidateOptions.length ? (
-                <label>
-                  <span>Cari adayları</span>
-                  <select
-                    onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
-                    value=""
-                  >
-                    <option value="">Cari adaylarından seç</option>
-                    {counterpartyCandidateOptions.map((candidate) => (
-                      <option key={candidate.code} value={candidate.code}>{candidateLabel(candidate)}</option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              <label>
-                <span>{correctionAccountLabel}</span>
-                <input
-                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, accountCode: event.target.value })}
-                  placeholder={correctionAccountPlaceholder}
-                  value={correctionDraft.accountCode}
-                />
-              </label>
-              <label>
-                <span>{isStatement ? "Yeni karşı hesap" : "Yeni cari"}</span>
-                <input
-                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, counterpartyCode: event.target.value })}
-                  placeholder={counterpartyValue}
-                  value={correctionDraft.counterpartyCode}
-                />
-              </label>
-              <label className="wide">
-                <span>Düzeltme notu</span>
-                <textarea
-                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
-                  placeholder="Bu fişte neyi neden değiştirdiniz?"
-                  rows={3}
-                  value={correctionDraft.reason}
-                />
-              </label>
-              <label className="wide">
-                <span>Kural talimatı</span>
-                <textarea
-                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, ruleInstruction: event.target.value })}
-                  placeholder="Benzer belgelerde nasıl önerilsin? Kural olarak kullan seçilirse aday kural bu metinden oluşur."
-                  rows={2}
-                  value={correctionDraft.ruleInstruction}
-                />
-              </label>
-              <label className="checkbox-row wide">
-                <input
-                  checked={correctionDraft.applyToSimilar}
-                  onChange={(event) => setCorrectionDraft({ ...correctionDraft, applyToSimilar: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>Benzerleri için öneri olarak kullan</span>
-              </label>
-            </div>
-          </section>
-        ) : null}
-        {activeReviewTab === "history" ? (
-          <section className="journal-tab-panel" role="tabpanel">
-            <DocumentPipelineTimeline events={document.pipelineEvents ?? []} />
-            <AiTracePanel document={document} />
-            <div className="accountant-guidance">
-              <details>
-                <summary>Teknik detay</summary>
-                <pre>{JSON.stringify(document.technicalDetails || {}, null, 2)}</pre>
-              </details>
-            </div>
-          </section>
-        ) : null}
+            </label>
+            <label className="wide">
+              <span>Benzer belge öğrenme talimatı</span>
+              <textarea
+                onChange={(event) => setCorrectionDraft({ ...correctionDraft, ruleInstruction: event.target.value })}
+                placeholder="Benzer belgelerde nasıl önerilsin? Kural olarak kullan seçilirse aday kural bu metinden oluşur."
+                rows={2}
+                value={correctionDraft.ruleInstruction}
+              />
+            </label>
+            <label className="checkbox-row wide">
+              <input
+                checked={correctionDraft.applyToSimilar}
+                onChange={(event) => setCorrectionDraft({ ...correctionDraft, applyToSimilar: event.target.checked })}
+                type="checkbox"
+              />
+              <span>Benzerleri için öneri olarak kullan</span>
+            </label>
+          </div>
+        </section>
+        <JournalReasonDisclosure document={document} />
       </div>
-      <section className="document-decision-panel" aria-label="Belge değerlendirme">
-        <div className="statement-review-heading">
-          <div>
-            <h3>Belge değerlendirme</h3>
-            <span>{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</span>
-          </div>
-        </div>
-        {pendingDirectionConflict ? (
-          <>
-            <div className="accountant-guidance">
-              <strong>Yön çakışması</strong>
-              <p>{document.directionConflict?.questionTr || "Yükleme yönü ile mükellef açısından tespit edilen yön çakışıyor."}</p>
-            </div>
-            <div className="decision-actions">
-              <button onClick={() => onSaveDecision("accept_detected_direction")} type="button">Sistemin tespit ettiği yöne geçir</button>
-              <button onClick={() => onSaveDecision("keep_upload_direction")} type="button">Yükleme tarafı doğru</button>
-            </div>
-          </>
-        ) : (
-          <div className="decision-actions">
-            <button onClick={onApproveAndNext} type="button">Onayla ve sonraki belgeye geç</button>
-            <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
-            <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
-            <button onClick={onReprocessDocument} type="button">Yeniden işle</button>
-            <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
-          </div>
-        )}
-      </section>
+      <JournalDecisionBar
+        decisionStatus={decisionStatus}
+        document={document}
+        onReprocessDocument={onReprocessDocument}
+        onSaveDecision={onSaveDecision}
+        pendingDirectionConflict={pendingDirectionConflict}
+      />
     </section>
   );
 }
 
-function DecisionChainPanel({ document }: { document: PilotDocument }) {
+function JournalDecisionBar({
+  decisionStatus,
+  document,
+  onReprocessDocument,
+  onSaveDecision,
+  pendingDirectionConflict,
+}: {
+  decisionStatus: string;
+  document: PilotDocument;
+  onReprocessDocument: () => void | Promise<void>;
+  onSaveDecision: (action: string) => void | Promise<void>;
+  pendingDirectionConflict: boolean;
+}) {
+  return (
+    <section className="journal-decision-bar" aria-label="Belge değerlendirme">
+      <div className="journal-decision-heading">
+        <div>
+          <h3>Belge değerlendirme</h3>
+          <span>{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</span>
+        </div>
+      </div>
+      {pendingDirectionConflict ? (
+        <>
+          <div className="accountant-guidance">
+            <strong>Yön çakışması</strong>
+            <p>{document.directionConflict?.questionTr || "Yükleme yönü ile mükellef açısından tespit edilen yön çakışıyor."}</p>
+          </div>
+          <div className="decision-actions direction-actions">
+            <button onClick={() => onSaveDecision("accept_detected_direction")} type="button">Sistemin tespit ettiği yöne geçir</button>
+            <button onClick={() => onSaveDecision("keep_upload_direction")} type="button">Yükleme tarafı doğru</button>
+          </div>
+        </>
+      ) : (
+        <div className="decision-actions secondary-actions">
+          <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
+          <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
+          <button onClick={onReprocessDocument} type="button">Yeniden işle</button>
+          <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function JournalReasonDisclosure({ document }: { document: PilotDocument }) {
   const aiStatus = document.aiResolutionStatus === "ai_retry_required"
     ? "Tekrar denenecek"
     : document.aiProvider && document.aiProvider !== "-" ? document.aiProvider : "Gerekmedi";
@@ -711,40 +601,36 @@ function DecisionChainPanel({ document }: { document: PilotDocument }) {
     document.aiSuggestedCounterpartyCode,
     document.suggestedCounterpartyAccount,
   ].filter(Boolean).join(" / ");
-  const staticFallbackTrace = document.staticFallbackSuppressed
-    ? `Bastirildi: ${document.staticFallbackAccount || "-"}`
-    : document.staticFallbackAccount || "-";
+  const researchNote = document.aiResearchRequested
+    ? (document.aiResearchQuery || "AI ek araştırma istedi.")
+    : "Ek araştırma gerekmedi.";
+  const accountReason = document.aiAccountReason || document.accountantExplanation || document.aiReason || document.deterministicSummary || "-";
   return (
-    <section className="decision-chain-panel" aria-label="Karar ve gerekçe">
-      <div className="statement-review-heading">
-        <div>
-          <h3>Karar ve gerekçe</h3>
-          <span>Fiş satırları doğruysa bu bölümü açmadan devam edebilirsiniz.</span>
-        </div>
-      </div>
-      <div className="decision-chain-steps">
-        <Info label="Kural" value={document.deterministicSummary || "Statik kontrol"} />
-        <Info label="AI" value={aiStatus} />
-        <Info label="Araştırma" value={researchStatus} />
-        <Info label="Müşavir öğrenmesi" value={learningStatus} />
-      </div>
+    <section className="journal-reason-disclosure" aria-label="Karar ve gerekçe">
       <details>
-        <summary>Kararı etkileyen açıklamaları göster</summary>
+        <summary>
+          <span>Neden böyle önerildi?</span>
+          <strong>Gerekçe ve AI izi</strong>
+        </summary>
+        <div className="decision-chain-steps">
+          <Info label="Kural" value={document.deterministicSummary || "Statik kontrol"} />
+          <Info label="AI" value={aiStatus} />
+          <Info label="Araştırma" value={researchStatus} />
+          <Info label="Müşavir öğrenmesi" value={learningStatus} />
+        </div>
         <div className="ai-guidance compact">
           <ReasonCard label="AI muhasebe gerekçesi" value={document.accountantExplanation || document.aiReason || document.accountantSummary || "-"} />
-          <ReasonCard label="Ürün kimliği" value={document.aiProductIdentity || document.productLine || "-"} />
-          <ReasonCard label="NACE/faaliyet" value={activityContext || "-"} />
-          <ReasonCard label="Research ihtiyacı" value={document.aiResearchRequested ? (document.aiResearchQuery || "AI araştırma istedi") : researchStatus} />
-          <ReasonCard label="AI tekrar durumu" value={document.aiResolutionStatus === "ai_retry_required" ? (document.aiRetryReason || "Tekrar denenecek") : "Gerekmedi"} />
-          <ReasonCard label="Statik fallback izi" value={staticFallbackTrace} />
-          <ReasonCard label="Cari aday izi" value={counterpartyIntent || "-"} />
-          <ReasonCard label="Faaliyet ilişkisi" value={document.businessRelation || "-"} />
-          <ReasonCard label="Muhasebe işleme" value={document.accountTreatment || "-"} />
-          <ReasonCard label="Kontrol gerekçesi" value={document.exportGateReason || "-"} />
+          <ReasonCard label="Bu hesap neden seçildi?" value={accountReason} />
+          <ReasonCard label="Ürün / hizmet yorumu" value={document.aiProductIdentity || document.productLine || "-"} />
+          <ReasonCard label="Mükellef faaliyetiyle ilişkisi" value={activityContext || document.businessRelation || "-"} />
+          <ReasonCard label="Cari nasıl eşleşti?" value={counterpartyIntent || "-"} />
+          <ReasonCard label="Araştırma notu" value={researchNote} />
+          <ReasonCard label="Muhasebe davranışı" value={document.accountTreatment || "-"} />
+          <ReasonCard label="Kontrol gerektiren nokta" value={document.exportGateReason || document.aiRetryReason || "-"} />
         </div>
+        <QualityScorecardPanel document={document} />
+        <LearningRuleCard document={document} />
       </details>
-      <QualityScorecardPanel document={document} />
-      <LearningRuleCard document={document} />
     </section>
   );
 }

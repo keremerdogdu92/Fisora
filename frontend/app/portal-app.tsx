@@ -9,7 +9,7 @@ import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
 import { ResearchKnowledgeView } from "./portal-research-view";
 import { SettingsView } from "./portal-settings-view";
-import { DocumentContextBar, PortalSidebar, PortalTopbarStatus } from "./shared/components";
+import { PortalSidebar, PortalTopbarStatus } from "./shared/components";
 import { AccountantWorkspace } from "./portal-workspace-view";
 import {
   loginWithPassword,
@@ -51,7 +51,7 @@ import { emptyPilotData } from "./portal-data-mappers";
 import { scopePilotDataForSession } from "./portal-data-scope";
 import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
-import { emptyCorrectionDraft, journalDraftLinesForDocument, useReviewCommands } from "./features/review";
+import { emptyCorrectionDraft, useReviewCommands } from "./features/review";
 
 type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
 
@@ -354,7 +354,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     setExportStatus,
     setSelectedDocumentId,
   });
-  const selectedDocumentDraftLines = selectedDocument ? journalDraftLinesForDocument(selectedDocument, selectedStatementLineNo) : [];
   const hasUnsavedReviewChanges = useMemo(() => Boolean(correctionDraft.accountCode.trim() || correctionDraft.counterpartyCode.trim() || correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim() || correctionDraft.applyToSimilar || correctionDraft.manualDraftLines.length), [correctionDraft]);
   const {
     approveSelectedAndMoveNext,
@@ -381,7 +380,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const testDataReset = useTestDataReset({ loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session, setSelectedClientId, setSelectedDocumentId });
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
   const showSidebar = visibleNavItems.length > 1;
-  const selectedPeriodTitle = selectedPeriod ? new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(new Date(`${selectedPeriod}-01T00:00:00`)) : "";
 
   return (
     <main className={showSidebar ? `private-shell portal-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}` : "private-shell portal-shell no-sidebar"}>
@@ -405,12 +403,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           showSidebarToggle={showSidebar}
           source={source}
           subtitle={mode === "client" && session?.delegatedBy ? "Müşavir vekaletinde işlem yapılıyor" : ""}
-          title={mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Belge İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
+          title={mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Fatura İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
         />
-
-      {mode === "documents" ? (
-        <DocumentContextBar client={selectedClient} draftLines={selectedDocumentDraftLines} period={selectedPeriodTitle} selectedDocument={selectedDocument} />
-      ) : null}
 
       <div className="portal-route-content">
 

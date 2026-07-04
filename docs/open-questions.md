@@ -39,45 +39,53 @@ netlestirilecek.
 19. Ayni mustavir karari kac tekrar sonra otomasyon adayi sayilmali?
 20. Genel ogrenme adayi, mustavir/ofis politikasi ve mukellef ozel kural ayrimi
     urunde nasil gosterilmeli?
+21. Muhasebe fisi satirindan yapilan manuel hesap/cari duzeltmesi backend'e
+    `draft_lines` olarak gidiyor; ogrenme motorunun eski
+    `corrected_account_code` ve `corrected_counterparty_code` alanlarini
+    kaybetmemesi icin bu kodlar frontend'de otomatik mi turetilmeli, yoksa
+    backend eski/yeni fis satiri farkindan mi cikarmali?
+22. `accountant_note` karar gerekcesi, `rule_instruction` benzer belge kural
+    talimati olarak ayrildi; mustavire tek not alani gibi gorunmeden, ogrenme
+    adayi uretiminde iki alanin nasil kullanildigi netlestirilmeli.
 
 ## Operasyon ve Veri
 
-21. Ham belge saklama politikasi 90 gun olarak belirlendi; metadata/audit
+23. Ham belge saklama politikasi 90 gun olarak belirlendi; metadata/audit
     saklama suresi mustavir/ofis politikasina gore netlestirilecek.
-22. Maliyet kontrolu icin hangi durumlarda AI cagrisi atlanacak?
-23. OCR fallback hangi belge tipleri ve hangi guven esiklerinde calisacak?
-24. Iptal ve duzeltme istekleri mustavir operasyonunda nasil karsilanmali?
-25. Mustavir onay izi, reddetme gerekcesi ve export paketi denetim icin ne kadar
+24. Maliyet kontrolu icin hangi durumlarda AI cagrisi atlanacak?
+25. OCR fallback hangi belge tipleri ve hangi guven esiklerinde calisacak?
+26. Iptal ve duzeltme istekleri mustavir operasyonunda nasil karsilanmali?
+27. Mustavir onay izi, reddetme gerekcesi ve export paketi denetim icin ne kadar
     saklanmali?
 
 ## Sunucu ve AI API
 
-26. Ilk production kendi kiralik sunucuda baslayacak; secilen saglayicida paket
+28. Ilk production kendi kiralik sunucuda baslayacak; secilen saglayicida paket
     buyutme, disk artirma ve veri tasima gerekip gerekmedigi yazili netlesmeli.
-27. Ham belge storage volume'u sifreli olacak mi, dis backup hangi Turkiye
+29. Ham belge storage volume'u sifreli olacak mi, dis backup hangi Turkiye
     lokasyonunda tutulacak?
-28. Dis AI API sadece kategori/gerekce icin mi kullanilacak, yoksa banka
+30. Dis AI API sadece kategori/gerekce icin mi kullanilacak, yoksa banka
     aciklamasi siniflandirma da kapsama girecek mi?
-29. API sonucunun dusuk guven esigi kac olacak ve hangi durumlarda mustavir
+31. API sonucunun dusuk guven esigi kac olacak ve hangi durumlarda mustavir
     review'a zorunlu donderecek?
-30. Aylik AI maliyet cap'i ofis bazinda mi, mukellef bazinda mi uygulanacak?
-31. Gercek fatura metni dis AI API'ye gonderilecekse mustavir ve veri sahibi
+32. Aylik AI maliyet cap'i ofis bazinda mi, mukellef bazinda mi uygulanacak?
+33. Gercek fatura metni dis AI API'ye gonderilecekse mustavir ve veri sahibi
     onayi hangi metinle alinacak?
-32. AI assisted draft modunda minimum confidence esigi kac olacak?
-33. AI'in hesap onerisi yalnizca mevcut hesap plani adaylariyla mi sinirli
+34. AI assisted draft modunda minimum confidence esigi kac olacak?
+35. AI'in hesap onerisi yalnizca mevcut hesap plani adaylariyla mi sinirli
     kalacak, yoksa "hesap bulunamadi" durumunda aciklama mi uretecek?
-34. Soguk baslangic demo basarisi ile production otomasyon basarisi raporda
+36. Soguk baslangic demo basarisi ile production otomasyon basarisi raporda
     nasil ayrilacak?
-35. OpenAI/Gemini/Manus benchmarkinda hangi 20-50 marka/model ve genel gider
+37. OpenAI/Gemini/Manus benchmarkinda hangi 20-50 marka/model ve genel gider
     case seti standart kabul edilecek?
 
 ## Auth ve Canli Portal
 
-36. Gercek login/session icin custom session mi, Keycloak/Auth0/Clerk gibi
+38. Gercek login/session icin custom session mi, Keycloak/Auth0/Clerk gibi
     provider mi secilecek?
-37. `trusted_header` kullanilacaksa header'i hangi gateway dogrulayip backend'e
+39. `trusted_header` kullanilacaksa header'i hangi gateway dogrulayip backend'e
     enjekte edecek?
-38. Mustavir/ofis kullanici daveti, sifre sifirlama ve 2FA politikasi nasil
+40. Mustavir/ofis kullanici daveti, sifre sifirlama ve 2FA politikasi nasil
     olacak?
-39. Mukellef kullanicisi export dosyalarini indirebilecek mi, yoksa sadece
+41. Mukellef kullanicisi export dosyalarini indirebilecek mi, yoksa sadece
     belge yukleme ve durum takibi mi yapacak?

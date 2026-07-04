@@ -35,7 +35,7 @@ const sidebarItems: {
   { key: "workspace", label: "Çalışma Alanı", mode: "accountant", fallbackHref: "/portal/musavir", icon: LayoutDashboard },
   { key: "agents", label: "AI Ajanları", mode: "agents", fallbackHref: "/portal/ajanlar", icon: Bot },
   { key: "clients", label: "Mükellefler", mode: "clients", fallbackHref: "/portal/mukellefler", icon: Users },
-  { key: "documents", label: "Belgeler", mode: "documents", segment: "invoices", fallbackHref: "/portal/belgeler", icon: FileText },
+  { key: "documents", label: "Faturalar", mode: "documents", segment: "purchase_invoices", fallbackHref: "/portal/belgeler", icon: FileText },
   { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", fallbackHref: "/portal/belgeler", icon: Landmark },
   { key: "other", label: "Diğer Belgeler", mode: "documents", segment: "other_documents", fallbackHref: "/portal/belgeler", icon: Files },
   { key: "exports", label: "Çıktı / Kontroller", mode: "exports", fallbackHref: "/portal/cikti", icon: CircleCheckBig },

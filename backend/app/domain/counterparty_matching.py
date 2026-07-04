@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 
 from app.domain.chart_accounts import ChartAccount, normalize_iban
@@ -35,6 +37,29 @@ def _normalize(value: str) -> str:
     return " ".join(lowered.split())
 
 
+def _normalize_counterparty_text(value: str) -> str:
+    translated = value.translate(
+        {
+            0x0131: "i",
+            0x0130: "i",
+            0x011F: "g",
+            0x011E: "g",
+            0x00FC: "u",
+            0x00DC: "u",
+            0x015F: "s",
+            0x015E: "s",
+            0x00F6: "o",
+            0x00D6: "o",
+            0x00E7: "c",
+            0x00C7: "c",
+        }
+    )
+    translated = unicodedata.normalize("NFKD", translated)
+    translated = "".join(character for character in translated if not unicodedata.combining(character))
+    translated = re.sub(r"[^0-9a-zA-Z]+", " ", translated.lower())
+    return " ".join(translated.split())
+
+
 def _distinctive_tokens(value: str) -> set[str]:
     legal_noise = {
         "a",
@@ -50,11 +75,13 @@ def _distinctive_tokens(value: str) -> set[str]:
         "ticaret",
         "san",
         "sanayi",
+        "anonim",
+        "sirket",
         "ve",
     }
     return {
         token
-        for token in _normalize(value).replace(".", " ").split()
+        for token in _normalize_counterparty_text(value).split()
         if len(token) >= 4 and token not in legal_noise
     }
 
@@ -95,10 +122,10 @@ def match_counterparty(
                 requires_review=False,
             )
 
-    normalized_hint = _normalize(name_hint)
+    normalized_hint = _normalize_counterparty_text(name_hint)
     if normalized_hint:
         for account in candidates:
-            normalized_name = _normalize(account.account_name)
+            normalized_name = _normalize_counterparty_text(account.account_name)
             if normalized_hint in normalized_name or normalized_name in normalized_hint:
                 return CounterpartyMatch(
                     account_code=account.normalized_account_code,

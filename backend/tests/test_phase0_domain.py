@@ -947,6 +947,64 @@ class Phase0DomainTests(unittest.TestCase):
             self.assertEqual(invoice.vat_total, vat_total, path.name)
             self.assertEqual(invoice.payable_total, payable_total, path.name)
 
+    def test_real_pilot_bera_invoice_extracts_issuer_title_for_counterparty_matching(self) -> None:
+        invoice_path = (
+            ROOT
+            / "private_samples"
+            / "real_pilot"
+            / "firma-2"
+            / "invoices"
+            / "purchases"
+            / "1640731289_AAA2026000001172.pdf"
+        )
+        chart_path = ROOT / "private_samples" / "real_pilot" / "firma-2" / "chart_accounts" / "orhan hs planı.xlsx"
+        if not invoice_path.exists() or not chart_path.exists():
+            self.skipTest("private pilot BERA sample missing")
+
+        invoice = parse_pdf_invoice(invoice_path)
+        accounts = parse_chart_accounts(chart_path)
+
+        self.assertEqual(invoice.issuer_title, "BERA ODYOLOJİ TİCARET LİMİTED ŞİRKETİ")
+        counterparty = match_counterparty(
+            accounts,
+            tax_ids=(invoice.issuer_tax_id,),
+            name_hint=invoice.issuer_title,
+            account_prefixes=("320",),
+        )
+        self.assertEqual(counterparty.account_code, "320.B04")
+        self.assertEqual(counterparty.match_reason, "title_token_overlap")
+
+    def test_counterparty_title_overlap_ignores_legal_suffix_only_matches(self) -> None:
+        accounts = [
+            ChartAccount("320.B04", "320.B04", "BERA ODYOLOJİ SAN TİC LTD ŞTİ", is_detail_account=True),
+        ]
+
+        counterparty = match_counterparty(
+            accounts,
+            name_hint="METRO GROSMARKET BAKIRKÖY ALIŞVERİŞ HİZMETLERİ TİC. LTD. ŞTİ.",
+            account_prefixes=("320",),
+        )
+
+        self.assertEqual(counterparty.match_reason, "not_found")
+
+    def test_real_pilot_dmarket_invoice_ignores_carrier_tax_id_for_issuer_title(self) -> None:
+        invoice_path = (
+            ROOT
+            / "private_samples"
+            / "real_pilot"
+            / "firma-1"
+            / "invoices"
+            / "purchases"
+            / "2650179910_HD02026000279063.pdf"
+        )
+        if not invoice_path.exists():
+            self.skipTest("private pilot D-Market sample missing")
+
+        invoice = parse_pdf_invoice(invoice_path)
+
+        self.assertEqual(invoice.issuer_tax_id, "2650179910")
+        self.assertEqual(invoice.issuer_title, "D-MARKET ELEKTRONİK HİZMETLER VE TİCARET ANONİM ŞİRKETİ")
+
     def test_vat_split_review_record_keeps_layout_evidence_for_future_rules(self) -> None:
         exact_path = (
             ROOT

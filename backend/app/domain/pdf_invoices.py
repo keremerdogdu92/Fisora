@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -18,6 +19,7 @@ ETTN_RE = re.compile(
 )
 INVOICE_NO_RE = re.compile(r"\b([A-Z]{2,4}\d{8,16}|[A-Z]\d[A-Z]\d{8,16})\b")
 TAX_ID_RE = re.compile(r"\b(?:VKN|TCKN|TC\s*Kimlik\s*No|Vergi\s*No)\s*:?\s*([0-9]{10,11})\b", re.IGNORECASE)
+TAX_ID_VALUE_RE = re.compile(r"\b([0-9]{10,11})\b")
 VAT_RATE_RE = re.compile(
     r"(?:KDV|Katma\s+Değer\s+Vergisi|Katma\s+Deger\s+Vergisi)[^\n\r%]{0,40}%?\s*\(?\s*([0-9]{1,2})(?:[,.]0+)?\s*\)?",
     re.IGNORECASE,
@@ -150,6 +152,28 @@ def normalize_turkish(value: str) -> str:
 
 def normalize_for_search(value: str) -> str:
     return re.sub(r"\s+", " ", normalize_turkish(value)).strip()
+
+
+def _fold_party_text(value: str) -> str:
+    translated = value.translate(
+        {
+            0x0131: "i",
+            0x0130: "i",
+            0x011F: "g",
+            0x011E: "g",
+            0x00FC: "u",
+            0x00DC: "u",
+            0x015F: "s",
+            0x015E: "s",
+            0x00F6: "o",
+            0x00D6: "o",
+            0x00E7: "c",
+            0x00C7: "c",
+        }
+    )
+    translated = unicodedata.normalize("NFKD", translated)
+    translated = "".join(character for character in translated if not unicodedata.combining(character))
+    return re.sub(r"\s+", " ", translated.lower()).strip()
 
 
 def parse_amount(raw: str) -> Decimal | None:
@@ -299,8 +323,27 @@ def _tax_id_from_line(line: str) -> str:
     return match.group(1) if match else ""
 
 
+def _tax_id_from_labeled_window(lines: list[str], index: int) -> str:
+    direct = _tax_id_from_line(lines[index])
+    if direct:
+        return direct
+    normalized = _fold_party_text(lines[index])
+    if not any(label in normalized for label in ("vkn", "tckn", "vergi no", "tc kimlik")):
+        return ""
+    for candidate in lines[index + 1 : index + 4]:
+        match = TAX_ID_VALUE_RE.search(candidate)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _is_non_party_tax_line(line: str) -> bool:
+    normalized = _fold_party_text(line)
+    return "tasiyici" in normalized
+
+
 def _meaningful_party_line(line: str) -> bool:
-    normalized = normalize_for_search(line)
+    normalized = _fold_party_text(line)
     if not normalized:
         return False
     location_tokens = {
@@ -315,7 +358,19 @@ def _meaningful_party_line(line: str) -> bool:
         "kadikoy",
         "merkez",
     }
-    address_tokens = (" mah", "cad", "sok", "no ", "sitesi", "web sitesi", "siparis tarihi", "yalniz")
+    address_tokens = (
+        " mah",
+        "cad",
+        "sok",
+        "no ",
+        "no:",
+        "kapi no",
+        "adres",
+        "sitesi",
+        "web sitesi",
+        "siparis tarihi",
+        "yalniz",
+    )
     if normalized in location_tokens or any(token in normalized for token in address_tokens):
         return False
     stop_tokens = (
@@ -331,17 +386,68 @@ def _meaningful_party_line(line: str) -> bool:
         "kdv",
         "vergiler",
         "odenecek",
+        "tel:",
+        "tel ",
+        "fax:",
+        "fax ",
+        "e-posta",
+        "email",
+        "web sitesi",
+        "mersis",
+        "musterino",
+        "ticaret sicil",
     )
     return not any(token in normalized for token in stop_tokens)
 
 
+def _party_title_score(line: str) -> int:
+    normalized = _fold_party_text(line)
+    company_tokens = (
+        "limited",
+        "ltd",
+        "anonim",
+        "a.s",
+        "sirket",
+        "ticaret",
+        "sanayi",
+        "hizmet",
+        "magazacilik",
+        "lojistik",
+        "odyoloji",
+        "medikal",
+        "eczane",
+        "market",
+        "banka",
+    )
+    score = sum(3 for token in company_tokens if token in normalized)
+    letters = [character for character in line if character.isalpha()]
+    if letters and sum(1 for character in letters if character.isupper()) / len(letters) >= 0.65:
+        score += 1
+    return score
+
+
 def _title_before_tax_line(lines: list[str], tax_line_index: int) -> str:
+    window_start = max(0, tax_line_index - 24)
+    candidates = [
+        (index, line, _party_title_score(line))
+        for index, line in enumerate(lines[window_start:tax_line_index], start=window_start)
+        if _meaningful_party_line(line) and not any(character.isdigit() for character in line) and "/" not in line
+    ]
+    scored = [candidate for candidate in candidates if candidate[2] > 0]
+    if scored:
+        best_index, _, _ = max(scored, key=lambda item: (item[2], item[0]))
+        selected_indexes = {best_index}
+        for neighbor in (best_index - 1, best_index + 1):
+            if neighbor < window_start or neighbor >= tax_line_index:
+                continue
+            line = lines[neighbor]
+            if _meaningful_party_line(line) and not any(character.isdigit() for character in line) and "/" not in line:
+                if _party_title_score(line) >= 3:
+                    selected_indexes.add(neighbor)
+        return " ".join(lines[index] for index in sorted(selected_indexes))[:120]
+
     parts: list[str] = []
-    for line in reversed(lines[max(0, tax_line_index - 8) : tax_line_index]):
-        if not _meaningful_party_line(line):
-            continue
-        if any(character.isdigit() for character in line) or "/" in line:
-            continue
+    for _, line, _ in reversed(candidates):
         parts.append(line)
         if len(parts) >= 2:
             break
@@ -373,7 +479,11 @@ def extract_recipient_title_from_text(text: str) -> str:
 def extract_pdf_party_details_from_text(text: str) -> tuple[str, str, str, str]:
     lines = [normalize_spaces(line) for line in text.splitlines()]
     sayin_index = next((index for index, line in enumerate(lines) if normalize_for_search(line).startswith("sayin")), -1)
-    tax_lines = [(index, _tax_id_from_line(line)) for index, line in enumerate(lines)]
+    tax_lines = [
+        (index, _tax_id_from_labeled_window(lines, index))
+        for index, line in enumerate(lines)
+        if not _is_non_party_tax_line(line)
+    ]
     tax_lines = [(index, tax_id) for index, tax_id in tax_lines if tax_id]
 
     issuer_tax_id = ""

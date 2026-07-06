@@ -78,6 +78,7 @@ export async function addLocalUploadsAction({
     deterministicSummary: intakeMetadata.deterministicSummary,
     exportGateReason: intakeMetadata.exportGateReason,
     draftStatus: "processing",
+    chartAccounts: [],
     accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
     accountantExplanation: "Belge henuz muhasebe gerekcesi uretmedi.",
     technicalDetails: {},

@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, MutableRefObject } from "react";
+import { applyAccountSelectionToLine, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
-import type { CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
+import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
 import { resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
@@ -430,8 +432,16 @@ export function JournalPanel({
     });
   }
 
+  function handleJournalShortcut(event: KeyboardEvent<HTMLElement>) {
+    if (pendingDirectionConflict) return;
+    if (event.key === "F2" || (event.key === "Enter" && event.ctrlKey)) {
+      event.preventDefault();
+      void onApproveAndNext();
+    }
+  }
+
   return (
-    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}`}>
+    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}`} onKeyDown={handleJournalShortcut}>
       <div className="journal-scroll-area">
         <div className="panel-heading">
           <div>
@@ -462,6 +472,7 @@ export function JournalPanel({
         ) : null}
         <ManualDraftEditor
           activeDraftLines={activeDraftLines}
+          chartAccounts={document.chartAccounts}
           generatedDraftLines={generatedDraftLines}
           needsManualDraft={needsManualDraft}
           onAddLine={addManualDraftLine}
@@ -668,6 +679,7 @@ function QualityScorecardPanel({ document }: { document: PilotDocument }) {
 
 function ManualDraftEditor({
   activeDraftLines,
+  chartAccounts,
   generatedDraftLines,
   needsManualDraft,
   onAddLine,
@@ -675,14 +687,44 @@ function ManualDraftEditor({
   onUpdateLine,
 }: {
   activeDraftLines: DraftLine[];
+  chartAccounts: ChartAccountOption[];
   generatedDraftLines: DraftLine[];
   needsManualDraft: boolean;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
 }) {
+  const descriptionRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const debitRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const creditRefs = useRef<Array<HTMLInputElement | null>>([]);
+
   if (!needsManualDraft && !activeDraftLines.length) return null;
   const rows = activeDraftLines.length ? activeDraftLines : [blankDraftLine(), blankDraftLine()];
+
+  function focusInput(refs: MutableRefObject<Array<HTMLInputElement | null>>, index: number) {
+    window.setTimeout(() => refs.current[index]?.focus(), 0);
+  }
+
+  function selectAccount(index: number, account: ChartAccountOption) {
+    const updated = applyAccountSelectionToLine(rows[index], account, chartAccounts);
+    onUpdateLine(index, updated);
+    focusInput(descriptionRefs, index);
+  }
+
+  function updateDebit(index: number, value: string) {
+    onUpdateLine(index, {
+      debit: value,
+      ...(value.trim() && parseAmount(value) !== 0 ? { credit: "0.00" } : {}),
+    });
+  }
+
+  function updateCredit(index: number, value: string) {
+    onUpdateLine(index, {
+      credit: value,
+      ...(value.trim() && parseAmount(value) !== 0 ? { debit: "0.00" } : {}),
+    });
+  }
+
   return (
     <section className="manual-draft-panel">
       <div className="statement-review-heading">
@@ -706,10 +748,49 @@ function ManualDraftEditor({
           <tbody>
             {rows.map((line, index) => (
               <tr key={index}>
-                <td><input onChange={(event) => onUpdateLine(index, { account_code: event.target.value })} value={line.account_code} /></td>
-                <td><input onChange={(event) => onUpdateLine(index, { description: event.target.value })} value={line.description} /></td>
-                <td><input inputMode="decimal" onChange={(event) => onUpdateLine(index, { debit: event.target.value })} value={line.debit} /></td>
-                <td><input inputMode="decimal" onChange={(event) => onUpdateLine(index, { credit: event.target.value })} value={line.credit} /></td>
+                <td>
+                  <AccountCodeCombobox
+                    accounts={chartAccounts}
+                    onChange={(value) => onUpdateLine(index, { account_code: value })}
+                    onSelect={(account) => selectAccount(index, account)}
+                    value={line.account_code}
+                  />
+                </td>
+                <td>
+                  <input
+                    onChange={(event) => onUpdateLine(index, { description: event.target.value })}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        focusInput(debitRefs, index);
+                      }
+                    }}
+                    ref={(element) => { descriptionRefs.current[index] = element; }}
+                    value={line.description}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    onChange={(event) => updateDebit(index, event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        focusInput(creditRefs, index);
+                      }
+                    }}
+                    ref={(element) => { debitRefs.current[index] = element; }}
+                    value={line.debit}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    onChange={(event) => updateCredit(index, event.target.value)}
+                    ref={(element) => { creditRefs.current[index] = element; }}
+                    value={line.credit}
+                  />
+                </td>
                 <td><button onClick={() => onRemoveLine(index)} type="button">Sil</button></td>
               </tr>
             ))}
@@ -717,6 +798,82 @@ function ManualDraftEditor({
         </table>
       </div>
     </section>
+  );
+}
+
+function AccountCodeCombobox({
+  accounts,
+  onChange,
+  onSelect,
+  value,
+}: {
+  accounts: ChartAccountOption[];
+  onChange: (value: string) => void;
+  onSelect: (account: ChartAccountOption) => void;
+  value: string;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [open, setOpen] = useState(false);
+  const matches = useMemo(() => filterAccountOptions(accounts, value, 20), [accounts, value]);
+
+  function selectActiveAccount() {
+    const selected = resolveAccountSelection(accounts, value, activeIndex);
+    if (!selected) return false;
+    onSelect(selected);
+    setOpen(false);
+    setActiveIndex(0);
+    return true;
+  }
+
+  return (
+    <div className="account-code-combobox">
+      <input
+        aria-label="Hesap kodu"
+        aria-expanded={open && matches.length > 0}
+        autoComplete="off"
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setActiveIndex(0);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(Boolean(value))}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setOpen(true);
+            setActiveIndex((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)));
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setActiveIndex((current) => Math.max(current - 1, 0));
+          } else if (event.key === "Enter" || event.key === "Tab") {
+            if (selectActiveAccount()) event.preventDefault();
+          } else if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        value={value}
+      />
+      {open && matches.length ? (
+        <div className="account-code-options" role="listbox">
+          {matches.map((account, index) => (
+            <button
+              className={index === activeIndex ? "active" : ""}
+              key={account.code}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                onSelect(account);
+                setOpen(false);
+              }}
+              type="button"
+            >
+              <span>{account.code}</span>
+              <strong>{account.name}</strong>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

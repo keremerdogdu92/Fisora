@@ -49,6 +49,30 @@ const workspaceRecord = {
       created_at: "2026-06-06T09:30:00Z",
     },
   ],
+  chart_accounts: {
+    account_count: 3,
+    accounts: [
+      {
+        raw_account_code: "191 01 020",
+        normalized_account_code: "191.01.020",
+        account_name: "Indirilecek KDV %20",
+        is_detail_account: true,
+      },
+      {
+        raw_account_code: "320.B04",
+        normalized_account_code: "320.B04",
+        account_name: "Rexton Medikal",
+        is_detail_account: true,
+        tax_id: "1234567890",
+      },
+      {
+        raw_account_code: "770.01",
+        normalized_account_code: "770.01",
+        account_name: "Genel gider",
+        is_detail_account: true,
+      },
+    ],
+  },
   uploaded_documents: [
     {
       client_id: "client-1",
@@ -330,6 +354,11 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].learningRuleSourceSummary, "Bu oneride 3 onceki musavir karari kullanildi.");
   assert.equal(data.documents[0].originalDocumentRef, "processed-1");
   assert.equal(data.documents[0].draftStatus, "draft_ready");
+  assert.deepEqual(data.documents[0].chartAccounts.map((account) => [account.code, account.name]), [
+    ["191.01.020", "Indirilecek KDV %20"],
+    ["320.B04", "Rexton Medikal"],
+    ["770.01", "Genel gider"],
+  ]);
   assert.equal(data.documents[0].accountantSummary, "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir.");
   assert.equal(data.documents[0].accountantExplanation, "Satis faturasi olarak yorumlandi; gelir 600.20 ve KDV 391.20 hesaplarina gider.");
   assert.equal(data.documents[0].accountingDirection, "sales");

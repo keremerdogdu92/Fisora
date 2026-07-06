@@ -36,3 +36,13 @@ test("approve and next sends approve_with_changes only when the current draft is
   assert.match(reviewCommands, /saveDecision\(approveAction\)/);
   assert.match(reviewCommands, /saveStatementLineDecision\(approveAction\)/);
 });
+
+test("manual journal editor is wired for chart-plan keyboard entry", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /chartAccounts=\{document\.chartAccounts\}/);
+  assert.match(reviewPanels, /AccountCodeCombobox/);
+  assert.match(reviewPanels, /onKeyDown=\{handleJournalShortcut\}/);
+  assert.match(reviewPanels, /event\.key === "F2"/);
+  assert.match(reviewPanels, /event\.key === "Enter" && event\.ctrlKey/);
+});

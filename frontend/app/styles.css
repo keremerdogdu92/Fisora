@@ -2514,6 +2514,56 @@ button:disabled {
   min-width: 0;
 }
 
+.account-code-combobox {
+  position: relative;
+}
+
+.account-code-options {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
+  display: grid;
+  left: 0;
+  max-height: 220px;
+  min-width: 280px;
+  overflow-y: auto;
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 20;
+}
+
+.account-code-options button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--text);
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 88px 1fr;
+  justify-items: start;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.account-code-options button.active,
+.account-code-options button:hover {
+  background: var(--surface-muted);
+}
+
+.account-code-options span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.account-code-options strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .accountant-guidance {
   display: grid;
   gap: 8px;

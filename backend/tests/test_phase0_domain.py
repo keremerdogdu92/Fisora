@@ -1476,6 +1476,79 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.suggested_counterparty_account, "320.9999999999")
         self.assertEqual([line["account_code"] for line in result.draft_lines], ["153.01.001", "191.20", "320.9999999999"])
 
+    def test_invoice_draft_descriptions_come_from_chart_account_names(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="chart-name-descriptions.pdf",
+            provider_hint="Rexton Medikal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="PUR2026000000033",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1234567890", "9999999999"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Rexton isitme cihazi",),
+        )
+        accounts = [
+            ChartAccount("153.01.001", "153.01.001", "Rexton stok hesabi", is_detail_account=True),
+            ChartAccount("191.01.020", "191.01.020", "Rexton indirilecek KDV 20", is_detail_account=True),
+            ChartAccount("320.01.015", "320.01.015", "Rexton Medikal cari", is_detail_account=True, tax_id="9999999999"),
+            ChartAccount("120.01.001", "120.01.001", "Alici cari", is_detail_account=True),
+            ChartAccount("600.01.020", "600.01.020", "Satislar 20", is_detail_account=True),
+            ChartAccount("391.01.020", "391.01.020", "Hesaplanan KDV 20", is_detail_account=True),
+            ChartAccount("102.01", "102.01", "Banka", is_detail_account=True),
+        ]
+        selection = select_accounts("chart.xlsx", accounts)
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        counterparty = CounterpartyMatch(
+            account_code="320.01.015",
+            account_name="Rexton Medikal cari",
+            confidence=100,
+            match_reason="tax_id_exact",
+            requires_review=False,
+        )
+
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            counterparty,
+            classification_override=ProductClassification(
+                raw_line="Rexton isitme cihazi",
+                category="hearing_aid",
+                confidence=95,
+                evidence=("test_stock_treatment",),
+            ),
+            processing_mode="controlled_automation",
+        )
+
+        self.assertEqual(
+            result.draft_lines,
+            (
+                {"account_code": "153.01.001", "description": "Rexton stok hesabi", "debit": "1000.00", "credit": "0.00"},
+                {"account_code": "191.01.020", "description": "Rexton indirilecek KDV 20", "debit": "200.00", "credit": "0.00"},
+                {"account_code": "320.01.015", "description": "Rexton Medikal cari", "debit": "0.00", "credit": "1200.00"},
+            ),
+        )
+
     def test_purchase_intake_handles_supplier_perspective_sales_pdf(self) -> None:
         invoice = ParsedInvoice(
             file_name="purchase-tab.pdf",
@@ -2161,11 +2234,11 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(
             result.draft_lines,
             (
-                {"account_code": "120.46141426750", "description": "Yeni cari onerisi - Alici cari", "debit": "27000.00", "credit": "0.00"},
-                {"account_code": "600.01.010", "description": "Satis KDV 10.00%", "debit": "0.00", "credit": "9090.91"},
-                {"account_code": "391.01.010", "description": "Hesaplanan KDV 10.00%", "debit": "0.00", "credit": "909.09"},
-                {"account_code": "600.01.020", "description": "Satis KDV 20.00%", "debit": "0.00", "credit": "14166.67"},
-                {"account_code": "391.01.020", "description": "Hesaplanan KDV 20.00%", "debit": "0.00", "credit": "2833.33"},
+                {"account_code": "120.46141426750", "description": "", "debit": "27000.00", "credit": "0.00"},
+                {"account_code": "600.01.010", "description": "Yuzde 10 Satislar", "debit": "0.00", "credit": "9090.91"},
+                {"account_code": "391.01.010", "description": "Yuzde 10 Hesaplanan KDV", "debit": "0.00", "credit": "909.09"},
+                {"account_code": "600.01.020", "description": "Yuzde 20 Satislar", "debit": "0.00", "credit": "14166.67"},
+                {"account_code": "391.01.020", "description": "Yuzde 20 Hesaplanan KDV", "debit": "0.00", "credit": "2833.33"},
             ),
         )
         self.assertIn("counterparty_missing", result.review_reason_codes)
@@ -2342,11 +2415,11 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(
             result.draft_lines,
             (
-                {"account_code": "153.01.001", "description": "Gider KDV 10.00%", "debit": "9090.91", "credit": "0.00"},
-                {"account_code": "191.01.010", "description": "Indirilecek KDV 10.00%", "debit": "909.09", "credit": "0.00"},
-                {"account_code": "153.01.001", "description": "Gider KDV 20.00%", "debit": "14166.67", "credit": "0.00"},
-                {"account_code": "191.01.020", "description": "Indirilecek KDV 20.00%", "debit": "2833.33", "credit": "0.00"},
-                {"account_code": "320.01", "description": "Satici cari", "debit": "0.00", "credit": "27000.00"},
+                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "9090.91", "credit": "0.00"},
+                {"account_code": "191.01.010", "description": "Indirilecek KDV %10", "debit": "909.09", "credit": "0.00"},
+                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "14166.67", "credit": "0.00"},
+                {"account_code": "191.01.020", "description": "Indirilecek KDV %20", "debit": "2833.33", "credit": "0.00"},
+                {"account_code": "320.01", "description": "Tedarikci A", "debit": "0.00", "credit": "27000.00"},
             ),
         )
         self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)

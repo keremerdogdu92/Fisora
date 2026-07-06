@@ -7,6 +7,16 @@ export type DraftLine = {
   credit: string;
 };
 
+export type ChartAccountOption = {
+  code: string;
+  name: string;
+  isDetail: boolean;
+  taxId: string;
+  taxOffice: string;
+  iban: string;
+  searchText: string;
+};
+
 export type AccountCandidate = {
   code: string;
   name: string;
@@ -168,6 +178,7 @@ export type PilotDocument = {
   counterpartyConfidence: number;
   reviewReasons: string[];
   riskFlags: string[];
+  chartAccounts: ChartAccountOption[];
   draftLines: DraftLine[];
   statementLines: StatementLineReview[];
   statementEntries: StatementEntryReview[];

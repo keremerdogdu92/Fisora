@@ -1,3 +1,5 @@
+const { normalizeChartAccountOptions } = require("./portal-account-combobox");
+
 function trimSlashes(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
@@ -379,6 +381,7 @@ function processedBackendDocument(document, workspace, client) {
   const uploadedDocument = safeList(workspace?.uploaded_documents).find((item) => safeText(item?.document_ref) === documentRef) || {};
   const originalDocumentRef = safeText(uploadedDocument?.document_ref || documentRef);
   const intakeSource = uploadedDocument?.intake_category || result.intake_category || document?.intake_category || result.invoice_type || document?.document_type;
+  const chartAccounts = normalizeChartAccountOptions(safeList(workspace?.chart_accounts?.accounts));
   return {
     id: documentRef,
     clientId: client.clientId,
@@ -423,6 +426,7 @@ function processedBackendDocument(document, workspace, client) {
     exportGateReason: safeText(result.export_gate_reason),
     draftStatus: safeText(result.draft_status, safeList(result.draft_lines).length ? "draft_ready" : "manual_draft_required"),
     draftConfidence: safeNumber(result.draft_confidence),
+    chartAccounts,
     primarySuggestion: result.primary_suggestion && typeof result.primary_suggestion === "object" ? result.primary_suggestion : {},
     reviewBlockers: safeList(result.review_blockers).map(String),
     automationEligibility: safeText(result.automation_eligibility),
@@ -467,6 +471,7 @@ function pendingBackendDocument(document, workspace, client) {
   const documentRef = safeText(document?.document_ref || document?.document_id || document?.original_file_name);
   const job = safeList(workspace?.processing_jobs).find((item) => safeText(item?.document_ref) === documentRef) || {};
   const documentType = safeText(document?.document_type || job.document_type, "invoice");
+  const chartAccounts = normalizeChartAccountOptions(safeList(workspace?.chart_accounts?.accounts));
   return {
     id: documentRef,
     clientId: client.clientId,
@@ -507,6 +512,7 @@ function pendingBackendDocument(document, workspace, client) {
     deterministicSummary: safeText(job.parser_kind, "queued"),
     exportGateReason: "İşleme ve müşavir kontrolü tamamlanmadan çıktıya alınmaz.",
     draftStatus: "processing",
+    chartAccounts,
     accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
     accountantExplanation: "Belge henuz muhasebe gerekcesi uretmedi.",
     aiQualityScorecard: {},

@@ -6,6 +6,7 @@ import type {
   PilotDocument,
   ReviewData,
 } from "./portal-types";
+import { normalizeChartAccountOptions } from "./portal-account-combobox";
 import { inferIntakeCategory, toIntakeCategory } from "./portal-formatters";
 import {
   normalizeRulePrompt,
@@ -89,6 +90,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Çıktı listesine alınabilir." : "Müşavir kontrolü gerekiyor."),
       draftStatus: Array.isArray(row.draftLines) && row.draftLines.length ? "draft_ready" : "manual_draft_required",
       draftConfidence: safeNumber(rowRecord.draftConfidence ?? rowRecord.draft_confidence),
+      chartAccounts: normalizeChartAccountOptions(Array.isArray(rowRecord.chartAccounts) ? rowRecord.chartAccounts : []),
       primarySuggestion: (rowRecord.primarySuggestion ?? rowRecord.primary_suggestion ?? {}) as Record<string, unknown>,
       reviewBlockers: Array.isArray(rowRecord.reviewBlockers)
         ? (rowRecord.reviewBlockers as unknown[]).map(String)
@@ -175,6 +177,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       deterministicSummary: "İşleme sonucu hazırlanıyor.",
       exportGateReason: "İşleme tamamlanmadan çıktıya eklenemez.",
       draftStatus: "processing",
+      chartAccounts: [],
       accountantSummary: "Belge alındı; fiş taslağı işleme kuyruğunda hazırlanacak.",
       accountantExplanation: "Belge henuz muhasebe gerekcesi uretmedi.",
       technicalDetails: {},
@@ -295,6 +298,7 @@ export function normalizePilotData(raw: unknown): PilotData {
         vatRates: Array.isArray(document.vatRates) ? document.vatRates : [],
         reviewReasons: Array.isArray(document.reviewReasons) ? document.reviewReasons : [],
         riskFlags: Array.isArray(document.riskFlags) ? document.riskFlags : [],
+        chartAccounts: Array.isArray(document.chartAccounts) ? document.chartAccounts : [],
         draftLines: Array.isArray(document.draftLines) ? document.draftLines : [],
         statementLines: normalizeStatementLines(document.statementLines),
         statementEntries: normalizeStatementEntries(document.statementEntries),

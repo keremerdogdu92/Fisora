@@ -1155,13 +1155,33 @@ def _mixed_vat_items_from_lines(
     return tuple(items)
 
 
-def _entry_lines(entry: JournalEntry | None) -> tuple[dict[str, str], ...]:
+def _account_names_from_selection(
+    selection: AccountSelection,
+    counterparty_match: CounterpartyMatch | None = None,
+) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for candidates in selection.account_candidates.values():
+        for candidate in candidates:
+            code = str(candidate.get("code") or "").strip()
+            name = str(candidate.get("name") or "").strip()
+            if code and name:
+                names[code] = name
+    if counterparty_match:
+        code = str(counterparty_match.account_code or "").strip()
+        name = str(counterparty_match.account_name or "").strip()
+        if code and name:
+            names.setdefault(code, name)
+    return names
+
+
+def _entry_lines(entry: JournalEntry | None, account_names: dict[str, str] | None = None) -> tuple[dict[str, str], ...]:
     if entry is None:
         return ()
+    names = account_names or {}
     return tuple(
         {
             "account_code": line.account_code,
-            "description": line.description,
+            "description": names.get(line.account_code, ""),
             "debit": f"{line.debit:.2f}",
             "credit": f"{line.credit:.2f}",
         }
@@ -2211,7 +2231,7 @@ def simulate_invoice(
         suggested_counterparty=suggested_counterparty,
         draft_quality=draft_quality,
     )
-    draft_lines = _entry_lines(entry)
+    draft_lines = _entry_lines(entry, _account_names_from_selection(selection, counterparty_match))
     review_blockers = _review_blockers(
         review_reasons=all_reasons,
         deterministic_checks=deterministic_checks,

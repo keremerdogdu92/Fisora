@@ -1362,6 +1362,10 @@ class WorkflowStoreTests(unittest.TestCase):
             [
                 "parse_started",
                 "parse_succeeded",
+                "canonical_extraction_completed",
+                "line_items_extracted",
+                "canonical_validation_failed",
+                "party_resolution_completed",
                 "direction_detected",
                 "vat_summary_parsed",
                 "accounting_explanation_ready",
@@ -1370,8 +1374,8 @@ class WorkflowStoreTests(unittest.TestCase):
             ],
         )
         self.assertEqual(workspace["document_pipeline_events"][1]["message_tr"], "Belge parse edildi.")
-        self.assertIn("Belge muhasebe", workspace["document_pipeline_events"][5]["message_tr"])
-        self.assertIn("doldu", workspace["document_pipeline_events"][5]["message_tr"])
+        self.assertIn("Belge muhasebe", workspace["document_pipeline_events"][9]["message_tr"])
+        self.assertIn("doldu", workspace["document_pipeline_events"][9]["message_tr"])
 
     def test_processing_worker_records_ai_decision_events_and_turkish_explanation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

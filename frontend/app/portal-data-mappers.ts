@@ -86,6 +86,14 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       counterpartyTaxId: safeText(row.counterpartyTaxId ?? rowRecord.counterparty_tax_id),
       counterpartyTitle: safeText(row.counterpartyTitle ?? rowRecord.counterparty_title),
       counterpartyIdentityKey: safeText(row.counterpartyIdentityKey ?? rowRecord.counterparty_identity_key),
+      canonicalLineCount: safeNumber(row.canonicalLineCount ?? rowRecord.canonical_line_count),
+      canonicalValidationStatus: safeText(row.canonicalValidationStatus ?? rowRecord.canonical_validation_status),
+      canonicalValidationReasons: Array.isArray(row.canonicalValidationReasons)
+        ? row.canonicalValidationReasons.map(String)
+        : Array.isArray(rowRecord.canonical_validation_reasons)
+          ? rowRecord.canonical_validation_reasons.map(String)
+          : [],
+      canonicalExtractionAiUsed: Boolean(row.canonicalExtractionAiUsed ?? rowRecord.canonical_extraction_ai_used),
       deterministicSummary: (row.deterministicChecks ?? []).join(", ") || (row.isBalanced ? "balanced_entry" : "denge kontrolü gerekli"),
       exportGateReason: safeText(row.exportGateReason, status === "export_ready" ? "Çıktı listesine alınabilir." : "Müşavir kontrolü gerekiyor."),
       draftStatus: Array.isArray(row.draftLines) && row.draftLines.length ? "draft_ready" : "manual_draft_required",

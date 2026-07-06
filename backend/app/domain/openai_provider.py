@@ -7,6 +7,7 @@ import httpx
 
 from app.domain.ai_capacity import normalize_cerebras_rate_limit_headers, normalize_groq_rate_limit_headers
 from app.domain.ai_classification import AiClassificationRequest
+from app.domain.canonical_invoices import CanonicalExtractionRequest
 from app.domain.statement_ai_suggestions import StatementAiSuggestionRequest
 
 
@@ -35,6 +36,13 @@ class OpenAiAccountingProvider:
         "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
         "Kanuni KDV ve hesap ailesi kurallarini ezme. "
         "Export izni verme; bu cikti sadece mustavir review taslagidir."
+    )
+    canonical_extraction_instructions = (
+        "Fatura PDF metni veya tablo ciktisini UBL benzeri canonical JSON'a ceviren parser yardimcisisin. "
+        "Satici ve alici taraflari, fatura satirlarini, KDV ozetini ve toplam alanlarini yalniz verilen metinden cikar. "
+        "Urun/hizmet anlamini sirket adindan tahmin etme; line_items sadece fatura satirlarindan gelsin. "
+        "Hesap kodu, muhasebe onayi, export karari veya yeni cari kodu uretme. "
+        "Emin olmadigin alanlari bos string veya bos liste birak ve evidence alaninda metin/bolge ipucu ver."
     )
     statement_suggestion_instructions = (
         "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
@@ -68,6 +76,15 @@ class OpenAiAccountingProvider:
         return self._post_structured_json(
             schema_name="fisora_invoice_ai_draft",
             instructions=self.product_classification_instructions,
+            user_payload=payload,
+            schema=payload["output_schema"],
+        )
+
+    def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
+        payload = request.to_schema_payload()
+        return self._post_structured_json(
+            schema_name="fisora_invoice_canonical_extraction",
+            instructions=self.canonical_extraction_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
         )
@@ -193,6 +210,15 @@ class ChatCompletionsAccountingProvider:
             schema=payload["output_schema"],
         )
 
+    def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
+        payload = request.to_schema_payload()
+        return self._post_structured_json(
+            schema_name="fisora_invoice_canonical_extraction",
+            instructions=self.canonical_extraction_instructions,
+            user_payload=payload,
+            schema=payload["output_schema"],
+        )
+
     def suggest_statement_line(self, request: StatementAiSuggestionRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
         return self._post_structured_json(
@@ -263,10 +289,17 @@ class FallbackAccountingProvider:
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         return self._call("classify_product", request)
 
+    def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
+        return self._call("extract_invoice_canonical", request)
+
     def suggest_statement_line(self, request: StatementAiSuggestionRequest) -> dict[str, Any]:
         return self._call("suggest_statement_line", request)
 
-    def _call(self, method_name: str, request: AiClassificationRequest | StatementAiSuggestionRequest) -> dict[str, Any]:
+    def _call(
+        self,
+        method_name: str,
+        request: AiClassificationRequest | CanonicalExtractionRequest | StatementAiSuggestionRequest,
+    ) -> dict[str, Any]:
         errors: list[str] = []
         for provider in self.providers:
             try:

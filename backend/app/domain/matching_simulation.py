@@ -167,6 +167,10 @@ class SimulatedInvoiceResult:
     ai_retry_reason: str = ""
     static_fallback_account: str = ""
     static_fallback_suppressed: bool = False
+    canonical_line_count: int = 0
+    canonical_validation_status: str = ""
+    canonical_validation_reasons: tuple[str, ...] = ()
+    canonical_extraction_ai_used: bool = False
 
 
 @dataclass(frozen=True)
@@ -1196,7 +1200,7 @@ def _normalize_processing_mode(mode: str | None) -> ProcessingMode:
 
 
 def _product_line_hint(invoice: ParsedInvoice) -> str:
-    return invoice.line_items[0] if invoice.line_items else invoice.provider_hint or invoice.invoice_type or invoice.file_name
+    return invoice.line_items[0] if invoice.line_items else ""
 
 
 def _ai_policy_from_classifier(product_classifier: ProductClassifier | None) -> AiClassificationPolicy:
@@ -1473,6 +1477,25 @@ def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
     )
 
 
+def _line_items_missing_relevance() -> BusinessRelevance:
+    classification = ProductClassification(
+        raw_line="",
+        category="bilinmeyen",
+        confidence=0,
+        evidence=("line_items_missing",),
+    )
+    return BusinessRelevance(
+        status="supheli",
+        confidence=0,
+        reason="Fatura satiri okunamadigi icin urun/hizmet anlamlandirilamadi.",
+        evidence=("line_items_missing",),
+        classification=classification,
+        relation="weak_match",
+        account_treatment="manual_review",
+        requires_accountant_review=True,
+    )
+
+
 def _deterministic_checks(
     *,
     entry: JournalEntry | None,
@@ -1722,6 +1745,16 @@ def simulate_invoice(
         tax_id=counterparty_tax_id,
         title=counterparty_title,
     )
+    canonical_invoice = getattr(invoice, "canonical_invoice", None)
+    canonical_validation = getattr(canonical_invoice, "validation", None)
+    canonical_line_count = (
+        len(tuple(getattr(canonical_invoice, "line_items", ()) or ()))
+        if canonical_invoice
+        else len(invoice.line_items)
+    )
+    canonical_validation_status = str(getattr(canonical_validation, "status", "") or "")
+    canonical_validation_reasons = tuple(str(reason) for reason in getattr(canonical_validation, "reason_codes", ()) or ())
+    canonical_extraction_ai_used = bool(getattr(canonical_invoice, "ai_used", False)) if canonical_invoice else False
     supplier_account = _selected_purchase_supplier_account(
         selection=selection,
         suggested_counterparty=suggested_counterparty if direction != "sales" else "",
@@ -1732,15 +1765,20 @@ def simulate_invoice(
     selected_sales_vat_account = ""
     selected_customer_account = ""
     raw_line = _product_line_hint(invoice)
+    line_items_missing = not raw_line.strip()
     relevance = (
-        assess_business_relevance(
-            raw_line,
-            client_profile,
-            supplier_hint=invoice.provider_hint,
-            classification=classification_override,
+        _line_items_missing_relevance()
+        if line_items_missing
+        else (
+            assess_business_relevance(
+                raw_line,
+                client_profile,
+                supplier_hint=invoice.provider_hint,
+                classification=classification_override,
+            )
+            if client_profile
+            else _not_assessed_relevance(raw_line)
         )
-        if client_profile
-        else _not_assessed_relevance(raw_line)
     )
     ai_used = False
     ai_provider = ""
@@ -1767,7 +1805,9 @@ def simulate_invoice(
     ai_trace_records: list[dict[str, object]] = []
     ai_account_candidate_count = 0
     ai_counterparty_candidate_count = 0
-    if client_profile and product_classifier and ai_gate.needs_ai and classification_override is None:
+    if line_items_missing:
+        ai_skipped_reason = "line_items_missing"
+    elif client_profile and product_classifier and ai_gate.needs_ai and classification_override is None:
         policy = _ai_policy_from_classifier(product_classifier)
         base_context = _ai_context(
             invoice=invoice,
@@ -1930,6 +1970,8 @@ def simulate_invoice(
     hearing_device_vat_review = direction == "sales" and _sales_hearing_device_vat_review_needed(invoice)
     if hearing_device_vat_review:
         reasons = tuple(dict.fromkeys((*reasons, "hearing_device_vat_should_be_zero")))
+    if line_items_missing:
+        reasons = tuple(dict.fromkeys((*reasons, "line_items_missing")))
 
     if static_fallback_suppressed:
         reasons = tuple(dict.fromkeys((*reasons, "ai_retry_required")))
@@ -2368,6 +2410,10 @@ def simulate_invoice(
         ai_retry_reason=ai_retry_reason,
         static_fallback_account=static_fallback_account,
         static_fallback_suppressed=static_fallback_suppressed,
+        canonical_line_count=canonical_line_count,
+        canonical_validation_status=canonical_validation_status,
+        canonical_validation_reasons=canonical_validation_reasons,
+        canonical_extraction_ai_used=canonical_extraction_ai_used,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",
@@ -2565,6 +2611,10 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "directionUncertainty": result.direction_uncertainty,
                     "directionEvidence": list(result.direction_evidence),
                     "directionConflict": result.direction_conflict,
+                    "canonicalLineCount": result.canonical_line_count,
+                    "canonicalValidationStatus": result.canonical_validation_status,
+                    "canonicalValidationReasons": list(result.canonical_validation_reasons),
+                    "canonicalExtractionAiUsed": result.canonical_extraction_ai_used,
                     "productLineHint": result.product_line_hint,
                     "productCategory": result.product_category,
                     "productConfidence": result.product_confidence,

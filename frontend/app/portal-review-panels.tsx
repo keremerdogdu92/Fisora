@@ -350,6 +350,16 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
           <Info label="Tarih" value={document.issueDate || "-"} />
           <Info label="Tutar" value={document.amount || "-"} />
           <Info label="KDV" value={document.vatRates.length ? document.vatRates.join(", ") : "-"} />
+          <Info label="Satir" value={typeof document.canonicalLineCount === "number" ? String(document.canonicalLineCount) : "-"} />
+          <Info
+            label="Okuma"
+            value={
+              document.canonicalValidationStatus
+                ? `${document.canonicalValidationStatus}${document.canonicalValidationReasons?.length ? ` / ${document.canonicalValidationReasons.join(", ")}` : ""}`
+                : "-"
+            }
+          />
+          <Info label="AI okuma" value={document.canonicalExtractionAiUsed ? "Kullanildi" : "Yok"} />
           <Info label="Sağlayıcı" value={document.provider || document.aiProvider || "-"} />
           <Info label="Orijinal ref" value={document.originalDocumentRef || "-"} />
         </aside>

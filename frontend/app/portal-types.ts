@@ -148,6 +148,10 @@ export type PilotDocument = {
   counterpartyTaxId?: string;
   counterpartyTitle?: string;
   counterpartyIdentityKey?: string;
+  canonicalLineCount?: number;
+  canonicalValidationStatus?: string;
+  canonicalValidationReasons?: string[];
+  canonicalExtractionAiUsed?: boolean;
   deterministicSummary: string;
   exportGateReason: string;
   draftStatus: string;
@@ -395,6 +399,10 @@ export type ReviewData = {
     riskFlags?: string[];
     parseNotes?: string[];
     reviewReasonCodes?: string[];
+    canonicalLineCount?: number;
+    canonicalValidationStatus?: string;
+    canonicalValidationReasons?: string[];
+    canonicalExtractionAiUsed?: boolean;
     productLineHint?: string;
     productCategory?: string;
     productConfidence?: number;

@@ -4,10 +4,22 @@ import csv
 import json
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from app.domain.canonical_invoices import (
+    CanonicalInvoice,
+    CanonicalExtractionPolicy,
+    CanonicalExtractionRequest,
+    CanonicalInvoiceHeader,
+    CanonicalInvoiceLine,
+    CanonicalInvoiceParty,
+    CanonicalInvoiceTotals,
+    CanonicalVatSummaryLine,
+    canonical_invoice_from_ai_payload,
+    with_validation,
+)
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text, invoice_line_hints
 from app.domain.vat_splits import VatSplitLine, extract_pdf_vat_split
@@ -106,6 +118,7 @@ class ParsedInvoice:
     vat_split_status: str = ""
     vat_split_lines: tuple[VatSplitLine, ...] = ()
     vat_split_evidence: tuple[str, ...] = ()
+    canonical_invoice: CanonicalInvoice | None = None
 
 
 def extract_pdf_text(path: Path) -> tuple[int, str, tuple[str, ...]]:
@@ -580,7 +593,187 @@ def build_route(risk_flags: tuple[str, ...], parsed: dict[str, str]) -> tuple[st
     return "journal_candidate", tuple(notes)
 
 
-def parse_pdf_invoice(path: Path) -> ParsedInvoice:
+def _canonical_line_from_invoice_line(line: InvoiceLine) -> CanonicalInvoiceLine:
+    return CanonicalInvoiceLine(
+        description=line.description,
+        taxable_amount=line.taxable_amount,
+        vat_rate=line.vat_rate,
+        tax_amount=line.tax_amount,
+        gross_amount=line.gross_amount or line.amount_hint,
+        evidence=(line.source or "pdf_text",),
+    )
+
+
+def build_pdf_canonical_invoice(
+    *,
+    issuer_title: str,
+    issuer_tax_id: str,
+    recipient_title: str,
+    recipient_tax_id: str,
+    invoice_no: str,
+    issue_date: str,
+    ettn: str,
+    scenario: str,
+    invoice_type: str,
+    line_item_details: tuple[InvoiceLine, ...],
+    vat_split_lines: tuple[VatSplitLine, ...],
+    parsed_totals: dict[str, str],
+    ai_used: bool = False,
+    extraction_notes: tuple[str, ...] = (),
+) -> CanonicalInvoice:
+    invoice = CanonicalInvoice(
+        source="pdf_text",
+        supplier_party=CanonicalInvoiceParty(
+            title=issuer_title,
+            tax_id=issuer_tax_id,
+            evidence=("pdf_party:issuer",) if issuer_title or issuer_tax_id else (),
+        ),
+        customer_party=CanonicalInvoiceParty(
+            title=recipient_title,
+            tax_id=recipient_tax_id,
+            evidence=("pdf_party:recipient",) if recipient_title or recipient_tax_id else (),
+        ),
+        header=CanonicalInvoiceHeader(
+            invoice_no=invoice_no,
+            issue_date=issue_date,
+            ettn=ettn,
+            scenario=scenario,
+            invoice_type=invoice_type,
+            evidence=("pdf_header",),
+        ),
+        line_items=tuple(_canonical_line_from_invoice_line(line) for line in line_item_details),
+        vat_summary=tuple(
+            CanonicalVatSummaryLine(
+                rate=line.rate,
+                taxable_amount=line.taxable_amount,
+                tax_amount=line.tax_amount,
+                evidence=line.evidence or (line.source,),
+            )
+            for line in vat_split_lines
+        ),
+        totals=CanonicalInvoiceTotals(
+            goods_services_total=parsed_totals.get("goods_services_total", ""),
+            vat_total=parsed_totals.get("vat_total", ""),
+            special_tax_total=parsed_totals.get("special_tax_total", ""),
+            tax_inclusive_total=parsed_totals.get("tax_inclusive_total", ""),
+            payable_total=parsed_totals.get("payable_total", ""),
+            evidence=("pdf_totals",),
+        ),
+        ai_used=ai_used,
+        extraction_notes=extraction_notes,
+    )
+    return with_validation(invoice)
+
+
+def _pdf_canonical_ai_payload(
+    *,
+    canonical_invoice: CanonicalInvoice,
+    parsed_identity: dict[str, str],
+    parsed_totals: dict[str, str],
+    line_item_details: tuple[InvoiceLine, ...],
+    vat_split: object,
+) -> dict[str, object]:
+    return {
+        "invoice_no": parsed_identity.get("invoice_no", ""),
+        "issue_date": parsed_identity.get("issue_date", ""),
+        "line_count": len(line_item_details),
+        "validation_status": canonical_invoice.validation.status,
+        "validation_reasons": list(canonical_invoice.validation.reason_codes),
+        "totals": dict(parsed_totals),
+        "vat_split_status": str(getattr(vat_split, "status", "") or ""),
+        "vat_summary": [
+            {
+                "rate": line.rate,
+                "taxable_amount": line.taxable_amount,
+                "tax_amount": line.tax_amount,
+                "source": line.source,
+            }
+            for line in getattr(vat_split, "lines", ()) or ()
+        ],
+        "line_items": [
+            {
+                "description": line.description,
+                "vat_rate": line.vat_rate,
+                "taxable_amount": line.taxable_amount,
+                "tax_amount": line.tax_amount,
+                "gross_amount": line.gross_amount,
+            }
+            for line in line_item_details
+        ],
+    }
+
+
+def _maybe_complete_canonical_with_ai(
+    *,
+    provider: object | None,
+    policy: CanonicalExtractionPolicy | None,
+    document_text: str,
+    deterministic: CanonicalInvoice,
+    parsed_identity: dict[str, str],
+    parsed_totals: dict[str, str],
+    line_item_details: tuple[InvoiceLine, ...],
+    vat_split: object,
+    client_identity: dict[str, object] | None,
+) -> CanonicalInvoice:
+    effective_policy = policy or CanonicalExtractionPolicy()
+    if (
+        provider is None
+        or not effective_policy.enabled
+        or effective_policy.max_provider_calls <= 0
+        or deterministic.validation.status == "valid"
+    ):
+        return deterministic
+    extractor = getattr(provider, "extract_invoice_canonical", None)
+    if extractor is None:
+        return deterministic
+    try:
+        payload = extractor(
+            CanonicalExtractionRequest(
+                document_text=document_text,
+                deterministic_payload=_pdf_canonical_ai_payload(
+                    canonical_invoice=deterministic,
+                    parsed_identity=parsed_identity,
+                    parsed_totals=parsed_totals,
+                    line_item_details=line_item_details,
+                    vat_split=vat_split,
+                ),
+                client_identity=client_identity or {},
+                max_input_chars=effective_policy.max_input_chars,
+            )
+        )
+        candidate = canonical_invoice_from_ai_payload(payload)
+    except Exception as exc:  # noqa: BLE001 - parser fallback must keep deterministic extraction
+        return replace(
+            deterministic,
+            extraction_notes=tuple(dict.fromkeys((*deterministic.extraction_notes, f"canonical_ai_error:{type(exc).__name__}"))),
+        )
+    if candidate.validation.status == "valid":
+        return replace(
+            candidate,
+            header=deterministic.header,
+            extraction_notes=tuple(dict.fromkeys((*deterministic.extraction_notes, "canonical_ai_used"))),
+        )
+    return replace(
+        deterministic,
+        extraction_notes=tuple(
+            dict.fromkeys(
+                (
+                    *deterministic.extraction_notes,
+                    "canonical_ai_rejected",
+                    *candidate.validation.reason_codes,
+                )
+            )
+        ),
+    )
+
+
+def parse_pdf_invoice(
+    path: Path,
+    *,
+    canonical_extraction_provider: object | None = None,
+    canonical_extraction_policy: CanonicalExtractionPolicy | None = None,
+    client_identity: dict[str, object] | None = None,
+) -> ParsedInvoice:
     page_count, text, extraction_notes = extract_pdf_text(path)
     stripped_text = text.strip()
     edge_summary = summarize_invoice_edge_cases(path.name, text, extracted_char_count=len(stripped_text))
@@ -609,16 +802,45 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
     line_items = invoice_line_hints(line_item_details)
     issuer_title, issuer_tax_id, recipient_title, recipient_tax_id = extract_pdf_party_details_from_text(text)
     invoice_type = extract_invoice_type(text)
+    scenario = extract_scenario(text)
+    invoice_no = parsed_identity["invoice_no"]
+    ettn = extract_ettn(text) or edge_summary.ettn
+    canonical_invoice = build_pdf_canonical_invoice(
+        issuer_title=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,
+        issuer_tax_id=issuer_tax_id,
+        recipient_title=recipient_title,
+        recipient_tax_id=recipient_tax_id,
+        invoice_no=invoice_no,
+        issue_date=parsed_identity["issue_date"],
+        ettn=ettn,
+        scenario=scenario,
+        invoice_type=invoice_type,
+        line_item_details=line_item_details,
+        vat_split_lines=vat_split.lines,
+        parsed_totals=parsed_totals,
+        extraction_notes=tuple(dict.fromkeys((*extraction_notes, *route_notes, *payable_notes))),
+    )
+    canonical_invoice = _maybe_complete_canonical_with_ai(
+        provider=canonical_extraction_provider,
+        policy=canonical_extraction_policy,
+        document_text=text,
+        deterministic=canonical_invoice,
+        parsed_identity=parsed_identity,
+        parsed_totals=parsed_totals,
+        line_item_details=line_item_details,
+        vat_split=vat_split,
+        client_identity=client_identity,
+    )
     return ParsedInvoice(
         file_name=path.name,
         provider_hint=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,
         page_count=page_count,
         text_extractable=len(stripped_text) >= 100,
         extracted_char_count=len(stripped_text),
-        scenario=extract_scenario(text),
+        scenario=scenario,
         invoice_type=invoice_type,
-        invoice_no=parsed_identity["invoice_no"],
-        ettn=extract_ettn(text) or edge_summary.ettn,
+        invoice_no=invoice_no,
+        ettn=ettn,
         issue_date=parsed_identity["issue_date"],
         tax_ids=extract_tax_ids(text),
         vat_rates=extract_vat_rates(text),
@@ -641,6 +863,7 @@ def parse_pdf_invoice(path: Path) -> ParsedInvoice:
         vat_split_status=vat_split.status,
         vat_split_lines=vat_split.lines,
         vat_split_evidence=vat_split.evidence,
+        canonical_invoice=canonical_invoice,
     )
 
 

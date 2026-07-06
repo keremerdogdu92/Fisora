@@ -796,6 +796,290 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(lines[1].taxable_amount, "545,46")
         self.assertEqual(lines[1].tax_amount, "54,55")
 
+    def test_canonical_invoice_validation_accepts_balanced_line_vat_and_totals(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceHeader,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceParty,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            validate_canonical_invoice,
+        )
+
+        invoice = CanonicalInvoice(
+            source="xml",
+            supplier_party=CanonicalInvoiceParty(title="Medikal Tedarik", tax_id="9999999999"),
+            customer_party=CanonicalInvoiceParty(title="ORHAN ELIBOL", tax_id="1234567890"),
+            header=CanonicalInvoiceHeader(invoice_no="AAA2026000000001", issue_date="01.06.2026"),
+            line_items=(
+                CanonicalInvoiceLine(
+                    description="Isitme cihazi",
+                    taxable_amount="1000.00",
+                    vat_rate="20",
+                    tax_amount="200.00",
+                    gross_amount="1200.00",
+                    evidence=("xml:InvoiceLine[1]",),
+                ),
+            ),
+            vat_summary=(CanonicalVatSummaryLine(rate="20", taxable_amount="1000.00", tax_amount="200.00"),),
+            totals=CanonicalInvoiceTotals(
+                goods_services_total="1000.00",
+                vat_total="200.00",
+                tax_inclusive_total="1200.00",
+                payable_total="1200.00",
+            ),
+        )
+
+        validation = validate_canonical_invoice(invoice)
+
+        self.assertEqual(validation.status, "valid")
+        self.assertEqual(validation.reason_codes, ())
+
+    def test_canonical_invoice_validation_flags_missing_lines_before_product_classification(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceHeader,
+            CanonicalInvoiceParty,
+            CanonicalInvoiceTotals,
+            validate_canonical_invoice,
+        )
+
+        invoice = CanonicalInvoice(
+            source="pdf_text",
+            supplier_party=CanonicalInvoiceParty(title="Rexton Medikal", tax_id="9999999999"),
+            customer_party=CanonicalInvoiceParty(title="ORHAN ELIBOL", tax_id="1234567890"),
+            header=CanonicalInvoiceHeader(invoice_no="AAA2026000000002", issue_date="01.06.2026"),
+            line_items=(),
+            vat_summary=(),
+            totals=CanonicalInvoiceTotals(payable_total="1200.00"),
+        )
+
+        validation = validate_canonical_invoice(invoice)
+
+        self.assertEqual(validation.status, "invalid")
+        self.assertIn("line_items_missing", validation.reason_codes)
+
+    def test_product_classification_does_not_infer_product_from_supplier_without_lines(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="supplier-name-only.pdf",
+            provider_hint="Rexton Medikal",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="AAA2026000000003",
+            ettn="",
+            issue_date="01.06.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=(),
+            line_item_details=(),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.02.001",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="ORHAN ELIBOL",
+            tax_id="1234567890",
+            activity_description="Odyoloji ve isitme cihazi satis hizmetleri",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+
+        self.assertEqual(result.product_line_hint, "")
+        self.assertEqual(result.product_category, "bilinmeyen")
+        self.assertEqual(result.product_confidence, 0)
+        self.assertIn("line_items_missing", result.review_reason_codes)
+        self.assertIn("line_items_missing", result.business_relevance_evidence)
+
+    def test_simulation_exposes_canonical_extraction_summary(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceHeader,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceParty,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+
+        canonical = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                supplier_party=CanonicalInvoiceParty(title="Medikal Tedarik", tax_id="9999999999"),
+                customer_party=CanonicalInvoiceParty(title="ORHAN ELIBOL", tax_id="1234567890"),
+                header=CanonicalInvoiceHeader(invoice_no="AAA2026000000006", issue_date="01.06.2026"),
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Isitme cihazi",
+                        taxable_amount="1000.00",
+                        vat_rate="20",
+                        tax_amount="200.00",
+                        gross_amount="1200.00",
+                    ),
+                ),
+                vat_summary=(CanonicalVatSummaryLine(rate="20", taxable_amount="1000.00", tax_amount="200.00"),),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="1000.00",
+                    vat_total="200.00",
+                    tax_inclusive_total="1200.00",
+                    payable_total="1200.00",
+                ),
+                ai_used=True,
+            )
+        )
+        invoice = ParsedInvoice(
+            file_name="canonical-summary.pdf",
+            provider_hint="Medikal Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="AAA2026000000006",
+            ettn="",
+            issue_date="01.06.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Isitme cihazi",),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.02.001",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="ORHAN ELIBOL",
+            tax_id="1234567890",
+            activity_description="Odyoloji ve isitme cihazi satis hizmetleri",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+
+        self.assertEqual(result.canonical_line_count, 1)
+        self.assertEqual(result.canonical_validation_status, "valid")
+        self.assertEqual(result.canonical_validation_reasons, ())
+        self.assertTrue(result.canonical_extraction_ai_used)
+
+    def test_xml_invoice_populates_canonical_parties_lines_vat_and_totals(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:UBLVersionID>2.1</cbc:UBLVersionID>
+  <cbc:ID>AAA2026000000004</cbc:ID>
+  <cbc:UUID>11111111-2222-3333-4444-555555555555</cbc:UUID>
+  <cbc:IssueDate>2026-06-01</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>SATIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyIdentification><cbc:ID>9999999999</cbc:ID></cac:PartyIdentification>
+      <cac:PartyName><cbc:Name>MEDIKAL TEDARIK A.S.</cbc:Name></cac:PartyName>
+      <cac:PartyLegalEntity><cbc:RegistrationName>MEDIKAL TEDARIK A.S.</cbc:RegistrationName></cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyIdentification><cbc:ID>1234567890</cbc:ID></cac:PartyIdentification>
+      <cac:PartyLegalEntity><cbc:RegistrationName>ORHAN ELIBOL</cbc:RegistrationName></cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="TRY">200.00</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="TRY">1000.00</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="TRY">200.00</cbc:TaxAmount>
+      <cac:TaxCategory><cbc:Percent>20</cbc:Percent></cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="TRY">1000.00</cbc:LineExtensionAmount>
+    <cbc:TaxInclusiveAmount currencyID="TRY">1200.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="TRY">1200.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+  <cac:InvoiceLine>
+    <cbc:ID>1</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="NIU">1</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="TRY">1000.00</cbc:LineExtensionAmount>
+    <cac:TaxTotal>
+      <cbc:TaxAmount currencyID="TRY">200.00</cbc:TaxAmount>
+      <cac:TaxSubtotal>
+        <cbc:TaxableAmount currencyID="TRY">1000.00</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="TRY">200.00</cbc:TaxAmount>
+        <cac:TaxCategory><cbc:Percent>20</cbc:Percent></cac:TaxCategory>
+      </cac:TaxSubtotal>
+    </cac:TaxTotal>
+    <cac:Item><cbc:Name>Isitme cihazi</cbc:Name></cac:Item>
+    <cac:Price><cbc:PriceAmount currencyID="TRY">1000.00</cbc:PriceAmount></cac:Price>
+  </cac:InvoiceLine>
+</Invoice>
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invoice.xml"
+            path.write_text(xml, encoding="utf-8")
+
+            invoice = parse_xml_invoice(path)
+
+        canonical = invoice.canonical_invoice
+        self.assertIsNotNone(canonical)
+        self.assertEqual(canonical.supplier_party.title, "MEDIKAL TEDARIK A.S.")
+        self.assertEqual(canonical.customer_party.tax_id, "1234567890")
+        self.assertEqual(canonical.line_items[0].description, "Isitme cihazi")
+        self.assertEqual(canonical.line_items[0].vat_rate, "20")
+        self.assertEqual(canonical.vat_summary[0].taxable_amount, "1000.00")
+        self.assertEqual(canonical.validation.status, "valid")
+
+    def test_pdf_invoice_populates_canonical_lines_and_vat_summary_from_deterministic_parser(self) -> None:
+        invoice_path = ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "1061386125_AVQ2026000000026.pdf"
+        if not invoice_path.exists():
+            self.skipTest(f"private pilot invoice sample missing: {invoice_path}")
+
+        invoice = parse_pdf_invoice(invoice_path)
+
+        canonical = invoice.canonical_invoice
+        self.assertIsNotNone(canonical)
+        self.assertEqual(canonical.source, "pdf_text")
+        self.assertEqual(canonical.line_items[0].description, "SLIM TAPER")
+        self.assertEqual(canonical.line_items[0].vat_rate, "10")
+        self.assertEqual(canonical.vat_summary[0].rate, "10")
+        self.assertEqual(canonical.validation.status, "valid")
+
     def test_pdf_vat_split_extracts_real_pilot_table_and_summary_evidence(self) -> None:
         cases = [
             (
@@ -4839,6 +5123,65 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("raw_pdf", user_content.lower())
         self.assertEqual(response["suggested_account_code"], "770.01")
         self.assertEqual(response["suggested_counterparty_code"], "320.01.015")
+
+    def test_openai_provider_posts_canonical_invoice_extraction_payload(self) -> None:
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": (
+                                        '{"supplier_party":{"title":"MEDIKAL TEDARIK","tax_id":"9999999999"},'
+                                        '"customer_party":{"title":"ORHAN ELIBOL","tax_id":"1234567890"},'
+                                        '"line_items":[{"description":"Isitme cihazi","taxable_amount":"1000.00",'
+                                        '"vat_rate":"20","tax_amount":"200.00","gross_amount":"1200.00",'
+                                        '"evidence":["pdf line 12"]}],'
+                                        '"vat_summary":[{"rate":"20","taxable_amount":"1000.00","tax_amount":"200.00"}],'
+                                        '"totals":{"goods_services_total":"1000.00","vat_total":"200.00",'
+                                        '"tax_inclusive_total":"1200.00","payable_total":"1200.00"}}'
+                                    ),
+                                }
+                            ]
+                        }
+                    ]
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["json"] = json
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        provider = OpenAiAccountingProvider(api_key="sk-test", model="gpt-5.4-mini", http_client=FakeClient())
+        response = provider.extract_invoice_canonical(
+            CanonicalExtractionRequest(
+                document_text="SATICI MEDIKAL TEDARIK\nSAYIN ORHAN ELIBOL\n1 Isitme cihazi 1000,00 %20 200,00",
+                deterministic_payload={"invoice_no": "AAA2026000000005", "line_count": 0},
+                client_identity={"title": "ORHAN ELIBOL", "tax_id": "1234567890"},
+                max_input_chars=500,
+            )
+        )
+
+        request_payload = captured["json"]
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(request_payload["text"]["format"]["name"], "fisora_invoice_canonical_extraction")
+        user_content = request_payload["input"][1]["content"]
+        self.assertIn("SATICI MEDIKAL TEDARIK", user_content)
+        self.assertIn("output_schema", user_content)
+        self.assertIn("line_items", user_content)
+        self.assertEqual(response["line_items"][0]["description"], "Isitme cihazi")
 
     def test_groq_accounting_provider_posts_openai_compatible_structured_payload(self) -> None:
         captured: dict[str, object] = {}

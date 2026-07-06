@@ -12,6 +12,7 @@ from typing import Any
 from app.domain.ai_classification import AiClassificationPolicy, ProductClassifier, StaticFirstClassifier
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
 from app.domain.business_relevance import ClientProfile, ProductClassification, assess_business_relevance
+from app.domain.canonical_invoices import CanonicalExtractionPolicy
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
@@ -319,6 +320,8 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
     if provider is None:
         return {
             "product_classifier": None,
+            "canonical_extraction_provider": None,
+            "canonical_extraction_policy": CanonicalExtractionPolicy(),
             "statement_ai_provider": None,
             "statement_ai_policy": StatementAiSuggestionPolicy(),
         }
@@ -337,8 +340,16 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         max_input_chars=int(source.get("FISORA_AI_STATEMENT_MAX_INPUT_CHARS", "420")),
         max_provider_calls=int(source.get("FISORA_AI_STATEMENT_MAX_PROVIDER_CALLS", "3")),
     )
+    canonical_policy = CanonicalExtractionPolicy(
+        enabled=source.get("FISORA_AI_CANONICAL_EXTRACTION_ENABLED", "true").strip().lower()
+        not in {"0", "false", "no", "disabled"},
+        max_input_chars=int(source.get("FISORA_AI_CANONICAL_MAX_INPUT_CHARS", "12000")),
+        max_provider_calls=int(source.get("FISORA_AI_CANONICAL_MAX_PROVIDER_CALLS", "1")),
+    )
     return {
         "product_classifier": StaticFirstClassifier(provider=provider, policy=product_policy),
+        "canonical_extraction_provider": provider,
+        "canonical_extraction_policy": canonical_policy,
         "statement_ai_provider": provider,
         "statement_ai_policy": statement_policy,
     }
@@ -603,10 +614,30 @@ def _rebuild_result_with_research(
     return _preserve_ai_fields(rebuilt, result)
 
 
-def _parse_invoice_document(path: Path, document_type: str) -> ParsedInvoice:
+def _canonical_client_identity(workspace: dict[str, Any]) -> dict[str, object]:
+    profile = ((workspace.get("client") or {}).get("profile") or {}) if isinstance(workspace, dict) else {}
+    return {
+        "title": profile.get("display_title") or profile.get("title") or profile.get("legal_name") or "",
+        "tax_id": profile.get("tax_identifier") or profile.get("tax_id") or profile.get("vkn") or profile.get("tckn") or "",
+    }
+
+
+def _parse_invoice_document(
+    path: Path,
+    document_type: str,
+    *,
+    canonical_extraction_provider: object | None = None,
+    canonical_extraction_policy: CanonicalExtractionPolicy | None = None,
+    client_identity: dict[str, object] | None = None,
+) -> ParsedInvoice:
     if document_type == "einvoice_xml" or path.suffix.lower() == ".xml":
         return parse_xml_invoice(path)
-    return parse_pdf_invoice(path)
+    return parse_pdf_invoice(
+        path,
+        canonical_extraction_provider=canonical_extraction_provider,
+        canonical_extraction_policy=canonical_extraction_policy,
+        client_identity=client_identity,
+    )
 
 
 def _intake_direction(value: str) -> str:
@@ -849,6 +880,8 @@ def build_processing_result(
     workspace: dict[str, Any],
     *,
     product_classifier: ProductClassifier | None = None,
+    canonical_extraction_provider: object | None = None,
+    canonical_extraction_policy: CanonicalExtractionPolicy | None = None,
     statement_ai_provider: StatementSuggestionProvider | None = None,
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
 ) -> dict[str, Any]:
@@ -865,7 +898,13 @@ def build_processing_result(
             statement_ai_provider=statement_ai_provider,
             statement_ai_policy=statement_ai_policy,
         )
-    invoice = _parse_invoice_document(path, document_type)
+    invoice = _parse_invoice_document(
+        path,
+        document_type,
+        canonical_extraction_provider=canonical_extraction_provider,
+        canonical_extraction_policy=canonical_extraction_policy,
+        client_identity=_canonical_client_identity(workspace),
+    )
     if not _invoice_has_expected_shape(invoice):
         return _unexpected_document_result(
             document,
@@ -1011,6 +1050,8 @@ def process_next_job_once(
         runtime = (
             {
                 "product_classifier": product_classifier,
+                "canonical_extraction_provider": None,
+                "canonical_extraction_policy": CanonicalExtractionPolicy(),
                 "statement_ai_provider": statement_ai_provider,
                 "statement_ai_policy": statement_ai_policy,
             }
@@ -1033,12 +1074,16 @@ def process_next_job_once(
             job,
             workspace,
             product_classifier=runtime["product_classifier"],
+            canonical_extraction_provider=runtime.get("canonical_extraction_provider"),
+            canonical_extraction_policy=runtime.get("canonical_extraction_policy"),
             statement_ai_provider=runtime["statement_ai_provider"],
             statement_ai_policy=runtime["statement_ai_policy"],
         )
         parse_ms = _duration_ms(parse_start)
         product_provider = getattr(runtime["product_classifier"], "provider", None)
-        if str(result.get("ai_classification_provider") or "") not in {"", "static_rules"}:
+        if str(result.get("ai_classification_provider") or "") not in {"", "static_rules"} or bool(
+            result.get("canonical_extraction_ai_used")
+        ):
             ai_ms = parse_ms
         _record_ai_capacity_snapshot(store, product_provider)
         _record_ai_capacity_snapshot(store, runtime["statement_ai_provider"])
@@ -1050,6 +1095,55 @@ def process_next_job_once(
             {
                 "document_validation_status": str(result.get("document_validation_status") or ""),
                 "product_category": str(result.get("product_category") or ""),
+            },
+        )
+        canonical_line_count = int(result.get("canonical_line_count") or 0)
+        canonical_validation_status = str(result.get("canonical_validation_status") or "")
+        canonical_validation_reasons = list(result.get("canonical_validation_reasons") or [])
+        pipeline_event(
+            "canonical_extraction_completed",
+            "ok" if canonical_validation_status != "invalid" else "warning",
+            "Canonical fatura modeli hazirlandi.",
+            "canonical_extraction_completed",
+            {
+                "line_count": canonical_line_count,
+                "validation_status": canonical_validation_status,
+                "validation_reasons": canonical_validation_reasons,
+                "ai_used": bool(result.get("canonical_extraction_ai_used")),
+            },
+        )
+        pipeline_event(
+            "line_items_extracted" if canonical_line_count > 0 else "line_items_missing",
+            "ok" if canonical_line_count > 0 else "warning",
+            "Fatura satirlari okundu." if canonical_line_count > 0 else "Fatura satirlari okunamadi.",
+            "line_items_extracted" if canonical_line_count > 0 else "line_items_missing",
+            {"line_count": canonical_line_count},
+        )
+        if canonical_validation_status == "invalid":
+            pipeline_event(
+                "canonical_validation_failed",
+                "warning",
+                "Canonical fatura mutabakati saglanamadi.",
+                "canonical_validation_failed",
+                {"validation_reasons": canonical_validation_reasons},
+            )
+        if bool(result.get("canonical_extraction_ai_used")):
+            pipeline_event(
+                "canonical_extraction_ai_used",
+                "ok",
+                "Canonical fatura modeli AI yardimiyla tamamlandi.",
+                "canonical_extraction_ai_used",
+                {"line_count": canonical_line_count},
+            )
+        pipeline_event(
+            "party_resolution_completed",
+            "ok",
+            "Satici/alici ve karsi taraf bilgisi canonical modelden cozuldu.",
+            "party_resolution_completed",
+            {
+                "accounting_direction": str(result.get("accounting_direction") or ""),
+                "counterparty_title": str(result.get("counterparty_title") or ""),
+                "counterparty_tax_id": str(result.get("counterparty_tax_id") or ""),
             },
         )
         if result.get("accounting_direction"):

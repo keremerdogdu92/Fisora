@@ -571,6 +571,24 @@ class DocumentUploadApiTests(unittest.TestCase):
             client.post(
                 "/phase0/store/portal-user",
                 json={
+                    "user_id": "evden-personel",
+                    "display_name": "Evden Personel",
+                    "role": "client_user",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
                     "user_id": "other-user",
                     "display_name": "Baska Kullanici",
                     "role": "client_user",
@@ -593,6 +611,14 @@ class DocumentUploadApiTests(unittest.TestCase):
                 f"/phase0/store/document-file/client-1/{document_ref}",
                 headers={"X-Fisora-User-Id": "mukellef-user"},
             )
+            same_client_staff = client.get(
+                f"/phase0/store/document-file/client-1/{document_ref}",
+                headers={"X-Fisora-User-Id": "evden-personel"},
+            )
+            accountant = client.get(
+                f"/phase0/store/document-file/client-1/{document_ref}",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            )
             denied = client.get(
                 f"/phase0/store/document-file/client-1/{document_ref}",
                 headers={"X-Fisora-User-Id": "other-user"},
@@ -600,6 +626,10 @@ class DocumentUploadApiTests(unittest.TestCase):
 
         self.assertEqual(authorized.status_code, 200)
         self.assertEqual(authorized.content, b"fatura-orijinal")
+        self.assertEqual(same_client_staff.status_code, 200)
+        self.assertEqual(same_client_staff.content, b"fatura-orijinal")
+        self.assertEqual(accountant.status_code, 200)
+        self.assertEqual(accountant.content, b"fatura-orijinal")
         self.assertIn("application/pdf", authorized.headers["content-type"])
         self.assertEqual(denied.status_code, 403)
 

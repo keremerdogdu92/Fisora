@@ -5,7 +5,7 @@ import type { KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
-import { resolveApiBaseUrl } from "./upload-api";
+import { backendAuthHeaders, resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -142,10 +142,12 @@ function hasPendingDirectionConflict(document: PilotDocument) {
 }
 
 function previewAuthHeaders(session: LocalSession | null | undefined, document?: PilotDocument): Record<string, string> {
-  if (session?.sessionToken) return { "X-Fisora-Session": session.sessionToken };
   const userId = session?.userId || document?.uploadedBy || "";
-  const headerUserId = safeHeaderValue(userId);
-  return headerUserId ? { "X-Fisora-User-Id": headerUserId } : {};
+  const headers = backendAuthHeaders({
+    sessionToken: session?.sessionToken || "",
+    userId: safeHeaderValue(userId),
+  });
+  return { ...headers };
 }
 
 function safeHeaderValue(value: string) {

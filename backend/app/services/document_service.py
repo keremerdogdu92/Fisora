@@ -725,6 +725,16 @@ class DocumentService:
             raise HTTPException(status_code=403, detail="document storage path is outside allowed storage") from exc
         file_name = Path(str(document.get("original_file_name") or path.name)).name
         media_type = str(document.get("content_type") or "") or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        document_type = str(document.get("document_type") or "")
+        if path.suffix.lower() == ".xml" or "xml" in media_type.lower() or document_type == "einvoice_xml":
+            from app.domain.ubl_invoice_preview import render_ubl_invoice_preview_html
+
+            return {
+                "path": path,
+                "file_name": file_name,
+                "media_type": "text/html; charset=utf-8",
+                "html": render_ubl_invoice_preview_html(path.read_text(encoding="utf-8")),
+            }
         return {
             "path": path,
             "file_name": file_name,

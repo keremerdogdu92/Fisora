@@ -18,6 +18,7 @@ from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.postgres_workflow_store import PostgresWorkflowStore
 from app.persistence.store_factory import build_workflow_store
+from app.services.document_service import DocumentService
 from app.worker import worker_concurrency_from_env
 from backend.scripts.import_private_intake_manifest import import_manifest
 from app.workflows.document_processing import build_ai_runtime_from_env, build_statement_processing_result, parser_kind_for_document_type, process_queued_documents
@@ -55,6 +56,66 @@ class RaisingProductProvider:
 
 
 class WorkflowStoreTests(unittest.TestCase):
+    def test_document_file_returns_rendered_invoice_preview_for_xml(self) -> None:
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>ABC2026000000001</cbc:ID>
+  <cbc:IssueDate>2026-07-06</cbc:IssueDate>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyName><cbc:Name>Satici Ltd Sti</cbc:Name></cac:PartyName>
+    <cac:PartyIdentification><cbc:ID schemeID="VKN">1111111111</cbc:ID></cac:PartyIdentification>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyName><cbc:Name>Alici Ltd Sti</cbc:Name></cac:PartyName>
+    <cac:PartyIdentification><cbc:ID schemeID="VKN">2222222222</cbc:ID></cac:PartyIdentification>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:InvoiceLine>
+    <cbc:ID>1</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="NIU">1</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="TRY">100.00</cbc:LineExtensionAmount>
+    <cac:Item><cbc:Name>Isitme cihazi bakim seti</cbc:Name></cac:Item>
+  </cac:InvoiceLine>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxInclusiveAmount currencyID="TRY">120.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="TRY">120.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            storage = base / "documents"
+            xml_path = storage / "client-1" / "invoice.xml"
+            xml_path.parent.mkdir(parents=True)
+            xml_path.write_text(xml, encoding="utf-8")
+            store = JsonWorkflowStore(base / "phase0_store.json")
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "invoice.xml",
+                    "document_ref": "invoice.xml",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "invoice.xml",
+                    "storage_path": str(xml_path),
+                    "content_type": "application/xml",
+                    "status": "stored",
+                },
+            )
+            service = DocumentService(
+                store=store,
+                document_storage_path=storage,
+                record_operation_event=lambda **kwargs: dict(kwargs),
+                require_client_access=lambda **kwargs: {"allowed": True},
+            )
+
+            info = service.original_document_file(client_id="client-1", document_ref="invoice.xml", user_id="tester")
+
+        self.assertEqual(info["media_type"], "text/html; charset=utf-8")
+        self.assertIn("html", info)
+        self.assertIn("Fatura", info["html"])
+        self.assertIn("Isitme cihazi bakim seti", info["html"])
+        self.assertNotIn("<Invoice", info["html"])
+
     def test_worker_concurrency_defaults_to_single_slot_outside_production_env(self) -> None:
         self.assertEqual(worker_concurrency_from_env({}), 1)
 

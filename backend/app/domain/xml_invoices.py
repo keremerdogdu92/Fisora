@@ -94,6 +94,17 @@ def _direct_children(root: ET.Element, local_name: str) -> list[ET.Element]:
     return [child for child in list(root) if _local_name(child.tag) == local_name]
 
 
+def _first_text_in_child(root: ET.Element, child_name: str, names: tuple[str, ...]) -> str:
+    child = _direct_child(root, child_name)
+    if child is None:
+        return ""
+    return _first_text_under(child, names)
+
+
+def _first_amount_in_child(root: ET.Element, child_name: str, names: tuple[str, ...]) -> str:
+    return _decimal_text(_first_text_in_child(root, child_name, names))
+
+
 def _format_sum(left: str, right: str) -> str:
     try:
         return f"{Decimal(left or '0') + Decimal(right or '0'):.2f}"
@@ -143,13 +154,9 @@ def _invoice_line_hints(root: ET.Element, *, max_lines: int = 20) -> tuple[str, 
     for line in root.iter():
         if _local_name(line.tag) != "InvoiceLine":
             continue
-        for child in line.iter():
-            if _local_name(child.tag) not in {"Name", "Description"}:
-                continue
-            value = _text(child)
-            if value:
-                hints.append(value[:120])
-                break
+        value = _first_text_in_child(line, "Item", ("Name", "Description"))
+        if value:
+            hints.append(value[:120])
         if len(hints) >= max_lines:
             break
     return tuple(dict.fromkeys(hints))
@@ -158,11 +165,14 @@ def _invoice_line_hints(root: ET.Element, *, max_lines: int = 20) -> tuple[str, 
 def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple[CanonicalInvoiceLine, ...]:
     lines: list[CanonicalInvoiceLine] = []
     for index, line in enumerate((element for element in root.iter() if _local_name(element.tag) == "InvoiceLine"), start=1):
-        description = _first_text_under(line, ("Name", "Description"))[:160]
-        taxable_amount = _first_amount_under(line, ("LineExtensionAmount", "TaxableAmount"))
-        tax_amount = _first_amount_under(line, ("TaxAmount",))
+        description = _first_text_in_child(line, "Item", ("Name", "Description"))[:160]
+        taxable_amount = _first_amount_in_child(line, "TaxTotal", ("TaxableAmount",)) or _first_amount_under(
+            line,
+            ("LineExtensionAmount",),
+        )
+        tax_amount = _first_amount_in_child(line, "TaxTotal", ("TaxAmount",))
         vat_rate = _first_text_under(line, ("Percent",))
-        unit_price = _first_amount_under(line, ("PriceAmount",))
+        unit_price = _first_amount_in_child(line, "Price", ("PriceAmount",))
         quantity = _first_text_under(line, ("InvoicedQuantity", "CreditedQuantity"))
         if description:
             lines.append(

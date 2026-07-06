@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
@@ -185,12 +185,17 @@ def store_document_file(
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
-) -> FileResponse:
+) -> Response:
     file_info = get_document_service().original_document_file(
         client_id=client_id,
         document_ref=document_ref,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
     )
+    if "html" in file_info:
+        return HTMLResponse(
+            content=str(file_info["html"]),
+            media_type=str(file_info["media_type"]),
+        )
     return FileResponse(
         file_info["path"],
         filename=str(file_info["file_name"]),

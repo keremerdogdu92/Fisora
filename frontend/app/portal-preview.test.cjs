@@ -15,11 +15,13 @@ test("document previews do not render mock paper markup when an original documen
 
 test("document previews include portal auth headers when fetching original files", () => {
   const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+  const uploadApi = readFileSync(join(__dirname, "upload-api.js"), "utf8");
   const clientView = readFileSync(join(__dirname, "portal-client-view.tsx"), "utf8");
 
   assert.match(reviewPanels, /previewAuthHeaders/);
-  assert.match(reviewPanels, /X-Fisora-Session/);
-  assert.match(reviewPanels, /X-Fisora-User-Id/);
+  assert.match(reviewPanels, /backendAuthHeaders/);
+  assert.match(uploadApi, /X-Fisora-Session/);
+  assert.match(uploadApi, /X-Fisora-User-Id/);
   assert.match(clientView, /<DocumentPreview document=\{selectedDocument\} session=\{session\}/);
 });
 
@@ -28,6 +30,15 @@ test("document previews use the configured backend api base path", () => {
 
   assert.match(reviewPanels, /resolveApiBaseUrl/);
   assert.doesNotMatch(reviewPanels, /window\.location\.hostname\}:8000/);
+});
+
+test("document previews keep XML invoices inside the same original document frame", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /original-document-frame/);
+  assert.doesNotMatch(reviewPanels, /XML'den/);
+  assert.doesNotMatch(reviewPanels, /UBL/);
+  assert.doesNotMatch(reviewPanels, /Orijinal XML indir/);
 });
 
 test("journal totals keep dot-decimal amounts as decimals", () => {

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 
 from app.domain.canonical_invoices import (
@@ -18,6 +20,16 @@ from app.domain.pdf_invoices import ParsedInvoice
 
 
 TAX_ID_RE = re.compile(r"^\d{10,11}$")
+GENERIC_TAX_SCHEME_NAMES = {"KDV", "VAT", "KATMA DEGER VERGISI"}
+
+
+@dataclass(frozen=True)
+class XmlPartyDetails:
+    title: str = ""
+    tax_id: str = ""
+    tax_office: str = ""
+    address: str = ""
+    evidence: tuple[str, ...] = ()
 
 
 def _local_name(tag: str) -> str:
@@ -26,6 +38,10 @@ def _local_name(tag: str) -> str:
 
 def _text(element: ET.Element | None) -> str:
     return " ".join((element.text or "").split()) if element is not None else ""
+
+
+def _ascii_upper(value: str) -> str:
+    return unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii").upper().strip()
 
 
 def _decimal_text(value: str) -> str:
@@ -43,28 +59,6 @@ def _first_text(root: ET.Element, names: tuple[str, ...]) -> str:
             if value:
                 return value
     return ""
-
-
-def _party_details(root: ET.Element, parent_name: str) -> tuple[str, str]:
-    tax_id = ""
-    legal_title = ""
-    display_title = ""
-    for parent in root.iter():
-        if _local_name(parent.tag) != parent_name:
-            continue
-        for element in parent.iter():
-            local_name = _local_name(element.tag)
-            value = _text(element)
-            if not value:
-                continue
-            if local_name in {"CompanyID", "ID"} and TAX_ID_RE.match(value) and not tax_id:
-                tax_id = value
-            elif local_name == "RegistrationName" and not legal_title:
-                legal_title = value[:120]
-            elif local_name == "Name" and not display_title:
-                display_title = value[:120]
-        break
-    return legal_title or display_title, tax_id
 
 
 def _first_amount(root: ET.Element, names: tuple[str, ...]) -> str:
@@ -92,6 +86,102 @@ def _direct_child(root: ET.Element, local_name: str) -> ET.Element | None:
 
 def _direct_children(root: ET.Element, local_name: str) -> list[ET.Element]:
     return [child for child in list(root) if _local_name(child.tag) == local_name]
+
+
+def _text_at(root: ET.Element | None, path: tuple[str, ...]) -> str:
+    current = root
+    for part in path:
+        if current is None:
+            return ""
+        current = _direct_child(current, part)
+    return _text(current)
+
+
+def _first_party_title(party: ET.Element, *, evidence: list[str]) -> str:
+    for entity in _direct_children(party, "PartyLegalEntity"):
+        value = _text_at(entity, ("RegistrationName",))
+        if value:
+            evidence.append("PartyLegalEntity/RegistrationName")
+            return value[:120]
+    for name in _direct_children(party, "PartyName"):
+        value = _text_at(name, ("Name",))
+        if value:
+            evidence.append("PartyName/Name")
+            return value[:120]
+    for person in _direct_children(party, "Person"):
+        parts = (
+            _text_at(person, ("FirstName",)),
+            _text_at(person, ("MiddleName",)),
+            _text_at(person, ("FamilyName",)),
+        )
+        value = " ".join(part for part in parts if part)
+        if value:
+            evidence.append("Person/FirstName+FamilyName")
+            return value[:120]
+        value = _text_at(person, ("Name",))
+        if value:
+            evidence.append("Person/Name")
+            return value[:120]
+    return ""
+
+
+def _first_party_tax_id(party: ET.Element, *, evidence: list[str]) -> str:
+    candidates: list[tuple[str, str]] = []
+    for identification in _direct_children(party, "PartyIdentification"):
+        candidates.append((_text_at(identification, ("ID",)), "PartyIdentification/ID"))
+    for scheme in _direct_children(party, "PartyTaxScheme"):
+        candidates.append((_text_at(scheme, ("CompanyID",)), "PartyTaxScheme/CompanyID"))
+    for entity in _direct_children(party, "PartyLegalEntity"):
+        candidates.append((_text_at(entity, ("CompanyID",)), "PartyLegalEntity/CompanyID"))
+    for value, path in candidates:
+        digits = re.sub(r"\D", "", value)
+        if TAX_ID_RE.match(digits):
+            evidence.append(path)
+            return digits
+    return ""
+
+
+def _party_tax_office(party: ET.Element, *, evidence: list[str]) -> str:
+    for scheme in _direct_children(party, "PartyTaxScheme"):
+        value = _text_at(_direct_child(scheme, "TaxScheme"), ("Name",))
+        if value and _ascii_upper(value) not in GENERIC_TAX_SCHEME_NAMES:
+            evidence.append("PartyTaxScheme/TaxScheme/Name")
+            return value[:80]
+    return ""
+
+
+def _party_address(party: ET.Element, *, evidence: list[str]) -> str:
+    address = _direct_child(party, "PostalAddress")
+    if address is None:
+        return ""
+    parts: list[str] = []
+    for name in ("StreetName", "BuildingName", "BuildingNumber", "Room", "CitySubdivisionName", "CityName", "PostalZone"):
+        value = _text_at(address, (name,))
+        if value:
+            parts.append(value)
+    for line in _direct_children(address, "AddressLine"):
+        value = _text_at(line, ("Line",))
+        if value:
+            parts.append(value)
+    unique_parts = tuple(dict.fromkeys(parts))
+    if unique_parts:
+        evidence.append("PostalAddress")
+    return " / ".join(unique_parts)[:240]
+
+
+def _party_details(root: ET.Element, parent_name: str) -> XmlPartyDetails:
+    parent = next((element for element in root.iter() if _local_name(element.tag) == parent_name), None)
+    party = _direct_child(parent, "Party") if parent is not None else None
+    if party is None:
+        return XmlPartyDetails()
+    evidence: list[str] = []
+    return XmlPartyDetails(
+        title=_first_party_title(party, evidence=evidence),
+        tax_id=_first_party_tax_id(party, evidence=evidence),
+        tax_office=_party_tax_office(party, evidence=evidence),
+        address=_party_address(party, evidence=evidence),
+        evidence=tuple(evidence),
+    )
 
 
 def _first_text_in_child(root: ET.Element, child_name: str, names: tuple[str, ...]) -> str:
@@ -139,9 +229,9 @@ def _vat_rates(root: ET.Element) -> tuple[str, ...]:
 
 
 def _provider_hint(root: ET.Element) -> str:
-    supplier_title, _ = _party_details(root, "AccountingSupplierParty")
-    if supplier_title:
-        return supplier_title
+    supplier = _party_details(root, "AccountingSupplierParty")
+    if supplier.title:
+        return supplier.title
     for name in ("RegistrationName", "Name"):
         value = _first_text(root, (name,))
         if value:
@@ -214,22 +304,26 @@ def _canonical_vat_summary(root: ET.Element) -> tuple[CanonicalVatSummaryLine, .
 
 
 def build_xml_canonical_invoice(root: ET.Element) -> CanonicalInvoice:
-    issuer_title, issuer_tax_id = _party_details(root, "AccountingSupplierParty")
-    recipient_title, recipient_tax_id = _party_details(root, "AccountingCustomerParty")
+    supplier = _party_details(root, "AccountingSupplierParty")
+    customer = _party_details(root, "AccountingCustomerParty")
     legal_totals = _direct_child(root, "LegalMonetaryTotal")
     if legal_totals is None:
         legal_totals = root
     invoice = CanonicalInvoice(
         source="xml",
         supplier_party=CanonicalInvoiceParty(
-            title=issuer_title,
-            tax_id=issuer_tax_id,
-            evidence=("xml:AccountingSupplierParty",) if issuer_title or issuer_tax_id else (),
+            title=supplier.title,
+            tax_id=supplier.tax_id,
+            tax_office=supplier.tax_office,
+            address=supplier.address,
+            evidence=tuple(f"xml:AccountingSupplierParty/{item}" for item in supplier.evidence) if supplier.evidence else (),
         ),
         customer_party=CanonicalInvoiceParty(
-            title=recipient_title,
-            tax_id=recipient_tax_id,
-            evidence=("xml:AccountingCustomerParty",) if recipient_title or recipient_tax_id else (),
+            title=customer.title,
+            tax_id=customer.tax_id,
+            tax_office=customer.tax_office,
+            address=customer.address,
+            evidence=tuple(f"xml:AccountingCustomerParty/{item}" for item in customer.evidence) if customer.evidence else (),
         ),
         header=CanonicalInvoiceHeader(
             invoice_no=_first_text(root, ("ID",)),
@@ -293,8 +387,8 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
 
     route = "review_queue" if notes else "journal_candidate"
     xml_text = ET.tostring(root, encoding="unicode")
-    issuer_title, issuer_tax_id = _party_details(root, "AccountingSupplierParty")
-    recipient_title, recipient_tax_id = _party_details(root, "AccountingCustomerParty")
+    supplier = _party_details(root, "AccountingSupplierParty")
+    customer = _party_details(root, "AccountingCustomerParty")
     invoice_type_code = _first_text(root, ("InvoiceTypeCode",))
     canonical_invoice = build_xml_canonical_invoice(root)
     return ParsedInvoice(
@@ -319,10 +413,10 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         suggested_route=route,
         parse_notes=tuple(notes),
         line_items=_invoice_line_hints(root),
-        issuer_title=issuer_title,
-        issuer_tax_id=issuer_tax_id,
-        recipient_title=recipient_title,
-        recipient_tax_id=recipient_tax_id,
+        issuer_title=supplier.title,
+        issuer_tax_id=supplier.tax_id,
+        recipient_title=customer.title,
+        recipient_tax_id=customer.tax_id,
         invoice_type_code=invoice_type_code,
         is_return_invoice=invoice_type_code.upper() in {"IADE", "\u0130ADE", "RETURN"},
         canonical_invoice=canonical_invoice,

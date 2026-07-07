@@ -1126,6 +1126,78 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(canonical.line_items[0].taxable_amount, "278.50")
         self.assertNotEqual(canonical.line_items[0].description, "KDV")
 
+    def test_xml_customer_title_does_not_use_tax_scheme_name(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>NOISE2026000000001</cbc:ID>
+  <cbc:IssueDate>2026-07-07</cbc:IssueDate>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyName><cbc:Name>SATICI A.S.</cbc:Name></cac:PartyName>
+    <cac:PartyIdentification><cbc:ID schemeID="VKN">1111111111</cbc:ID></cac:PartyIdentification>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="TCKN">22222222222</cbc:ID></cac:PartyIdentification>
+    <cac:PartyTaxScheme><cac:TaxScheme><cbc:Name>KDV</cbc:Name></cac:TaxScheme></cac:PartyTaxScheme>
+    <cac:Person><cbc:FirstName>Ayse</cbc:FirstName><cbc:FamilyName>Yilmaz</cbc:FamilyName></cac:Person>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:InvoiceLine><cac:Item><cbc:Name>Bakim hizmeti</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:LegalMonetaryTotal><cbc:PayableAmount>1.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invoice.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+
+        self.assertEqual(invoice.recipient_title, "Ayse Yilmaz")
+        self.assertEqual(invoice.recipient_tax_id, "22222222222")
+        self.assertEqual(invoice.canonical_invoice.customer_party.title, "Ayse Yilmaz")
+        self.assertNotEqual(invoice.recipient_title, "KDV")
+
+    def test_xml_party_details_include_address_and_tax_office(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>ADDR2026000000001</cbc:ID>
+  <cbc:IssueDate>2026-07-07</cbc:IssueDate>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyLegalEntity><cbc:RegistrationName>MEDIKAL TEDARIK A.S.</cbc:RegistrationName></cac:PartyLegalEntity>
+    <cac:PartyTaxScheme>
+      <cbc:CompanyID>1111111111</cbc:CompanyID>
+      <cac:TaxScheme><cbc:Name>KADIKOY</cbc:Name></cac:TaxScheme>
+    </cac:PartyTaxScheme>
+    <cac:PostalAddress>
+      <cbc:StreetName>Bagdat Cad.</cbc:StreetName>
+      <cbc:BuildingNumber>10</cbc:BuildingNumber>
+      <cbc:CitySubdivisionName>Kadikoy</cbc:CitySubdivisionName>
+      <cbc:CityName>Istanbul</cbc:CityName>
+    </cac:PostalAddress>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyName><cbc:Name>ALICI LTD</cbc:Name></cac:PartyName>
+    <cac:PartyIdentification><cbc:ID>2222222222</cbc:ID></cac:PartyIdentification>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:InvoiceLine><cac:Item><cbc:Name>Bakim hizmeti</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:LegalMonetaryTotal><cbc:PayableAmount>1.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invoice.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+
+        supplier = invoice.canonical_invoice.supplier_party
+        self.assertEqual(supplier.title, "MEDIKAL TEDARIK A.S.")
+        self.assertEqual(supplier.tax_id, "1111111111")
+        self.assertEqual(supplier.tax_office, "KADIKOY")
+        self.assertIn("Bagdat Cad.", supplier.address)
+        self.assertIn("Istanbul", supplier.address)
+
     def test_ubl_party_resolution_uses_supplier_as_counterparty_for_purchase(self) -> None:
         from app.domain.xml_invoices import parse_xml_invoice
 
@@ -1229,6 +1301,61 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.counterparty_title, "Customer From XML")
         self.assertEqual(result.counterparty_identity_key, "sales|tax:2222222222")
 
+    def test_ubl_counterparty_matching_uses_person_title_when_tax_scheme_name_is_noise(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>SAT2026000000002</cbc:ID>
+  <cbc:IssueDate>2026-07-07</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>SATIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="VKN">1111111111</cbc:ID></cac:PartyIdentification>
+    <cac:PartyName><cbc:Name>Client From XML</cbc:Name></cac:PartyName>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="TCKN">22222222222</cbc:ID></cac:PartyIdentification>
+    <cac:PartyTaxScheme><cac:TaxScheme><cbc:Name>KDV</cbc:Name></cac:TaxScheme></cac:PartyTaxScheme>
+    <cac:Person><cbc:FirstName>Ayse</cbc:FirstName><cbc:FamilyName>Yilmaz</cbc:FamilyName></cac:Person>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:LegalMonetaryTotal><cbc:PayableAmount currencyID="TRY">120.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:LineExtensionAmount currencyID="TRY">100.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Bakim hizmeti</cbc:Name></cac:Item></cac:InvoiceLine>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sale.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.02.001",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.001",
+            revenue_account="600.01.001",
+            sales_vat_account="391.01.020",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Client From XML",
+            tax_id="1111111111",
+            activity_description="Odyoloji hizmetleri",
+            workplace_addresses=(),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+
+        self.assertEqual(result.accounting_direction, "sales")
+        self.assertEqual(result.suggested_counterparty_account, "120.22222222222")
+        self.assertEqual(result.counterparty_title, "Ayse Yilmaz")
+        self.assertEqual(result.counterparty_identity_key, "sales|tax:22222222222")
+        self.assertNotEqual(result.counterparty_title, "KDV")
+
     def test_pdf_invoice_populates_canonical_lines_and_vat_summary_from_deterministic_parser(self) -> None:
         invoice_path = ROOT / "private_samples" / "real_pilot" / "firma-2" / "invoices" / "purchases" / "1061386125_AVQ2026000000026.pdf"
         if not invoice_path.exists():
@@ -1257,6 +1384,15 @@ class Phase0DomainTests(unittest.TestCase):
   <cac:AccountingSupplierParty><cac:Party>
     <cac:PartyName><cbc:Name>Satici Ltd Sti</cbc:Name></cac:PartyName>
     <cac:PartyIdentification><cbc:ID schemeID="VKN">1111111111</cbc:ID></cac:PartyIdentification>
+    <cac:PartyTaxScheme>
+      <cbc:CompanyID>1111111111</cbc:CompanyID>
+      <cac:TaxScheme><cbc:Name>KADIKOY</cbc:Name></cac:TaxScheme>
+    </cac:PartyTaxScheme>
+    <cac:PostalAddress>
+      <cbc:StreetName>Bagdat Cad.</cbc:StreetName>
+      <cbc:BuildingNumber>10</cbc:BuildingNumber>
+      <cbc:CityName>Istanbul</cbc:CityName>
+    </cac:PostalAddress>
   </cac:Party></cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty><cac:Party>
     <cac:PartyName><cbc:Name>Alici Ltd Sti</cbc:Name></cac:PartyName>
@@ -1292,8 +1428,11 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("ABC2026000000001", html)
         self.assertIn("Satici Ltd Sti", html)
         self.assertIn("Alici Ltd Sti", html)
+        self.assertIn("KADIKOY", html)
+        self.assertIn("Bagdat Cad.", html)
         self.assertIn("Isitme cihazi bakim seti", html)
         self.assertIn("120.00", html)
+        self.assertNotIn("<dd>-</dd>", html)
         self.assertNotIn("<Invoice", html)
 
     def test_pdf_vat_split_extracts_real_pilot_table_and_summary_evidence(self) -> None:

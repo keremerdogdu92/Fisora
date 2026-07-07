@@ -11,16 +11,24 @@ def _text(value: object) -> str:
     return text or "-"
 
 
+def _detail_row(label: str, value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return f"<div><dt>{escape(label)}</dt><dd>{escape(text)}</dd></div>"
+
+
 def _party_block(label: str, title: str, tax_id: str, tax_office: str, address: str) -> str:
+    details = (
+        _detail_row("Vergi/TCKN", tax_id)
+        + _detail_row("Vergi dairesi", tax_office)
+        + _detail_row("Adres", address)
+    )
     return f"""
       <section class="party-block">
         <h2>{escape(label)}</h2>
         <strong>{escape(_text(title))}</strong>
-        <dl>
-          <div><dt>Vergi/TCKN</dt><dd>{escape(_text(tax_id))}</dd></div>
-          <div><dt>Vergi dairesi</dt><dd>{escape(_text(tax_office))}</dd></div>
-          <div><dt>Adres</dt><dd>{escape(_text(address))}</dd></div>
-        </dl>
+        {f"<dl>{details}</dl>" if details else ""}
       </section>
     """
 

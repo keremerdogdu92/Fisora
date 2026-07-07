@@ -36,8 +36,8 @@ class ReviewService:
             corrected_counterparty_code=payload.corrected_counterparty_code,
             category=payload.category,
             reason=payload.reason,
-            accountant_note=payload.accountant_note,
-            rule_instruction=payload.rule_instruction,
+            accountant_note=payload.normalized_accountant_note,
+            rule_instruction=payload.normalized_rule_instruction,
             apply_to_similar=payload.apply_to_similar,
             statement_line_no=payload.statement_line_no,
         )

@@ -251,6 +251,7 @@ class ReviewDecisionPayload(BaseModel):
     corrected_counterparty_code: str = ""
     category: str = ""
     reason: str = ""
+    decision_note: str = ""
     accountant_note: str = ""
     rule_instruction: str = ""
     apply_to_similar: bool = False
@@ -258,6 +259,18 @@ class ReviewDecisionPayload(BaseModel):
     statement_line_no: int = 0
     draft_lines: list[JournalLinePayload] = Field(default_factory=list)
     vat_split_review: dict[str, object] = Field(default_factory=dict)
+
+    @property
+    def normalized_decision_note(self) -> str:
+        return (self.decision_note or self.accountant_note or self.rule_instruction or "").strip()
+
+    @property
+    def normalized_accountant_note(self) -> str:
+        return (self.decision_note or self.accountant_note or self.rule_instruction or "").strip()
+
+    @property
+    def normalized_rule_instruction(self) -> str:
+        return (self.decision_note or self.rule_instruction or self.accountant_note or "").strip()
 
 
 class ExportCandidatePayload(BaseModel):
@@ -353,6 +366,7 @@ class AuthLogoutPayload(BaseModel):
 
 class AuthInvitePayload(BaseModel):
     user_id: str
+    email: str = ""
     display_name: str = ""
     role: Literal["client_user", "accountant", "admin"] = "client_user"
     allowed_client_ids: list[str] = Field(default_factory=list)
@@ -367,6 +381,7 @@ class AuthInviteAcceptPayload(BaseModel):
 
 class AuthPasswordResetPayload(BaseModel):
     user_id: str
+    email: str = ""
     ttl_hours: int = 24
 
 
@@ -381,6 +396,12 @@ class TestDataResetPayload(BaseModel):
 
 
 class DocumentRetentionRunPayload(BaseModel):
+    delete_files: bool = True
+
+
+class DocumentRetentionActionPayload(BaseModel):
+    document_refs: list[str] = Field(default_factory=list)
+    action: str
     delete_files: bool = True
 
 

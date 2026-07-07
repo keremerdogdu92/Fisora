@@ -247,6 +247,7 @@ export async function saveStatementLineDecisionAction({
   const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim() || "mali-musavir";
   const reason = correctionDraft.reason.trim();
   const ruleInstruction = correctionDraft.ruleInstruction.trim();
+  const decisionNote = reason || ruleInstruction;
   const applyToSimilar = Boolean(correctionDraft.applyToSimilar || action === "suggest_for_similar");
   setData((current) => ({
     ...current,
@@ -272,8 +273,7 @@ export async function saveStatementLineDecisionAction({
       correctedCounterpartyCode,
       category: selectedLine.transaction_type,
       reason,
-      accountantNote: reason,
-      ruleInstruction,
+      decisionNote,
       sessionToken: session?.sessionToken,
     });
     setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satir: ${label} backend'e kaydedildi.`);
@@ -315,6 +315,7 @@ export async function saveDecisionAction({
   const correctedCounterpartyCode = correctionDraft.counterpartyCode.trim();
   const reason = correctionDraft.reason.trim();
   const ruleInstruction = correctionDraft.ruleInstruction.trim();
+  const decisionNote = reason || ruleInstruction;
   const manualDraftLines = correctionDraft.manualDraftLines.filter(
     (line) => line.account_code.trim() || line.description.trim() || line.debit.trim() || line.credit.trim(),
   );
@@ -354,8 +355,7 @@ export async function saveDecisionAction({
       correctedCounterpartyCode,
       category: selectedDocument.productCategory,
       reason,
-      accountantNote: reason,
-      ruleInstruction,
+      decisionNote,
       draftLines: manualDraftLines,
       sessionToken: session?.sessionToken,
     });

@@ -11,7 +11,7 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 | Faz 3 | done | Ortak bilgi havuzu ve operasyonel gorunurluk | AI research query, explicit AI research istegi, global cache ve Tavily siniri baglandi |
 | Faz 4 | done | Research sonucu ile fis kararini yeniden kurma | Dusuk guven export'u acmaz, ama dengeli review taslagi korunur |
 | Faz 5 | done | Karisik KDV satir ayrimi | Cihaz %0/3065 kalir, aksesuar/pil satiri KDV'li kalabilir |
-| Faz 6 | done | Dogal dil musavir kural adayi | Not ve kural talimati review payload'ina baglandi |
+| Faz 6 | revise | Dogal dil musavir kural adayi | UI'da tek `Karar notu`; backend eski alanlari geriye uyumluluk icin kabul eder |
 | Faz 7 | done | Portal karar zinciri gorunurlugu | Fis satirlari onde; urun kimligi, NACE/faaliyet, research ve cari aday izi alt akis oldu |
 | Faz 8 | next | Cok mukellefli gercek belge matrisi | Canli deneme ve private sample matrix ile genisletilecek |
 
@@ -20,7 +20,11 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - Vergi levhasi profilinde `tckn`, `vkn`, `identity_type`, `tax_identifier`, `legal_name`, `trade_name`, `display_title`, `tax_office`, `nace_code`, `activity_description`, `workplace_addresses` alanlari ayrik tutulacak.
 - Eski `tax_id` alani geriye uyumluluk icin korunacak; yeni karar motoru `vkn` varsa onu, yoksa `tckn` degerini kullanacak.
 - Fatura yukleme sekmesi niyet/filtredir; icerik karari kazanir.
-- Iade faturasi sinyali varsa otomatik fis uretilmez, kontrol kuyrugunda kalir.
+- Iade, tevkifat ve istisna belgeleri kural ogrenilene kadar review'da kalir;
+  musavir farkli politika verirse kural olarak uygulanir.
+- OIV/OTV, karma KDV ve eksik belge no gibi teknik olarak cozumlenebilen
+  durumlar yeterli guven, kanit ve hesap plani eslesmesi varsa export-ready
+  olabilir; guven dusukse review'a duser.
 - Satis fisinde gelir hesabi ve `391`, alis fisinde gider/stok hesabi ve `191` kullanilir. Ayni panelde gelir ve gider hesabi beraber gosterilmez.
 - `%0` satis KDV satiri uretmez; gelir `%0 / 3065` gelir hesabina yonlenir. Hesap bulunamazsa mustavirden kural olarak secim alinacak.
 - Her alis ve satista yeni cari onerisi uretilir. Mevcut eslesme varsa mevcut cari aday olarak korunur, ama yeni cari onerisi de gorunur.
@@ -172,10 +176,12 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
     cevrilmeyecek ve motor tarafindan daha genel bir hesaba zorla
     kaydirilmayacak. Ornegin AI `153.01.001` veya `770.01` sectiyse taslak o
     hesapla olusur; dogruluk karari review ekraninda mustavirdedir.
-  - `>=85` guven: kesin kanuni/KDV kurala aykiri degilse taslaga uygulanabilir.
-  - `70-84` guven: taslaga uygulanabilir, mustavir onayi gerekir.
-  - `<70` guven: taslak yine dolu kalir, export review'de kalir ve gerekirse
-    research istenir.
+- `>=85` guven: kesin kanuni/KDV kurala aykiri degilse taslaga uygulanabilir.
+- `70-84` guven: taslaga uygulanabilir, mustavir onayi gerekir.
+- `<70` guven: taslak yine dolu kalir, export review'de kalir ve gerekirse
+  research istenir.
+- Varsayilan yuksek tutar limiti olmayacak; tek basina tutar otomasyon kararini
+  kapatmaz.
 - Marka/model, NACE ve internet arastirmasi karari:
   - Vergi levhasi yuklendiginde client activity profile hazir olmalidir.
     Fatura aninda ayni NACE arastirmasi bastan gereksiz tekrar edilmemelidir.
@@ -211,6 +217,13 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - Canli denemeden sonra Faz 8 icin cok mukellefli matrix genisletilecek: isitme cihazi, genel perakende, hizmet, gida, insaat ve medikal benzeri profiller.
 - Mevcut belgeleri otomatik yeniden isleme henuz kapali. Sonraki faz: secili belgeyi yeniden isle.
 - Bilgi Havuzu benchmark ekranini netlestirme acik kalir: bos cache veya eksik profil durumunda sonucun neden dusuk/0 gorundugunu mustavire debug dili kullanmadan anlatmaliyiz.
+- Review ekraninda `accountant_note` ve `rule_instruction` ayrimi kaldirilacak;
+  tek alan `Karar notu` olacak. Sistem bu notu hem belge gerekcesi hem de
+  ogrenme/kural adayi sinyali olarak kullanacak.
+- Fatura/ekstre akisi bu fazda OCR kullanmayacak. XML/UBL, CSV/Excel ve text
+  PDF ana kaynaktir; text cikmayan/taranmis fatura veya ekstre otomatik
+  islenmez, review/unsupported gerekcesiyle ayrilir. Vergi levhasi OCR'i
+  onboarding icin ayri kalabilir.
 
 ## 2026-06-29 Release Ozeti
 
@@ -223,5 +236,6 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - Review required olsa bile temel tutarlar ve yon varsa dengeli muhasebe fis taslagi olusturulur.
 - Tavily/global research sadece belirsiz marka/model veya zayif siniflandirma durumunda calisir; sonuc cache'e yazilir.
 - Karisik KDV icin cihaz satiri %0/3065 kalabilirken pil, aksesuar veya sarj aleti KDV'li satir olarak ayrilabilir.
-- Musavir duzeltmesi artik fis satirlari, hesap/cari secimi, duzeltme notu ve kural talimatini ayni karar payload'inda tasir.
+- Musavir duzeltmesi fis satirlari, hesap/cari secimi ve tek `Karar notu`
+  uzerinden ayni karar payload'inda tasinir.
 - Portalda muhasebe fisi birinci siraya alindi; karar zinciri ve nedenler fis dogruysa bakilmasi gerekmeyen ikincil bolume indi.

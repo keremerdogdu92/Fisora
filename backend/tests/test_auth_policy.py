@@ -29,6 +29,101 @@ except ModuleNotFoundError:
 
 
 class AuthPolicyTests(unittest.TestCase):
+    def test_email_delivery_disabled_returns_link_only(self) -> None:
+        from app.domain.email_delivery import send_auth_email
+
+        result = send_auth_email(
+            recipient="client@example.com",
+            subject="Fisora davet",
+            body_text="Link: https://portal.test/invite?token=abc",
+            action_url="https://portal.test/invite?token=abc",
+            env={"FISORA_EMAIL_PROVIDER": "disabled"},
+        )
+
+        self.assertEqual(result["status"], "disabled")
+        self.assertEqual(result["action_url"], "https://portal.test/invite?token=abc")
+
+    def test_email_delivery_dry_run_records_provider_without_network(self) -> None:
+        from app.domain.email_delivery import send_auth_email
+
+        result = send_auth_email(
+            recipient="client@example.com",
+            subject="Fisora sifre sifirlama",
+            body_text="Link: https://portal.test/reset?token=abc",
+            action_url="https://portal.test/reset?token=abc",
+            env={"FISORA_EMAIL_PROVIDER": "dry_run"},
+        )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertEqual(result["provider"], "dry_run")
+
+    def test_invite_route_returns_email_delivery_status(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        previous_base_url = os.environ.get("FISORA_PORTAL_BASE_URL")
+        os.environ["FISORA_PORTAL_BASE_URL"] = "https://portal.test"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                with patch("app.api.phase0_routes_auth.send_auth_email") as sender:
+                    sender.return_value = {
+                        "status": "dry_run",
+                        "provider": "dry_run",
+                        "action_url": "https://portal.test/portal/invite?token=abc",
+                    }
+                    response = client.post(
+                        "/phase0/store/auth/invite",
+                        json={
+                            "user_id": "client-user",
+                            "display_name": "Client User",
+                            "role": "client_user",
+                            "allowed_client_ids": ["client-1"],
+                            "invited_by": "mali-musavir",
+                            "email": "client@example.com",
+                        },
+                    )
+        finally:
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+            if previous_base_url is None:
+                os.environ.pop("FISORA_PORTAL_BASE_URL", None)
+            else:
+                os.environ["FISORA_PORTAL_BASE_URL"] = previous_base_url
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email_delivery"]["status"], "dry_run")
+
+    def test_password_reset_route_returns_email_delivery_status(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        previous_base_url = os.environ.get("FISORA_PORTAL_BASE_URL")
+        os.environ["FISORA_PORTAL_BASE_URL"] = "https://portal.test"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                with patch("app.api.phase0_routes_auth.send_auth_email") as sender:
+                    sender.return_value = {
+                        "status": "dry_run",
+                        "provider": "dry_run",
+                        "action_url": "https://portal.test/portal/password-reset?token=abc",
+                    }
+                    response = client.post(
+                        "/phase0/store/auth/password-reset",
+                        json={"user_id": "client-user", "email": "client@example.com"},
+                    )
+        finally:
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+            if previous_base_url is None:
+                os.environ.pop("FISORA_PORTAL_BASE_URL", None)
+            else:
+                os.environ["FISORA_PORTAL_BASE_URL"] = previous_base_url
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email_delivery"]["status"], "dry_run")
+
     def test_trusted_header_mode_is_production_ready_and_requires_user(self) -> None:
         config = build_auth_config({"FISORA_AUTH_MODE": "trusted_header"})
         status = auth_status_payload(config)

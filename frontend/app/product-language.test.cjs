@@ -43,7 +43,7 @@ test("portal visible copy presents AI agent automation without internal implemen
   assert.match(visibleSource, /AI ajan destekli fiş taslağı/);
   assert.match(visibleSource, /Otomasyon adayı/);
   assert.match(visibleSource, /Güven düzeyi/);
-  assert.match(visibleSource, /Müşavir notu/);
+  assert.match(visibleSource, /Karar notu/);
 
   assert.doesNotMatch(
     visibleSource,
@@ -136,8 +136,8 @@ test("document processing workbench keeps the journal review explicit", () => {
   assert.ok(primaryApproveIndex < correctionPanelIndex, "notes should stay below the primary approval path");
   assert.ok(scrollAreaIndex < decisionBarIndex, "decision actions should sit outside the scrollable journal content");
   assert.doesNotMatch(journalPanelSource, /DocumentPipelineTimeline|AiTracePanel/);
-  assert.match(reviewSource, /Müşavir notu/);
-  assert.match(reviewSource, /Benzer belge öğrenme talimatı/);
+  assert.match(reviewSource, /Karar notu/);
+  assert.doesNotMatch(reviewSource, /Müşavir notu|Benzer belge öğrenme talimatı/);
   assert.doesNotMatch(journalPanelSource, /className="accountant-summary"/);
   assert.match(reviewSource, /Yeniden işle/);
   assert.match(stylesSource, /\.journal-scroll-area/);

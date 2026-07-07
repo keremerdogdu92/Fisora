@@ -403,6 +403,7 @@ async function createClientOnboardingPackage({
 async function createPortalInvite({
   apiBaseUrl,
   userId,
+  email = "",
   displayName = "",
   clientId,
   invitedBy = "",
@@ -421,6 +422,7 @@ async function createPortalInvite({
       role: "client_user",
       allowed_client_ids: [String(clientId || "").trim()].filter(Boolean),
       invited_by: String(invitedBy || "").trim(),
+      email: String(email || "").trim(),
       ttl_hours: Number(ttlHours || 48),
     },
     headers,
@@ -496,6 +498,26 @@ async function deleteClientDocuments({
       delete_files: Boolean(deleteFiles),
     },
     headers,
+    fetchImpl,
+  });
+}
+
+async function createWorkspaceExportPackage({
+  apiBaseUrl,
+  clientId,
+  exportType = "zirve_mapping_csv",
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/export-package/from-workspace",
+    payload: {
+      client_id: String(clientId || "").trim(),
+      export_type: String(exportType || "zirve_mapping_csv").trim() || "zirve_mapping_csv",
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
     fetchImpl,
   });
 }
@@ -693,6 +715,7 @@ async function storeReviewDecision({
   correctedCounterpartyCode = "",
   category = "",
   reason = "",
+  decisionNote = "",
   accountantNote = "",
   ruleInstruction = "",
   applyToSimilar = false,
@@ -713,6 +736,7 @@ async function storeReviewDecision({
         }))
         .filter((line) => line.account_code || line.description || line.debit !== "0.00" || line.credit !== "0.00")
     : [];
+  const normalizedDecisionNote = String(decisionNote || "").trim();
   const payload = {
     client_id: String(clientId || ""),
     decision: {
@@ -723,8 +747,8 @@ async function storeReviewDecision({
       corrected_counterparty_code: String(correctedCounterpartyCode || ""),
       category: String(category || ""),
       reason: String(reason || ""),
-      accountant_note: String(accountantNote || ""),
-      rule_instruction: String(ruleInstruction || ""),
+      accountant_note: normalizedDecisionNote || String(accountantNote || ""),
+      rule_instruction: normalizedDecisionNote || String(ruleInstruction || ""),
       apply_to_similar: Boolean(applyToSimilar),
       prior_consistent_approval_count: Number(priorConsistentApprovalCount || 0),
       statement_line_no: Number(statementLineNo || 0),
@@ -799,8 +823,58 @@ async function reprocessClient({
   return response.json();
 }
 
+async function previewDocumentRetention({
+  apiBaseUrl,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  const normalizedUserId = userId || DEFAULT_UPLOAD_USER_ID;
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/document-retention/preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
+    },
+    body: JSON.stringify({}),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `document retention preview failed with ${response.status}`));
+  }
+  return response.json();
+}
+
+async function applyDocumentRetentionAction({
+  apiBaseUrl,
+  documentRefs,
+  action,
+  deleteFiles = true,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  const normalizedUserId = userId || DEFAULT_UPLOAD_USER_ID;
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/document-retention/action`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
+    },
+    body: JSON.stringify({
+      document_refs: Array.from(documentRefs || []).map((ref) => String(ref || "")),
+      action: String(action || ""),
+      delete_files: Boolean(deleteFiles),
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `document retention action failed with ${response.status}`));
+  }
+  return response.json();
+}
+
 module.exports = {
   DEFAULT_UPLOAD_USER_ID,
+  applyDocumentRetentionAction,
   backendAuthHeaders,
   buildClientBootstrapPayload,
   buildClientOnboardingPackagePayload,
@@ -811,12 +885,14 @@ module.exports = {
   createDelegatedClientSession,
   createClientOnboardingPackage,
   createPortalInvite,
+  createWorkspaceExportPackage,
   deleteClientDocuments,
   ensureUploadWorkspace,
   loginWithPassword,
   parseDelegatedSessionHash,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
+  previewDocumentRetention,
   pickUploadUser,
   requestStatementAiSuggestions,
   reprocessClient,

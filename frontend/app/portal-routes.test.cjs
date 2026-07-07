@@ -178,6 +178,16 @@ test("client management view keeps new-client onboarding readable in tabs", () =
   assert.match(clientsView, /NACE araştırmasını onayla/);
 });
 
+test("export view exposes Zirve mapping adapter for field testing", () => {
+  const exportsView = require("node:fs").readFileSync(join(__dirname, "portal-exports-view.tsx"), "utf8");
+  const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+
+  assert.match(exportsView, /zirve_mapping_csv/);
+  assert.match(exportsView, /Zirve mapping CSV/);
+  assert.match(exportsView, /setExportType/);
+  assert.match(portalApp, /const \[exportType, setExportType\]/);
+});
+
 test("client management view separates tax certificate OCR loading from NACE research", () => {
   const clientsView = require("node:fs").readFileSync(join(__dirname, "portal-clients-view.tsx"), "utf8");
   const clientActions = require("node:fs").readFileSync(join(__dirname, "portal-client-actions.ts"), "utf8");

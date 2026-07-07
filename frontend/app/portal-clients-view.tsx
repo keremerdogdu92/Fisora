@@ -243,7 +243,7 @@ export function ClientManagementView({
                   placeholder="Üyelik adı / e-posta"
                   value={portalUserIdDraft}
                 />
-                <button onClick={onCreateInvite} type="button">Davet tokeni oluştur</button>
+                <button onClick={onCreateInvite} type="button">Davet linki oluştur</button>
                 <input
                   aria-label="Portal şifresi"
                   onChange={(event) => setPortalPassword(event.target.value)}

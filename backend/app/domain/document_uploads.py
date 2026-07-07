@@ -102,6 +102,13 @@ def retention_deadline(*, created_at: datetime | None = None, retention_days: in
     return (created_at or utc_now()) + timedelta(days=retention_days)
 
 
+def extend_retention_deadline(expires_at: str, *, days: int = DEFAULT_RETENTION_DAYS) -> str:
+    if days <= 0:
+        raise ValueError("days must be positive")
+    parsed = datetime.fromisoformat(expires_at)
+    return isoformat(parsed + timedelta(days=days))
+
+
 def document_storage_status(
     *,
     expires_at: datetime,

@@ -27,10 +27,8 @@ import {
   usePilotReadinessQuery,
 } from "./features/workspace";
 import { useClientManagementCommands } from "./features/clients";
-import {
-  addLocalUploadsAction,
-  useDocumentWorkflow,
-} from "./features/documents";
+import { useDocumentRetentionCommands } from "./features/operations";
+import { addLocalUploadsAction, useDocumentWorkflow } from "./features/documents";
 import { useExportCommands } from "./features/export";
 import { buildPortalDashboardViewModels } from "./portal-dashboard";
 import {
@@ -126,6 +124,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [uploadStatus, setUploadStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
   const [exportMode, setExportMode] = useState<ExportMode>("bulk");
+  const [exportType, setExportType] = useState("zirve_mapping_csv");
   const [correctionDraft, setCorrectionDraft] = useState<CorrectionDraft>(() => emptyCorrectionDraft());
   const readinessQuery = usePilotReadinessQuery();
   const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });
@@ -343,11 +342,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     requestCancellation,
     resolveCancellation,
   } = useExportCommands({
-    cancelReason,
-    clientDocuments,
-    exportMode,
-    selectedClient,
-    selectedPeriod,
+    cancelReason, clientDocuments, exportBasket: data.exportBasket, exportMode, exportType, loginUserId, selectedClient, selectedPeriod, session,
     setCancelReason,
     setClientCancellationDocumentId,
     setData,
@@ -378,6 +373,9 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     setStatementAiStatus,
   });
   const testDataReset = useTestDataReset({ loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session, setSelectedClientId, setSelectedDocumentId });
+  const { deleteRetentionDocuments, extendRetentionDocuments, previewRetention, retentionDocuments, retentionStatus } = useDocumentRetentionCommands({
+    defaultUserId: portalConfig.defaultUserId, loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session,
+  });
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
   const showSidebar = visibleNavItems.length > 1;
 
@@ -588,18 +586,17 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
       {mode === "exports" ? (
         <ExportBasketRouteView
-          documents={data.documents}
-          exportBasket={data.exportBasket}
-          exportMode={exportMode}
-          exportStatus={exportStatus}
-          onMarkPackaged={markBasketPackaged}
-          periodLabel={periodLabel}
-          setExportMode={setExportMode}
+          documents={data.documents} exportBasket={data.exportBasket} exportMode={exportMode} exportStatus={exportStatus} exportType={exportType}
+          onMarkPackaged={markBasketPackaged} periodLabel={periodLabel} setExportMode={setExportMode} setExportType={setExportType}
         />
       ) : null}
 
       {mode === "operations" ? (
-        <OperationsRouteView aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed} readinessView={readinessView} source={source.label} />
+        <OperationsRouteView
+          aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed}
+          onDeleteRetentionDocuments={deleteRetentionDocuments} onExtendRetentionDocuments={extendRetentionDocuments} onPreviewRetention={previewRetention}
+          readinessView={readinessView} retentionDocuments={retentionDocuments} retentionStatus={retentionStatus} source={source.label}
+        />
       ) : null}
       </div>
       </section>

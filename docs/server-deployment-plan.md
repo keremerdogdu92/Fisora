@@ -4,28 +4,21 @@
 
 Ilk production kurulumu GPU'suz tek kiralik sunucuda baslayacak. Sunucu AI modeli
 calistirmayacak; AI ihtiyaci sadece dis API/batch cagriyla karsilanacak.
-Varsayilan baslangic saglayici Radore Cloud Server Infinity kabul edilir.
 
 ## Onerilen Minimum Sunucu
 
-Pilot ve ilk canli deneme icin:
+Alinan pilot sunucu:
 
-- Turkiye lokasyon
-- 8 vCPU
-- 24 GB RAM
-- En az 250 GB disk, tercihen buyutulebilir disk
+- 4 Core 2.70 GHz
+- 4 GB DDR4 RAM
+- 100 GB NVMe SSD
 - Ubuntu LTS
 - Ayrilmis belge storage klasoru veya volume
-- Harici backup hedefi
-
-Varsayilan ilk paket:
-
-- Radore Infinity: 8 vCPU, 24 GB RAM, 250 GB disk.
+- Ayni makine disi backup hedefi
 
 Buyume hedefi:
 
-- 16 vCPU / 32 GB RAM veya daha yuksek paket.
-- Disk/storage ayrica buyutulebilmeli.
+- RAM, CPU ve disk/storage ayrica buyutulebilmeli.
 - Paket buyutmede veri tasima gerekip gerekmedigi satin alma oncesi yazili
   netlestirilmeli.
 
@@ -71,11 +64,12 @@ saklanir.
 
 ## Belge Saklama Politikasi
 
-Ham PDF/XML/ekstre dosyalari 90 gun indirilebilir kalir.
+Ham PDF/XML/ekstre dosyalari 90 gun aktif kalir.
 
-- 0-90 gun: belge indirilebilir ve review ekraninda goruntulenebilir.
+- 0-90 gun: belge review ekraninda goruntulenebilir.
 - 75. gunden sonra: `storage_status=expiring`.
-- 90. gun sonunda: ham dosya silinir, `storage_status=deleted`.
+- 90. gun sonunda: musavire indirme/arsivleme linki, silme onayi ve 90 gun
+  uzatma secenegi sunulur. Sessiz otomatik silme uygulanmaz.
 - Metadata, fis taslagi, mustavir karari, learning kaydi ve export izi kalir.
 
 Backup manifestleri 14 gun saklanir. Ham dosya backup kopyasi uzun sureli
@@ -88,7 +82,7 @@ Ilk production env:
 ```text
 FISORA_ENV=production
 FISORA_STORE_BACKEND=postgres
-FISORA_AUTH_MODE=mock_header_required
+FISORA_AUTH_MODE=session_required
 FISORA_AUTH_HEADER=X-Fisora-User-Id
 FISORA_DOCUMENT_STORAGE_PATH=/opt/fisora/data/documents
 FISORA_EXPORT_PATH=/opt/fisora/data/exports
@@ -108,22 +102,25 @@ sunucuda model runtime'i kurulmaz; key sadece kapali server env dosyasinda
 tutulur. Ucretli OpenAI kiyasi gerekirse ayni adapter hatti OpenAI env'i ile
 calistirilir.
 
-Ilk kapali IP demosunda gateway/session katmani hazir degilse
-`FISORA_AUTH_MODE=mock_header_required` kullanilir. Domain, TLS ve gateway
-dogrulanmis user header'i hazirlandiginda `trusted_header` moduna gecilir.
+Ilk kapali IP demosunda session katmani hazir degilse
+`FISORA_AUTH_MODE=mock_header_required` kullanilir. Ilk MVP hedefi custom
+session'dir. `trusted_header` ancak ayri gateway/JWT/OIDC katmani user id'yi
+guvenli sekilde dogrulayip backend'e enjekte ederse kullanilir.
 
 ## Backup Politikasi
 
-Her gece:
+Periyodik veya manuel calistirilan backup:
 
 - PostgreSQL dump.
 - Belge metadata manifest.
 - Export paketleri.
+- Gerekli aktif belge dosyalari.
+- Ayni makine disina kopyalama.
 
 Saklama:
 
 - Gunluk: 14 gun.
-- Ham belge dosyasi: urun politikasina gore 90 gunu asmayacak.
+- Ham belge dosyasi: musavir onayli 90 gun/uzatma politikasina uyacak.
 - Metadata/audit/export izleri: database retention politikasina gore kalir.
 
 ## Ilk Deploy Sirasi

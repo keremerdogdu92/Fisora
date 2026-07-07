@@ -470,22 +470,30 @@ export async function createInviteForSelectedClientAction({
 }) {
   if (!selectedClient) return;
   const userId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
-  setInviteStatus(`${userId} için davet tokeni hazırlanıyor...`);
+  const inviteEmail = userId.includes("@") ? userId : "";
+  setInviteStatus(`${userId} için davet linki hazırlanıyor...`);
   try {
     const result = await createPortalInvite({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
       userId,
+      email: inviteEmail,
       displayName: selectedClient.userLabel || selectedClient.clientName,
       clientId: selectedClient.clientId,
       invitedBy: session?.userId || loginUserId.trim() || "mali-musavir",
       sessionToken: session?.sessionToken,
       userHeader: session?.userId || loginUserId.trim(),
     });
-    setInviteStatus(`Davet tokeni: ${String(result.invite_token || "")}`);
+    const delivery = result.email_delivery as Record<string, unknown> | undefined;
+    const deliveryStatus = String(delivery?.status || "");
+    setInviteStatus(
+      deliveryStatus === "sent" || deliveryStatus === "dry_run"
+        ? "Davet maili hazırlandı."
+        : "Davet linki hazır. Mail kapalıysa link elle paylaşılabilir.",
+    );
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setInviteStatus(`Davet tokeni olusturulamadi. ${message}`);
+    setInviteStatus(`Davet linki olusturulamadi. ${message}`);
   }
 }
 

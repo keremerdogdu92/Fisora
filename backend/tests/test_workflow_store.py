@@ -539,6 +539,69 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "deleted")
         self.assertEqual(workspace["uploaded_documents"][0]["original_file_name"], "expired.pdf")
 
+    def test_json_store_document_retention_preview_does_not_delete_expired_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage_path = Path(temp_dir) / "expired-preview.pdf"
+            storage_path.write_bytes(b"expired")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            expired_at = datetime.now(UTC) - timedelta(days=1)
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "expired-preview",
+                    "document_type": "invoice",
+                    "original_file_name": "expired-preview.pdf",
+                    "storage_path": str(storage_path),
+                    "status": "stored",
+                    "storage_status": "stored",
+                    "expires_at": expired_at.isoformat(timespec="seconds"),
+                    "deleted_at": "",
+                },
+            )
+
+            preview = store.preview_document_retention()
+            workspace = store.get_workspace("client-1")
+            file_exists = storage_path.exists()
+
+        self.assertEqual(preview["expired_count"], 1)
+        self.assertEqual(preview["deleted_count"], 0)
+        self.assertTrue(file_exists)
+        self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "stored")
+
+    def test_json_store_document_retention_action_extends_expired_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            storage_path = Path(temp_dir) / "expired-extend.pdf"
+            storage_path.write_bytes(b"expired")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            expired_at = datetime(2026, 1, 1, tzinfo=UTC)
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "expired-extend",
+                    "document_type": "invoice",
+                    "original_file_name": "expired-extend.pdf",
+                    "storage_path": str(storage_path),
+                    "status": "stored",
+                    "storage_status": "stored",
+                    "download_available_until": expired_at.isoformat(timespec="seconds"),
+                    "expires_at": expired_at.isoformat(timespec="seconds"),
+                    "deleted_at": "",
+                },
+            )
+
+            result = store.apply_document_retention_action(
+                document_refs=["expired-extend"],
+                action="extend_90_days",
+            )
+            workspace = store.get_workspace("client-1")
+            file_exists = storage_path.exists()
+
+        self.assertEqual(result["extended_count"], 1)
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertTrue(file_exists)
+        self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "stored")
+        self.assertEqual(workspace["uploaded_documents"][0]["expires_at"], "2026-04-01T00:00:00+00:00")
+
     def test_json_store_keeps_document_under_review_for_review_required_decision(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")

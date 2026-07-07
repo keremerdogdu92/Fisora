@@ -11,6 +11,7 @@ const {
   createDelegatedClientSession,
   createClientOnboardingPackage,
   createPortalInvite,
+  createWorkspaceExportPackage,
   deleteClientDocuments,
   ensureUploadWorkspace,
   loginWithPassword,
@@ -18,6 +19,8 @@ const {
   pickUploadUser,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
+  applyDocumentRetentionAction,
+  previewDocumentRetention,
   requestStatementAiSuggestions,
   reprocessClient,
   reprocessDocument,
@@ -673,9 +676,30 @@ test("createPortalInvite posts invite payload without sending email", async () =
     role: "client_user",
     allowed_client_ids: ["client-1"],
     invited_by: "mali-musavir",
+    email: "",
     ttl_hours: 48,
   });
   assert.deepEqual(result, { invite_token: "invite-1" });
+});
+
+test("createPortalInvite includes recipient email when provided", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ invite_token: "invite-1", email_delivery: { status: "dry_run" } }) };
+  };
+
+  await createPortalInvite({
+    apiBaseUrl: "http://localhost:8000",
+    userId: "client-user",
+    displayName: "Client User",
+    clientId: "client-1",
+    invitedBy: "mali-musavir",
+    email: "client@example.com",
+    fetchImpl,
+  });
+
+  assert.equal(JSON.parse(request.init.body).email, "client@example.com");
 });
 
 test("setPortalPassword posts password bootstrap payload", async () => {
@@ -770,6 +794,36 @@ test("deleteClientDocuments posts confirmed bulk document deletion", async () =>
     delete_files: true,
   });
   assert.deepEqual(result, { deleted_count: 2, deleted_document_refs: ["doc-1", "doc-2"] });
+});
+
+test("createWorkspaceExportPackage posts selected Zirve mapping adapter", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ package: { export_type: "zirve_mapping_csv", download_url: "/download.csv" } }) };
+  };
+
+  const result = await createWorkspaceExportPackage({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    exportType: "zirve_mapping_csv",
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/export-package/from-workspace");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    client_id: "client-1",
+    export_type: "zirve_mapping_csv",
+  });
+  assert.equal(result.package.download_url, "/download.csv");
 });
 
 test("requestStatementAiSuggestions posts structured statement lines", async () => {
@@ -955,6 +1009,32 @@ test("storeReviewDecision binds draft corrections to accountant note and rule in
   assert.deepEqual(decision.draft_lines.map((line) => line.account_code), ["153.01", "320.01"]);
 });
 
+test("storeReviewDecision maps decision note to accountant note and rule instruction", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ learning_event: { scope: "client_rule" } }) };
+  };
+
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "fuel.pdf",
+    action: "approve_with_changes",
+    reviewer: "mali-musavir",
+    correctedAccountCode: "770.05",
+    reason: "Fuel expense was confirmed.",
+    decisionNote: "Fuel from this vendor should be reviewed and posted to 770.05.",
+    applyToSimilar: true,
+    fetchImpl,
+  });
+
+  const decision = JSON.parse(request.init.body).decision;
+  assert.equal(decision.accountant_note, "Fuel from this vendor should be reviewed and posted to 770.05.");
+  assert.equal(decision.rule_instruction, "Fuel from this vendor should be reviewed and posted to 770.05.");
+});
+
 test("storeReviewDecision marks one-click rule requests as apply-to-similar", async () => {
   let request;
   const fetchImpl = async (url, init) => {
@@ -1039,6 +1119,64 @@ test("reprocessClient posts selected client for queued background reprocessing",
     max_jobs: 25,
   });
   assert.equal(result.queued_document_count, 3);
+});
+
+test("previewDocumentRetention posts non-destructive retention preview request", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ expired_count: 1, deleted_count: 0, documents: [] }) };
+  };
+
+  const result = await previewDocumentRetention({
+    apiBaseUrl: "http://localhost:8000",
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/document-retention/preview");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {});
+  assert.equal(result.expired_count, 1);
+  assert.equal(result.deleted_count, 0);
+});
+
+test("applyDocumentRetentionAction posts selected documents and requested action", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ action: "extend_90_days", extended_count: 1 }) };
+  };
+
+  const result = await applyDocumentRetentionAction({
+    apiBaseUrl: "http://localhost:8000",
+    documentRefs: ["client-1:doc-1"],
+    action: "extend_90_days",
+    deleteFiles: false,
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/document-retention/action");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    document_refs: ["client-1:doc-1"],
+    action: "extend_90_days",
+    delete_files: false,
+  });
+  assert.equal(result.extended_count, 1);
 });
 
 test("resetTestData posts guarded accountant reset request", async () => {

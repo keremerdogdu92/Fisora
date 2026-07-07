@@ -143,12 +143,25 @@ powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-health.ps1 `
 
 ## Backup ve Restore
 
+Deploy veya buyuk veri islemi oncesi tek seferlik backup al:
+
+```bash
+sh deploy/scripts/fisora-prod.sh backup-once
+```
+
 Backup container su dosyalari uretir:
 
 ```text
 postgres-YYYYMMDDTHHMMSSZ.sql
 documents-YYYYMMDDTHHMMSSZ.manifest.tsv
 ```
+
+Kontrol listesi:
+
+- SQL dump dosyasi olustu.
+- Belge manifest dosyasi olustu.
+- `FISORA_BACKUP_COPY_DIR` tanimliysa ayni dosyalar makine disi hedefte de var.
+- Backup klasoru ve belge klasoru disk kullaniminda beklenmeyen artis yok.
 
 Restore komutu sadece acil durum icindir:
 
@@ -158,6 +171,31 @@ sh deploy/scripts/fisora-prod.sh restore-postgres /path/to/postgres-YYYYMMDDTHHM
 
 Restore mevcut database icerigini degistirir. Once yeni backup alinmadan
 calistirilmaz.
+
+## Belge Saklama Operasyonu
+
+Ham belgeler 90 gun sonunda sessizce silinmez. Once operasyon ekraninda
+saklama onizlemesi alinir:
+
+```text
+POST /api/phase0/store/document-retention/preview
+```
+
+Musavir kontrolunden sonra iki islemden biri uygulanir:
+
+```text
+POST /api/phase0/store/document-retention/action
+```
+
+Payload ornekleri:
+
+```json
+{"document_refs":["client-1:doc-1"],"action":"extend_90_days","delete_files":true}
+{"document_refs":["client-1:doc-1"],"action":"delete","delete_files":true}
+```
+
+Kural: musteriye geri indirme acilmaz; musteri sadece onizleyebilir.
+Gerekirse indirme/arsivleme musavir operasyonu olarak ayrica yapilir.
 
 ## Readiness Kontrolu
 

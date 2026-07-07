@@ -1,13 +1,15 @@
 # Zirve Import/Export Dogrulama Matrisi
 
-Bu tablo Zirve makinesinde yapilan testlerle doldurulacak. Bos alanlar
-bilerek birakilmistir.
+Bu tablo Zirve makinesinde yapilan kolon eslestirme testleriyle doldurulacak.
+Zirve tarafinda sabit ve guvenilir bir hazir format varsayilmiyor; Fisora
+anlamli CSV/XLSX kolonlari uretir, mustavir import ekraninda hangi kolonun ne
+oldugunu tanitir.
 
 | Test ID | Format Adayi | Dosya | Sonuc | Zirve Hata Mesaji | Zorunlu Kolonlar | Not |
 |---|---|---|---|---|---|---|
 | ZRV-001 | Universal Journal CSV | exports/universal_journal.csv | TBD | TBD | TBD | Ilk aday format |
-| ZRV-002 | Zirve Trial Voucher CSV | exports/generated/{client}-zirve_trial_csv.csv | TBD | TBD | fis_tarihi, fis_turu, hesap_kodu, borc, alacak | Yeni saha eslestirme adayi; dogrulanmadi |
-| ZRV-003 | Zirve Manual Mapping CSV | exports/generated/{client}-zirve_mapping_csv.csv | field mapping test pending | TBD | hesap_kodu, evrak_tarihi, evrak_no, belge_turu, aciklama, borc, alacak | Zirve kolon sirasini sabitlemiyor; kullanici import ekraninda kolonlari elle eslestiriyor |
+| ZRV-002 | Zirve Trial Voucher CSV | exports/generated/{client}-zirve_trial_csv.csv | kolon eslestirme bekliyor | TBD | fis_tarihi, fis_turu, hesap_kodu, borc, alacak | Yeni saha eslestirme adayi; dogrulanmadi |
+| ZRV-003 | Zirve Manual Mapping CSV | exports/generated/{client}-zirve_mapping_csv.csv | field_test_pending | TBD | hesap_kodu, evrak_tarihi, evrak_no, belge_turu, aciklama, borc, alacak | Ana aday; saha adimlari `docs/zirve-field-test-runbook.md` |
 | ZRV-004 | Fis listesi Excel | TBD | TBD | TBD | TBD | Alternatif rota |
 | ZRV-005 | Fatura Excel | TBD | TBD | TBD | TBD | Fis seviyesi yeterli olmazsa |
 | ZRV-006 | Banka Excel | TBD | TBD | TBD | TBD | Banka hareketleri icin |
@@ -52,7 +54,7 @@ degeri `false` kalir.
 ## Manual Mapping CSV Adayi
 
 `zirve_mapping_csv` adapter'i Zirve'nin sabit kolon sirasindan cok import
-ekraninda elle kolon eslestirme yaptirdigi varsayimina gore uretilir. Bu nedenle
+ekraninda elle kolon eslestirme yaptirdigi kararina gore uretilir. Bu nedenle
 kolon sirasi urun kontrati degildir; kontrat, asgari alanlarin dosyada bulunmasi
 ve mustavirin bunlari Zirve import ekraninda eslestirebilmesidir.
 

@@ -776,6 +776,29 @@ def parse_pdf_invoice(
 ) -> ParsedInvoice:
     page_count, text, extraction_notes = extract_pdf_text(path)
     stripped_text = text.strip()
+    if page_count > 0 and not stripped_text:
+        return ParsedInvoice(
+            file_name=path.name,
+            provider_hint="",
+            page_count=page_count,
+            text_extractable=False,
+            extracted_char_count=0,
+            scenario="",
+            invoice_type="",
+            invoice_no="",
+            ettn="",
+            issue_date="",
+            tax_ids=(),
+            vat_rates=(),
+            goods_services_total="",
+            vat_total="",
+            special_tax_total="",
+            tax_inclusive_total="",
+            payable_total="",
+            risk_flags=("scanned_pdf_unsupported",),
+            suggested_route="review_queue",
+            parse_notes=tuple(dict.fromkeys((*extraction_notes, "scanned_pdf_unsupported"))),
+        )
     edge_summary = summarize_invoice_edge_cases(path.name, text, extracted_char_count=len(stripped_text))
     parsed_totals = {
         key: extract_label_amount(text, labels)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from app.domain.document_uploads import retention_decision
+from app.domain.document_uploads import extend_retention_deadline, retention_decision
 from app.domain.portal_access import (
     PORTAL_USERS_CLIENT_ID,
     build_portal_user_record,
@@ -640,6 +640,94 @@ class PostgresWorkflowStore:
             "expiring_count": expiring_count,
             "deleted_count": deleted_count,
             "deleted_document_refs": deleted_refs,
+        }
+
+    def preview_document_retention(self) -> dict[str, Any]:
+        checked_count = 0
+        expiring_count = 0
+        expired_count = 0
+        documents: list[dict[str, Any]] = []
+        for row in self._list_records("uploaded_document"):
+            checked_count += 1
+            client_id = str(row["client_id"])
+            document_ref = str(row["record_key"])
+            document = row["payload"]
+            decision = retention_decision(document)
+            if decision.storage_status == "expiring":
+                expiring_count += 1
+            if decision.storage_status == "expired":
+                expired_count += 1
+            if decision.storage_status in {"expiring", "expired"}:
+                documents.append(
+                    {
+                        "document_ref": document_ref,
+                        "document_key": f"{client_id}:{document_ref}",
+                        "client_id": client_id,
+                        "original_file_name": str(document.get("original_file_name") or ""),
+                        "storage_status": decision.storage_status,
+                        "expires_at": str(document.get("expires_at") or ""),
+                        "reason": decision.reason,
+                    }
+                )
+        return {
+            "checked_count": checked_count,
+            "expiring_count": expiring_count,
+            "expired_count": expired_count,
+            "deleted_count": 0,
+            "documents": documents,
+        }
+
+    def apply_document_retention_action(
+        self,
+        *,
+        document_refs: list[str],
+        action: str,
+        delete_files: bool = True,
+    ) -> dict[str, Any]:
+        normalized_refs = {str(ref or "").strip() for ref in document_refs if str(ref or "").strip()}
+        if action not in {"delete", "extend_90_days"}:
+            raise ValueError("unsupported retention action")
+        timestamp = utc_now()
+        deleted_count = 0
+        extended_count = 0
+        deleted_file_count = 0
+        changed_refs: list[str] = []
+        for row in self._list_records("uploaded_document"):
+            client_id = str(row["client_id"])
+            document_ref = str(row["record_key"])
+            document_key = f"{client_id}:{document_ref}"
+            if document_ref not in normalized_refs and document_key not in normalized_refs:
+                continue
+            document = row["payload"]
+            if action == "delete":
+                storage_path = Path(str(document.get("storage_path") or ""))
+                if delete_files and storage_path.exists() and storage_path.is_file():
+                    storage_path.unlink()
+                    deleted_file_count += 1
+                document["status"] = "deleted"
+                document["storage_status"] = "deleted"
+                document["deleted_at"] = timestamp
+                document["updated_at"] = timestamp
+                deleted_count += 1
+            else:
+                current_expiry = str(document.get("expires_at") or "")
+                if not current_expiry:
+                    continue
+                extended = extend_retention_deadline(current_expiry, days=90)
+                document["expires_at"] = extended
+                document["download_available_until"] = extended
+                document["storage_status"] = "stored"
+                document["deleted_at"] = ""
+                document["updated_at"] = timestamp
+                extended_count += 1
+            self._upsert_record(client_id, "uploaded_document", document_ref, document)
+            changed_refs.append(document_ref)
+        return {
+            "action": action,
+            "deleted_count": deleted_count,
+            "extended_count": extended_count,
+            "deleted_file_count": deleted_file_count,
+            "document_refs": changed_refs,
         }
 
     def delete_client_documents(

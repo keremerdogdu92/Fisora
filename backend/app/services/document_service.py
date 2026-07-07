@@ -388,6 +388,43 @@ class DocumentService:
         )
         return summary
 
+    def store_document_retention_preview(self) -> dict[str, object]:
+        summary = self.store.preview_document_retention()
+        self.record_operation_event(
+            store=self.store,
+            client_id="__system__",
+            event_type="document_retention_preview",
+            status="warning" if summary["expired_count"] else "ok",
+            message="90 gun belge retention onizlemesi hazirlandi.",
+            metadata=summary,
+        )
+        return summary
+
+    def store_document_retention_action(
+        self,
+        *,
+        document_refs: list[str],
+        action: str,
+        delete_files: bool,
+    ) -> dict[str, object]:
+        try:
+            summary = self.store.apply_document_retention_action(
+                document_refs=document_refs,
+                action=action,
+                delete_files=delete_files,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        self.record_operation_event(
+            store=self.store,
+            client_id="__system__",
+            event_type="document_retention_action",
+            status="warning" if summary["deleted_count"] else "ok",
+            message="Secili belge retention aksiyonu uygulandi.",
+            metadata=summary,
+        )
+        return summary
+
     def store_processing_run(self, *, max_jobs: int) -> dict[str, object]:
         summary = process_queued_documents(self.store, max_jobs=max_jobs)
         self.record_operation_event(

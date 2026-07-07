@@ -2,22 +2,28 @@ import { groupedReviewReasons } from "./portal-normalization";
 import { Info, Metric } from "./portal-shared";
 import type { AiCapacityAgentView, AiCapacityView, ExportBasketItem, ExportMode, PilotData, PilotDocument, PilotReadinessView } from "./portal-types";
 
+type RetentionDocumentView = Record<string, unknown>;
+
 export function ExportBasketView({
   documents,
   exportBasket,
   exportMode,
   exportStatus,
+  exportType,
   onMarkPackaged,
   periodLabel,
   setExportMode,
+  setExportType,
 }: {
   documents: PilotDocument[];
   exportBasket: ExportBasketItem[];
   exportMode: ExportMode;
   exportStatus: string;
+  exportType: string;
   onMarkPackaged: () => void;
   periodLabel: (period: string) => string;
   setExportMode: (value: ExportMode) => void;
+  setExportType: (value: string) => void;
 }) {
   const totalDocuments = exportBasket.reduce((sum, item) => sum + item.documentCount, 0);
   const pendingReviewDocuments = documents.filter((document) => document.status === "review_required");
@@ -33,6 +39,11 @@ export function ExportBasketView({
           <button className={exportMode === "bulk" ? "active-action" : ""} onClick={() => setExportMode("bulk")} type="button">Toplu paket</button>
           <button className={exportMode === "by_client" ? "active-action" : ""} onClick={() => setExportMode("by_client")} type="button">Mükellef bazlı</button>
         </div>
+      </div>
+      <div className="inline-actions">
+        <button className={exportType === "zirve_mapping_csv" ? "active-action" : ""} onClick={() => setExportType("zirve_mapping_csv")} type="button">Zirve mapping CSV</button>
+        <button className={exportType === "zirve_universal_csv" ? "active-action" : ""} onClick={() => setExportType("zirve_universal_csv")} type="button">Universal CSV</button>
+        <button className={exportType === "zirve_trial_csv" ? "active-action" : ""} onClick={() => setExportType("zirve_trial_csv")} type="button">Trial CSV</button>
       </div>
       <div className="summary-grid compact">
         <Metric label="Mükellef" value={exportBasket.length} />
@@ -77,13 +88,23 @@ export function OperationsView({
   aiCapacity,
   data,
   localFallbackAllowed,
+  onDeleteRetentionDocuments,
+  onExtendRetentionDocuments,
+  onPreviewRetention,
   readinessView,
+  retentionDocuments,
+  retentionStatus,
   source,
 }: {
   aiCapacity?: AiCapacityView;
   data: PilotData;
   localFallbackAllowed: boolean;
+  onDeleteRetentionDocuments: () => void;
+  onExtendRetentionDocuments: () => void;
+  onPreviewRetention: () => void;
   readinessView: PilotReadinessView;
+  retentionDocuments: RetentionDocumentView[];
+  retentionStatus: string;
   source: string;
 }) {
   const agents = aiCapacity?.agents ?? [];
@@ -151,6 +172,49 @@ export function OperationsView({
         {localFallbackAllowed ? (
           <p className="decision-status">Lokal çalışma verisi açık.</p>
         ) : null}
+      </div>
+      <div className="panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Belge saklama</h2>
+            <span>90 gun sonunda silme veya 90 gun uzatma karari.</span>
+          </div>
+          <button className="secondary" onClick={onPreviewRetention} type="button">Onizle</button>
+        </div>
+        <div className="summary-grid compact">
+          <Metric label="Aksiyon bekleyen" value={retentionDocuments.length} />
+          <Metric label="Toplam belge" value={data.documents.length} />
+        </div>
+        <div className="basket-list">
+          {retentionDocuments.slice(0, 6).map((document) => {
+            const documentKey = String(document.document_key || document.document_ref || "");
+            return (
+              <div className="basket-row" key={documentKey}>
+                <div>
+                  <strong>{String(document.original_file_name || documentKey || "Belge")}</strong>
+                  <span>{String(document.client_id || "")} / {String(document.expires_at || "")}</span>
+                </div>
+                <span className={`status ${document.storage_status === "expired" ? "cancel_requested" : "queued"}`}>
+                  {String(document.storage_status || "bekliyor")}
+                </span>
+              </div>
+            );
+          })}
+          {!retentionDocuments.length ? (
+            <div className="basket-row">
+              <div>
+                <strong>Saklama onizlemesi bekleniyor</strong>
+                <span>Once sureci gorelim; silme veya uzatma ondan sonra uygulanir.</span>
+              </div>
+              <span className="status queued">Bekliyor</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="inline-actions">
+          <button className="secondary" disabled={!retentionDocuments.length} onClick={onExtendRetentionDocuments} type="button">90 gun uzat</button>
+          <button className="danger" disabled={!retentionDocuments.length} onClick={onDeleteRetentionDocuments} type="button">Onayla sil</button>
+        </div>
+        <p className="decision-status">{retentionStatus || "Musteri indirme yetkisi acilmadan, operasyon tarafinda kontrollu saklama karari verilir."}</p>
       </div>
     </section>
   );

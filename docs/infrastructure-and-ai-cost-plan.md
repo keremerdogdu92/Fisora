@@ -22,18 +22,16 @@ Baslangic icin GPU'suz cloud server yeterlidir:
 - Local encrypted document volume
 - Harici/gece backup
 
-Varsayilan ilk sunucu:
+Alinan ilk sunucu:
 
-- Turkiye lokasyon
-- Radore Cloud Server Infinity varsayimi
-- 8 vCPU
-- 24 GB RAM
-- 250 GB disk
+- 4 Core 2.70 GHz
+- 4 GB DDR4 RAM
+- 100 GB NVMe SSD
 - GPU yok
 
-Bu kurulum fatura yukleme, hesap plani, cari eslestirme, fis taslagi, review ve
-export paketi icin yeterlidir. AI modeli calistirmak icin GPU, Ollama, vLLM veya
-benzeri bir runtime kurulmayacak.
+Bu kurulum hafif pilot icin kabul edilir. Worker sayisi, backup saati ve disk
+kullanim uyari esikleri bu kaynak sinirina gore temkinli ayarlanmalidir. AI
+modeli calistirmak icin GPU, Ollama, vLLM veya benzeri bir runtime kurulmayacak.
 
 ## AI Kullanim Karari
 
@@ -42,8 +40,8 @@ Baslangic karari:
 - Kendi sunucuda model calistirma yok.
 - Kucuk sorgular icin bile once kural motoru ve parser calisir.
 - Belirsiz kalemlerde dis AI API'ye dusuk hacimli, kontrollu batch istek atilir.
-- Her istek JSON schema ile sinirlanir ve muhasebe karari yerine sadece
-  kategori/gerekce uretir.
+- Her istek JSON schema ile sinirlanir ve mustavir politikasina yardimci olacak
+  kategori/gerekce, fis taslagi aciklamasi veya politika sablonu uretir.
 - Gecmis veri olmayan yeni mukellefte AI, `ai_assisted_draft` modunda ilk fis
   taslagini hazirlamaya yardim edebilir; bu sonuc export yetkisi vermez.
 
@@ -58,7 +56,7 @@ AI API su isleri yapmayacak:
 
 - Nihai muhasebe hesabina karar verme.
 - Belgenin gider yazilip yazilamayacagina kesin karar verme.
-- KDV, tevkifat, iade, istisna gibi riskli kararlar.
+- KDV, tevkifat, iade, istisna gibi riskli kararlar icin nihai politika koyma.
 - Zirve export formatini kesinlestirme.
 
 ## Maliyet Politikasi
@@ -73,13 +71,12 @@ Ilk hedef aylik AI maliyetini dusuk tutmaktir:
 6. Soguk baslangic demo/pilot istekleri ayri izlenir; satis demosu icin yapilan
    AI cagrilari production otomasyon basarisi gibi raporlanmaz.
 
-Benchmark altyapisi:
+Kalite olcumu:
 
-- `POST /phase0/classification/batch-benchmark` statik kural ve provider
-  payload'larini ayni kategori/guven/gerekce schema'siyla karsilastirir.
-- Ilk benchmark dis API'ye cikmadan replay payload ile yapilir.
-- OpenAI/Gemini/Manus adaylari baglandiginda ayni case seti uzerinde dogruluk,
-  AI kullanildi mi ve tahmini input karakteri raporlanir.
+- Eski OpenAI/Gemini/Manus benchmark sorusu urun kararindan cikarildi.
+- Ana basari `draft_success`: AI/motor gerekli fis taslagini uretebiliyor mu.
+- `automation_success`: mustavir politikasiyla dogrudan export-ready olabilen
+  islem oranidir ve ayri izlenir.
 
 Usage ledger ilk surumu:
 
@@ -105,33 +102,27 @@ avantajli gorunmuyor.
 
 ## Normal Sunucu Kisa Liste
 
-Baslangic icin pratik secenek:
-
-- 8 vCPU / 24 GB RAM / 250 GB disk: ilk pilot ve dusuk hacimli canli kullanim.
-- 16 vCPU / 32 GB RAM: daha fazla worker ve daha rahat PostgreSQL payi.
-- Ek disk/storage: belge hacmi arttiginda ilk buyutulecek kaynak.
-
-Ilk pilotta 2-5 mukellef ve text PDF/XML/CSV agirlikli akis icin 8 vCPU / 24 GB
-RAM yeterli olur. Ham belgeler 90 gun sonra silinecegi icin uzun vadeli disk
-yuku metadata ve export izinden cok daha dusuk kalir.
+Mevcut paket 4 Core / 4 GB RAM / 100 GB NVMe oldugu icin ilk pilot dusuk
+hacimli tutulur. Ek disk/storage ve RAM, belge hacmi veya worker concurrency
+artarsa ilk buyutulecek kaynaklardir.
 
 ## 90 Gun Ham Belge Saklama
 
-Ham PDF/XML/ekstre dosyalari 90 gun indirilebilir kalir. 75. gunden sonra
-uyari, 90. gun sonunda silme uygulanir. Metadata, fis taslagi, mustavir karari,
+Ham PDF/XML/ekstre dosyalari 90 gun aktif kalir. 90. gun sonunda sistem
+musavire indirme/arsivleme linki, silme onayi ve 90 gun uzatma secenegi sunar.
+Sessiz otomatik silme uygulanmaz. Metadata, fis taslagi, mustavir karari,
 learning event ve export izi korunur.
 
 Bu karar:
 
 - Storage maliyetini dusurur.
 - Server tasimasini kolaylastirir.
-- 250 GB diskle baslamayi daha gercekci yapar.
+- 100 GB diskle baslayan pilotta disk baskisini kontrol altinda tutar.
 - Backup politikasini ham belge yerine metadata/dump agirlikli hale getirir.
 
 ## Sonraki Teknik Adim
 
-Yerel Docker smoke testinde Postgres, Redis, backend, frontend, nginx, worker,
-export ve backup akisi dogrulandi. Sonraki teknik adim ayni komut setini gercek
-Turkiye lokasyonlu sunucuda calistirmak, env secret/TLS/firewall ayarlarini
-eklemek ve belge volume'u icin sifreleme ile harici backup hedefini
-netlestirmektir.
+Sonraki teknik adim mevcut 4 GB RAM / 100 GB diskli sunucu icin manuel backup
+plani yazmak, backup'i ayni makine disina tasimak, env secret/TLS/firewall
+ayarlarini tamamlamak ve disk kullanim uyarilarini operasyon ekranina
+baglamaktir.

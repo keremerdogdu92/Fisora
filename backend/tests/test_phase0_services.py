@@ -13,9 +13,10 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.api.phase0_dependencies import record_operation_event
-from app.api.phase0_schemas import ClientProfilePayload, ReviewDecisionPayload, StoredReviewDecisionPayload
+from app.api.phase0_schemas import ClientProfilePayload, ReviewDecisionPayload, StoredReviewDecisionPayload, WorkspaceExportPackagePayload
 from app.persistence.workflow_store import JsonWorkflowStore
 from app.services.document_service import DocumentService
+from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
 from app.services.workspace_service import WorkspaceService
 
@@ -167,6 +168,86 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(saved["decision"]["action"], "approve_with_changes")
         self.assertEqual(workspace["learning_events"][0]["client_id"], "client-1")
         self.assertEqual(workspace["operation_events"][0]["event_type"], "review_decision_saved")
+
+    def test_export_package_exposes_zirve_mapping_field_notes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="ready.pdf",
+                result={
+                    "file_name": "ready.pdf",
+                    "export_status": "export_ready",
+                    "review_reason_codes": [],
+                    "risk_flags": [],
+                    "issue_date": "2026-07-01",
+                    "draft_lines": [
+                        {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.01", "description": "Tedarikci", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+            service = ExportService(
+                store=store,
+                export_path=Path(temp_dir) / "exports",
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            saved = service.store_export_package_from_workspace(
+                payload=WorkspaceExportPackagePayload(client_id="client-1", export_type="zirve_mapping_csv"),
+                user_id="mali-musavir",
+            )
+
+        adapter = saved["package"]["adapter"]
+        self.assertEqual(adapter["validation_status"], "field_test_pending")
+        self.assertFalse(adapter["verified_in_zirve"])
+        self.assertTrue(any("manual column mapping" in note.lower() for note in adapter["field_mapping_notes"]))
+
+    def test_review_decision_payload_normalizes_decision_note(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            event = service.review_learning_event(
+                ReviewDecisionPayload(
+                    document_ref="fuel.pdf",
+                    action="approve_with_changes",
+                    reviewer="mali-musavir",
+                    decision_note="Fuel vendor should stay in review until vehicle rule is learned.",
+                    apply_to_similar=True,
+                )
+            )
+
+        self.assertEqual(event["accountant_note"], "Fuel vendor should stay in review until vehicle rule is learned.")
+        self.assertEqual(event["rule_instruction"], "Fuel vendor should stay in review until vehicle rule is learned.")
+
+    def test_review_decision_payload_preserves_legacy_note_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            event = service.review_learning_event(
+                ReviewDecisionPayload(
+                    document_ref="legacy.pdf",
+                    action="approve_with_changes",
+                    reviewer="mali-musavir",
+                    accountant_note="Accountant rationale",
+                    rule_instruction="Learning rule text",
+                    apply_to_similar=True,
+                )
+            )
+
+        self.assertEqual(event["accountant_note"], "Accountant rationale")
+        self.assertEqual(event["rule_instruction"], "Learning rule text")
 
     def test_review_service_persists_vat_split_review_in_learning_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

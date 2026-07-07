@@ -508,30 +508,21 @@ export function JournalPanel({
             statementAiStatus={statementAiStatus}
           />
         ) : null}
-        <section className="journal-correction-panel" aria-label="Fiş notu ve öğrenme talimatı">
+        <section className="journal-correction-panel" aria-label="Karar notu">
           <div className="statement-review-heading">
             <div>
-              <h3>Düzeltme ve not</h3>
-              <span>Hesap ve cari değişikliği fiş satırında yapılır; not karar kaydı, öğrenme talimatı benzer belge önerisi içindir.</span>
+              <h3>Karar notu</h3>
+              <span>Hesap ve cari değişikliği fiş satırında yapılır; bu not karar kaydı ve benzer belge öğrenme adayı için kullanılır.</span>
             </div>
           </div>
           <div className="correction-form">
             <label className="wide">
-              <span>Müşavir notu</span>
+              <span>Karar notu</span>
               <textarea
                 onChange={(event) => setCorrectionDraft({ ...correctionDraft, reason: event.target.value })}
-                placeholder="Bu fişte neyi neden değiştirdiniz?"
+                placeholder="Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?"
                 rows={3}
                 value={correctionDraft.reason}
-              />
-            </label>
-            <label className="wide">
-              <span>Benzer belge öğrenme talimatı</span>
-              <textarea
-                onChange={(event) => setCorrectionDraft({ ...correctionDraft, ruleInstruction: event.target.value })}
-                placeholder="Benzer belgelerde nasıl önerilsin? Kural olarak kullan seçilirse aday kural bu metinden oluşur."
-                rows={2}
-                value={correctionDraft.ruleInstruction}
               />
             </label>
             <label className="checkbox-row wide">

@@ -14,6 +14,7 @@ if str(BACKEND) not in sys.path:
 from app.domain.document_uploads import (
     decode_base64_content,
     document_storage_status,
+    extend_retention_deadline,
     retention_decision,
     sanitize_file_name,
     store_document_content,
@@ -129,6 +130,12 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertEqual(decision.document_id, "doc-1")
         self.assertEqual(decision.storage_status, "expired")
         self.assertTrue(decision.should_delete)
+
+    def test_extend_retention_deadline_adds_90_days_from_current_expiry(self) -> None:
+        self.assertEqual(
+            extend_retention_deadline("2026-01-01T00:00:00+00:00", days=90),
+            "2026-04-01T00:00:00+00:00",
+        )
 
 
 if __name__ == "__main__":

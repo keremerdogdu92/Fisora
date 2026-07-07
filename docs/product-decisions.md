@@ -52,10 +52,10 @@ Calisma modlari:
 - Serbest uyelik olmayacak; kullanicilar mustavir/ofis tarafindan acilacak.
 - Her kullanici bastan en az bir mukellefe baglanacak. Mukellef eslesmesi yoksa
   fatura yukleme izni olmayacak.
-- Minimum mukellef paketi: mukellef karti, VKN/TCKN, faaliyet/NACE veya faaliyet
-  aciklamasi, isyeri adresi ve Zirve hesap plani.
-- Gecmis yevmiye, muavin veya fis exportu zorunlu degil; varsa baslangic
-  ogrenmesini hizlandirir.
+- Minimum mukellef paketi: mukellef karti, VKN/TCKN, NACE, NACE'den uretilen
+  faaliyet aciklamasi, isyeri adresi ve Zirve hesap plani.
+- Gecmis yevmiye, muavin veya fis exportu ilk faz kapsami disina alindi; bu
+  veriyi Zirve'den alma yolu blokaj olarak izlenmeyecek.
 - Faturadaki karsi taraf ayrica 120/320 cari olarak eslestirilir. Bulunamazsa
   belge kontrol kuyruguna duser.
 - Sistem mukellef ozel detay hesap kodu uydurmaz; mevcut Zirve hesap planindan
@@ -64,11 +64,19 @@ Calisma modlari:
   bakim/kozmetik, `Rexton RLi 20` isitme cihazi adayi.
 - Supheli veya is alani disi belgelerde fis taslagi uretilir fakat export
   listesine alinmaz.
+- Iade, tevkifat ve istisna belgeleri kural ogrenilene kadar review'da kalir.
+  OIV/OTV, karma KDV ve eksik belge no gibi teknik olarak cozumlenebilen
+  durumlar yeterli guven ve kanit varsa export-ready olabilir.
 - Ilk canli otomasyon politikasi `export kontrollu`: sistem otomatik taslak
   uretir; export'a yalnizca net, dengeli, risk bayraksiz veya mustavir
   politikasinca izinli kayitlar girer.
 - Ilk demo ve yeni mukellef akisi `ai_assisted_draft` modunu kullanabilir; bu
   modda AI taslak hazirlar ama kesin kayit veya export karari vermez.
+- Varsayilan yuksek tutar limiti olmayacak; risk karari belge tipi, kanit,
+  hesap plani eslesmesi, guven ve mustavir politikasi ile verilir.
+- Mukellef kullanicisi yukledigi belgeyi geri indiremez, sadece onizleyebilir.
+  Ileride mustavir isterse indirme yetkisi ofis/mukellef politikasi olarak
+  acilabilecek sekilde tasarlanir.
 
 ## Faz 0 Hedefi
 
@@ -120,6 +128,7 @@ prototip icin opsiyonel tutulabilir.
 - Mustavir onayi olmadan riskli belge exportu
 - AI'in tek basina vergi/hukuk yorumu yapmasi
 - Dogrulanmamis Zirve direkt entegrasyonu veya COM/OLE otomasyonu
+- Taranmis fatura/ekstre OCR otomasyonu
 - Gercek musteri verisinin anonimlestirilmeden repoya eklenmesi
 
 ## Veri Guvenligi

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import sys
 import tempfile
@@ -164,6 +165,104 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["processing_job"]["intake_category"], "purchase_invoice")
         self.assertEqual([job["status"] for job in workspace["processing_jobs"]], ["queued", "queued"])
         self.assertIn("reprocess_queued", [event["step"] for event in workspace["document_pipeline_events"]])
+
+    def test_document_retention_preview_lists_expired_documents_without_deleting_file(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "eski-fatura.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZXNraS1mYXR1cmE=",
+                },
+            ).json()
+            expired_at = (datetime.now(UTC) - timedelta(days=1)).isoformat(timespec="seconds")
+            upload["expires_at"] = expired_at
+            upload["download_available_until"] = expired_at
+            phase0.get_workflow_store().save_uploaded_document(client_id="client-1", document=upload)
+            storage_path = Path(str(upload["storage_path"]))
+
+            response = client.post("/phase0/store/document-retention/preview")
+            file_exists_after_preview = storage_path.exists()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["deleted_count"], 0)
+        self.assertEqual(payload["expired_count"], 1)
+        self.assertEqual(payload["documents"][0]["document_key"], f"client-1:{upload['document_ref']}")
+        self.assertTrue(file_exists_after_preview)
+
+    def test_document_retention_action_extends_selected_expired_document(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            upload = client.post(
+                "/phase0/store/document-upload",
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "eski-fatura.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZXNraS1mYXR1cmE=",
+                },
+            ).json()
+            expired_at = (datetime.now(UTC) - timedelta(days=1)).isoformat(timespec="seconds")
+            upload["expires_at"] = expired_at
+            upload["download_available_until"] = expired_at
+            phase0.get_workflow_store().save_uploaded_document(client_id="client-1", document=upload)
+
+            response = client.post(
+                "/phase0/store/document-retention/action",
+                json={
+                    "document_refs": [f"client-1:{upload['document_ref']}"],
+                    "action": "extend_90_days",
+                    "delete_files": True,
+                },
+            )
+            workspace = client.get("/phase0/store/workspace/client-1").json()
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        extended_at = (datetime.fromisoformat(expired_at) + timedelta(days=90)).isoformat()
+        self.assertEqual(payload["extended_count"], 1)
+        self.assertEqual(workspace["uploaded_documents"][0]["expires_at"], extended_at)
+        self.assertEqual(workspace["uploaded_documents"][0]["storage_status"], "stored")
 
     def test_client_reprocess_reloads_tax_certificate_nace_and_processes_documents(self) -> None:
         if TestClient is None or phase0 is None or app is None:

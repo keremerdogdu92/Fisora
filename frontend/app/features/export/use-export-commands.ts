@@ -8,14 +8,23 @@ import {
   requestCancellationAction,
   resolveCancellationAction,
 } from "../../portal-export-actions";
-import type { ExportMode, PilotClient, PilotData, PilotDocument } from "../../portal-types";
+import { createWorkspaceExportPackage, resolveApiBaseUrl, sessionAuthErrorMessage } from "../../upload-api";
+import type { ExportMode, LocalSession, PilotClient, PilotData, PilotDocument, ExportBasketItem } from "../../portal-types";
+
+function pageUrl() {
+  return typeof window === "undefined" ? "" : window.location.href;
+}
 
 export function useExportCommands({
   cancelReason,
   clientDocuments,
+  exportBasket,
   exportMode,
+  exportType,
+  loginUserId,
   selectedClient,
   selectedPeriod,
+  session,
   setCancelReason,
   setClientCancellationDocumentId,
   setData,
@@ -24,9 +33,13 @@ export function useExportCommands({
 }: {
   cancelReason: string;
   clientDocuments: PilotDocument[];
+  exportBasket: ExportBasketItem[];
   exportMode: ExportMode;
+  exportType: string;
+  loginUserId: string;
   selectedClient?: PilotClient;
   selectedPeriod: string;
+  session: LocalSession | null;
   setCancelReason: (value: string) => void;
   setClientCancellationDocumentId: (value: string) => void;
   setData: Dispatch<SetStateAction<PilotData>>;
@@ -72,9 +85,33 @@ export function useExportCommands({
     });
   }, [clientDocuments, selectedClient, selectedPeriod, setData, setExportStatus]);
 
-  const markBasketPackaged = useCallback(() => {
-    markBasketPackagedAction({ exportMode, setData, setExportStatus });
-  }, [exportMode, setData, setExportStatus]);
+  const markBasketPackaged = useCallback(async () => {
+    if (!exportBasket.length) {
+      setExportStatus("Cikti paketi icin once mukellef ekleyin.");
+      return;
+    }
+    const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+    setExportStatus(`${exportBasket.length} mukellef icin ${exportType} paketi uretiliyor.`);
+    try {
+      const packages = [];
+      for (const item of exportBasket) {
+        packages.push(await createWorkspaceExportPackage({
+          apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+          clientId: item.clientId,
+          exportType,
+          userId: actingUserId,
+          sessionToken: session?.sessionToken,
+        }));
+      }
+      markBasketPackagedAction({ exportMode, exportType, setData, setExportStatus });
+      const firstPackage = packages[0]?.package || packages[0] || {};
+      const download = String(firstPackage.download_url || "");
+      setExportStatus(download ? `${packages.length} paket hazir: ${download}` : `${packages.length} ${exportType} paketi hazir.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setExportStatus(`Cikti paketi uretilemedi. ${sessionAuthErrorMessage(message) || message}`);
+    }
+  }, [exportBasket, exportMode, exportType, loginUserId, session, setData, setExportStatus]);
 
   return {
     addSelectedClientToBasket,

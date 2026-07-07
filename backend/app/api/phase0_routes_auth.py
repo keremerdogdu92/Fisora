@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Cookie, Header, HTTPException, Response
 
 from app.api.phase0_context import (
@@ -28,6 +30,7 @@ from app.api.phase0_schemas import (
     TestDataResetPayload,
 )
 from app.domain.auth_policy import auth_status_payload, build_auth_config
+from app.domain.email_delivery import send_auth_email
 from app.domain.session_auth import (
     action_token_expires_at,
     create_auth_action_token,
@@ -40,6 +43,33 @@ from app.domain.session_auth import (
 
 
 router = APIRouter()
+
+
+def _portal_action_url(path: str, token: str) -> str:
+    portal_base_url = os.getenv("FISORA_PORTAL_BASE_URL", "").rstrip("/")
+    return f"{portal_base_url}{path}?token={token}" if portal_base_url else ""
+
+
+def _auth_email_delivery(
+    *,
+    recipient: str,
+    subject: str,
+    body_text: str,
+    action_url: str,
+) -> dict[str, object]:
+    if not recipient.strip() or not action_url:
+        return {
+            "status": "manual_link",
+            "provider": "manual",
+            "recipient": recipient.strip(),
+            "action_url": action_url,
+        }
+    return send_auth_email(
+        recipient=recipient.strip(),
+        subject=subject,
+        body_text=body_text,
+        action_url=action_url,
+    )
 
 
 @router.post("/store/portal-user")
@@ -231,9 +261,23 @@ def store_auth_invite(payload: AuthInvitePayload) -> dict[str, object]:
             "role": payload.role,
             "allowed_client_ids": payload.allowed_client_ids,
             "invited_by": payload.invited_by,
+            "email": payload.email,
         },
     )
-    return {"invite_token": token.raw_token, "token": token_record, "portal_user": portal_user}
+    action_url = _portal_action_url("/portal/invite", token.raw_token)
+    email_delivery = _auth_email_delivery(
+        recipient=payload.email,
+        subject="Fisora portal daveti",
+        body_text=f"Fisora portal davet linkiniz: {action_url or token.raw_token}",
+        action_url=action_url,
+    )
+    return {
+        "invite_token": token.raw_token,
+        "token": token_record,
+        "portal_user": portal_user,
+        "invite_url": action_url,
+        "email_delivery": email_delivery,
+    }
 
 
 @router.post("/store/auth/invite/accept")
@@ -261,14 +305,26 @@ def store_auth_password_reset(payload: AuthPasswordResetPayload) -> dict[str, ob
         expires_at = action_token_expires_at(ttl_hours=payload.ttl_hours)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    action_url = _portal_action_url("/portal/password-reset", token.raw_token)
     token_record = get_workflow_store().create_auth_token(
         purpose="password_reset",
         user_id=payload.user_id.strip(),
         token_hash=token.token_hash,
         expires_at=expires_at,
-        payload={},
+        payload={"email": payload.email},
     )
-    return {"reset_token": token.raw_token, "token": token_record}
+    email_delivery = _auth_email_delivery(
+        recipient=payload.email,
+        subject="Fisora sifre sifirlama",
+        body_text=f"Fisora sifre sifirlama linkiniz: {action_url or token.raw_token}",
+        action_url=action_url,
+    )
+    return {
+        "reset_token": token.raw_token,
+        "token": token_record,
+        "reset_url": action_url,
+        "email_delivery": email_delivery,
+    }
 
 
 @router.post("/store/auth/password-reset/confirm")

@@ -1208,14 +1208,6 @@ def process_next_job_once(
                 "accounting_explanation_ready",
                 {"accountant_explanation_tr": str(result.get("accountant_explanation_tr") or "")},
             )
-        if any("ocr" in str(note).lower() for note in result.get("parse_notes") or []):
-            pipeline_event(
-                "ocr_fallback_succeeded",
-                "ok",
-                "Belge OCR fallback ile okundu.",
-                "ocr_fallback_succeeded",
-                {"parse_notes": list(result.get("parse_notes") or [])},
-            )
         ai_provider_name = str(result.get("ai_classification_provider") or "")
         if ai_provider_name and ai_provider_name != "static_rules":
             ai_status = "error" if result.get("ai_classification_skipped_reason") == "ai_provider_error" else "ok"

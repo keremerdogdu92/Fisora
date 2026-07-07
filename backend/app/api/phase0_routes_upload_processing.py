@@ -11,7 +11,14 @@ from app.api.phase0_context import (
     request_auth_context,
     request_user_id,
 )
-from app.api.phase0_schemas import ClientReprocessPayload, DocumentReprocessPayload, DocumentRetentionRunPayload, DocumentUploadPayload, ProcessingRunPayload
+from app.api.phase0_schemas import (
+    ClientReprocessPayload,
+    DocumentReprocessPayload,
+    DocumentRetentionActionPayload,
+    DocumentRetentionRunPayload,
+    DocumentUploadPayload,
+    ProcessingRunPayload,
+)
 from app.domain.document_uploads import decode_base64_content
 from app.workflows.document_processing import process_queued_documents
 
@@ -89,6 +96,20 @@ async def store_document_upload_multipart(
 @router.post("/store/document-retention/run")
 def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
     return get_document_service().store_document_retention_run(delete_files=payload.delete_files)
+
+
+@router.post("/store/document-retention/preview")
+def store_document_retention_preview() -> dict[str, object]:
+    return get_document_service().store_document_retention_preview()
+
+
+@router.post("/store/document-retention/action")
+def store_document_retention_action(payload: DocumentRetentionActionPayload) -> dict[str, object]:
+    return get_document_service().store_document_retention_action(
+        document_refs=payload.document_refs,
+        action=payload.action,
+        delete_files=payload.delete_files,
+    )
 
 
 @router.post("/store/processing/run")

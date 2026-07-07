@@ -105,10 +105,12 @@ export function addSelectedClientToBasketAction({
 
 export function markBasketPackagedAction({
   exportMode,
+  exportType = "zirve_mapping_csv",
   setData,
   setExportStatus,
 }: {
   exportMode: ExportMode;
+  exportType?: string;
   setData: Dispatch<SetStateAction<PilotData>>;
   setExportStatus: (status: string) => void;
 }) {
@@ -119,5 +121,5 @@ export function markBasketPackagedAction({
       current.exportBasket.some((item) => item.documentIds.includes(document.id)) ? { ...document, status: "exported" } : document,
     ),
   }));
-  setExportStatus(exportMode === "bulk" ? "Seçili mükellefler için toplu paket hazır görünüyor." : "Mükellef bazlı paketler hazır görünüyor.");
+  setExportStatus(exportMode === "bulk" ? `Secili mukellefler icin ${exportType} paketi hazir.` : `Mukellef bazli ${exportType} paketleri hazir.`);
 }

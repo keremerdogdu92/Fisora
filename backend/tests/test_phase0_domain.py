@@ -41,7 +41,7 @@ from app.domain.chart_accounts import ChartAccount
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
 from app.domain.export_adapters import get_export_adapter, write_export_file
 from app.domain.export_packages import ExportCandidate, build_export_package
-from app.domain.exporters import export_universal_journal_csv, export_zirve_trial_csv
+from app.domain.exporters import ZIRVE_MAPPING_COLUMNS, export_universal_journal_csv, export_zirve_trial_csv
 from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_operations import (
@@ -728,6 +728,16 @@ class Phase0DomainTests(unittest.TestCase):
         noisy_table_header = "KDV Oranı\nKDV Tutarı\n1\nSLIM TAPER\n"
         self.assertEqual(extract_vat_rates(noisy_table_header), ())
         self.assertEqual(extract_vat_rates("KATMA DEĞER VERGİSİ(%10)\n309,09 TL"), ("10",))
+
+    def test_textless_pdf_invoice_is_reviewed_without_ocr(self) -> None:
+        from unittest.mock import patch
+
+        with patch("app.domain.pdf_invoices.extract_pdf_text", return_value=(1, "", ("pdf_text_empty",))):
+            invoice = parse_pdf_invoice(Path("scanned.pdf"))
+
+        self.assertEqual(invoice.suggested_route, "review_queue")
+        self.assertIn("scanned_pdf_unsupported", invoice.parse_notes)
+        self.assertNotIn("ocr", " ".join(invoice.parse_notes).lower())
 
     def test_pdf_invoice_line_extraction_prefers_product_table_rows(self) -> None:
         text = "\n".join(
@@ -6663,6 +6673,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
         self.assertEqual(adapter.validation_status, "field_test_pending")
         self.assertFalse(adapter.verified_in_zirve)
+        self.assertEqual(text.splitlines()[0], ";".join(ZIRVE_MAPPING_COLUMNS))
         self.assertIn(
             "hesap_kodu;evrak_tarihi;evrak_no;belge_turu;aciklama;borc;alacak;vkn_tckn;odeme_sekli;fis_turu;satir_no;kaynak_belge",
             text,

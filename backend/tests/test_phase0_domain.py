@@ -2049,6 +2049,21 @@ class Phase0DomainTests(unittest.TestCase):
             ),
         )
 
+    def test_account_selection_carries_full_chart_account_name_map(self) -> None:
+        accounts = [
+            ChartAccount("153", "153", "Ticari mallar", is_detail_account=False),
+            ChartAccount("153.01.001", "153.01.001", "Ticari mal detay", is_detail_account=True),
+            ChartAccount("102.01", "102.01", "Banka hesabi", is_detail_account=True),
+            ChartAccount("360.01", "360.01", "Odenecek vergiler", is_detail_account=True),
+            ChartAccount("320.01.015", "320.01.015", "Rexton Medikal cari", is_detail_account=True),
+        ]
+
+        selection = select_accounts("chart.xlsx", accounts)
+
+        self.assertEqual(selection.account_names["102.01"], "Banka hesabi")
+        self.assertEqual(selection.account_names["360.01"], "Odenecek vergiler")
+        self.assertEqual(selection.account_names["153"], "Ticari mallar")
+
     def test_purchase_intake_handles_supplier_perspective_sales_pdf(self) -> None:
         invoice = ParsedInvoice(
             file_name="purchase-tab.pdf",

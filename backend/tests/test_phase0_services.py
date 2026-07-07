@@ -169,6 +169,221 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(workspace["learning_events"][0]["client_id"], "client-1")
         self.assertEqual(workspace["operation_events"][0]["event_type"], "review_decision_saved")
 
+    def test_review_service_rejects_manual_draft_line_outside_chart_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                    {"raw_account_code": "320.01", "normalized_account_code": "320.01", "account_name": "Satici cari", "is_detail_account": True},
+                ],
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={"file_name": "fatura.pdf", "export_status": "review_required", "draft_lines": []},
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            with self.assertRaises(HTTPException) as raised:
+                service.store_review_decision(
+                    payload=StoredReviewDecisionPayload(
+                        client_id="client-1",
+                        decision=ReviewDecisionPayload(
+                            document_ref="fatura.pdf",
+                            action="approve_with_changes",
+                            reviewer="mali-musavir",
+                            draft_lines=[
+                                {"account_code": "770.99", "description": "Serbest gider", "debit": "100.00", "credit": "0.00"},
+                                {"account_code": "320.01", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                            ],
+                        ),
+                    ),
+                    user_id="mali-musavir",
+                )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("770.99", str(raised.exception.detail))
+
+    def test_review_service_canonicalizes_manual_draft_descriptions_from_chart_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                    {"raw_account_code": "320.01", "normalized_account_code": "320.01", "account_name": "Satici cari", "is_detail_account": True},
+                ],
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={"file_name": "fatura.pdf", "export_status": "review_required", "draft_lines": []},
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="fatura.pdf",
+                        action="approve_with_changes",
+                        reviewer="mali-musavir",
+                        draft_lines=[
+                            {"account_code": "770.01", "description": "Elle yazilan gider", "debit": "100.00", "credit": "0.00"},
+                            {"account_code": "320.01", "description": "Elle yazilan cari", "debit": "0.00", "credit": "100.00"},
+                        ],
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(
+            [line["description"] for line in workspace["documents"][0]["result"]["draft_lines"]],
+            ["Genel gider", "Satici cari"],
+        )
+
+    def test_review_service_rejects_header_accounts_even_when_in_chart_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770", "normalized_account_code": "770", "account_name": "Genel Yonetim Giderleri", "is_detail_account": False},
+                    {"raw_account_code": "320.01", "normalized_account_code": "320.01", "account_name": "Satici cari", "is_detail_account": True},
+                ],
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={"file_name": "fatura.pdf", "export_status": "review_required", "draft_lines": []},
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            with self.assertRaises(HTTPException) as raised:
+                service.store_review_decision(
+                    payload=StoredReviewDecisionPayload(
+                        client_id="client-1",
+                        decision=ReviewDecisionPayload(
+                            document_ref="fatura.pdf",
+                            action="approve_with_changes",
+                            reviewer="mali-musavir",
+                            draft_lines=[
+                                {"account_code": "770", "description": "Header", "debit": "100.00", "credit": "0.00"},
+                                {"account_code": "320.01", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                            ],
+                        ),
+                    ),
+                    user_id="mali-musavir",
+                )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("770", str(raised.exception.detail))
+
+    def test_review_service_allows_system_suggested_new_counterparty_account(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                ],
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={
+                    "file_name": "fatura.pdf",
+                    "export_status": "review_required",
+                    "draft_lines": [],
+                    "suggested_counterparty_account": "320.A01",
+                    "selected_supplier_account": "320.A01",
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="fatura.pdf",
+                        action="approve_with_changes",
+                        reviewer="mali-musavir",
+                        draft_lines=[
+                            {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                            {"account_code": "320.A01", "description": "Yeni cari", "debit": "0.00", "credit": "100.00"},
+                        ],
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(workspace["documents"][0]["result"]["draft_lines"][1]["account_code"], "320.A01")
+
+    def test_review_service_rejects_free_typed_counterparty_account_without_new_counterparty_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                ],
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={"file_name": "fatura.pdf", "export_status": "review_required", "draft_lines": []},
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            with self.assertRaises(HTTPException) as raised:
+                service.store_review_decision(
+                    payload=StoredReviewDecisionPayload(
+                        client_id="client-1",
+                        decision=ReviewDecisionPayload(
+                            document_ref="fatura.pdf",
+                            action="approve_with_changes",
+                            reviewer="mali-musavir",
+                            draft_lines=[
+                                {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                                {"account_code": "320.A99", "description": "Serbest yeni cari", "debit": "0.00", "credit": "100.00"},
+                            ],
+                        ),
+                    ),
+                    user_id="mali-musavir",
+                )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("320.A99", str(raised.exception.detail))
+
     def test_export_package_exposes_zirve_mapping_field_notes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")

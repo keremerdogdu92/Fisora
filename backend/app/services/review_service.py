@@ -6,7 +6,8 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.api.phase0_review_export import workspace_document
-from app.api.phase0_schemas import ReviewDecisionPayload, StoredReviewDecisionPayload
+from app.api.phase0_schemas import JournalLinePayload, ReviewDecisionPayload, StoredReviewDecisionPayload
+from app.domain.chart_accounts import normalize_account_code
 from app.domain.learning_intelligence import enrich_learning_event
 from app.domain.review_learning import ReviewDecision, build_learning_event
 
@@ -71,26 +72,28 @@ class ReviewService:
             allowed_roles=("accountant", "admin"),
         )
         workspace = self.store.get_workspace(payload.client_id)
-        event = self.review_learning_event(payload.decision)
+        document = workspace_document(workspace, payload.decision.document_ref)
+        decision = self._validated_review_decision(payload.decision, workspace=workspace, document=document)
+        event = self.review_learning_event(decision)
         event = enrich_learning_event(
             event,
             client_id=payload.client_id,
-            decision=payload.decision.model_dump(),
-            document=workspace_document(workspace, payload.decision.document_ref),
+            decision=decision.model_dump(),
+            document=document,
             client_profile=(workspace.get("client") or {}).get("profile") or {},
             prior_learning_events=workspace.get("learning_events") or (),
         )
         saved = self.store.save_review_decision(
             client_id=payload.client_id,
-            decision=payload.decision.model_dump(),
+            decision=decision.model_dump(),
             learning_event=event,
         )
-        document_ref = payload.decision.document_ref
+        document_ref = decision.document_ref
         if (
-            payload.decision.corrected_account_code.strip()
-            or payload.decision.corrected_counterparty_code.strip()
-            or payload.decision.draft_lines
-            or payload.decision.statement_line_no
+            decision.corrected_account_code.strip()
+            or decision.corrected_counterparty_code.strip()
+            or decision.draft_lines
+            or decision.statement_line_no
         ):
             self.store.record_document_pipeline_event(
                 client_id=payload.client_id,
@@ -100,14 +103,14 @@ class ReviewService:
                 message_tr="Müşavir muhasebe fişine müdahale etti.",
                 debug_code="journal_edited",
                 details={
-                    "action": payload.decision.action,
-                    "corrected_account_code": payload.decision.corrected_account_code,
-                    "corrected_counterparty_code": payload.decision.corrected_counterparty_code,
-                    "statement_line_no": payload.decision.statement_line_no,
-                    "draft_line_count": len(payload.decision.draft_lines),
+                    "action": decision.action,
+                    "corrected_account_code": decision.corrected_account_code,
+                    "corrected_counterparty_code": decision.corrected_counterparty_code,
+                    "statement_line_no": decision.statement_line_no,
+                    "draft_line_count": len(decision.draft_lines),
                 },
             )
-        if payload.decision.vat_split_review:
+        if decision.vat_split_review:
             self.store.record_document_pipeline_event(
                 client_id=payload.client_id,
                 document_ref=document_ref,
@@ -116,9 +119,9 @@ class ReviewService:
                 message_tr="KDV ayrimi musavir tarafindan kaydedildi.",
                 debug_code="vat_split_review_saved",
                 details={
-                    "status": str(payload.decision.vat_split_review.get("status") or ""),
-                    "similarity_key": str(payload.decision.vat_split_review.get("similarity_key") or ""),
-                    "line_count": len(payload.decision.vat_split_review.get("lines") or []),
+                    "status": str(decision.vat_split_review.get("status") or ""),
+                    "similarity_key": str(decision.vat_split_review.get("similarity_key") or ""),
+                    "line_count": len(decision.vat_split_review.get("lines") or []),
                 },
             )
         corrected_document = saved.get("corrected_document") if isinstance(saved, dict) else None
@@ -131,7 +134,7 @@ class ReviewService:
             message_tr="Muhasebe fişi kaydedildi.",
             debug_code="journal_saved",
             details={
-                "action": payload.decision.action,
+                "action": decision.action,
                 "export_status": str(corrected_result.get("export_status") or ""),
             },
         )
@@ -143,7 +146,7 @@ class ReviewService:
                 status="ok",
                 message_tr="Muhasebe fişi kaydedildi; exporta gönderilebilir durumda.",
                 debug_code="export_ready",
-                details={"action": payload.decision.action},
+                details={"action": decision.action},
             )
         self.record_operation_event(
             store=self.store,
@@ -152,11 +155,98 @@ class ReviewService:
             status="ok",
             message="Musavir review karari ve learning event kaydedildi.",
             metadata={
-                "document_ref": payload.decision.document_ref,
-                "action": payload.decision.action,
-                "reviewer": payload.decision.reviewer,
+                "document_ref": decision.document_ref,
+                "action": decision.action,
+                "reviewer": decision.reviewer,
                 "automation_candidate": event.get("automation_candidate", False),
             },
         )
         return saved
 
+    def _validated_review_decision(
+        self,
+        decision: ReviewDecisionPayload,
+        *,
+        workspace: dict[str, object],
+        document: dict[str, object] | None,
+    ) -> ReviewDecisionPayload:
+        if not decision.draft_lines:
+            return decision
+        chart_accounts = workspace.get("chart_accounts") or {}
+        accounts = chart_accounts.get("accounts") if isinstance(chart_accounts, dict) else None
+        if not isinstance(accounts, list) or not accounts:
+            return decision
+        account_names, detail_codes = _chart_account_indexes(accounts)
+        allowed_new_counterparties = _allowed_new_counterparty_codes(document)
+        normalized_lines: list[JournalLinePayload] = []
+        invalid_codes: list[str] = []
+        for line in decision.draft_lines:
+            code = normalize_account_code(line.account_code)
+            if code in detail_codes:
+                normalized_lines.append(
+                    JournalLinePayload(
+                        account_code=code,
+                        description=account_names[code],
+                        debit=line.debit,
+                        credit=line.credit,
+                        document_ref=line.document_ref,
+                    )
+                )
+                continue
+            if code in allowed_new_counterparties:
+                normalized_lines.append(
+                    JournalLinePayload(
+                        account_code=code,
+                        description=line.description,
+                        debit=line.debit,
+                        credit=line.credit,
+                        document_ref=line.document_ref,
+                    )
+                )
+                continue
+            invalid_codes.append(code or line.account_code)
+        if invalid_codes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Hesap plani disinda veya secilemez hesap kodu: {', '.join(invalid_codes)}",
+            )
+        return decision.model_copy(update={"draft_lines": normalized_lines})
+
+
+def _chart_account_indexes(accounts: list[object]) -> tuple[dict[str, str], set[str]]:
+    account_names: dict[str, str] = {}
+    detail_codes: set[str] = set()
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        code = normalize_account_code(
+            str(account.get("normalized_account_code") or account.get("code") or account.get("raw_account_code") or "")
+        )
+        name = str(account.get("account_name") or account.get("name") or "").strip()
+        if not code or not name:
+            continue
+        account_names[code] = name
+        if bool(account.get("is_detail_account")):
+            detail_codes.add(code)
+    return account_names, detail_codes
+
+
+def _allowed_new_counterparty_codes(document: dict[str, object] | None) -> set[str]:
+    if not isinstance(document, dict):
+        return set()
+    result = document.get("result") or {}
+    if not isinstance(result, dict):
+        return set()
+    fields = (
+        "suggested_counterparty_account",
+        "selected_supplier_account",
+        "selected_customer_account",
+        "selected_counterparty_account",
+        "ai_suggested_counterparty_code",
+    )
+    allowed: set[str] = set()
+    for field_name in fields:
+        code = normalize_account_code(str(result.get(field_name) or ""))
+        if code.startswith(("120", "320")):
+            allowed.add(code)
+    return allowed

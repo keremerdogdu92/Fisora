@@ -41,6 +41,7 @@ function normalizeChartAccountOptions(accounts) {
 function filterAccountOptions(options, query, limit = 20) {
   const normalizedQuery = normalizeSearchText(query);
   if (!normalizedQuery) return [];
+  const familyQuery = /^\d{3}$/.test(normalizedQuery);
   const startsWithMatches = [];
   const containsMatches = [];
   for (const option of safeList(options)) {
@@ -51,20 +52,23 @@ function filterAccountOptions(options, query, limit = 20) {
     } else if (searchText.includes(normalizedQuery)) {
       containsMatches.push(option);
     }
-    if (startsWithMatches.length + containsMatches.length >= limit) break;
+    if (!familyQuery && startsWithMatches.length + containsMatches.length >= limit) break;
   }
-  return [...startsWithMatches, ...containsMatches].slice(0, limit);
+  const matches = [...startsWithMatches, ...containsMatches];
+  return familyQuery ? matches : matches.slice(0, limit);
 }
 
 function resolveAccountSelection(options, input, activeIndex = 0) {
   const normalizedInput = normalizeSearchText(input);
   if (!normalizedInput) return null;
+  if (/^\d{3}$/.test(normalizedInput)) return null;
   const normalizedOptions = safeList(options);
-  const exact = normalizedOptions.find((option) => normalizeSearchText(option?.code) === normalizedInput);
+  const selectableOptions = normalizedOptions.filter((option) => Boolean(option?.isDetail));
+  const exact = selectableOptions.find((option) => normalizeSearchText(option?.code) === normalizedInput);
   if (exact) return exact;
-  const codeMatches = normalizedOptions.filter((option) => normalizeSearchText(option?.code).startsWith(normalizedInput));
+  const codeMatches = selectableOptions.filter((option) => normalizeSearchText(option?.code).startsWith(normalizedInput));
   if (codeMatches.length === 1) return codeMatches[0];
-  const visible = filterAccountOptions(normalizedOptions, input);
+  const visible = filterAccountOptions(normalizedOptions, input).filter((option) => Boolean(option?.isDetail));
   return visible[Math.max(0, Math.min(activeIndex, visible.length - 1))] || null;
 }
 
@@ -74,19 +78,11 @@ function accountNameForCode(options, accountCode) {
   return safeText(safeList(options).find((option) => normalizeSearchText(option?.code) === normalizedCode)?.name);
 }
 
-function shouldReplaceDescription(line, options) {
-  const description = safeText(line?.description).trim();
-  if (!description) return true;
-  const previousAccountName = accountNameForCode(options, line?.account_code);
-  return Boolean(previousAccountName && normalizeSearchText(previousAccountName) === normalizeSearchText(description));
-}
-
 function applyAccountSelectionToLine(line, account, options = []) {
-  const description = safeText(line?.description).trim();
   const accountName = safeText(account?.name);
   return {
     account_code: safeText(account?.code),
-    description: shouldReplaceDescription(line, options) ? accountName : description,
+    description: accountName,
     debit: safeText(line?.debit, "0.00"),
     credit: safeText(line?.credit, "0.00"),
   };

@@ -2552,6 +2552,11 @@ button:disabled {
   background: var(--surface-muted);
 }
 
+.account-code-options button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
 .account-code-options span {
   color: var(--muted);
   font-family: var(--font-mono);
@@ -2562,6 +2567,19 @@ button:disabled {
 .account-code-options strong {
   font-size: 12px;
   font-weight: 800;
+}
+
+.account-code-options em,
+.field-warning {
+  color: #dc2626;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.field-warning {
+  display: block;
+  margin-top: 4px;
 }
 
 .accountant-guidance {

@@ -68,6 +68,7 @@ class AccountSelection:
     stock_account: str = "153.01"
     non_deductible_account: str = "689.01"
     account_candidates: dict[str, tuple[dict[str, Any], ...]] = field(default_factory=dict)
+    account_names: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -241,6 +242,14 @@ def _candidate_group_with_hint(accounts: list[ChartAccount], prefix: str, hints:
     )
 
 
+def _account_name_map(accounts: list[ChartAccount]) -> dict[str, str]:
+    return {
+        account.normalized_account_code: account.account_name
+        for account in accounts
+        if account.normalized_account_code and account.account_name
+    }
+
+
 def _next_counterparty_account(accounts: list[ChartAccount], prefix: str, letter: str = "A") -> str:
     pattern = re.compile(rf"^{re.escape(prefix)}\.?{re.escape(letter)}(\d+)$", re.IGNORECASE)
     max_index = 0
@@ -313,6 +322,7 @@ def select_accounts(chart_file_name: str, accounts: list[ChartAccount]) -> Accou
             "supplier": _candidate_group(accounts, ("320",), "320 satici cari adayi"),
             "non_deductible": _candidate_group(accounts, ("689",), "KKEG adayi"),
         },
+        account_names=_account_name_map(accounts),
     )
 
 
@@ -1163,13 +1173,13 @@ def _account_names_from_selection(
     selection: AccountSelection,
     counterparty_match: CounterpartyMatch | None = None,
 ) -> dict[str, str]:
-    names: dict[str, str] = {}
+    names: dict[str, str] = dict(selection.account_names)
     for candidates in selection.account_candidates.values():
         for candidate in candidates:
             code = str(candidate.get("code") or "").strip()
             name = str(candidate.get("name") or "").strip()
             if code and name:
-                names[code] = name
+                names.setdefault(code, name)
     if counterparty_match:
         code = str(counterparty_match.account_code or "").strip()
         name = str(counterparty_match.account_name or "").strip()

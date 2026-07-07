@@ -91,6 +91,31 @@ function blankDraftLine(): DraftLine {
   return { account_code: "", description: "", debit: "0.00", credit: "0.00" };
 }
 
+function normalizeAccountCodeInput(value: string) {
+  return String(value || "").trim().replace(/[\s-]+/g, ".").replace(/,+/g, ".").replace(/[^0-9A-Za-z.]/g, "").replace(/\.+/g, ".").replace(/^\.+|\.+$/g, "");
+}
+
+function newCounterpartyCodesForDocument(document: PilotDocument) {
+  return new Set(
+    [
+      document.suggestedCounterpartyAccount,
+      document.selectedCounterpartyAccount,
+      document.selectedCustomerAccount,
+    ]
+      .map((code) => normalizeAccountCodeInput(code || ""))
+      .filter((code) => code.startsWith("120") || code.startsWith("320")),
+  );
+}
+
+function invalidDraftAccountCodes(lines: DraftLine[], chartAccounts: ChartAccountOption[], document: PilotDocument) {
+  const detailCodes = new Set(chartAccounts.filter((account) => account.isDetail).map((account) => normalizeAccountCodeInput(account.code)));
+  const allowedNewCounterparties = newCounterpartyCodesForDocument(document);
+  return lines
+    .map((line) => normalizeAccountCodeInput(line.account_code))
+    .filter(Boolean)
+    .filter((code) => !detailCodes.has(code) && !allowedNewCounterparties.has(code));
+}
+
 function isImageMime(value: string) {
   return String(value || "").toLowerCase().startsWith("image/");
 }
@@ -413,6 +438,8 @@ export function JournalPanel({
   const activeDraftLines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines;
   const totals = draftTotals(activeDraftLines);
   const needsManualDraft = !generatedDraftLines.length || document.draftStatus === "manual_draft_required";
+  const invalidAccountCodes = invalidDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
+  const hasInvalidDraftAccounts = invalidAccountCodes.length > 0;
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
@@ -446,6 +473,7 @@ export function JournalPanel({
 
   function handleJournalShortcut(event: KeyboardEvent<HTMLElement>) {
     if (pendingDirectionConflict) return;
+    if (hasInvalidDraftAccounts) return;
     if (event.key === "F2" || (event.key === "Enter" && event.ctrlKey)) {
       event.preventDefault();
       void onApproveAndNext();
@@ -486,6 +514,7 @@ export function JournalPanel({
           activeDraftLines={activeDraftLines}
           chartAccounts={document.chartAccounts}
           generatedDraftLines={generatedDraftLines}
+          invalidAccountCodes={invalidAccountCodes}
           needsManualDraft={needsManualDraft}
           onAddLine={addManualDraftLine}
           onRemoveLine={removeManualDraftLine}
@@ -493,7 +522,7 @@ export function JournalPanel({
         />
         {!pendingDirectionConflict ? (
           <section className="journal-primary-approve" aria-label="Ana fiş kararı">
-            <button onClick={onApproveAndNext} type="button">Onayla ve geç</button>
+            <button disabled={hasInvalidDraftAccounts} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </section>
         ) : null}
         {isStatement ? (
@@ -540,6 +569,7 @@ export function JournalPanel({
       <JournalDecisionBar
         decisionStatus={decisionStatus}
         document={document}
+        hasInvalidDraftAccounts={hasInvalidDraftAccounts}
         onReprocessDocument={onReprocessDocument}
         onSaveDecision={onSaveDecision}
         pendingDirectionConflict={pendingDirectionConflict}
@@ -551,12 +581,14 @@ export function JournalPanel({
 function JournalDecisionBar({
   decisionStatus,
   document,
+  hasInvalidDraftAccounts,
   onReprocessDocument,
   onSaveDecision,
   pendingDirectionConflict,
 }: {
   decisionStatus: string;
   document: PilotDocument;
+  hasInvalidDraftAccounts: boolean;
   onReprocessDocument: () => void | Promise<void>;
   onSaveDecision: (action: string) => void | Promise<void>;
   pendingDirectionConflict: boolean;
@@ -582,8 +614,8 @@ function JournalDecisionBar({
         </>
       ) : (
         <div className="decision-actions secondary-actions">
-          <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
-          <button onClick={() => onSaveDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
+          <button disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
+          <button disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
           <button onClick={onReprocessDocument} type="button">Yeniden işle</button>
           <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>
         </div>
@@ -684,6 +716,7 @@ function ManualDraftEditor({
   activeDraftLines,
   chartAccounts,
   generatedDraftLines,
+  invalidAccountCodes,
   needsManualDraft,
   onAddLine,
   onRemoveLine,
@@ -692,6 +725,7 @@ function ManualDraftEditor({
   activeDraftLines: DraftLine[];
   chartAccounts: ChartAccountOption[];
   generatedDraftLines: DraftLine[];
+  invalidAccountCodes: string[];
   needsManualDraft: boolean;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
@@ -758,6 +792,9 @@ function ManualDraftEditor({
                     onSelect={(account) => selectAccount(index, account)}
                     value={line.account_code}
                   />
+                  {invalidAccountCodes.includes(normalizeAccountCodeInput(line.account_code)) ? (
+                    <small className="field-warning">Hesap planında olmayan veya seçilemeyen kod.</small>
+                  ) : null}
                 </td>
                 <td>
                   <input
@@ -861,10 +898,13 @@ function AccountCodeCombobox({
         <div className="account-code-options" role="listbox">
           {matches.map((account, index) => (
             <button
+              aria-disabled={!account.isDetail}
               className={index === activeIndex ? "active" : ""}
+              disabled={!account.isDetail}
               key={account.code}
               onMouseDown={(event) => {
                 event.preventDefault();
+                if (!account.isDetail) return;
                 onSelect(account);
                 setOpen(false);
               }}
@@ -872,6 +912,7 @@ function AccountCodeCombobox({
             >
               <span>{account.code}</span>
               <strong>{account.name}</strong>
+              {!account.isDetail ? <em>Detay hesap seçin</em> : null}
             </button>
           ))}
         </div>

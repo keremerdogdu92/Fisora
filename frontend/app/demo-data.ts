@@ -134,6 +134,7 @@ export const fallbackReviewData = {
       accountingIntent: "faaliyet_disi_kontrol",
       accountingIntentConfidence: 72,
       learningRuleSourceSummary: "Benzer kararlar düşük riskli tekrar kuralına aday.",
+      ruleInterpretation: null,
       rulePrompt: {
         show: true,
         default_scope: "office_pattern",

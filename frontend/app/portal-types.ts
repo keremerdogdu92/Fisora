@@ -85,6 +85,30 @@ export type RulePromptView = {
   officeConsistentDecisionCount: number;
 };
 
+export type RuleInterpretationView = {
+  source: string;
+  provider: string;
+  status: string;
+  summaryTr: string;
+  triggerTr: string;
+  actionTr: string;
+  guardrailTr: string;
+  confidence: number;
+  reasonCodes: string[];
+};
+
+export type DecisionNarrativeView = {
+  invoiceProductLine: string;
+  fisoraInterpretation: string;
+  businessRelation: string;
+  accountCode: string;
+  accountName: string;
+  counterpartyMatch: string;
+  confidenceLabel: string;
+  unresolvedInfo: string;
+  readFacts: Record<string, string>;
+};
+
 export type DocumentPipelineEvent = {
   eventId: string;
   step: string;
@@ -148,6 +172,7 @@ export type PilotDocument = {
   counterpartyTaxId?: string;
   counterpartyTitle?: string;
   counterpartyIdentityKey?: string;
+  decisionNarrative?: DecisionNarrativeView;
   canonicalLineCount?: number;
   canonicalValidationStatus?: string;
   canonicalValidationReasons?: string[];
@@ -193,6 +218,7 @@ export type PilotDocument = {
   learningRuleScope: string;
   learningRuleReason: string;
   learningRuleSourceSummary: string;
+  ruleInterpretation: RuleInterpretationView | null;
   rulePrompt: RulePromptView;
 };
 
@@ -477,6 +503,8 @@ export type ReviewData = {
     learning_rule_reason?: string;
     learningRuleSourceSummary?: string;
     learning_rule_source_summary?: string;
+    ruleInterpretation?: RuleInterpretationView | null;
+    rule_interpretation?: unknown;
     rulePrompt?: unknown;
     rule_prompt?: unknown;
   }[];

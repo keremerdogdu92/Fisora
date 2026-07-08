@@ -29,6 +29,25 @@ def request_user_id(user_header: str | None, *_: object) -> str:
     return user_header or ""
 
 
+class FakeRuleInterpreter:
+    provider_name = "fake_rule_ai"
+
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def interpret_review_rule(self, request: dict[str, object]) -> dict[str, object]:
+        self.requests.append(request)
+        return {
+            "status": "ready",
+            "summary_tr": "Bu mükellefte Yurtiçi Kargo faturaları kargo gideri olarak önerilecek.",
+            "trigger_tr": "VKN 9860008925 / Yurtiçi Kargo alış faturası",
+            "action_tr": "Gider hesabı 760.03.010, cari 320.9860008925.",
+            "guardrail_tr": "İlk uygulamalarda müşavir kontrolü istenir.",
+            "confidence": 91,
+            "reason_codes": ["counterparty_tax_id_rule", "expense_account_rule"],
+        }
+
+
 class Phase0ServiceTests(unittest.TestCase):
     def test_workspace_service_filters_clients_by_portal_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -551,6 +570,114 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(candidate["match_phrase"], "rexton rli 20")
         self.assertEqual(candidate["suggested_account_code"], "153.01")
         self.assertTrue(candidate["requires_review"])
+
+    def test_review_service_records_ai_rule_interpretation_for_accountant_note(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="kargo.xml",
+                result={
+                    "file_name": "kargo.xml",
+                    "export_status": "review_required",
+                    "is_balanced": True,
+                    "accounting_direction": "purchase",
+                    "selected_expense_account": "760.03.010",
+                    "selected_supplier_account": "320.9860008925",
+                    "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtiçi Kargo Servisi A.Ş.",
+                    "product_line_hint": "Posta Hizmet Geliri",
+                    "product_category": "kargo",
+                    "draft_lines": [
+                        {"account_code": "760.03.010", "description": "Kargo", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.9860008925", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+            interpreter = FakeRuleInterpreter()
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+                rule_interpreter=interpreter,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="kargo.xml",
+                        action="suggest_for_similar",
+                        reviewer="mali-musavir",
+                        category="kargo",
+                        reason="Kargo gideri olarak kaydettim.",
+                        accountant_note="Bundan sonra bu vergi numarası ile gelen faturaları kargo gideri olarak işle.",
+                        rule_instruction="Bundan sonra bu vergi numarası ile gelen faturaları kargo gideri olarak işle.",
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        interpretation = workspace["learning_events"][0]["rule_interpretation"]
+        document_interpretation = workspace["documents"][0]["result"]["rule_interpretation"]
+        self.assertEqual(interpretation["source"], "ai")
+        self.assertEqual(interpretation["provider"], "fake_rule_ai")
+        self.assertEqual(interpretation["status"], "ready")
+        self.assertIn("Yurtiçi Kargo", interpretation["summary_tr"])
+        self.assertEqual(document_interpretation["summary_tr"], interpretation["summary_tr"])
+        self.assertEqual(interpreter.requests[0]["candidate"]["suggested_account_code"], "760.03.010")
+
+    def test_review_service_records_deterministic_rule_interpretation_without_ai_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="dogalgaz.xml",
+                result={
+                    "file_name": "dogalgaz.xml",
+                    "export_status": "review_required",
+                    "is_balanced": True,
+                    "accounting_direction": "purchase",
+                    "selected_expense_account": "770.02.003",
+                    "selected_supplier_account": "320.4700022607",
+                    "counterparty_tax_id": "4700022607",
+                    "counterparty_title": "İstanbul Gaz Dağıtım Sanayi ve Ticaret A.Ş.",
+                    "product_line_hint": "Toplam Tüketim Bedeli",
+                    "product_category": "dogalgaz",
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="dogalgaz.xml",
+                        action="suggest_for_similar",
+                        reviewer="mali-musavir",
+                        category="dogalgaz",
+                        reason="Doğalgaz gideri olarak kaydettim.",
+                        accountant_note="Bundan sonra bu vergi numarası ile gelen faturaları doğalgaz gideri olarak işle.",
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        interpretation = workspace["learning_events"][0]["rule_interpretation"]
+        document_interpretation = workspace["documents"][0]["result"]["rule_interpretation"]
+        self.assertEqual(interpretation["source"], "deterministic")
+        self.assertEqual(interpretation["status"], "ready")
+        self.assertIn("4700022607", interpretation["summary_tr"])
+        self.assertIn("770.02.003", interpretation["action_tr"])
+        self.assertEqual(document_interpretation["action_tr"], interpretation["action_tr"])
 
     def test_review_service_records_journal_edit_save_and_export_pipeline_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

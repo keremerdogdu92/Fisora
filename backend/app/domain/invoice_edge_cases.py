@@ -8,6 +8,7 @@ KEYWORD_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("withholding", ("tevkifat", "tevkifatli", "tevkifatlı")),
     ("exemption", ("istisna", "muafiyet")),
     ("return_invoice", ("iade", "iade faturasi", "iade faturası")),
+    ("cancelled_invoice", ("iptal", "iptal edilmistir", "iptal edildi", "cancelled", "canceled")),
     ("zero_amount", ("0,00", "0.00")),
     (
         "special_tax",
@@ -120,6 +121,8 @@ def summarize_invoice_edge_cases(file_name: str, text: str, *, extracted_char_co
         risk_flags.append("exemption_manual_review")
     if "return_invoice" in keywords:
         risk_flags.append("return_invoice_manual_review")
+    if "cancelled_invoice" in keywords:
+        risk_flags.append("cancelled_invoice_visible")
     if "special_tax" in keywords:
         risk_flags.append("special_tax_manual_review")
     if len(vat_rates) > 1:

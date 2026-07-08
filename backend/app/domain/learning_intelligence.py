@@ -201,7 +201,7 @@ def enrich_learning_event(
             rule_instruction=rule_instruction,
             product_line_hint=str(result.get("product_line_hint") or result.get("provider_hint") or ""),
             category=str(event.get("category") or decision.get("category") or result.get("product_category") or ""),
-            corrected_account_code=str(event.get("corrected_account_code") or decision.get("corrected_account_code") or ""),
+            corrected_account_code=str(enriched.get("corrected_account_code") or decision.get("corrected_account_code") or ""),
         )
     client_count = _consistent_count(enriched, prior_learning_events, client_scoped=True)
     office_events = [*prior_learning_events, enriched]

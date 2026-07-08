@@ -65,6 +65,50 @@ function normalizeDirectionConflict(value) {
   return conflict;
 }
 
+function normalizeRuleInterpretation(value) {
+  if (!value || typeof value !== "object") return null;
+  const status = safeText(value.status);
+  const summaryTr = safeText(value.summary_tr || value.summaryTr);
+  const triggerTr = safeText(value.trigger_tr || value.triggerTr);
+  const actionTr = safeText(value.action_tr || value.actionTr);
+  const guardrailTr = safeText(value.guardrail_tr || value.guardrailTr);
+  if (!status && !summaryTr && !triggerTr && !actionTr && !guardrailTr) return null;
+  return {
+    source: safeText(value.source),
+    provider: safeText(value.provider),
+    status,
+    summaryTr,
+    triggerTr,
+    actionTr,
+    guardrailTr,
+    confidence: safeNumber(value.confidence),
+    reasonCodes: safeList(value.reason_codes || value.reasonCodes).map(String),
+  };
+}
+
+function normalizeDecisionNarrative(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const readFactsSource = value.read_facts || value.readFacts;
+  const readFacts = {};
+  if (readFactsSource && typeof readFactsSource === "object" && !Array.isArray(readFactsSource)) {
+    for (const [key, factValue] of Object.entries(readFactsSource)) {
+      if (safeText(factValue)) readFacts[String(key)] = safeText(factValue);
+    }
+  }
+  const narrative = {
+    invoiceProductLine: safeText(value.invoice_product_line || value.invoiceProductLine),
+    fisoraInterpretation: safeText(value.fisora_interpretation || value.fisoraInterpretation),
+    businessRelation: safeText(value.business_relation || value.businessRelation),
+    accountCode: safeText(value.account_code || value.accountCode),
+    accountName: safeText(value.account_name || value.accountName),
+    counterpartyMatch: safeText(value.counterparty_match || value.counterpartyMatch),
+    confidenceLabel: safeText(value.confidence_label || value.confidenceLabel),
+    unresolvedInfo: safeText(value.unresolved_info || value.unresolvedInfo),
+    readFacts,
+  };
+  return Object.values(narrative).some((item) => (typeof item === "string" ? item : Object.keys(item).length)) ? narrative : undefined;
+}
+
 const DEFAULT_BACKEND_TIMEOUT_MS = 2500;
 
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
@@ -422,6 +466,7 @@ function processedBackendDocument(document, workspace, client) {
     counterpartyTaxId: safeText(result.counterparty_tax_id),
     counterpartyTitle: safeText(result.counterparty_title),
     counterpartyIdentityKey: safeText(result.counterparty_identity_key),
+    decisionNarrative: normalizeDecisionNarrative(result.decision_narrative || result.decisionNarrative),
     canonicalLineCount: safeNumber(result.canonical_line_count),
     canonicalValidationStatus: safeText(result.canonical_validation_status),
     canonicalValidationReasons: safeList(result.canonical_validation_reasons).map(String),
@@ -467,6 +512,7 @@ function processedBackendDocument(document, workspace, client) {
     learningRuleScope: safeText(result.learning_rule_scope),
     learningRuleReason: safeText(result.learning_rule_reason),
     learningRuleSourceSummary: safeText(result.learning_rule_source_summary || result.learning_rule_reason),
+    ruleInterpretation: normalizeRuleInterpretation(result.rule_interpretation),
     rulePrompt: normalizeRulePrompt(result.rule_prompt),
   };
 }
@@ -549,6 +595,7 @@ function pendingBackendDocument(document, workspace, client) {
     learningRuleScope: "",
     learningRuleReason: "",
     learningRuleSourceSummary: "",
+    ruleInterpretation: null,
     rulePrompt: normalizeRulePrompt({}),
   };
 }

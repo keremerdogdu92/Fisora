@@ -1198,6 +1198,64 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("Bagdat Cad.", supplier.address)
         self.assertIn("Istanbul", supplier.address)
 
+    def test_xml_invoice_with_visible_cancellation_warning_still_builds_draft(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>IPT2026000000001</cbc:ID>
+  <cbc:IssueDate>2026-07-07</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>SATIS</cbc:InvoiceTypeCode>
+  <cbc:Note>BU FATURA IPTAL EDILMISTIR</cbc:Note>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="VKN">1111111111</cbc:ID></cac:PartyIdentification>
+    <cac:PartyName><cbc:Name>Tedarikci A.S.</cbc:Name></cac:PartyName>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="VKN">2222222222</cbc:ID></cac:PartyIdentification>
+    <cac:PartyName><cbc:Name>Isitme Merkezi A</cbc:Name></cac:PartyName>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:LegalMonetaryTotal><cbc:PayableAmount currencyID="TRY">120.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine>
+    <cbc:ID>1</cbc:ID>
+    <cbc:LineExtensionAmount currencyID="TRY">100.00</cbc:LineExtensionAmount>
+    <cac:TaxTotal><cbc:TaxAmount currencyID="TRY">20.00</cbc:TaxAmount></cac:TaxTotal>
+    <cac:Item><cbc:Name>Bakim hizmeti</cbc:Name></cac:Item>
+  </cac:InvoiceLine>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "iptal.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+
+        self.assertIn("cancelled_invoice_visible", invoice.risk_flags)
+
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="2222222222",
+            activity_description="Isitme cihazi satis ve servis merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_invoice(invoice, selection, profile, intended_direction="purchase")
+
+        self.assertTrue(result.draft_lines)
+        self.assertEqual(result.export_status, "review_required")
+        self.assertIn("cancelled_invoice_visible", result.review_reason_codes)
+        self.assertIn("iptal", result.export_gate_reason.lower())
+
     def test_ubl_party_resolution_uses_supplier_as_counterparty_for_purchase(self) -> None:
         from app.domain.xml_invoices import parse_xml_invoice
 
@@ -2277,6 +2335,19 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_purchase_vat_account, "")
         self.assertEqual([line["account_code"] for line in result.draft_lines], ["689.01", "320.1061386125"])
         self.assertEqual(result.export_status, "review_required")
+        narrative = result.decision_narrative
+        self.assertEqual(narrative["invoice_product_line"], "SLIM TAPER")
+        self.assertIn("giyim", narrative["fisora_interpretation"].lower())
+        self.assertEqual(narrative["account_code"], "689.01")
+        self.assertEqual(narrative["account_name"], "K.K.E Giderler")
+        self.assertIn("Avrupa Yakasi Online", narrative["counterparty_match"])
+        self.assertEqual(narrative["confidence_label"], "Yuksek")
+        self.assertIn("faaliyet", narrative["unresolved_info"].lower())
+        self.assertEqual(narrative["read_facts"]["Fatura urun satiri"], "SLIM TAPER")
+        self.assertEqual(narrative["read_facts"]["Satici unvani"], "Avrupa Yakasi Online")
+        self.assertEqual(narrative["read_facts"]["KDV orani"], "%10")
+        self.assertEqual(narrative["read_facts"]["Genel toplam"], "3399.99")
+        self.assertNotIn("okunamadi", str(narrative).lower())
 
     def test_account_selection_exposes_semantic_detail_account_candidates(self) -> None:
         selection = select_accounts(
@@ -5182,6 +5253,16 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(relevance.status, "is_alani_disi")
         self.assertEqual(status, "review_required")
 
+    def test_invoice_edge_cases_flags_visible_cancellation_without_return_classification(self) -> None:
+        summary = summarize_invoice_edge_cases(
+            "fatura.pdf",
+            "Fatura No: ABC2026000000001\nBU FATURA IPTAL EDILMISTIR\nGENEL TOPLAM 120,00",
+            extracted_char_count=180,
+        )
+
+        self.assertIn("cancelled_invoice_visible", summary.risk_flags)
+        self.assertNotIn("return_invoice_manual_review", summary.risk_flags)
+
     def test_brand_model_line_allows_hearing_device_for_hearing_center(self) -> None:
         profile = ClientProfile(
             client_id="client-1",
@@ -5552,6 +5633,61 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("output_schema", user_content)
         self.assertIn("line_items", user_content)
         self.assertEqual(response["line_items"][0]["description"], "Isitme cihazi")
+
+    def test_openai_provider_posts_review_rule_interpretation_payload(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "output": [
+                        {
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": (
+                                        '{"status":"ready",'
+                                        '"summary_tr":"Bu mükellefte Yurtiçi Kargo faturaları kargo gideri olarak önerilecek.",'
+                                        '"trigger_tr":"VKN 9860008925 / Yurtiçi Kargo alış faturası",'
+                                        '"action_tr":"Gider hesabı 760.03.010.",'
+                                        '"guardrail_tr":"İlk uygulamalarda müşavir kontrolü istenir.",'
+                                        '"confidence":90,'
+                                        '"reason_codes":["counterparty_tax_id_rule"]}'
+                                    ),
+                                }
+                            ]
+                        }
+                    ]
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["json"] = json
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        provider = OpenAiAccountingProvider(api_key="sk-test", model="gpt-5.4-mini", http_client=FakeClient())
+        response = provider.interpret_review_rule(
+            {
+                "accountant_note": "Bundan sonra bu vergi numarasi ile gelen faturalari kargo gideri olarak isle.",
+                "candidate": {"suggested_account_code": "760.03.010"},
+                "document": {"counterparty_tax_id": "9860008925", "counterparty_title": "Yurtici Kargo"},
+            }
+        )
+
+        request_payload = captured["json"]
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(request_payload["text"]["format"]["name"], "fisora_review_rule_interpretation")
+        user_content = request_payload["input"][1]["content"]
+        self.assertIn("accountant_note", user_content)
+        self.assertIn("760.03.010", user_content)
+        self.assertEqual(response["status"], "ready")
+        self.assertIn("Yurtiçi Kargo", response["summary_tr"])
 
     def test_groq_accounting_provider_posts_openai_compatible_structured_payload(self) -> None:
         captured: dict[str, object] = {}
@@ -6642,6 +6778,97 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(candidate["suggested_account_code"], "153.01")
         self.assertTrue(candidate["requires_review"])
 
+    def test_office_general_note_creates_semantic_rule_without_account_code(self) -> None:
+        candidate = build_natural_language_rule_candidate(
+            accountant_note="Ofis geneli bu cariden gelenler dogalgaz gideridir.",
+            rule_instruction="Tum mukelleflerde dogalgaz olarak yorumla.",
+            product_line_hint="Dogalgaz tuketim bedeli",
+            category="",
+            corrected_account_code="770.03",
+        )
+
+        self.assertEqual(candidate["scope"], "office_semantic")
+        self.assertEqual(candidate["semantic_accounting_intent"], "dogalgaz_gideri")
+        self.assertEqual(candidate["suggested_account_code"], "")
+        self.assertTrue(candidate["requires_review"])
+
+    def test_office_semantic_learning_rule_does_not_copy_account_code_to_other_client(self) -> None:
+        profile = ClientProfile(
+            client_id="client-2",
+            title="Baska Mukellef",
+            tax_id="2222222222",
+            activity_description="Perakende ticaret",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="dogalgaz-tekrar.pdf",
+            provider_hint="IGDAS",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000005",
+            ettn="",
+            issue_date="05.05.2026",
+            tax_ids=("1111111111", "2222222222"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Dogalgaz tuketim bedeli",),
+            issuer_title="IGDAS",
+            issuer_tax_id="1111111111",
+            recipient_title="Baska Mukellef",
+            recipient_tax_id="2222222222",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        event = {
+            "client_id": "client-1",
+            "scope": "office_policy",
+            "action": "suggest_for_similar",
+            "category": "dogalgaz_gideri",
+            "corrected_account_code": "770.03",
+            "corrected_counterparty_code": "",
+            "reason": "Ofis geneli dogalgaz gideri olarak yorumlansin.",
+            "accounting_intent": "dogalgaz_gideri",
+            "accounting_intent_confidence": 88,
+            "normalized_terms": ["dogalgaz", "tuketim", "bedeli"],
+            "automation_candidate": True,
+            "natural_language_rule_candidate": {
+                "scope": "office_semantic",
+                "match_phrase": "dogalgaz tuketim bedeli",
+                "product_category": "dogalgaz_gideri",
+                "account_treatment": "expense",
+                "semantic_accounting_intent": "dogalgaz_gideri",
+                "suggested_account_code": "",
+                "requires_review": True,
+                "reason": "Ofis geneli anlam bilgisi.",
+            },
+            "learning_rule_source_summary": "Benzer satirlar dogalgaz gideri olarak isaretlenmis.",
+        }
+
+        result = simulate_invoice(invoice, selection, profile)
+        learned = apply_learning_rules(result, [rule_from_event_payload(event)])
+
+        self.assertTrue(learned.learning_rule_applied)
+        self.assertEqual(learned.selected_expense_account, "770.01")
+        self.assertEqual(learned.accounting_intent, "dogalgaz_gideri")
+        self.assertIn("dogalgaz", learned.learning_rule_source_summary.lower())
+
     def test_accountant_note_creates_client_counterparty_rule_candidate_for_wholesaler(self) -> None:
         candidate = build_natural_language_rule_candidate(
             accountant_note="Bu cari bunun toptancisi, buradan bize kesilen tum faturalar stok alimidir.",
@@ -6655,6 +6882,53 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(candidate["account_treatment"], "stock_or_cogs")
         self.assertEqual(candidate["suggested_account_code"], "153.03")
         self.assertTrue(candidate["requires_review"])
+
+    def test_enriched_natural_language_candidate_uses_selected_account_when_decision_account_is_blank(self) -> None:
+        event = {
+            "document_ref": "kargo.xml",
+            "scope": "general_candidate",
+            "action": "approve_with_changes",
+            "category": "kargo",
+            "corrected_account_code": "",
+            "corrected_counterparty_code": "",
+            "reason": "Kargo gideri olarak kaydettim.",
+            "accountant_note": "Bundan sonra bu vergi numarasi ile gelen faturalari kargo gideri olarak isle.",
+            "rule_instruction": "Bundan sonra bu vergi numarasi ile gelen faturalari kargo gideri olarak isle.",
+            "automation_candidate": False,
+        }
+        decision = {
+            "document_ref": "kargo.xml",
+            "action": "approve_with_changes",
+            "reviewer": "mali-musavir",
+            "corrected_account_code": "",
+            "corrected_counterparty_code": "",
+            "category": "kargo",
+            "reason": "Kargo gideri olarak kaydettim.",
+            "accountant_note": "Bundan sonra bu vergi numarasi ile gelen faturalari kargo gideri olarak isle.",
+            "rule_instruction": "Bundan sonra bu vergi numarasi ile gelen faturalari kargo gideri olarak isle.",
+        }
+        enriched = enrich_learning_event(
+            event,
+            client_id="client-1",
+            decision=decision,
+            document={
+                "result": {
+                    "accounting_direction": "purchase",
+                    "selected_expense_account": "760.03.010",
+                    "selected_supplier_account": "320.9860008925",
+                    "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtici Kargo Servisi A.S.",
+                    "product_line_hint": "Posta Hizmet Geliri",
+                    "product_category": "kargo",
+                }
+            },
+            prior_learning_events=(),
+        )
+
+        candidate = enriched["natural_language_rule_candidate"]
+        self.assertEqual(enriched["corrected_account_code"], "760.03.010")
+        self.assertEqual(candidate["suggested_account_code"], "760.03.010")
+        self.assertEqual(candidate["scope"], "client_counterparty")
 
     def test_vague_accountant_note_does_not_create_active_learning_rule(self) -> None:
         event = {

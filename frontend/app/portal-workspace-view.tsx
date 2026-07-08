@@ -393,7 +393,7 @@ export function AccountantWorkspace({
                   {document.reviewReasons.length ? (
                     <div className="review-reason-chips" aria-label="Kontrol gerekçeleri">
                       {document.reviewReasons.slice(0, 3).map((reason) => (
-                        <span key={reason}>{reviewReasonLabel(reason)}</span>
+                        <span className={reason === "cancelled_invoice_visible" ? "danger" : undefined} key={reason}>{reviewReasonLabel(reason)}</span>
                       ))}
                       {document.reviewReasons.length > 3 ? <span>+{document.reviewReasons.length - 3}</span> : null}
                     </div>

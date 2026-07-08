@@ -25,16 +25,20 @@ def build_natural_language_rule_candidate(
     normalized = _normalize_text(source_text)
     match_phrase = _match_phrase(product_line_hint, source_text)
     product_category = _product_category(normalized, category)
+    semantic_intent = _semantic_accounting_intent(normalized, product_category)
     account_treatment = _account_treatment(normalized, product_category, corrected_account_code)
     vague = _is_vague(normalized, match_phrase, product_category, corrected_account_code)
     counterparty_rule = _is_counterparty_rule(normalized)
+    office_semantic = _is_office_semantic_rule(normalized, semantic_intent)
+    scope = _scope(vague=vague, match_phrase=match_phrase, counterparty_rule=counterparty_rule, office_semantic=office_semantic)
 
     return {
-        "scope": _scope(vague=vague, match_phrase=match_phrase, counterparty_rule=counterparty_rule),
+        "scope": scope,
         "match_phrase": "" if vague else match_phrase,
-        "product_category": "" if vague else product_category,
+        "product_category": "" if vague else product_category or semantic_intent,
         "account_treatment": "" if vague else account_treatment,
-        "suggested_account_code": "" if vague else str(corrected_account_code or "").strip(),
+        "semantic_accounting_intent": "" if vague else semantic_intent,
+        "suggested_account_code": "" if vague or office_semantic else str(corrected_account_code or "").strip(),
         "requires_review": True,
         "reason": "Not kural icin fazla muglak." if vague else _reason(product_category, account_treatment, match_phrase),
     }
@@ -67,9 +71,25 @@ def _product_category(normalized: str, category: str) -> str:
         return "isitme_cihazi_pili"
     if "kargo" in normalized or "nakliye" in normalized:
         return "kargo"
+    if "dogalgaz" in normalized or "dogal gaz" in normalized or "igdas" in normalized:
+        return "dogalgaz_gideri"
     if "kira" in normalized or "kiralama" in normalized:
         return "isyeri_kirasi"
     return ""
+
+
+def _semantic_accounting_intent(normalized: str, product_category: str) -> str:
+    if product_category == "dogalgaz_gideri" or "dogalgaz" in normalized or "dogal gaz" in normalized or "igdas" in normalized:
+        return "dogalgaz_gideri"
+    if product_category in {"e_fatura_hizmeti"} or "e fatura" in normalized or "efatura" in normalized:
+        return "e_fatura_yazilim_gideri"
+    if product_category == "kargo" or "kargo" in normalized or "nakliye" in normalized:
+        return "kargo_gideri"
+    if "internet" in normalized or "ttnet" in normalized or "turknet" in normalized:
+        return "internet_gideri"
+    if "elektrik" in normalized or "edas" in normalized:
+        return "elektrik_gideri"
+    return product_category
 
 
 def _account_treatment(normalized: str, product_category: str, corrected_account_code: str) -> str:
@@ -99,16 +119,32 @@ def _is_vague(normalized: str, match_phrase: str, product_category: str, correct
 def _is_counterparty_rule(normalized: str) -> bool:
     terms = set(normalized.split())
     return bool(
-        {"cari", "toptanci", "tedarikci", "satici"}.intersection(terms)
+        {"cari", "firma", "firmanin", "toptanci", "tedarikci", "satici", "vkn"}.intersection(terms)
+        or "vergi numarasi" in normalized
+        or "vergi numarali" in normalized
         or "bize kesilen" in normalized
         or "gelen fatura" in normalized
         or "bu mukellefte" in normalized
     )
 
 
-def _scope(*, vague: bool, match_phrase: str, counterparty_rule: bool) -> str:
+def _is_office_semantic_rule(normalized: str, semantic_intent: str) -> bool:
+    if not semantic_intent:
+        return False
+    return bool(
+        "ofis geneli" in normalized
+        or "tum mukellef" in normalized
+        or "tum firm" in normalized
+        or "firma geneli" in normalized
+        or "her mukellef" in normalized
+    )
+
+
+def _scope(*, vague: bool, match_phrase: str, counterparty_rule: bool, office_semantic: bool) -> str:
     if vague or not match_phrase:
         return "client_only"
+    if office_semantic:
+        return "office_semantic"
     if counterparty_rule:
         return "client_counterparty"
     return "global_product_phrase"

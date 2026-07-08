@@ -27,6 +27,33 @@ export const emptyPilotData: PilotData = {
   exportBasket: [],
 };
 
+function normalizeDecisionNarrative(value: unknown) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const readFactsSource = source.readFacts ?? source.read_facts;
+  const readFactsRecord = readFactsSource && typeof readFactsSource === "object" && !Array.isArray(readFactsSource)
+    ? readFactsSource as Record<string, unknown>
+    : {};
+  const readFacts = Object.fromEntries(
+    Object.entries(readFactsRecord)
+      .map(([key, factValue]) => [key, safeText(factValue)] as const)
+      .filter(([, factValue]) => factValue),
+  );
+  const narrative = {
+    invoiceProductLine: safeText(source.invoiceProductLine ?? source.invoice_product_line),
+    fisoraInterpretation: safeText(source.fisoraInterpretation ?? source.fisora_interpretation),
+    businessRelation: safeText(source.businessRelation ?? source.business_relation),
+    accountCode: safeText(source.accountCode ?? source.account_code),
+    accountName: safeText(source.accountName ?? source.account_name),
+    counterpartyMatch: safeText(source.counterpartyMatch ?? source.counterparty_match),
+    confidenceLabel: safeText(source.confidenceLabel ?? source.confidence_label),
+    unresolvedInfo: safeText(source.unresolvedInfo ?? source.unresolved_info),
+    readFacts,
+  };
+  return Object.values(narrative).some((item) => (typeof item === "string" ? item : Object.keys(item).length))
+    ? narrative
+    : undefined;
+}
+
 function normalizeReviewData(raw: ReviewData): PilotData {
   const clientId = safeText(raw.clientId, "ofis-calisma-client");
   const clientName = safeText(raw.clientName, "Ofis Mükellefi");
@@ -86,6 +113,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       counterpartyTaxId: safeText(row.counterpartyTaxId ?? rowRecord.counterparty_tax_id),
       counterpartyTitle: safeText(row.counterpartyTitle ?? rowRecord.counterparty_title),
       counterpartyIdentityKey: safeText(row.counterpartyIdentityKey ?? rowRecord.counterparty_identity_key),
+      decisionNarrative: normalizeDecisionNarrative(rowRecord.decisionNarrative ?? rowRecord.decision_narrative),
       canonicalLineCount: safeNumber(row.canonicalLineCount ?? rowRecord.canonical_line_count),
       canonicalValidationStatus: safeText(row.canonicalValidationStatus ?? rowRecord.canonical_validation_status),
       canonicalValidationReasons: Array.isArray(row.canonicalValidationReasons)
@@ -146,6 +174,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       learningRuleScope: safeText(row.learningRuleScope ?? row.learning_rule_scope),
       learningRuleReason: safeText(row.learningRuleReason ?? row.learning_rule_reason),
       learningRuleSourceSummary: safeText(row.learningRuleSourceSummary ?? row.learning_rule_source_summary),
+      ruleInterpretation: null,
       rulePrompt: normalizeRulePrompt(row.rulePrompt ?? row.rule_prompt),
     };
   });
@@ -223,6 +252,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       learningRuleScope: "",
       learningRuleReason: "",
       learningRuleSourceSummary: "",
+      ruleInterpretation: null,
       rulePrompt: normalizeRulePrompt({}),
     }));
 
@@ -303,6 +333,7 @@ export function normalizePilotData(raw: unknown): PilotData {
         counterpartyTaxId: safeText(document.counterpartyTaxId, ""),
         counterpartyTitle: safeText(document.counterpartyTitle, ""),
         counterpartyIdentityKey: safeText(document.counterpartyIdentityKey, ""),
+        decisionNarrative: normalizeDecisionNarrative(document.decisionNarrative),
         vatRates: Array.isArray(document.vatRates) ? document.vatRates : [],
         reviewReasons: Array.isArray(document.reviewReasons) ? document.reviewReasons : [],
         riskFlags: Array.isArray(document.riskFlags) ? document.riskFlags : [],
@@ -334,6 +365,7 @@ export function normalizePilotData(raw: unknown): PilotData {
         learningRuleScope: safeText(document.learningRuleScope, ""),
         learningRuleReason: safeText(document.learningRuleReason, ""),
         learningRuleSourceSummary: safeText(document.learningRuleSourceSummary, ""),
+        ruleInterpretation: document.ruleInterpretation ?? null,
         rulePrompt: normalizeRulePrompt(document.rulePrompt),
       })),
       cancellationRequests: Array.isArray(maybePilot.cancellationRequests) ? (maybePilot.cancellationRequests as CancellationRequest[]) : [],

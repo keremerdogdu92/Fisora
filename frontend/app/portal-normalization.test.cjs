@@ -97,6 +97,7 @@ test("review reason labels are accountant-readable Turkish copy", () => {
   assert.equal(reviewReasonLabel("mixed_vat_manual_review"), "KDV ayrımı kontrolü");
   assert.equal(reviewReasonLabel("counterparty_title_token_overlap"), "Cari eşleşme kontrolü");
   assert.equal(reviewReasonLabel("onboarding_missing_activity_or_nace"), "Mükellef onboarding eksiği");
+  assert.equal(reviewReasonLabel("cancelled_invoice_visible"), "Bu fatura iptal görünmektedir");
   assert.equal(reviewReasonLabel("unknown_backend_code"), "Ek kontrol gerekli");
 
   assert.deepEqual(

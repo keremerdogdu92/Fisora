@@ -563,6 +563,7 @@ export function JournalPanel({
               <span>Benzerleri için öneri olarak kullan</span>
             </label>
           </div>
+          <RuleInterpretationCard document={document} />
         </section>
         <JournalReasonDisclosure document={document} />
       </div>
@@ -624,58 +625,79 @@ function JournalDecisionBar({
   );
 }
 
-function JournalReasonDisclosure({ document }: { document: PilotDocument }) {
-  const aiStatus = document.aiResolutionStatus === "ai_retry_required"
-    ? "Tekrar denenecek"
-    : document.aiProvider && document.aiProvider !== "-" ? document.aiProvider : "Gerekmedi";
-  const researchStatus = document.reviewReasons.includes("research_low_confidence")
-    || document.reviewReasons.includes("research_source_rejected")
-    ? "Kontrol"
-    : document.aiResearchRequested
-      ? "İstendi"
-      : "Gerekmedi";
-  const learningStatus = document.rulePrompt.show || document.learningRuleSourceSummary
-    ? "Aday var"
-    : "Yok";
-  const activityContext = [
-    document.clientNaceCode,
-    ...(document.clientActivityTags ?? []),
-  ].filter(Boolean).join(" / ");
-  const counterpartyIntent = [
-    document.counterpartyTaxId,
-    document.counterpartyTitle,
-    document.aiSuggestedCounterpartyCode,
-    document.suggestedCounterpartyAccount,
-  ].filter(Boolean).join(" / ");
-  const researchNote = document.aiResearchRequested
-    ? (document.aiResearchQuery || "AI ek araştırma istedi.")
-    : "Ek araştırma gerekmedi.";
-  const accountReason = document.aiAccountReason || document.accountantExplanation || document.aiReason || document.deterministicSummary || "-";
+function RuleInterpretationCard({ document }: { document: PilotDocument }) {
+  const interpretation = document.ruleInterpretation;
+  if (!interpretation) return null;
+  const needsClarification = interpretation.status === "needs_clarification";
+  const title = needsClarification ? "Netleştirme gerekiyor" : "Fisora'nın anladığı";
+  const detailRows = [
+    ["Tetikleyici", interpretation.triggerTr],
+    ["Uygulama", interpretation.actionTr],
+    ["Kontrol", interpretation.guardrailTr],
+  ].filter(([, value]) => value);
   return (
-    <section className="journal-reason-disclosure" aria-label="Karar ve gerekçe">
+    <section className={`rule-interpretation-card ${needsClarification ? "needs-clarification" : "ready"}`} aria-label={title}>
+      <div>
+        <span>{title}</span>
+        <strong>{interpretation.summaryTr || "Karar notu kural adayına çevrildi."}</strong>
+      </div>
+      {detailRows.length ? (
+        <div className="rule-interpretation-details">
+          {detailRows.map(([label, value]) => (
+            <Info key={label} label={label} value={value} />
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function JournalReasonDisclosure({ document }: { document: PilotDocument }) {
+  const narrative = document.decisionNarrative;
+  const summaryRows = [
+    ["Fatura ürün satırı", narrative?.invoiceProductLine || document.productLine || "-"],
+    ["Fisora yorumu", narrative?.fisoraInterpretation || document.aiProductIdentity || document.productCategory || "-"],
+    ["Faaliyet ilişkisi", narrative?.businessRelation || document.businessRelation || "-"],
+    ["Hesap önerisi", [narrative?.accountCode || document.selectedExpenseAccount || document.selectedRevenueAccount, narrative?.accountName].filter(Boolean).join(" / ") || "-"],
+    ["Cari eşleşme", narrative?.counterpartyMatch || document.counterpartyTitle || document.selectedCounterpartyAccount || "-"],
+    ["Güven", narrative?.confidenceLabel || (document.draftConfidence ? `%${document.draftConfidence}` : "-")],
+  ];
+  const readFacts = Object.entries(narrative?.readFacts ?? {});
+  const unresolved = narrative?.unresolvedInfo || "";
+  return (
+    <section className="journal-reason-disclosure" aria-label="Fisora karar özeti">
       <details>
         <summary>
-          <span>Neden böyle önerildi?</span>
-          <strong>Gerekçe ve AI izi</strong>
+          <span>Fisora Özeti</span>
+          <strong>{narrative?.confidenceLabel || formatDraftStatus(document.draftStatus)}</strong>
         </summary>
-        <div className="decision-chain-steps">
-          <Info label="Kural" value={document.deterministicSummary || "Statik kontrol"} />
-          <Info label="AI" value={aiStatus} />
-          <Info label="Araştırma" value={researchStatus} />
-          <Info label="Müşavir öğrenmesi" value={learningStatus} />
+        <div className="ai-guidance compact fisora-summary-grid">
+          {summaryRows.map(([label, value]) => (
+            <ReasonCard key={label} label={label} value={value} />
+          ))}
         </div>
-        <div className="ai-guidance compact">
-          <ReasonCard label="AI muhasebe gerekçesi" value={document.accountantExplanation || document.aiReason || document.accountantSummary || "-"} />
-          <ReasonCard label="Bu hesap neden seçildi?" value={accountReason} />
-          <ReasonCard label="Ürün / hizmet yorumu" value={document.aiProductIdentity || document.productLine || "-"} />
-          <ReasonCard label="Mükellef faaliyetiyle ilişkisi" value={activityContext || document.businessRelation || "-"} />
-          <ReasonCard label="Cari nasıl eşleşti?" value={counterpartyIntent || "-"} />
-          <ReasonCard label="Araştırma notu" value={researchNote} />
-          <ReasonCard label="Muhasebe davranışı" value={document.accountTreatment || "-"} />
-          <ReasonCard label="Kontrol gerektiren nokta" value={document.exportGateReason || document.aiRetryReason || "-"} />
-        </div>
-        <QualityScorecardPanel document={document} />
+        {readFacts.length ? (
+          <details className="decision-narrative-section">
+            <summary>Faturadan Okunan Bilgiler</summary>
+            <div className="decision-chain-steps">
+              {readFacts.map(([label, value]) => (
+                <Info key={label} label={label} value={String(value)} />
+              ))}
+            </div>
+          </details>
+        ) : null}
+        {unresolved ? (
+          <details className="decision-narrative-section">
+            <summary>Netleşmeyen Bilgiler</summary>
+            <p>{unresolved}</p>
+          </details>
+        ) : null}
         <LearningRuleCard document={document} />
+        <details className="decision-narrative-section technical">
+          <summary>Teknik İz</summary>
+          <QualityScorecardPanel document={document} />
+          <AiTracePanel document={document} />
+        </details>
       </details>
     </section>
   );
@@ -703,7 +725,7 @@ function QualityScorecardPanel({ document }: { document: PilotDocument }) {
     : "Henüz karar yok";
   return (
     <section className="ai-guidance compact" aria-label="Karar kalitesi">
-      <ReasonCard label="Statik motor" value={`${qualityText(staticDecision, "category")} / %${qualityText(staticDecision, "confidence", "0")}`} />
+      <ReasonCard label="İlk taslak" value={`${qualityText(staticDecision, "category")} / %${qualityText(staticDecision, "confidence", "0")}`} />
       <ReasonCard label="AI" value={`${qualityText(aiDecision, "provider", "Gerekmedi")} / ${qualityText(aiDecision, "category")} / %${qualityText(aiDecision, "confidence", "0")}`} />
       <ReasonCard label="Sistem final taslağı" value={finalValue} />
       <ReasonCard label="Müşavir finali" value={accountantValue} />

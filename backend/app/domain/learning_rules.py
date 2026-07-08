@@ -78,9 +78,13 @@ def apply_learning_rules(
     result: SimulatedInvoiceResult,
     rules: Iterable[LearnedPostingRule],
 ) -> SimulatedInvoiceResult:
-    rule = _select_rule(result, rules)
+    rule_list = tuple(rules)
+    rule = _select_rule(result, rule_list)
     if rule is None:
-        return result
+        semantic_rule = _select_semantic_rule(result, rule_list)
+        if semantic_rule is None:
+            return result
+        return _apply_semantic_rule_context(result, semantic_rule)
 
     can_apply_counterparty = _can_apply_counterparty_code(result, rule)
     effective_rule = rule if can_apply_counterparty else replace(rule, corrected_counterparty_code="")
@@ -121,6 +125,8 @@ def _select_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingR
     allowed_actions = {"approve", "approve_with_changes", "suggest_for_similar"}
     scored: list[tuple[int, LearnedPostingRule]] = []
     for rule in rules:
+        if _is_office_semantic_rule(rule):
+            continue
         if rule.action not in allowed_actions:
             continue
         if (
@@ -142,6 +148,42 @@ def _select_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingR
         return None
     scored.sort(key=lambda item: item[0], reverse=True)
     return scored[0][1]
+
+
+def _select_semantic_rule(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingRule]) -> LearnedPostingRule | None:
+    allowed_actions = {"approve", "approve_with_changes", "suggest_for_similar"}
+    scored: list[tuple[int, LearnedPostingRule]] = []
+    for rule in rules:
+        if rule.action not in allowed_actions or not _is_office_semantic_rule(rule):
+            continue
+        score = _rule_score(result, replace(rule, corrected_account_code="", corrected_counterparty_code=""))
+        if score >= 60:
+            scored.append((score, rule))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return scored[0][1]
+
+
+def _apply_semantic_rule_context(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> SimulatedInvoiceResult:
+    evidence = tuple(dict.fromkeys((*result.business_relevance_evidence, LEARNING_APPLIED_EVIDENCE)))
+    reason = rule.source_summary or rule.reason
+    return replace(
+        result,
+        business_relevance_evidence=evidence,
+        learning_rule_applied=True,
+        learning_rule_scope=rule.scope,
+        learning_rule_reason=reason,
+        learning_rule_source_summary=reason,
+        accounting_intent=rule.accounting_intent,
+        accounting_intent_confidence=rule.accounting_intent_confidence,
+        rule_prompt=rule.rule_prompt or {},
+    )
+
+
+def _is_office_semantic_rule(rule: LearnedPostingRule) -> bool:
+    candidate = rule.natural_language_rule_candidate or {}
+    return str(candidate.get("scope") or "") == "office_semantic"
 
 
 def _rule_can_override_ai(rule: LearnedPostingRule) -> bool:

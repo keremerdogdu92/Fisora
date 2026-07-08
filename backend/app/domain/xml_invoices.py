@@ -21,6 +21,7 @@ from app.domain.pdf_invoices import ParsedInvoice
 
 TAX_ID_RE = re.compile(r"^\d{10,11}$")
 GENERIC_TAX_SCHEME_NAMES = {"KDV", "VAT", "KATMA DEGER VERGISI"}
+CANCELLATION_MARKERS = ("IPTAL", "CANCELLED", "CANCELED")
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,15 @@ def _first_text(root: ET.Element, names: tuple[str, ...]) -> str:
             if value:
                 return value
     return ""
+
+
+def _document_text(root: ET.Element) -> str:
+    return " ".join(_text(element) for element in root.iter() if _text(element))
+
+
+def _cancellation_risk_flags(root: ET.Element) -> tuple[str, ...]:
+    haystack = _ascii_upper(_document_text(root))
+    return ("cancelled_invoice_visible",) if any(marker in haystack for marker in CANCELLATION_MARKERS) else ()
 
 
 def _first_amount(root: ET.Element, names: tuple[str, ...]) -> str:
@@ -385,7 +395,8 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
     if not payable_total:
         notes.append("missing_payable_total")
 
-    route = "review_queue" if notes else "journal_candidate"
+    cancellation_risk_flags = _cancellation_risk_flags(root)
+    route = "review_queue" if notes or cancellation_risk_flags else "journal_candidate"
     xml_text = ET.tostring(root, encoding="unicode")
     supplier = _party_details(root, "AccountingSupplierParty")
     customer = _party_details(root, "AccountingCustomerParty")
@@ -409,7 +420,7 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         special_tax_total="",
         tax_inclusive_total=_first_amount(root, ("TaxInclusiveAmount",)),
         payable_total=payable_total,
-        risk_flags=(),
+        risk_flags=cancellation_risk_flags,
         suggested_route=route,
         parse_notes=tuple(notes),
         line_items=_invoice_line_hints(root),

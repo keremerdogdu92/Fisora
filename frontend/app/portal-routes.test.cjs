@@ -134,6 +134,15 @@ test("portal implementation is split into route view modules", () => {
   assert.equal(existsSync(join(__dirname, "portal-workspace-view.tsx")), true);
 });
 
+test("workspace marks visible invoice cancellation reasons as danger chips", () => {
+  const workspaceView = require("node:fs").readFileSync(join(__dirname, "portal-workspace-view.tsx"), "utf8");
+  const styles = require("node:fs").readFileSync(join(__dirname, "styles.css"), "utf8");
+
+  assert.match(workspaceView, /cancelled_invoice_visible/);
+  assert.match(workspaceView, /className=\{reason === "cancelled_invoice_visible" \? "danger" : undefined\}/);
+  assert.match(styles, /\.review-reason-chips span\.danger/);
+});
+
 test("portal shell delegates session and review helpers to feature modules", () => {
   const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
   const lineCount = portalApp.split(/\r?\n/).length;

@@ -105,6 +105,10 @@ def apply_review_decision_to_document(
         result["learning_rule_scope"] = str(learning_event.get("scope") or "client_rule")
         result["learning_rule_reason"] = reason or "Musavir duzeltmesi kalici taslaga uygulandi."
 
+    rule_interpretation = learning_event.get("rule_interpretation")
+    if isinstance(rule_interpretation, dict):
+        result["rule_interpretation"] = deepcopy(rule_interpretation)
+
     result["accountant_decision_action"] = action
     result["accountant_decision_reason"] = reason
     result["accountant_reviewed_at"] = reviewed_at

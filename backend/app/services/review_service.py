@@ -9,6 +9,7 @@ from app.api.phase0_review_export import workspace_document
 from app.api.phase0_schemas import JournalLinePayload, ReviewDecisionPayload, StoredReviewDecisionPayload
 from app.domain.chart_accounts import normalize_account_code
 from app.domain.learning_intelligence import enrich_learning_event
+from app.domain.review_rule_interpretation import build_review_rule_interpretation
 from app.domain.review_learning import ReviewDecision, build_learning_event
 
 
@@ -23,10 +24,12 @@ class ReviewService:
         store: Any,
         record_operation_event: OperationRecorder,
         require_client_access: AccessChecker,
+        rule_interpreter: Any | None = None,
     ) -> None:
         self.store = store
         self.record_operation_event = record_operation_event
         self.require_client_access = require_client_access
+        self.rule_interpreter = rule_interpreter
 
     def review_learning_event(self, payload: ReviewDecisionPayload) -> dict[str, object]:
         decision = ReviewDecision(
@@ -83,6 +86,13 @@ class ReviewService:
             client_profile=(workspace.get("client") or {}).get("profile") or {},
             prior_learning_events=workspace.get("learning_events") or (),
         )
+        rule_interpretation = build_review_rule_interpretation(
+            event=event,
+            document=document,
+            provider=self.rule_interpreter,
+        )
+        if rule_interpretation is not None:
+            event["rule_interpretation"] = rule_interpretation
         saved = self.store.save_review_decision(
             client_id=payload.client_id,
             decision=decision.model_dump(),

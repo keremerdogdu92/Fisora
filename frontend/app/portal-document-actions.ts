@@ -116,6 +116,7 @@ export async function addLocalUploadsAction({
     learningRuleScope: "",
     learningRuleReason: "",
     learningRuleSourceSummary: "",
+    ruleInterpretation: null,
     rulePrompt: normalizeRulePrompt({}),
   }));
   if (localFallbackAllowed) {

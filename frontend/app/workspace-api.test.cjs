@@ -115,12 +115,40 @@ const workspaceRecord = {
         counterparty_tax_id: "2222222222",
         counterparty_title: "Alici Hasta",
         counterparty_identity_key: "2222222222",
+        decision_narrative: {
+          invoice_product_line: "Cihaz satisi",
+          fisora_interpretation: "Isitme cihazi",
+          business_relation: "Faaliyetle dogrudan iliskili",
+          account_code: "600.20",
+          account_name: "Yurt ici satislar yuzde 20",
+          counterparty_match: "VKN birebir eslesti / 120.01 / Alici Hasta",
+          confidence_label: "Yuksek",
+          unresolved_info: "",
+          read_facts: {
+            "Fatura urun satiri": "Cihaz satisi",
+            "Satici unvani": "Pilot Alici",
+            "KDV orani": "%20",
+            "Genel toplam": "120.00",
+            "Tutar kontrolu": "Matrah + KDV toplamla uyumlu",
+          },
+        },
         ai_explanation_tr: "AI kararı: statik kurallar belge kalemini satış olarak değerlendirdi.",
         accounting_intent: "e_fatura_yazilim_gideri",
         accounting_intent_confidence: 84,
         learning_rule_scope: "client_rule",
         learning_rule_reason: "Kolay Soft e-fatura hizmetleri 770.05 alt hesabinda izleniyor.",
         learning_rule_source_summary: "Bu oneride 3 onceki musavir karari kullanildi.",
+        rule_interpretation: {
+          source: "ai",
+          provider: "openrouter",
+          status: "ready",
+          summary_tr: "Bu mükellefte Yurtiçi Kargo faturaları kargo gideri olarak önerilecek.",
+          trigger_tr: "VKN 9860008925 / Yurtiçi Kargo alış faturası",
+          action_tr: "Gider hesabı 760.03.010, cari 320.9860008925.",
+          guardrail_tr: "İlk uygulamalarda müşavir kontrolü istenir.",
+          confidence: 91,
+          reason_codes: ["counterparty_tax_id_rule", "account_rule"],
+        },
         rule_prompt: {
           show: true,
           default_scope: "client_narrow",
@@ -333,6 +361,23 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.deepEqual(data.documents[0].clientActivityTags, ["hearing_aid", "medical_retail", "retail_trade"]);
   assert.equal(data.documents[0].counterpartyTaxId, "2222222222");
   assert.equal(data.documents[0].counterpartyTitle, "Alici Hasta");
+  assert.deepEqual(data.documents[0].decisionNarrative, {
+    invoiceProductLine: "Cihaz satisi",
+    fisoraInterpretation: "Isitme cihazi",
+    businessRelation: "Faaliyetle dogrudan iliskili",
+    accountCode: "600.20",
+    accountName: "Yurt ici satislar yuzde 20",
+    counterpartyMatch: "VKN birebir eslesti / 120.01 / Alici Hasta",
+    confidenceLabel: "Yuksek",
+    unresolvedInfo: "",
+    readFacts: {
+      "Fatura urun satiri": "Cihaz satisi",
+      "Satici unvani": "Pilot Alici",
+      "KDV orani": "%20",
+      "Genel toplam": "120.00",
+      "Tutar kontrolu": "Matrah + KDV toplamla uyumlu",
+    },
+  });
   assert.equal(data.documents[0].aiReason, "AI kararı: statik kurallar belge kalemini satış olarak değerlendirdi.");
   assert.deepEqual(
     data.documents[0].pipelineEvents.map((event) => [event.step, event.status, event.messageTr, event.debugCode]),
@@ -352,6 +397,17 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
     officeConsistentDecisionCount: 3,
   });
   assert.equal(data.documents[0].learningRuleSourceSummary, "Bu oneride 3 onceki musavir karari kullanildi.");
+  assert.deepEqual(data.documents[0].ruleInterpretation, {
+    source: "ai",
+    provider: "openrouter",
+    status: "ready",
+    summaryTr: "Bu mükellefte Yurtiçi Kargo faturaları kargo gideri olarak önerilecek.",
+    triggerTr: "VKN 9860008925 / Yurtiçi Kargo alış faturası",
+    actionTr: "Gider hesabı 760.03.010, cari 320.9860008925.",
+    guardrailTr: "İlk uygulamalarda müşavir kontrolü istenir.",
+    confidence: 91,
+    reasonCodes: ["counterparty_tax_id_rule", "account_rule"],
+  });
   assert.equal(data.documents[0].originalDocumentRef, "processed-1");
   assert.equal(data.documents[0].draftStatus, "draft_ready");
   assert.deepEqual(data.documents[0].chartAccounts.map((account) => [account.code, account.name]), [

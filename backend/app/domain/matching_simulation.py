@@ -172,6 +172,7 @@ class SimulatedInvoiceResult:
     canonical_validation_status: str = ""
     canonical_validation_reasons: tuple[str, ...] = ()
     canonical_extraction_ai_used: bool = False
+    decision_narrative: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -866,6 +867,137 @@ def _accountant_explanation(
     )
 
 
+def _category_label(category: str, product_identity: str = "") -> str:
+    identity = str(product_identity or "").strip()
+    labels = {
+        "personal_clothing": "Pantolon / giyim urunu",
+        "e_fatura_hizmeti": "E-fatura / yazilim hizmeti",
+        "bulut_yazilim_hizmeti": "Bulut / yazilim hizmeti",
+        "elektrik": "Elektrik / enerji gideri",
+        "internet": "Internet hizmeti",
+        "kira": "Kira gideri",
+        "kargo": "Kargo / nakliye hizmeti",
+        "isitme_cihazi": "Isitme cihazi",
+        "isitme_cihazi_pili": "Isitme cihazi pili",
+        "kisisel_bakim_kozmetik": "Kisisel bakim / kozmetik",
+    }
+    label = labels.get(str(category or ""), str(category or "").replace("_", " ").strip())
+    if identity and label and identity.lower() not in label.lower():
+        return f"{identity} / {label}"
+    return label or identity or "-"
+
+
+def _confidence_label(confidence: int) -> str:
+    if confidence >= 80:
+        return "Yuksek"
+    if confidence >= 55:
+        return "Orta"
+    return "Dusuk"
+
+
+def _business_relation_label(relation: str, status: str) -> str:
+    labels = {
+        "core_business": "Faaliyetle dogrudan iliskili",
+        "adjacent_business": "Faaliyetle iliskili gorunuyor",
+        "general_overhead": "Genel isletme gideri",
+        "weak_match": "Faaliyet iliskisi net degil",
+        "off_activity": "Faaliyetle dogrudan iliskili gorunmuyor",
+        "blocked_or_regulated": "Ozel kontrol gerektiren kalem",
+    }
+    return labels.get(str(relation or ""), labels.get(str(status or ""), str(status or "").replace("_", " ").strip() or "-"))
+
+
+def _counterparty_match_label(
+    *,
+    counterparty_match: CounterpartyMatch | None,
+    suggested_counterparty: str,
+    counterparty_title: str,
+) -> str:
+    title = str(counterparty_title or "").strip()
+    if counterparty_match and counterparty_match.account_code:
+        reason_labels = {
+            "tax_id_exact": "VKN birebir eslesti",
+            "iban_exact": "IBAN birebir eslesti",
+            "title_similarity": "Unvan benzerligiyle eslesti",
+            "title_token_overlap": "Unvan benzerligiyle eslesti",
+            "learning_event": "Onceki musavir kararindan eslesti",
+            "accountant_corrected": "Musavir duzeltmesiyle eslesti",
+        }
+        reason = reason_labels.get(counterparty_match.match_reason, "Cari eslesmesi bulundu")
+        name = counterparty_match.account_name or title
+        pieces = [reason, counterparty_match.account_code, name]
+        return " / ".join(piece for piece in pieces if str(piece or "").strip())
+    if suggested_counterparty:
+        return f"Yeni cari onerisi / {suggested_counterparty}" + (f" / {title}" if title else "")
+    return f"Cari bulunamadi" + (f" / {title}" if title else "")
+
+
+def _amount_check(invoice: ParsedInvoice) -> str:
+    try:
+        goods = money(invoice.goods_services_total)
+        vat = money(invoice.vat_total)
+        total = money(invoice.payable_total)
+    except Exception:  # noqa: BLE001 - narrative should not break simulation
+        return ""
+    return "Matrah + KDV toplamla uyumlu" if abs((goods + vat) - total) <= MONEY_TOLERANCE else "Tutarlar kontrol gerektiriyor"
+
+
+def _non_empty_fact_rows(rows: tuple[tuple[str, str], ...]) -> dict[str, str]:
+    return {label: value for label, value in rows if str(value or "").strip()}
+
+
+def _decision_narrative(
+    *,
+    invoice: ParsedInvoice,
+    relevance: BusinessRelevance,
+    selected_account_code: str,
+    selected_account_name: str,
+    counterparty_match: CounterpartyMatch | None,
+    suggested_counterparty: str,
+    counterparty_title: str,
+    counterparty_tax_id: str,
+    export_gate_reason: str,
+    ai_product_identity: str,
+) -> dict[str, object]:
+    invoice_product_line = str(invoice.line_items[0] if invoice.line_items else invoice.provider_hint or "").strip()
+    unresolved = ""
+    if relevance.status in {"supheli", "is_alani_disi"} or relevance.relation in {"weak_match", "off_activity"}:
+        unresolved = "Urunun faaliyetle baglantisi net degil."
+    if counterparty_match and counterparty_match.requires_review:
+        unresolved = "Cari eslesmesi kesin degil." if not unresolved else f"{unresolved} Cari eslesmesi kesin degil."
+    elif not counterparty_match and suggested_counterparty:
+        unresolved = "Cari hesabi yeni acilacak gibi gorunuyor." if not unresolved else f"{unresolved} Cari hesabi yeni acilacak gibi gorunuyor."
+    read_facts = _non_empty_fact_rows(
+        (
+            ("Fatura urun satiri", invoice_product_line),
+            ("Satici unvani", counterparty_title or invoice.provider_hint),
+            ("Vergi no", counterparty_tax_id),
+            ("Fatura tarihi", invoice.issue_date),
+            ("Matrah", invoice.goods_services_total),
+            ("KDV orani", ", ".join(f"%{rate}" for rate in invoice.vat_rates if str(rate).strip())),
+            ("KDV tutari", invoice.vat_total),
+            ("Genel toplam", invoice.payable_total),
+            ("Tutar kontrolu", _amount_check(invoice)),
+        )
+    )
+    return {
+        "invoice_product_line": invoice_product_line,
+        "fisora_interpretation": _category_label(relevance.classification.category, ai_product_identity),
+        "business_relation": _business_relation_label(relevance.relation, relevance.status),
+        "account_code": selected_account_code,
+        "account_name": selected_account_name,
+        "counterparty_match": _counterparty_match_label(
+            counterparty_match=counterparty_match,
+            suggested_counterparty=suggested_counterparty,
+            counterparty_title=counterparty_title,
+        ),
+        "confidence_label": _confidence_label(max(relevance.classification.confidence, relevance.confidence)),
+        "unresolved_info": unresolved,
+        "read_facts": read_facts,
+        "export_gate_reason": export_gate_reason,
+    }
+
+
 def _gross_review_entry(
     invoice: ParsedInvoice,
     selection: AccountSelection,
@@ -1555,6 +1687,8 @@ def _export_gate_reason(
         return "Fis dengeli degil veya taslak satirlari eksik."
     if counterparty_match and counterparty_match.requires_review:
         return f"Cari eslesmesi kontrol istiyor: {counterparty_match.match_reason}."
+    if "cancelled_invoice_visible" in review_reasons:
+        return "Bu fatura iptal gorunmektedir; fis taslagi hazir ama mustavir kontrolu gerekir."
     if review_reasons:
         return f"Review nedeni: {', '.join(review_reasons)}."
     if relevance.status == "is_alani_disi":
@@ -2283,7 +2417,8 @@ def simulate_invoice(
         suggested_counterparty=suggested_counterparty,
         draft_quality=draft_quality,
     )
-    draft_lines = _entry_lines(entry, _account_names_from_selection(selection, counterparty_match))
+    account_names = _account_names_from_selection(selection, counterparty_match)
+    draft_lines = _entry_lines(entry, account_names)
     review_blockers = _review_blockers(
         review_reasons=all_reasons,
         deterministic_checks=deterministic_checks,
@@ -2346,6 +2481,18 @@ def simulate_invoice(
         draft_confidence=draft_confidence,
         ai_account_candidate_count=ai_account_candidate_count,
         ai_counterparty_candidate_count=ai_counterparty_candidate_count,
+    )
+    decision_narrative = _decision_narrative(
+        invoice=invoice,
+        relevance=relevance,
+        selected_account_code=selected_account_code,
+        selected_account_name=account_names.get(selected_account_code, ""),
+        counterparty_match=counterparty_match,
+        suggested_counterparty=suggested_counterparty,
+        counterparty_title=counterparty_title,
+        counterparty_tax_id=counterparty_tax_id,
+        export_gate_reason=export_gate_reason,
+        ai_product_identity=ai_product_identity,
     )
 
     return SimulatedInvoiceResult(
@@ -2424,6 +2571,7 @@ def simulate_invoice(
         canonical_validation_status=canonical_validation_status,
         canonical_validation_reasons=canonical_validation_reasons,
         canonical_extraction_ai_used=canonical_extraction_ai_used,
+        decision_narrative=decision_narrative,
         learning_rule_applied=False,
         learning_rule_scope="",
         learning_rule_reason="",
@@ -2625,6 +2773,7 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "canonicalValidationStatus": result.canonical_validation_status,
                     "canonicalValidationReasons": list(result.canonical_validation_reasons),
                     "canonicalExtractionAiUsed": result.canonical_extraction_ai_used,
+                    "decisionNarrative": result.decision_narrative,
                     "productLineHint": result.product_line_hint,
                     "productCategory": result.product_category,
                     "productConfidence": result.product_confidence,

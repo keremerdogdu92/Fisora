@@ -28,6 +28,7 @@ function agentSourceLabel(value) {
 }
 
 const REVIEW_REASON_LABELS = {
+  cancelled_invoice_visible: "Bu fatura iptal görünmektedir",
   mixed_vat_manual_review: "KDV ayrımı kontrolü",
   counterparty_title_token_overlap: "Cari eşleşme kontrolü",
   onboarding_missing_activity_or_nace: "Mükellef onboarding eksiği",

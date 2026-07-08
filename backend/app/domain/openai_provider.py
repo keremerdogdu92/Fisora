@@ -8,6 +8,7 @@ import httpx
 from app.domain.ai_capacity import normalize_cerebras_rate_limit_headers, normalize_groq_rate_limit_headers
 from app.domain.ai_classification import AiClassificationRequest
 from app.domain.canonical_invoices import CanonicalExtractionRequest
+from app.domain.review_rule_interpretation import REVIEW_RULE_INTERPRETATION_SCHEMA
 from app.domain.statement_ai_suggestions import StatementAiSuggestionRequest
 
 
@@ -48,6 +49,13 @@ class OpenAiAccountingProvider:
         "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
         "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
         "Export izni verme; mustavir onayi gerektigini koru."
+    )
+    review_rule_interpretation_instructions = (
+        "Muhasebe mustavirinin karar notunu kisa, denetlenebilir bir kural adayina cevir. "
+        "Sadece verilen belge, cari, hesap ve aday kural alanlarini kullan. "
+        "Yeni hesap kodu veya cari kod uydurma. Not belirsizse status=needs_clarification don. "
+        "Cikti mustavire gosterilecek; teknik olmayan Turkce kullan. "
+        "Kural aktiflesse bile ilk uygulamalarda mustavir kontrolu ve KDV/fis dengesi korundugunu belirt."
     )
 
     def __init__(
@@ -96,6 +104,15 @@ class OpenAiAccountingProvider:
             instructions=self.statement_suggestion_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
+        )
+
+    def interpret_review_rule(self, request: Mapping[str, object]) -> dict[str, Any]:
+        payload = dict(request)
+        return self._post_structured_json(
+            schema_name="fisora_review_rule_interpretation",
+            instructions=self.review_rule_interpretation_instructions,
+            user_payload=payload,
+            schema=REVIEW_RULE_INTERPRETATION_SCHEMA,
         )
 
     def _post_structured_json(
@@ -177,6 +194,7 @@ class ChatCompletionsAccountingProvider:
         "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
         "Export izni verme; mustavir onayi gerektigini koru."
     )
+    review_rule_interpretation_instructions = OpenAiAccountingProvider.review_rule_interpretation_instructions
 
     def __init__(
         self,
@@ -226,6 +244,15 @@ class ChatCompletionsAccountingProvider:
             instructions=self.statement_suggestion_instructions,
             user_payload=payload,
             schema=payload["output_schema"],
+        )
+
+    def interpret_review_rule(self, request: Mapping[str, object]) -> dict[str, Any]:
+        payload = dict(request)
+        return self._post_structured_json(
+            schema_name="fisora_review_rule_interpretation",
+            instructions=self.review_rule_interpretation_instructions,
+            user_payload=payload,
+            schema=REVIEW_RULE_INTERPRETATION_SCHEMA,
         )
 
     def _post_structured_json(
@@ -295,10 +322,13 @@ class FallbackAccountingProvider:
     def suggest_statement_line(self, request: StatementAiSuggestionRequest) -> dict[str, Any]:
         return self._call("suggest_statement_line", request)
 
+    def interpret_review_rule(self, request: Mapping[str, object]) -> dict[str, Any]:
+        return self._call("interpret_review_rule", request)
+
     def _call(
         self,
         method_name: str,
-        request: AiClassificationRequest | CanonicalExtractionRequest | StatementAiSuggestionRequest,
+        request: AiClassificationRequest | CanonicalExtractionRequest | StatementAiSuggestionRequest | Mapping[str, object],
     ) -> dict[str, Any]:
         errors: list[str] = []
         for provider in self.providers:

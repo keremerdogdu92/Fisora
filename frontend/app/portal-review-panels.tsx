@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent, MutableRefObject } from "react";
+import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
@@ -876,7 +876,33 @@ function AccountCodeCombobox({
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [popupPosition, setPopupPosition] = useState({ left: 16, top: 16 });
   const matches = useMemo(() => filterAccountOptions(accounts, value, 20), [accounts, value]);
+
+  function updatePopupPosition() {
+    const input = inputRef.current;
+    if (!input) return;
+    const rect = input.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || 0;
+    const popupWidth = Math.min(520, Math.max(0, viewportWidth - 32));
+    const left = Math.max(16, Math.min(rect.left, viewportWidth - popupWidth - 16));
+    setPopupPosition({
+      left,
+      top: rect.bottom + 4,
+    });
+  }
+
+  useEffect(() => {
+    if (!open) return undefined;
+    updatePopupPosition();
+    window.addEventListener("resize", updatePopupPosition);
+    window.addEventListener("scroll", updatePopupPosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePopupPosition);
+      window.removeEventListener("scroll", updatePopupPosition, true);
+    };
+  }, [open, value]);
 
   function selectActiveAccount() {
     const selected = resolveAccountSelection(accounts, value, activeIndex);
@@ -886,6 +912,11 @@ function AccountCodeCombobox({
     setActiveIndex(0);
     return true;
   }
+
+  const popupStyle = {
+    "--account-options-left": `${popupPosition.left}px`,
+    "--account-options-top": `${popupPosition.top}px`,
+  } as CSSProperties;
 
   return (
     <div className="account-code-combobox">
@@ -897,12 +928,17 @@ function AccountCodeCombobox({
         onChange={(event) => {
           onChange(event.target.value);
           setActiveIndex(0);
+          updatePopupPosition();
           setOpen(true);
         }}
-        onFocus={() => setOpen(Boolean(value))}
+        onFocus={() => {
+          updatePopupPosition();
+          setOpen(Boolean(value));
+        }}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {
             event.preventDefault();
+            updatePopupPosition();
             setOpen(true);
             setActiveIndex((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)));
           } else if (event.key === "ArrowUp") {
@@ -914,10 +950,11 @@ function AccountCodeCombobox({
             setOpen(false);
           }
         }}
+        ref={inputRef}
         value={value}
       />
       {open && matches.length ? (
-        <div className="account-code-options" role="listbox">
+        <div className="account-code-options" role="listbox" style={popupStyle}>
           {matches.map((account, index) => (
             <button
               aria-disabled={!account.isDetail}

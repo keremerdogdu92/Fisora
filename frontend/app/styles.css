@@ -2530,13 +2530,13 @@ button:disabled {
   border-radius: 8px;
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
   display: grid;
-  left: 0;
-  max-height: 220px;
-  min-width: 280px;
+  left: var(--account-options-left, 16px);
+  max-height: min(320px, calc(100vh - var(--account-options-top, 16px) - 16px));
   overflow-y: auto;
-  position: absolute;
-  top: calc(100% + 4px);
-  z-index: 20;
+  position: fixed;
+  top: var(--account-options-top, 16px);
+  width: min(520px, calc(100vw - 32px));
+  z-index: 60;
 }
 
 .account-code-options button {
@@ -2547,7 +2547,7 @@ button:disabled {
   color: var(--text);
   display: grid;
   gap: 2px;
-  grid-template-columns: 88px 1fr;
+  grid-template-columns: 112px minmax(0, 1fr);
   justify-items: start;
   padding: 8px 10px;
   text-align: left;
@@ -2573,6 +2573,7 @@ button:disabled {
 .account-code-options strong {
   font-size: 12px;
   font-weight: 800;
+  line-height: 1.25;
 }
 
 .account-code-options em,

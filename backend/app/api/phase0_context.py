@@ -19,6 +19,7 @@ from app.api.phase0_dependencies import (
 from app.api.phase0_uploads import save_uploaded_document_with_job as _save_uploaded_document_with_job
 from app.persistence.store_factory import build_workflow_store
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
+from app.domain.qnb_efatura import QnbConnectionService, build_qnb_adapter_from_env
 from app.workflows.document_processing import _provider_chain_from_env
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
@@ -110,6 +111,14 @@ def get_export_service() -> ExportService:
         export_path=default_export_path(),
         record_operation_event=record_operation_event,
         require_client_access=require_client_access,
+    )
+
+
+def get_qnb_connection_service() -> QnbConnectionService:
+    return QnbConnectionService(
+        store=get_workflow_store(),
+        document_storage_path=default_document_storage_path(),
+        adapter=build_qnb_adapter_from_env(os.environ),
     )
 
 

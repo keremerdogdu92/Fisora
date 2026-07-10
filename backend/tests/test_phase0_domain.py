@@ -6869,6 +6869,78 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(learned.accounting_intent, "dogalgaz_gideri")
         self.assertIn("dogalgaz", learned.learning_rule_source_summary.lower())
 
+    def test_learning_rule_application_adds_debug_audit_payload(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Pilot Mukellef",
+            tax_id="2222222222",
+            activity_description="Lojistik hizmetleri",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="kargo-tekrar.pdf",
+            provider_hint="Yurtici Kargo",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=800,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000006",
+            ettn="",
+            issue_date="06.05.2026",
+            tax_ids=("9860008925", "2222222222"),
+            vat_rates=("20",),
+            goods_services_total="100.00",
+            vat_total="20.00",
+            special_tax_total="",
+            tax_inclusive_total="120.00",
+            payable_total="120.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kargo hizmet bedeli",),
+            issuer_title="Yurtici Kargo",
+            issuer_tax_id="9860008925",
+            recipient_title="Pilot Mukellef",
+            recipient_tax_id="2222222222",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+        )
+        event = {
+            "client_id": "client-1",
+            "scope": "client_rule",
+            "action": "suggest_for_similar",
+            "category": "kargo",
+            "corrected_account_code": "760.03.010",
+            "corrected_counterparty_code": "320.9860008925",
+            "reason": "Yurtici Kargo kargo gideri olarak izlenir.",
+            "accounting_intent": "kargo_gideri",
+            "accounting_intent_confidence": 90,
+            "normalized_terms": ["yurtici", "kargo", "hizmet"],
+            "counterparty_tax_id": "9860008925",
+            "counterparty_title": "Yurtici Kargo",
+            "automation_candidate": True,
+            "learning_rule_source_summary": "Yurtici Kargo onceki musavir kararindan eslesti.",
+        }
+
+        result = simulate_invoice(invoice, selection, profile)
+        learned = apply_learning_rules(result, [rule_from_event_payload(event)])
+
+        self.assertTrue(learned.learning_rule_applied)
+        audit = learned.learning_audit
+        self.assertEqual(audit["status"], "applied")
+        self.assertEqual(audit["scope"], "client_rule")
+        self.assertEqual(audit["suggested_account_code"], "760.03.010")
+        self.assertGreaterEqual(audit["match_score"], 60)
+        self.assertIn("kargo", audit["matched_terms"])
+
     def test_accountant_note_creates_client_counterparty_rule_candidate_for_wholesaler(self) -> None:
         candidate = build_natural_language_rule_candidate(
             accountant_note="Bu cari bunun toptancisi, buradan bize kesilen tum faturalar stok alimidir.",

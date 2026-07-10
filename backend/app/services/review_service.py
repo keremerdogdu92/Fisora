@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.api.phase0_review_export import workspace_document
-from app.api.phase0_schemas import JournalLinePayload, ReviewDecisionPayload, StoredReviewDecisionPayload
+from app.api.phase0_schemas import JournalLinePayload, ReviewDecisionPayload, ReviewRulePreviewPayload, StoredReviewDecisionPayload
 from app.domain.chart_accounts import normalize_account_code
 from app.domain.learning_intelligence import enrich_learning_event
 from app.domain.review_rule_interpretation import build_review_rule_interpretation
@@ -64,7 +64,38 @@ class ReviewService:
         }
         if payload.vat_split_review:
             event_payload["vat_split_review"] = payload.vat_split_review
+        if payload.learning_confirmation.strip() and payload.learning_confirmation.strip() != "none":
+            event_payload["learning_confirmation"] = payload.learning_confirmation.strip()
+        if payload.suppress_rule_prompt_key.strip():
+            event_payload["suppress_rule_prompt_key"] = payload.suppress_rule_prompt_key.strip()
         return event_payload
+
+    def preview_review_rule(self, *, payload: ReviewRulePreviewPayload, user_id: str | None) -> dict[str, object]:
+        if not payload.client_id.strip():
+            raise HTTPException(status_code=400, detail="client_id is required for rule preview")
+        self.require_client_access(
+            client_id=payload.client_id,
+            user_id=user_id,
+            allowed_roles=("accountant", "admin"),
+        )
+        workspace = self.store.get_workspace(payload.client_id)
+        document = workspace_document(workspace, payload.decision.document_ref)
+        decision = self._validated_review_decision(payload.decision, workspace=workspace, document=document)
+        event = self._enriched_learning_event(
+            client_id=payload.client_id,
+            decision=decision,
+            workspace=workspace,
+            document=document,
+        )
+        interpretation = self._rule_interpretation(event=event, document=document, decision=decision)
+        if interpretation is not None:
+            event["rule_interpretation"] = interpretation
+        return {
+            "learning_event": event,
+            "natural_language_rule_candidate": event.get("natural_language_rule_candidate") or {},
+            "rule_interpretation": interpretation,
+            "rule_prompt": event.get("rule_prompt") or {},
+        }
 
     def store_review_decision(self, *, payload: StoredReviewDecisionPayload, user_id: str | None) -> dict[str, object]:
         if not payload.client_id.strip():
@@ -77,22 +108,21 @@ class ReviewService:
         workspace = self.store.get_workspace(payload.client_id)
         document = workspace_document(workspace, payload.decision.document_ref)
         decision = self._validated_review_decision(payload.decision, workspace=workspace, document=document)
-        event = self.review_learning_event(decision)
-        event = enrich_learning_event(
-            event,
+        event = self._enriched_learning_event(
             client_id=payload.client_id,
-            decision=decision.model_dump(),
+            decision=decision,
+            workspace=workspace,
             document=document,
-            client_profile=(workspace.get("client") or {}).get("profile") or {},
-            prior_learning_events=workspace.get("learning_events") or (),
         )
-        rule_interpretation = build_review_rule_interpretation(
-            event=event,
-            document=document,
-            provider=self.rule_interpreter,
-        )
+        rule_interpretation = self._rule_interpretation(event=event, document=document, decision=decision)
         if rule_interpretation is not None:
             event["rule_interpretation"] = rule_interpretation
+        self._record_learning_pipeline_events(
+            client_id=payload.client_id,
+            document_ref=decision.document_ref,
+            event=event,
+            interpretation=rule_interpretation,
+        )
         saved = self.store.save_review_decision(
             client_id=payload.client_id,
             decision=decision.model_dump(),
@@ -172,6 +202,96 @@ class ReviewService:
             },
         )
         return saved
+
+    def _record_learning_pipeline_events(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        event: dict[str, object],
+        interpretation: dict[str, object] | None,
+    ) -> None:
+        if not hasattr(self.store, "record_document_pipeline_event"):
+            return
+        candidate = event.get("natural_language_rule_candidate")
+        if isinstance(candidate, dict) and candidate:
+            self.store.record_document_pipeline_event(
+                client_id=client_id,
+                document_ref=document_ref,
+                step="learning_candidate_built",
+                status="ok",
+                message_tr="Musavir karar notundan kural adayi olusturuldu.",
+                debug_code="learning_candidate_built",
+                details={
+                    "scope": str(candidate.get("scope") or event.get("scope") or ""),
+                    "action": str(event.get("action") or ""),
+                    "accounting_intent": str(event.get("accounting_intent") or candidate.get("semantic_accounting_intent") or ""),
+                    "matched_terms": list(event.get("normalized_terms") or []),
+                    "match_score": int(event.get("accounting_intent_confidence") or 0),
+                    "suggested_account_code": str(candidate.get("suggested_account_code") or ""),
+                    "suggested_counterparty_code": str(event.get("corrected_counterparty_code") or ""),
+                    "reason_codes": ["natural_language_rule_candidate"],
+                },
+            )
+        if isinstance(interpretation, dict) and interpretation:
+            self.store.record_document_pipeline_event(
+                client_id=client_id,
+                document_ref=document_ref,
+                step="learning_rule_interpreted",
+                status="ok" if str(interpretation.get("status") or "") == "ready" else "warning",
+                message_tr="Fisora karar notunu anlasilir kurala cevirdi.",
+                debug_code="learning_rule_interpreted",
+                details={
+                    "scope": str((candidate or {}).get("scope") or event.get("scope") or "") if isinstance(candidate, dict) else str(event.get("scope") or ""),
+                    "action": str(event.get("action") or ""),
+                    "accounting_intent": str(event.get("accounting_intent") or ""),
+                    "matched_terms": list(event.get("normalized_terms") or []),
+                    "match_score": int(interpretation.get("confidence") or event.get("accounting_intent_confidence") or 0),
+                    "suggested_account_code": str((candidate or {}).get("suggested_account_code") or event.get("corrected_account_code") or "") if isinstance(candidate, dict) else str(event.get("corrected_account_code") or ""),
+                    "suggested_counterparty_code": str(event.get("corrected_counterparty_code") or ""),
+                    "understood_rule_tr": str(interpretation.get("summary_tr") or ""),
+                    "trigger_tr": str(interpretation.get("trigger_tr") or ""),
+                    "applied_effect_tr": str(interpretation.get("action_tr") or ""),
+                    "guardrail_tr": str(interpretation.get("guardrail_tr") or ""),
+                    "reason_codes": [str(item) for item in interpretation.get("reason_codes") or [] if str(item).strip()],
+                },
+            )
+
+    def _enriched_learning_event(
+        self,
+        *,
+        client_id: str,
+        decision: ReviewDecisionPayload,
+        workspace: dict[str, object],
+        document: dict[str, object] | None,
+    ) -> dict[str, object]:
+        event = self.review_learning_event(decision)
+        return enrich_learning_event(
+            event,
+            client_id=client_id,
+            decision=decision.model_dump(),
+            document=document,
+            client_profile=(workspace.get("client") or {}).get("profile") or {},
+            prior_learning_events=workspace.get("learning_events") or (),
+        )
+
+    def _rule_interpretation(
+        self,
+        *,
+        event: dict[str, object],
+        document: dict[str, object] | None,
+        decision: ReviewDecisionPayload,
+    ) -> dict[str, object] | None:
+        confirmed = _normalized_rule_interpretation(decision.confirmed_rule_interpretation)
+        if confirmed:
+            confirmed["source"] = "accountant_confirmed"
+            confirmed["provider"] = "accountant_review_modal"
+            return confirmed
+        return build_review_rule_interpretation(
+            event=event,
+            document=document,
+            provider=self.rule_interpreter,
+        )
 
     def _validated_review_decision(
         self,
@@ -260,3 +380,35 @@ def _allowed_new_counterparty_codes(document: dict[str, object] | None) -> set[s
         if code.startswith(("120", "320")):
             allowed.add(code)
     return allowed
+
+
+def _normalized_rule_interpretation(value: dict[str, object] | None) -> dict[str, object]:
+    if not isinstance(value, dict) or not value:
+        return {}
+
+    def text(*keys: str) -> str:
+        for key in keys:
+            candidate = value.get(key)
+            if candidate is not None and str(candidate).strip():
+                return str(candidate).strip()
+        return ""
+
+    status = text("status") or "needs_clarification"
+    if status not in {"ready", "needs_clarification", "not_available"}:
+        status = "needs_clarification"
+    try:
+        confidence = int(value.get("confidence") or 0)
+    except (TypeError, ValueError):
+        confidence = 0
+    reason_codes = value.get("reason_codes")
+    if not isinstance(reason_codes, list):
+        reason_codes = value.get("reasonCodes")
+    return {
+        "status": status,
+        "summary_tr": text("summary_tr", "summaryTr"),
+        "trigger_tr": text("trigger_tr", "triggerTr"),
+        "action_tr": text("action_tr", "actionTr"),
+        "guardrail_tr": text("guardrail_tr", "guardrailTr") or "Ilk uygulamalarda musavir kontrolu istenir.",
+        "confidence": min(max(confidence, 0), 100),
+        "reason_codes": [str(item) for item in reason_codes or [] if str(item).strip()],
+    }

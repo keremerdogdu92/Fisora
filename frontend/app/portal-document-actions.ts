@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { statementStatusLabel, statementReviewStatus, reviewActionLabel } from "./portal-formatters";
 import { normalizeRulePrompt, normalizeStatementAiSuggestions, normalizeStatus, safeNumber, safeRecord } from "./portal-normalization";
 import { applyStatementLineDecision } from "./portal-review-actions";
-import type { CorrectionDraft, IntakeCategory, LocalSession, PilotClient, PilotData, PilotDocument, PilotStatus } from "./portal-types";
+import type { CorrectionDraft, IntakeCategory, LocalSession, PilotClient, PilotData, PilotDocument, PilotStatus, ReviewLearningDecisionOptions } from "./portal-types";
 import { previousCompletedPeriod } from "./portal-periods";
 import { buildUploadIntakeMetadata } from "./upload-intake";
 import {
@@ -261,7 +261,7 @@ export async function saveStatementLineDecisionAction({
   const label = statementStatusLabel(statementReviewStatus(action));
   setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satir: ${label} arayuzde uygulandi.`);
   try {
-    await storeReviewDecision({
+    await (storeReviewDecision as unknown as (args: Record<string, unknown>) => Promise<unknown>)({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
       clientId: selectedDocument.clientId,
       userId: reviewer,
@@ -292,6 +292,7 @@ export async function saveStatementLineDecisionAction({
 export async function saveDecisionAction({
   action,
   correctionDraft,
+  learningOptions = {},
   localFallbackAllowed,
   loginUserId,
   refreshBackendPilotData,
@@ -302,6 +303,7 @@ export async function saveDecisionAction({
 }: {
   action: string;
   correctionDraft: CorrectionDraft;
+  learningOptions?: ReviewLearningDecisionOptions;
   localFallbackAllowed: boolean;
   loginUserId: string;
   refreshBackendPilotData: () => Promise<boolean>;
@@ -344,7 +346,7 @@ export async function saveDecisionAction({
   }));
   setDecisionStatus(`${selectedDocument.fileName}: ${label} arayuzde uygulandi.`);
   try {
-    await storeReviewDecision({
+    await (storeReviewDecision as unknown as (args: Record<string, unknown>) => Promise<unknown>)({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
       clientId: selectedDocument.clientId,
       userId: reviewer,
@@ -357,6 +359,9 @@ export async function saveDecisionAction({
       category: selectedDocument.productCategory,
       reason,
       decisionNote,
+      learningConfirmation: learningOptions.learningConfirmation || "none",
+      confirmedRuleInterpretation: learningOptions.confirmedRuleInterpretation || null,
+      suppressRulePromptKey: learningOptions.suppressRulePromptKey || "",
       draftLines: manualDraftLines,
       sessionToken: session?.sessionToken,
     });

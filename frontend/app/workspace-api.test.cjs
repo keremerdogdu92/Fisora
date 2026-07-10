@@ -593,7 +593,7 @@ test("processed backend documents expose AI retry without promoting static fallb
   assert.deepEqual(document.pipelineEvents.map((event) => event.step), ["ai_retry_required"]);
 });
 
-test("fetchBackendPilotData loads clients then each allowed workspace", async () => {
+test("fetchBackendPilotData loads clients then each allowed summary workspace with a longer backend timeout", async () => {
   const requests = [];
   const fetchImpl = async (url, init = {}) => {
     requests.push({ url, init });
@@ -603,7 +603,7 @@ test("fetchBackendPilotData loads clients then each allowed workspace", async ()
         json: async () => ({ clients: [clientRecord] }),
       };
     }
-    if (url.endsWith("/phase0/store/workspace/client-1")) {
+    if (url.endsWith("/phase0/store/workspace/client-1?view=summary")) {
       return {
         ok: true,
         json: async () => workspaceRecord,
@@ -624,11 +624,13 @@ test("fetchBackendPilotData loads clients then each allowed workspace", async ()
     requests.map((request) => request.url),
     [
       "http://localhost:8000/phase0/store/clients",
-      "http://localhost:8000/phase0/store/workspace/client-1",
+      "http://localhost:8000/phase0/store/workspace/client-1?view=summary",
     ],
   );
   assert.deepEqual(requests[0].init.headers, { "X-Fisora-User-Id": "mukellef-user" });
   assert.deepEqual(requests[1].init.headers, { "X-Fisora-User-Id": "mukellef-user" });
+  assert.equal(requests[0].init.signal.aborted, false);
+  assert.equal(requests[1].init.signal.aborted, false);
 });
 
 test("fetchBackendReadiness loads the system readiness payload without auth headers", async () => {

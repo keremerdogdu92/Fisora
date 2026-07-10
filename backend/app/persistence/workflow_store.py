@@ -41,6 +41,8 @@ def empty_store() -> dict[str, Any]:
         "auth_credentials": {},
         "auth_sessions": {},
         "auth_tokens": {},
+        "qnb_connections": {},
+        "qnb_sync_runs": {},
         "ai_usage_events": [],
         "ai_capacity_snapshots": {},
         "operation_events": [],
@@ -467,6 +469,41 @@ class JsonWorkflowStore:
             if event.get("client_id") == client_id
         ]
         return events[-max(limit, 1):]
+
+    def save_qnb_connection(self, *, client_id: str, connection: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        timestamp = utc_now()
+        existing = data.get("qnb_connections", {}).get(client_id, {})
+        record = {
+            **existing,
+            **connection,
+            "client_id": client_id,
+            "provider": connection.get("provider") or "qnb_esolutions",
+            "updated_at": timestamp,
+        }
+        record.setdefault("created_at", timestamp)
+        data.setdefault("qnb_connections", {})[client_id] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def get_qnb_connection(self, *, client_id: str) -> dict[str, Any] | None:
+        data = self._read()
+        record = data.get("qnb_connections", {}).get(client_id)
+        return deepcopy(record) if record else None
+
+    def save_qnb_sync_run(self, *, client_id: str, sync_run: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        record = {
+            **sync_run,
+            "client_id": client_id,
+            "updated_at": utc_now(),
+        }
+        record.setdefault("sync_run_id", str(uuid4()))
+        record.setdefault("created_at", record["updated_at"])
+        key = f"{client_id}:{record['sync_run_id']}"
+        data.setdefault("qnb_sync_runs", {})[key] = record
+        self._write(data)
+        return deepcopy(record)
 
     def record_document_pipeline_event(
         self,

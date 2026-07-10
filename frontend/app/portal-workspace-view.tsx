@@ -18,6 +18,7 @@ import type {
   PilotClient,
   PilotDocument,
   PilotStatus,
+  ReviewLearningDecisionOptions,
   ReviewFilter,
 } from "./portal-types";
 import { labelForIntakeCategory } from "./upload-intake";
@@ -165,7 +166,7 @@ export function AccountantWorkspace({
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
-  onSaveDecision: (action: string) => void | Promise<void>;
+  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<void>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
   reviewFilter: ReviewFilter;
@@ -341,6 +342,7 @@ export function AccountantWorkspace({
           onSaveDecision={onSaveDecision}
           onSaveStatementDecision={onSaveStatementDecision}
           selectedStatementLineNo={selectedStatementLineNo}
+          session={session}
           setCorrectionDraft={setCorrectionDraft}
           setSelectedStatementLineNo={setSelectedStatementLineNo}
           statementAiStatus={statementAiStatus}

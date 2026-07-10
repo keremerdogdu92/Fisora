@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
-import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, StatementLineReview } from "./portal-types";
-import { backendAuthHeaders, resolveApiBaseUrl } from "./upload-api";
+import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
+import { backendAuthHeaders, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -154,6 +154,33 @@ function qualityText(record: Record<string, unknown>, key: string, fallback = "-
   if (Array.isArray(value)) return value.map(String).filter(Boolean).join(", ") || fallback;
   if (value === undefined || value === null || value === "") return fallback;
   return String(value);
+}
+
+function normalizeRuleInterpretationView(value: unknown): RuleInterpretationView | null {
+  const record = asRecord(value);
+  const status = qualityText(record, "status", "");
+  const summaryTr = qualityText(record, "summary_tr", qualityText(record, "summaryTr", ""));
+  const triggerTr = qualityText(record, "trigger_tr", qualityText(record, "triggerTr", ""));
+  const actionTr = qualityText(record, "action_tr", qualityText(record, "actionTr", ""));
+  const guardrailTr = qualityText(record, "guardrail_tr", qualityText(record, "guardrailTr", ""));
+  if (!status && !summaryTr && !triggerTr && !actionTr && !guardrailTr) return null;
+  const confidence = Number(record.confidence || 0);
+  const reasonCodes = Array.isArray(record.reason_codes)
+    ? record.reason_codes
+    : Array.isArray(record.reasonCodes)
+      ? record.reasonCodes
+      : [];
+  return {
+    source: qualityText(record, "source", ""),
+    provider: qualityText(record, "provider", ""),
+    status,
+    summaryTr,
+    triggerTr,
+    actionTr,
+    guardrailTr,
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+    reasonCodes: reasonCodes.map(String).filter(Boolean),
+  };
 }
 
 function uploadDirectionForDocument(document: PilotDocument) {
@@ -407,6 +434,7 @@ export function JournalPanel({
   onSaveDecision,
   onSaveStatementDecision,
   selectedStatementLineNo,
+  session,
   setCorrectionDraft,
   setSelectedStatementLineNo,
   statementAiStatus,
@@ -419,13 +447,18 @@ export function JournalPanel({
   onResetDraft: () => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
-  onSaveDecision: (action: string) => void | Promise<void>;
+  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<void>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   selectedStatementLineNo: number;
+  session: LocalSession | null;
   setCorrectionDraft: (value: CorrectionDraft) => void;
   setSelectedStatementLineNo: (value: number) => void;
   statementAiStatus: string;
 }) {
+  const [learningModalOpen, setLearningModalOpen] = useState(false);
+  const [rulePreview, setRulePreview] = useState<RuleInterpretationView | null>(null);
+  const [rulePreviewStatus, setRulePreviewStatus] = useState("");
+
   if (!document) {
     return (
       <section className="panel review-panel">
@@ -434,6 +467,7 @@ export function JournalPanel({
       </section>
     );
   }
+  const activeDocument = document;
   const generatedDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
   const activeDraftLines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines;
   const totals = draftTotals(activeDraftLines);
@@ -448,6 +482,48 @@ export function JournalPanel({
     `Yükleme: ${directionLabel(uploadDirection)}`,
     `Mükellef açısından: ${directionLabel(accountingDirection)}`,
   ].join(" / ");
+
+  async function onPreviewReviewRule() {
+    const decisionNote = correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim();
+    if (!decisionNote) {
+      setRulePreviewStatus("Karar notu yazmadan kural yorumu olusturulamaz.");
+      return;
+    }
+    setRulePreviewStatus("Fisora karar notunu yorumluyor...");
+    try {
+      const payload = await previewReviewRule({
+        apiBaseUrl: resolvePreviewApiBaseUrl(),
+        clientId: activeDocument.clientId,
+        userId: session?.userId || activeDocument.uploadedBy || "mali-musavir",
+        documentRef: activeDocument.id,
+        action: "suggest_for_similar",
+        reviewer: session?.userId || "mali-musavir",
+        correctedAccountCode: correctionDraft.accountCode.trim(),
+        correctedCounterpartyCode: correctionDraft.counterpartyCode.trim(),
+        category: activeDocument.productCategory,
+        reason: correctionDraft.reason.trim(),
+        decisionNote,
+        applyToSimilar: true,
+        statementLineNo: selectedStatementLineNo,
+        draftLines: activeDraftLines,
+        sessionToken: session?.sessionToken || "",
+      });
+      const interpretation = normalizeRuleInterpretationView(asRecord(payload).rule_interpretation);
+      setRulePreview(interpretation);
+      setLearningModalOpen(true);
+      setRulePreviewStatus(interpretation ? "Yorum hazir." : "Sistem bu nottan net kural olusturamadi.");
+    } catch (error) {
+      setRulePreviewStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function saveLearningDecision(learningConfirmation: "save_rule" | "suggest_similar") {
+    void onSaveDecision("suggest_for_similar", {
+      learningConfirmation,
+      confirmedRuleInterpretation: rulePreview,
+    });
+    setLearningModalOpen(false);
+  }
 
   function setManualDraftLine(index: number, patch: Partial<DraftLine>) {
     const lines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : (generatedDraftLines.length ? generatedDraftLines : [blankDraftLine(), blankDraftLine()]);
@@ -563,7 +639,38 @@ export function JournalPanel({
               <span>Benzerleri için öneri olarak kullan</span>
             </label>
           </div>
+          <div className="learning-rule-actions">
+            <button onClick={onPreviewReviewRule} type="button">Egitim notunu kaydet</button>
+            {rulePreviewStatus ? <span>{rulePreviewStatus}</span> : null}
+          </div>
           <RuleInterpretationCard document={document} />
+          {learningModalOpen ? (
+            <section className="learning-rule-modal" aria-label="Fisora karar notu yorumu">
+              <div className="learning-rule-dialog">
+                <div className="statement-review-heading">
+                  <div>
+                    <h3>Fisora bunu boyle anladi</h3>
+                    <span>Ilk uygulamalarda musavir kontrolu devam eder.</span>
+                  </div>
+                  <button onClick={() => setLearningModalOpen(false)} type="button">Kapat</button>
+                </div>
+                {rulePreview ? (
+                  <div className="rule-interpretation-details">
+                    <div><span>Ozet</span><strong>{rulePreview.summaryTr || "-"}</strong></div>
+                    <div><span>Tetikleyici</span><strong>{rulePreview.triggerTr || "-"}</strong></div>
+                    <div><span>Uygulama</span><strong>{rulePreview.actionTr || "-"}</strong></div>
+                    <div><span>Guvenlik</span><strong>{rulePreview.guardrailTr || "Ilk uygulamalarda musavir kontrolu istenir."}</strong></div>
+                  </div>
+                ) : (
+                  <p className="empty">Bu nottan net kural olusmadi; karar notunu daha dar yazin.</p>
+                )}
+                <div className="decision-actions secondary-actions">
+                  <button disabled={!rulePreview || rulePreview.status !== "ready"} onClick={() => saveLearningDecision("save_rule")} type="button">Kural olarak kaydet</button>
+                  <button disabled={!rulePreview} onClick={() => saveLearningDecision("suggest_similar")} type="button">Benzerlerde oner</button>
+                </div>
+              </div>
+            </section>
+          ) : null}
         </section>
         <JournalReasonDisclosure document={document} />
       </div>
@@ -591,7 +698,7 @@ function JournalDecisionBar({
   document: PilotDocument;
   hasInvalidDraftAccounts: boolean;
   onReprocessDocument: () => void | Promise<void>;
-  onSaveDecision: (action: string) => void | Promise<void>;
+  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<void>;
   pendingDirectionConflict: boolean;
 }) {
   return (

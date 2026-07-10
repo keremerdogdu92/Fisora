@@ -476,6 +476,33 @@ class PostgresWorkflowStore:
         events = self._payloads(client_id, "operation_event")
         return events[-max(limit, 1):]
 
+    def save_qnb_connection(self, *, client_id: str, connection: dict[str, Any]) -> dict[str, Any]:
+        existing = self._get_record(client_id, "qnb_connection", client_id) or {}
+        timestamp = utc_now()
+        record = {
+            **existing,
+            **connection,
+            "client_id": client_id,
+            "provider": connection.get("provider") or "qnb_esolutions",
+            "updated_at": timestamp,
+        }
+        record.setdefault("created_at", timestamp)
+        return self._upsert_record(client_id, "qnb_connection", client_id, record)
+
+    def get_qnb_connection(self, *, client_id: str) -> dict[str, Any] | None:
+        return self._get_record(client_id, "qnb_connection", client_id)
+
+    def save_qnb_sync_run(self, *, client_id: str, sync_run: dict[str, Any]) -> dict[str, Any]:
+        timestamp = utc_now()
+        record = {
+            **sync_run,
+            "client_id": client_id,
+            "updated_at": timestamp,
+        }
+        record.setdefault("sync_run_id", str(uuid4()))
+        record.setdefault("created_at", timestamp)
+        return self._upsert_record(client_id, "qnb_sync_run", str(record["sync_run_id"]), record)
+
     def record_document_pipeline_event(
         self,
         *,

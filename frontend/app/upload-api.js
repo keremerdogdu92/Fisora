@@ -522,6 +522,65 @@ async function createWorkspaceExportPackage({
   });
 }
 
+async function saveQnbConnectionToBackend({
+  apiBaseUrl,
+  clientId,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  connection,
+  fetchImpl = fetch,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}`,
+    payload: {
+      base_url: String(connection?.baseUrl || connection?.base_url || "").trim(),
+      username: String(connection?.username || "").trim(),
+      password: String(connection?.password || ""),
+      vkn: String(connection?.vkn || "").trim(),
+      erp_code: String(connection?.erpCode || connection?.erp_code || "").trim(),
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
+async function fetchQnbConnectionStatus({
+  apiBaseUrl,
+  clientId,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
+async function syncQnbIncomingInvoices({
+  apiBaseUrl,
+  clientId,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  startDate = "",
+  endDate = "",
+  fetchImpl = fetch,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}/sync-incoming-invoices`,
+    payload: {
+      start_date: String(startDate || "").trim(),
+      end_date: String(endDate || "").trim(),
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
 async function uploadChartAccountsToBackend({
   apiBaseUrl,
   clientId,
@@ -719,6 +778,9 @@ async function storeReviewDecision({
   accountantNote = "",
   ruleInstruction = "",
   applyToSimilar = false,
+  learningConfirmation = "none",
+  confirmedRuleInterpretation = null,
+  suppressRulePromptKey = "",
   priorConsistentApprovalCount = 0,
   statementLineNo = 0,
   draftLines = /** @type {Array<Record<string, unknown>> | null} */ (null),
@@ -754,6 +816,19 @@ async function storeReviewDecision({
       statement_line_no: Number(statementLineNo || 0),
     },
   };
+  if (normalizedDecisionNote) {
+    payload.decision.decision_note = normalizedDecisionNote;
+  }
+  if (learningConfirmation && learningConfirmation !== "none") {
+    payload.decision.learning_confirmation = String(learningConfirmation);
+  }
+  if (suppressRulePromptKey) {
+    payload.decision.suppress_rule_prompt_key = String(suppressRulePromptKey);
+  }
+  const normalizedInterpretation = normalizeRuleInterpretationPayload(confirmedRuleInterpretation);
+  if (normalizedInterpretation) {
+    payload.decision.confirmed_rule_interpretation = normalizedInterpretation;
+  }
   if (normalizedDraftLines.length) {
     payload.decision.draft_lines = normalizedDraftLines;
   }
@@ -823,6 +898,108 @@ async function reprocessClient({
   return response.json();
 }
 
+async function previewReviewRule({
+  apiBaseUrl,
+  clientId,
+  userId,
+  documentRef,
+  action,
+  reviewer,
+  correctedAccountCode = "",
+  correctedCounterpartyCode = "",
+  category = "",
+  reason = "",
+  decisionNote = "",
+  accountantNote = "",
+  ruleInstruction = "",
+  applyToSimilar = false,
+  statementLineNo = 0,
+  draftLines = /** @type {Array<Record<string, unknown>> | null} */ (null),
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  const normalizedUserId = String(userId || reviewer || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID;
+  const normalizedDecisionNote = String(decisionNote || "").trim();
+  const normalizedDraftLines = Array.isArray(draftLines)
+    ? draftLines
+        .map((line) => ({
+          account_code: String(line?.account_code || line?.accountCode || ""),
+          description: String(line?.description || ""),
+          debit: String(line?.debit || "0.00"),
+          credit: String(line?.credit || "0.00"),
+        }))
+        .filter((line) => line.account_code || line.description || line.debit !== "0.00" || line.credit !== "0.00")
+    : [];
+  const payload = {
+    client_id: String(clientId || ""),
+    decision: {
+      document_ref: String(documentRef || ""),
+      action: String(action || "suggest_for_similar"),
+      reviewer: String(reviewer || normalizedUserId),
+      corrected_account_code: String(correctedAccountCode || ""),
+      corrected_counterparty_code: String(correctedCounterpartyCode || ""),
+      category: String(category || ""),
+      reason: String(reason || ""),
+      decision_note: normalizedDecisionNote,
+      accountant_note: normalizedDecisionNote || String(accountantNote || ""),
+      rule_instruction: normalizedDecisionNote || String(ruleInstruction || ""),
+      apply_to_similar: Boolean(applyToSimilar),
+      statement_line_no: Number(statementLineNo || 0),
+    },
+  };
+  if (normalizedDraftLines.length) {
+    payload.decision.draft_lines = normalizedDraftLines;
+  }
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/review-rule/preview`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...backendAuthHeaders({ sessionToken, userId: normalizedUserId }),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `review rule preview failed with ${response.status}`));
+  }
+  return response.json();
+}
+
+function normalizeRuleInterpretationPayload(value) {
+  if (!value || typeof value !== "object") return null;
+  const source = value;
+  const status = String(source.status || "").trim();
+  const summary = String(source.summary_tr || source.summaryTr || "").trim();
+  const trigger = String(source.trigger_tr || source.triggerTr || "").trim();
+  const action = String(source.action_tr || source.actionTr || "").trim();
+  const guardrail = String(source.guardrail_tr || source.guardrailTr || "").trim();
+  if (!status && !summary && !trigger && !action && !guardrail) return null;
+  const reasonCodes = Array.isArray(source.reason_codes)
+    ? source.reason_codes
+    : Array.isArray(source.reasonCodes)
+      ? source.reasonCodes
+      : [];
+  return {
+    status,
+    summary_tr: summary,
+    trigger_tr: trigger,
+    action_tr: action,
+    guardrail_tr: guardrail,
+    confidence: Number(source.confidence || 0),
+    reason_codes: reasonCodes.map(String).filter(Boolean),
+  };
+}
+
+async function getJson({ apiBaseUrl, path, headers = {}, fetchImpl = fetch }) {
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}${path}`, {
+    method: "GET",
+    headers,
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response, `${path} failed with ${response.status}`));
+  }
+  return response.json();
+}
+
 async function previewDocumentRetention({
   apiBaseUrl,
   userId = DEFAULT_UPLOAD_USER_ID,
@@ -888,20 +1065,24 @@ module.exports = {
   createWorkspaceExportPackage,
   deleteClientDocuments,
   ensureUploadWorkspace,
+  fetchQnbConnectionStatus,
   loginWithPassword,
   parseDelegatedSessionHash,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
   previewDocumentRetention,
+  previewReviewRule,
   pickUploadUser,
   requestStatementAiSuggestions,
   reprocessClient,
   reprocessDocument,
   resetTestData,
   resolveApiBaseUrl,
+  saveQnbConnectionToBackend,
   sessionAuthErrorMessage,
   setPortalPassword,
   storeReviewDecision,
+  syncQnbIncomingInvoices,
   updateClientPortalAccess,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,

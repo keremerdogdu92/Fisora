@@ -1184,6 +1184,25 @@ def process_next_job_once(
                     "payable_total": str(result.get("payable_total") or ""),
                 },
             )
+        learning_audit = result.get("learning_audit") if isinstance(result.get("learning_audit"), dict) else {}
+        if learning_audit:
+            learning_status = str(learning_audit.get("status") or "")
+            if learning_status == "applied":
+                pipeline_event(
+                    "learning_rule_applied",
+                    "ok",
+                    "Onceki musavir karari benzer belge icin kullanildi.",
+                    "learning_rule_applied",
+                    learning_audit,
+                )
+            elif learning_status == "blocked":
+                pipeline_event(
+                    "learning_rule_blocked",
+                    "warning",
+                    "Ogrenme kurali bu belgeye uygulanmadi.",
+                    "learning_rule_blocked",
+                    learning_audit,
+                )
         vat_split_review = result.get("vat_split_review") if isinstance(result.get("vat_split_review"), dict) else {}
         if vat_split_review:
             requires_vat_review = bool(vat_split_review.get("requires_accountant_review"))

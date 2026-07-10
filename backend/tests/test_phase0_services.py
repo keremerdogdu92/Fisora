@@ -13,12 +13,12 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
 from app.api.phase0_dependencies import record_operation_event
-from app.api.phase0_schemas import ClientProfilePayload, ReviewDecisionPayload, StoredReviewDecisionPayload, WorkspaceExportPackagePayload
+from app.api.phase0_schemas import ClientProfilePayload, ReviewDecisionPayload, ReviewRulePreviewPayload, StoredReviewDecisionPayload, WorkspaceExportPackagePayload
 from app.persistence.workflow_store import JsonWorkflowStore
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
-from app.services.workspace_service import WorkspaceService
+from app.services.workspace_service import WorkspaceService, compact_workspace_payload
 
 
 def allow_access(**_: object) -> dict[str, object]:
@@ -49,6 +49,51 @@ class FakeRuleInterpreter:
 
 
 class Phase0ServiceTests(unittest.TestCase):
+    def test_compact_workspace_payload_strips_heavy_history_for_summary_views(self) -> None:
+        workspace = {
+            "client": {"client_id": "client-1", "profile": {"title": "Demo"}},
+            "chart_accounts": {
+                "account_count": 582,
+                "accounts": [
+                    {"normalized_account_code": "770.01", "account_name": "Genel gider"},
+                    {"normalized_account_code": "320.01", "account_name": "Satici"},
+                ],
+            },
+            "documents": [
+                {
+                    "document_ref": "doc-1",
+                    "export_status": "review_required",
+                    "created_at": "2026-07-09T10:00:00Z",
+                    "result": {
+                        "file_name": "alis.pdf",
+                        "invoice_type": "ALIS",
+                        "provider_hint": "Yurtici Kargo",
+                        "payable_total": "120.00",
+                        "draft_lines": [{"account_code": "770.01"}],
+                        "technical_details": {"ai_trace": [{"large": "payload"}]},
+                        "ai_stage_evidence": [{"large": "payload"}],
+                        "account_candidates": {"purchase_expense": [{"code": "770.01"}]},
+                        "rule_prompt": {"show": True},
+                    },
+                }
+            ],
+            "document_pipeline_events": [{"document_ref": "doc-1", "step": "uploaded"}],
+            "operation_events": [{"event_type": "one"}, {"event_type": "two"}],
+        }
+
+        compact = compact_workspace_payload(workspace)
+
+        self.assertEqual(compact["chart_accounts"], {"account_count": 582, "accounts": []})
+        self.assertEqual(compact["document_pipeline_events"], [])
+        self.assertEqual(compact["operation_events"], [{"event_type": "two"}, {"event_type": "one"}])
+        result = compact["documents"][0]["result"]
+        self.assertEqual(result["file_name"], "alis.pdf")
+        self.assertEqual(result["rule_prompt"], {"show": True})
+        self.assertNotIn("technical_details", result)
+        self.assertNotIn("ai_stage_evidence", result)
+        self.assertEqual(result["account_candidates"], {"purchase_expense": [{"code": "770.01"}]})
+        self.assertEqual(result["draft_lines"], [{"account_code": "770.01"}])
+
     def test_workspace_service_filters_clients_by_portal_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")
@@ -629,6 +674,58 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(document_interpretation["summary_tr"], interpretation["summary_tr"])
         self.assertEqual(interpreter.requests[0]["candidate"]["suggested_account_code"], "760.03.010")
 
+    def test_review_service_records_learning_pipeline_events_for_rule_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="kargo.xml",
+                result={
+                    "file_name": "kargo.xml",
+                    "export_status": "review_required",
+                    "is_balanced": True,
+                    "accounting_direction": "purchase",
+                    "selected_expense_account": "760.03.010",
+                    "selected_supplier_account": "320.9860008925",
+                    "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtici Kargo",
+                    "product_line_hint": "Kargo hizmeti",
+                    "product_category": "kargo",
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="kargo.xml",
+                        action="suggest_for_similar",
+                        reviewer="mali-musavir",
+                        corrected_account_code="760.03.010",
+                        category="kargo",
+                        decision_note="Bundan sonra bu VKN'den gelen faturalar kargo gideridir.",
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        learning_events = [event for event in workspace["document_pipeline_events"] if event["step"].startswith("learning_")]
+        self.assertEqual([event["step"] for event in learning_events], ["learning_candidate_built", "learning_rule_interpreted"])
+        candidate_details = learning_events[0]["details"]
+        self.assertEqual(candidate_details["scope"], "client_counterparty")
+        self.assertEqual(candidate_details["action"], "suggest_for_similar")
+        self.assertEqual(candidate_details["suggested_account_code"], "760.03.010")
+        interpreted_details = learning_events[1]["details"]
+        self.assertEqual(interpreted_details["reason_codes"], ["counterparty_tax_id_rule", "account_rule"])
+        self.assertIn("760.03.010", interpreted_details["applied_effect_tr"])
+
     def test_review_service_records_deterministic_rule_interpretation_without_ai_provider(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")
@@ -678,6 +775,112 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertIn("4700022607", interpretation["summary_tr"])
         self.assertIn("770.02.003", interpretation["action_tr"])
         self.assertEqual(document_interpretation["action_tr"], interpretation["action_tr"])
+
+    def test_review_rule_preview_returns_interpretation_without_persisting_learning_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="kargo.xml",
+                result={
+                    "file_name": "kargo.xml",
+                    "export_status": "review_required",
+                    "is_balanced": True,
+                    "accounting_direction": "purchase",
+                    "selected_expense_account": "770.01",
+                    "selected_supplier_account": "320.01",
+                    "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtici Kargo",
+                    "product_line_hint": "Kargo hizmeti",
+                    "product_category": "kargo",
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            preview = service.preview_review_rule(
+                payload=ReviewRulePreviewPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="kargo.xml",
+                        action="suggest_for_similar",
+                        reviewer="mali-musavir",
+                        corrected_account_code="760.03.010",
+                        category="kargo",
+                        decision_note="Bundan sonra bu VKN'den gelen faturalar kargo gideridir.",
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        self.assertEqual(preview["rule_interpretation"]["status"], "ready")
+        self.assertEqual(preview["natural_language_rule_candidate"]["suggested_account_code"], "760.03.010")
+        self.assertEqual(workspace["learning_events"], [])
+
+    def test_confirmed_rule_interpretation_is_persisted_on_learning_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="kargo.xml",
+                result={
+                    "file_name": "kargo.xml",
+                    "export_status": "review_required",
+                    "is_balanced": True,
+                    "accounting_direction": "purchase",
+                    "selected_expense_account": "760.03.010",
+                    "selected_supplier_account": "320.01",
+                    "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtici Kargo",
+                    "product_line_hint": "Kargo hizmeti",
+                    "product_category": "kargo",
+                    "draft_lines": [
+                        {"account_code": "760.03.010", "description": "Kargo", "debit": "100.00", "credit": "0.00"},
+                        {"account_code": "320.01", "description": "Cari", "debit": "0.00", "credit": "100.00"},
+                    ],
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="kargo.xml",
+                        action="suggest_for_similar",
+                        reviewer="mali-musavir",
+                        corrected_account_code="760.03.010",
+                        category="kargo",
+                        decision_note="Bundan sonra bu VKN'den gelen faturalar kargo gideridir.",
+                        learning_confirmation="suggest_similar",
+                        confirmed_rule_interpretation={
+                            "status": "ready",
+                            "summary_tr": "Yurtici Kargo faturalari kargo gideri onerisi olacak.",
+                            "trigger_tr": "VKN 9860008925 / alis faturasi",
+                            "action_tr": "Hesap 760.03.010 onerilecek.",
+                            "guardrail_tr": "Ilk uygulamalarda musavir kontrolu istenir.",
+                            "confidence": 88,
+                            "reason_codes": ["account_rule"],
+                        },
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+
+        event = workspace["learning_events"][0]
+        self.assertEqual(event["learning_confirmation"], "suggest_similar")
+        self.assertEqual(event["rule_interpretation"]["summary_tr"], "Yurtici Kargo faturalari kargo gideri onerisi olacak.")
 
     def test_review_service_records_journal_edit_save_and_export_pipeline_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -127,6 +127,7 @@ class SimulatedInvoiceResult:
     rule_prompt: dict[str, object]
     export_status: str
     draft_lines: tuple[dict[str, str], ...]
+    learning_audit: dict[str, object] = field(default_factory=dict)
     draft_confidence: int = 0
     primary_suggestion: dict[str, object] = field(default_factory=dict)
     review_blockers: tuple[str, ...] = ()

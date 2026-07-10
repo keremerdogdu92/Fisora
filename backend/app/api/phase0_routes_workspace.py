@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, Query, UploadFile
 
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
@@ -125,12 +125,14 @@ async def parse_tax_certificate_upload(file: UploadFile = File(...)) -> dict[str
 @router.get("/store/workspace/{client_id}")
 def store_workspace(
     client_id: str,
+    view: str = Query(default="full"),
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     return get_workspace_service().store_workspace(
         client_id=client_id,
+        view=view,
         x_fisora_user_id=x_fisora_user_id,
         x_fisora_session=x_fisora_session,
         fisora_session=fisora_session,

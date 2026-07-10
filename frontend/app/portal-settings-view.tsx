@@ -1,7 +1,7 @@
 "use client";
 
 import { Info } from "./portal-shared";
-import type { LocalSession, PilotReadinessView } from "./portal-types";
+import type { LocalSession, PilotClient, PilotReadinessView } from "./portal-types";
 
 const roleLabels: Record<LocalSession["role"], string> = {
   accountant: "Müşavir",
@@ -91,7 +91,15 @@ export function SettingsView({
   localFallbackAllowed,
   onLogin,
   onLogout,
+  onQnbConnectionChange,
+  onQnbRefreshStatus,
+  onQnbSaveConnection,
+  onQnbSyncIncoming,
   onResetTestData,
+  qnbConnection,
+  qnbStatus,
+  qnbSyncWindow,
+  selectedClient,
   readinessView,
   resetConfirmation,
   resetStatus,
@@ -118,7 +126,31 @@ export function SettingsView({
   localFallbackAllowed: boolean;
   onLogin: () => void | Promise<void>;
   onLogout: () => void;
+  onQnbConnectionChange: (field: "baseUrl" | "username" | "password" | "vkn" | "erpCode", value: string) => void;
+  onQnbRefreshStatus: () => void | Promise<void>;
+  onQnbSaveConnection: () => void | Promise<void>;
+  onQnbSyncIncoming: () => void | Promise<void>;
   onResetTestData: () => void | Promise<void>;
+  qnbConnection: {
+    baseUrl: string;
+    username: string;
+    password: string;
+    vkn: string;
+    erpCode: string;
+  };
+  qnbStatus: {
+    message: string;
+    maskedUsername: string;
+    status: string;
+  };
+  qnbSyncWindow: {
+    startDate: string;
+    endDate: string;
+    setStartDate: (value: string) => void;
+    setEndDate: (value: string) => void;
+    message: string;
+  };
+  selectedClient: PilotClient | undefined;
   readinessView: PilotReadinessView;
   resetConfirmation: string;
   resetStatus: string;
@@ -158,6 +190,71 @@ export function SettingsView({
         <Info label="Mükellef" value={String(dashboardMetrics.totalClients)} />
         <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
       </section>
+      {session?.role === "accountant" ? (
+        <section className="panel settings-card" aria-label="QNB gelen e-Fatura">
+          <div>
+            <span>QNB gelen e-Fatura</span>
+            <strong>{selectedClient ? selectedClient.clientName : "Mükellef seçilmedi"}</strong>
+            <p>{qnbStatus.message || (qnbStatus.status ? `Bağlantı durumu: ${qnbStatus.status}` : "Gelen e-Fatura UBL belgelerini mükellefin belge kuyruğuna alır.")}</p>
+          </div>
+          <div className="qnb-settings-form">
+            <input
+              aria-label="QNB servis adresi"
+              onChange={(event) => onQnbConnectionChange("baseUrl", event.target.value)}
+              placeholder="QNB servis adresi"
+              value={qnbConnection.baseUrl}
+            />
+            <input
+              aria-label="QNB kullanıcı adı"
+              onChange={(event) => onQnbConnectionChange("username", event.target.value)}
+              placeholder="QNB kullanıcı adı"
+              value={qnbConnection.username}
+            />
+            <input
+              aria-label="QNB şifre"
+              onChange={(event) => onQnbConnectionChange("password", event.target.value)}
+              placeholder="QNB şifre"
+              type="password"
+              value={qnbConnection.password}
+            />
+            <input
+              aria-label="Mükellef VKN"
+              onChange={(event) => onQnbConnectionChange("vkn", event.target.value)}
+              placeholder="Mükellef VKN"
+              value={qnbConnection.vkn}
+            />
+            <input
+              aria-label="ERP kodu"
+              onChange={(event) => onQnbConnectionChange("erpCode", event.target.value)}
+              placeholder="ERP kodu"
+              value={qnbConnection.erpCode}
+            />
+          </div>
+          <div className="session-controls">
+            <button disabled={!selectedClient} onClick={onQnbSaveConnection} type="button">Bağlantıyı kaydet</button>
+            <button className="secondary" disabled={!selectedClient} onClick={onQnbRefreshStatus} type="button">Durumu yenile</button>
+          </div>
+          <div className="qnb-sync-row">
+            <input
+              aria-label="QNB başlangıç tarihi"
+              onChange={(event) => qnbSyncWindow.setStartDate(event.target.value)}
+              type="date"
+              value={qnbSyncWindow.startDate}
+            />
+            <input
+              aria-label="QNB bitiş tarihi"
+              onChange={(event) => qnbSyncWindow.setEndDate(event.target.value)}
+              type="date"
+              value={qnbSyncWindow.endDate}
+            />
+            <button disabled={!selectedClient} onClick={onQnbSyncIncoming} type="button">Gelenleri al</button>
+          </div>
+          <div className="settings-grid">
+            <Info label="Kullanıcı" value={qnbStatus.maskedUsername || "-"} />
+            <Info label="Sync" value={qnbSyncWindow.message || "Henüz çalışmadı"} />
+          </div>
+        </section>
+      ) : null}
       {session?.role === "accountant" ? (
         <section className="panel settings-danger-panel" aria-label="Test verisi temizleme">
           <div>

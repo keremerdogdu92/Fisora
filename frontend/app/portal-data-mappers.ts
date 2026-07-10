@@ -54,6 +54,33 @@ function normalizeDecisionNarrative(value: unknown) {
     : undefined;
 }
 
+function normalizeRuleInterpretation(value: unknown) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const status = safeText(source.status);
+  const summaryTr = safeText(source.summaryTr ?? source.summary_tr);
+  const triggerTr = safeText(source.triggerTr ?? source.trigger_tr);
+  const actionTr = safeText(source.actionTr ?? source.action_tr);
+  const guardrailTr = safeText(source.guardrailTr ?? source.guardrail_tr);
+  const confidence = safeNumber(source.confidence);
+  const reasonCodes = Array.isArray(source.reasonCodes)
+    ? source.reasonCodes.map(String)
+    : Array.isArray(source.reason_codes)
+      ? source.reason_codes.map(String)
+      : [];
+  if (!status && !summaryTr && !triggerTr && !actionTr && !guardrailTr && !reasonCodes.length) return null;
+  return {
+    source: safeText(source.source),
+    provider: safeText(source.provider),
+    status,
+    summaryTr,
+    triggerTr,
+    actionTr,
+    guardrailTr,
+    confidence,
+    reasonCodes,
+  };
+}
+
 function normalizeReviewData(raw: ReviewData): PilotData {
   const clientId = safeText(raw.clientId, "ofis-calisma-client");
   const clientName = safeText(raw.clientName, "Ofis Mükellefi");
@@ -174,7 +201,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       learningRuleScope: safeText(row.learningRuleScope ?? row.learning_rule_scope),
       learningRuleReason: safeText(row.learningRuleReason ?? row.learning_rule_reason),
       learningRuleSourceSummary: safeText(row.learningRuleSourceSummary ?? row.learning_rule_source_summary),
-      ruleInterpretation: null,
+      ruleInterpretation: normalizeRuleInterpretation(row.ruleInterpretation ?? row.rule_interpretation),
       rulePrompt: normalizeRulePrompt(row.rulePrompt ?? row.rule_prompt),
     };
   });

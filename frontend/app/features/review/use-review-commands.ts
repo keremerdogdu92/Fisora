@@ -8,7 +8,7 @@ import {
   saveDecisionAction,
   saveStatementLineDecisionAction,
 } from "../../portal-document-actions";
-import type { CorrectionDraft, LocalSession, PilotData, PilotDocument } from "../../portal-types";
+import type { CorrectionDraft, LocalSession, PilotData, PilotDocument, ReviewLearningDecisionOptions } from "../../portal-types";
 
 export function emptyCorrectionDraft(): CorrectionDraft {
   return {
@@ -103,10 +103,11 @@ export function useReviewCommands({
   );
 
   const saveDecision = useCallback(
-    (action: string) => {
+    (action: string, options: ReviewLearningDecisionOptions = {}) => {
       return saveDecisionAction({
         action,
         correctionDraft,
+        learningOptions: options,
         localFallbackAllowed,
         loginUserId,
         refreshBackendPilotData,

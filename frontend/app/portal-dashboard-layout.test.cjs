@@ -185,3 +185,12 @@ test("agent training page is read-only and uses learning evidence language", () 
   assert.match(styles, /\.agent-training-page\s*\{/);
   assert.match(styles, /\.agent-training-grid\s*\{/);
 });
+
+test("document cockpit exposes accountant learning preview modal controls", () => {
+  const reviewPanels = source("portal-review-panels.tsx");
+
+  assert.match(reviewPanels, /learning-rule-modal/);
+  assert.match(reviewPanels, /onPreviewReviewRule/);
+  assert.match(reviewPanels, /Kural olarak kaydet/);
+  assert.match(reviewPanels, /Benzerlerde oner/);
+});

@@ -220,6 +220,11 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - Review ekraninda `accountant_note` ve `rule_instruction` ayrimi kaldirilacak;
   tek alan `Karar notu` olacak. Sistem bu notu hem belge gerekcesi hem de
   ogrenme/kural adayi sinyali olarak kullanacak.
+- Musavir ogrenme UX'i `docs/ai-first-invoice-processing-flow.md` icindeki
+  "Musavir ogrenme UX plani"na gore ilerleyecek: otomatik tekrar sinyali ile
+  acik musavir notu ayrilacak, sistem nottan anladigi kural formunu modalda
+  gosterecek, musavir `Kural olarak kaydet` veya `Benzerlerde oner` sonucunu
+  sececek; yeni kurallar pilotta ilk uygulamalarda yine musavir kontrolu ister.
 - Fatura/ekstre akisi bu fazda OCR kullanmayacak. XML/UBL, CSV/Excel ve text
   PDF ana kaynaktir; text cikmayan/taranmis fatura veya ekstre otomatik
   islenmez, review/unsupported gerekcesiyle ayrilir. Vergi levhasi OCR'i

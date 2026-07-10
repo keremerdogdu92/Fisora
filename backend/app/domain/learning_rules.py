@@ -83,7 +83,7 @@ def apply_learning_rules(
     if rule is None:
         semantic_rule = _select_semantic_rule(result, rule_list)
         if semantic_rule is None:
-            return result
+            return replace(result, learning_audit=_blocked_learning_audit(result, rule_list)) if rule_list else result
         return _apply_semantic_rule_context(result, semantic_rule)
 
     can_apply_counterparty = _can_apply_counterparty_code(result, rule)
@@ -110,6 +110,7 @@ def apply_learning_rules(
         accounting_intent=rule.accounting_intent,
         accounting_intent_confidence=rule.accounting_intent_confidence,
         rule_prompt=rule.rule_prompt or {},
+        learning_audit=_applied_learning_audit(result, rule, status="applied", semantic=False),
         simulated_status=result.simulated_status if trusted_export else "review_required",
         export_status=result.export_status if trusted_export else "review_required",
         export_gate_reason=(
@@ -178,6 +179,7 @@ def _apply_semantic_rule_context(result: SimulatedInvoiceResult, rule: LearnedPo
         accounting_intent=rule.accounting_intent,
         accounting_intent_confidence=rule.accounting_intent_confidence,
         rule_prompt=rule.rule_prompt or {},
+        learning_audit=_applied_learning_audit(result, rule, status="applied", semantic=True),
     )
 
 
@@ -231,6 +233,93 @@ def _rule_score(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> int
     if _has_counterparty_scope(rule) and _counterparty_scope_matches(result, rule):
         score += 35
     return score
+
+
+def _matched_terms(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> list[str]:
+    haystack = normalize_text(
+        " ".join(
+            (
+                result.product_line_hint,
+                result.provider_hint,
+                result.product_category,
+                result.invoice_type,
+            )
+        )
+    )
+    haystack_terms = set(normalized_terms(haystack, limit=20))
+    return sorted(set(rule.normalized_terms).intersection(haystack_terms))
+
+
+def _applied_learning_audit(
+    result: SimulatedInvoiceResult,
+    rule: LearnedPostingRule,
+    *,
+    status: str,
+    semantic: bool,
+) -> dict[str, object]:
+    score = _rule_score(result, rule)
+    account = "" if semantic else rule.corrected_account_code
+    counterparty = "" if semantic else rule.corrected_counterparty_code
+    applied_effect = (
+        "Ofis geneli anlam baglami kullanildi; hesap kodu baska mukellefe tasinmadi."
+        if semantic
+        else "; ".join(
+            part
+            for part in (
+                f"Hesap {account} onerildi" if account else "",
+                f"cari {counterparty} kullanildi" if counterparty else "",
+            )
+            if part
+        )
+        or "Onceki musavir karari benzerlik baglami olarak kullanildi."
+    )
+    return {
+        "status": status,
+        "scope": rule.scope,
+        "source_action": rule.action,
+        "understood_rule_tr": rule.source_summary or rule.reason,
+        "trigger_tr": rule.counterparty_title or rule.counterparty_tax_id or rule.category or rule.accounting_intent,
+        "applied_effect_tr": applied_effect,
+        "guardrail_tr": "Ilk uygulamalarda musavir kontrolu istenir; KDV, fis dengesi ve export kapisi ayrica korunur.",
+        "match_score": score,
+        "matched_terms": _matched_terms(result, rule),
+        "suggested_account_code": account,
+        "suggested_counterparty_code": counterparty,
+        "reason_codes": ["office_semantic_context"] if semantic else ["learning_rule_applied"],
+    }
+
+
+def _blocked_learning_audit(result: SimulatedInvoiceResult, rules: Iterable[LearnedPostingRule]) -> dict[str, object]:
+    allowed_actions = {"approve", "approve_with_changes", "suggest_for_similar"}
+    scored = [(max(_rule_score(result, rule), 0), rule) for rule in rules if rule.action in allowed_actions]
+    if not scored:
+        return {
+            "status": "blocked",
+            "reason_codes": ["no_approved_learning_rule"],
+            "match_score": 0,
+            "matched_terms": [],
+        }
+    scored.sort(key=lambda item: item[0], reverse=True)
+    score, rule = scored[0]
+    reason_codes = ["learning_rule_score_below_threshold"] if score < 60 else ["learning_rule_guardrail_blocked"]
+    if _has_counterparty_scope(rule) and not _counterparty_scope_matches(result, rule):
+        reason_codes.append("counterparty_scope_mismatch")
+    if rule.natural_language_rule_candidate and rule.natural_language_rule_candidate.get("requires_review") and rule.action != "suggest_for_similar":
+        reason_codes.append("requires_explicit_suggest_for_similar")
+    return {
+        "status": "blocked",
+        "scope": rule.scope,
+        "source_action": rule.action,
+        "understood_rule_tr": rule.source_summary or rule.reason,
+        "trigger_tr": rule.counterparty_title or rule.counterparty_tax_id or rule.category or rule.accounting_intent,
+        "applied_effect_tr": "Ogrenme kurali bu belgeye uygulanmadi.",
+        "guardrail_tr": "Benzerlik, kapsam ve guvenlik kosullari saglanmadan kural uygulanmaz.",
+        "match_score": score,
+        "matched_terms": _matched_terms(result, rule),
+        "suggested_account_code": rule.corrected_account_code,
+        "suggested_counterparty_code": rule.corrected_counterparty_code,
+        "reason_codes": reason_codes,
+    }
 
 
 def _has_counterparty_scope(rule: LearnedPostingRule) -> bool:

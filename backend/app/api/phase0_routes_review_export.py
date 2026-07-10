@@ -15,6 +15,7 @@ from app.api.rate_limit import enforce_rate_limit
 from app.api.phase0_schemas import (
     ExportPackagePayload,
     ReviewDecisionPayload,
+    ReviewRulePreviewPayload,
     StoredExportPackagePayload,
     StoredReviewDecisionPayload,
     WorkspaceExportPackagePayload,
@@ -37,6 +38,19 @@ def store_review_decision(
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     return get_review_service().store_review_decision(
+        payload=payload,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+
+
+@router.post("/store/review-rule/preview")
+def preview_review_rule(
+    payload: ReviewRulePreviewPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_review_service().preview_review_rule(
         payload=payload,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
     )

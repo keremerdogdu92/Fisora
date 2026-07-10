@@ -11,13 +11,7 @@ import { ResearchKnowledgeView } from "./portal-research-view";
 import { SettingsView } from "./portal-settings-view";
 import { PortalSidebar, PortalTopbarStatus } from "./shared/components";
 import { AccountantWorkspace } from "./portal-workspace-view";
-import {
-  loginWithPassword,
-  persistSession,
-  readStoredSession,
-  resolveApiBaseUrl,
-  useTestDataReset,
-} from "./features/session";
+import { loginWithPassword, persistSession, readStoredSession, resolveApiBaseUrl, useTestDataReset } from "./features/session";
 import {
   PilotQueryProvider,
   buildPilotReadinessView,
@@ -28,14 +22,11 @@ import {
 } from "./features/workspace";
 import { useClientManagementCommands } from "./features/clients";
 import { useDocumentRetentionCommands } from "./features/operations";
+import { useQnbCommands } from "./features/qnb";
 import { addLocalUploadsAction, useDocumentWorkflow } from "./features/documents";
 import { useExportCommands } from "./features/export";
 import { buildPortalDashboardViewModels } from "./portal-dashboard";
-import {
-  normalizeSessionForPortalConfig,
-  PORTAL_NAV_ITEMS,
-  portalConfigForRouteKey,
-} from "./portal-routes";
+import { normalizeSessionForPortalConfig, PORTAL_NAV_ITEMS, portalConfigForRouteKey } from "./portal-routes";
 import type {
   CancellationRequest,
   CorrectionDraft,
@@ -184,6 +175,20 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
+  const {
+    qnbConnection,
+    qnbStatus,
+    qnbSyncWindow,
+    refreshQnbStatus,
+    saveQnbConnection,
+    syncQnbIncoming,
+    updateQnbConnection,
+  } = useQnbCommands({
+    loginUserId,
+    refreshBackendPilotData: () => refreshBackendPilotData(),
+    selectedClient,
+    session,
+  });
   const {
     chartUploadStatus, clientDocumentDeleteConfirmed, clientDocumentDeleteStatus, clientReprocessStatus,
     clientPortalOpenStatus,
@@ -571,8 +576,11 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           lockedRole={lockedRole}
           onLogin={login}
           onLogout={logout}
+          onQnbConnectionChange={updateQnbConnection} onQnbRefreshStatus={refreshQnbStatus} onQnbSaveConnection={saveQnbConnection} onQnbSyncIncoming={syncQnbIncoming}
           localFallbackAllowed={localFallbackAllowed}
+          qnbConnection={qnbConnection} qnbStatus={qnbStatus} qnbSyncWindow={qnbSyncWindow}
           readinessView={readinessView}
+          selectedClient={selectedClient}
           session={session}
           setLoginPassword={setLoginPassword}
           setLoginRole={setLoginRole}

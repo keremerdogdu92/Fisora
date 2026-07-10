@@ -109,7 +109,8 @@ function normalizeDecisionNarrative(value) {
   return Object.values(narrative).some((item) => (typeof item === "string" ? item : Object.keys(item).length)) ? narrative : undefined;
 }
 
-const DEFAULT_BACKEND_TIMEOUT_MS = 2500;
+const DEFAULT_BACKEND_TIMEOUT_MS = 20000;
+const DEFAULT_WORKSPACE_VIEW = "summary";
 
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
   const token = safeText(sessionToken).trim();
@@ -179,6 +180,7 @@ async function fetchBackendPilotData({
   userId = "",
   fetchImpl = fetch,
   timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+  workspaceView = DEFAULT_WORKSPACE_VIEW,
 }) {
   const headers = backendAuthHeaders({ sessionToken, userId });
   const clientsPayload = await getJson({
@@ -193,7 +195,7 @@ async function fetchBackendPilotData({
     clients.map((client) =>
       getJson({
         apiBaseUrl,
-        path: `/phase0/store/workspace/${encodeURIComponent(clientIdFromRecord(client))}`,
+        path: workspacePath(clientIdFromRecord(client), workspaceView),
         headers,
         fetchImpl,
         timeoutMs,
@@ -205,6 +207,13 @@ async function fetchBackendPilotData({
     workspaces,
     source: "Çalışma alanı",
   });
+}
+
+function workspacePath(clientId, view) {
+  const encodedClientId = encodeURIComponent(clientId);
+  const normalizedView = safeText(view).trim();
+  const query = normalizedView ? `?view=${encodeURIComponent(normalizedView)}` : "";
+  return `/phase0/store/workspace/${encodedClientId}${query}`;
 }
 
 async function fetchBackendReadiness({

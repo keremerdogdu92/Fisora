@@ -1501,6 +1501,111 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("Belge muhasebe", workspace["document_pipeline_events"][9]["message_tr"])
         self.assertIn("doldu", workspace["document_pipeline_events"][9]["message_tr"])
 
+    def test_processing_worker_records_learning_rule_applied_pipeline_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "kargo.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>KRG202600000001</cbc:ID>
+  <cbc:IssueDate>2026-05-03</cbc:IssueDate>
+  <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyLegalEntity><cbc:RegistrationName>Yurtici Kargo</cbc:RegistrationName></cac:PartyLegalEntity>
+      <cac:PartyTaxScheme><cbc:CompanyID>9860008925</cbc:CompanyID></cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:InvoiceLine>
+    <cbc:InvoicedQuantity>1</cbc:InvoicedQuantity>
+    <cac:Item><cbc:Name>Kargo hizmet bedeli</cbc:Name></cac:Item>
+  </cac:InvoiceLine>
+  <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount>
+    <cbc:TaxInclusiveAmount>120.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount>120.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>
+""",
+                encoding="utf-8",
+            )
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={
+                    "client_id": "client-1",
+                    "title": "Demo Lojistik",
+                    "tax_id": "1111111111",
+                    "activity_description": "lojistik hizmetleri",
+                    "workplace_addresses": ["Istanbul"],
+                    "has_chart_accounts": True,
+                },
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                    {"raw_account_code": "760.03.010", "normalized_account_code": "760.03.010", "account_name": "Kargo gideri", "is_detail_account": True},
+                    {"raw_account_code": "191.01", "normalized_account_code": "191.01", "account_name": "Indirilecek KDV", "is_detail_account": True},
+                    {"raw_account_code": "320.9860008925", "normalized_account_code": "320.9860008925", "account_name": "Yurtici Kargo", "is_detail_account": True, "tax_id": "9860008925"},
+                    {"raw_account_code": "102.01", "normalized_account_code": "102.01", "account_name": "Banka", "is_detail_account": True},
+                ],
+            )
+            store.save_review_decision(
+                client_id="client-1",
+                decision={"document_ref": "source-kargo.xml", "action": "suggest_for_similar"},
+                learning_event={
+                    "document_ref": "source-kargo.xml",
+                    "scope": "client_rule",
+                    "action": "suggest_for_similar",
+                    "category": "kargo",
+                    "corrected_account_code": "760.03.010",
+                    "corrected_counterparty_code": "320.9860008925",
+                    "reason": "Yurtici Kargo kargo gideri olarak izlenir.",
+                    "accounting_intent": "kargo_gideri",
+                    "accounting_intent_confidence": 90,
+                    "normalized_terms": ["yurtici", "kargo", "hizmet"],
+                    "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtici Kargo",
+                    "automation_candidate": True,
+                    "learning_rule_source_summary": "Yurtici Kargo onceki musavir kararindan eslesti.",
+                },
+            )
+            uploaded = store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "kargo-doc",
+                    "document_ref": "kargo-doc",
+                    "document_type": "einvoice_xml",
+                    "original_file_name": "kargo.xml",
+                    "storage_path": str(xml_path),
+                    "status": "stored",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref=uploaded["document_ref"],
+                document_type="einvoice_xml",
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+            )
+
+            summary = process_queued_documents(store)
+            workspace = store.get_workspace("client-1")
+            result = workspace["documents"][0]["result"]
+
+        self.assertEqual(summary["completed_count"], 1)
+        self.assertTrue(result["learning_rule_applied"])
+        self.assertEqual(result["learning_audit"]["status"], "applied")
+        learning_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "learning_rule_applied")
+        self.assertEqual(learning_event["details"]["suggested_account_code"], "760.03.010")
+        self.assertGreaterEqual(learning_event["details"]["match_score"], 60)
+
     def test_processing_worker_records_ai_decision_events_and_turkish_explanation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "rexton.xml"

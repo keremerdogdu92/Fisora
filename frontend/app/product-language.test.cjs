@@ -169,3 +169,15 @@ test("document processing workbench keeps the journal review explicit", () => {
   assert.doesNotMatch(stylesSource, /\.journal-workspace-tabs/);
   assert.match(stylesSource, /\.journal-ledger/);
 });
+
+test("review data mapper preserves existing rule interpretation without new visible UX", () => {
+  const mapperSource = source("portal-data-mappers.ts");
+  const reviewRowsMapper = mapperSource.slice(
+    mapperSource.indexOf("const documentsFromRows"),
+    mapperSource.indexOf("const rowFileNames"),
+  );
+
+  assert.match(mapperSource, /function normalizeRuleInterpretation/);
+  assert.match(reviewRowsMapper, /ruleInterpretation:\s*normalizeRuleInterpretation\(row\.ruleInterpretation \?\? row\.rule_interpretation\)/);
+  assert.doesNotMatch(reviewRowsMapper, /ruleInterpretation:\s*null/);
+});

@@ -526,6 +526,12 @@ export type CorrectionDraft = {
   ruleInstruction: string;
 };
 
+export type ReviewLearningDecisionOptions = {
+  learningConfirmation?: "none" | "save_rule" | "suggest_similar";
+  confirmedRuleInterpretation?: RuleInterpretationView | null;
+  suppressRulePromptKey?: string;
+};
+
 export type NewClientDraft = {
   clientId: string;
   title: string;

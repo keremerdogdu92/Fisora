@@ -255,6 +255,9 @@ class ReviewDecisionPayload(BaseModel):
     accountant_note: str = ""
     rule_instruction: str = ""
     apply_to_similar: bool = False
+    learning_confirmation: str = "none"
+    confirmed_rule_interpretation: dict[str, object] = Field(default_factory=dict)
+    suppress_rule_prompt_key: str = ""
     prior_consistent_approval_count: int = 0
     statement_line_no: int = 0
     draft_lines: list[JournalLinePayload] = Field(default_factory=list)
@@ -425,6 +428,11 @@ class StoredReviewDecisionPayload(BaseModel):
     decision: ReviewDecisionPayload
 
 
+class ReviewRulePreviewPayload(BaseModel):
+    client_id: str
+    decision: ReviewDecisionPayload
+
+
 class StoredExportPackagePayload(BaseModel):
     client_id: str
     package: ExportPackagePayload
@@ -433,3 +441,16 @@ class StoredExportPackagePayload(BaseModel):
 class WorkspaceExportPackagePayload(BaseModel):
     client_id: str
     export_type: str = "zirve_universal_csv"
+
+
+class QnbConnectionPayload(BaseModel):
+    base_url: str
+    username: str
+    password: str
+    vkn: str = ""
+    erp_code: str = ""
+
+
+class QnbSyncPayload(BaseModel):
+    start_date: str = ""
+    end_date: str = ""

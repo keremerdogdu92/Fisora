@@ -2774,6 +2774,45 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.learning-rule-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.learning-rule-actions span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.learning-rule-modal {
+  background: rgba(15, 23, 42, 0.42);
+  border-radius: 8px;
+  inset: 0;
+  padding: 16px;
+  position: fixed;
+  z-index: 40;
+}
+
+.learning-rule-dialog {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.26);
+  display: grid;
+  gap: 14px;
+  margin: min(10vh, 72px) auto 0;
+  max-width: 720px;
+  padding: 16px;
+}
+
+.learning-rule-dialog .decision-actions button:last-child {
+  border-color: var(--border);
+  color: var(--text);
+  grid-column: auto;
+}
+
 .learning-rule-meta {
   display: grid;
   gap: 8px;
@@ -3798,6 +3837,21 @@ tbody tr:last-child td {
   color: var(--muted);
   font-size: 0.8rem;
   text-transform: uppercase;
+}
+
+.qnb-settings-form,
+.qnb-sync-row {
+  display: grid;
+  gap: 10px;
+}
+
+.qnb-settings-form {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.qnb-sync-row {
+  align-items: center;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 }
 
 .settings-danger-panel {

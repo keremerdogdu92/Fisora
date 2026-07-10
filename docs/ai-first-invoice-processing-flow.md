@@ -224,6 +224,93 @@ Ogrenme iki seviyede dusunulur:
 
 Yuksek guvenli ogrenme olusmadan AI/research devreden cikarilmamalidir. Ogrenme guveni yeterince birikince sistem once o kurali uygular, AI'i sadece audit/gerekce veya dusuk guven durumunda cagirir.
 
+### 14.1 Musavir ogrenme UX plani
+
+Bu akisin hedefi musavire cok butonlu bir "programi egit" ekrani acmak
+degil; normal review isini yaparken sistemin ne ogrendigini netlestirmektir.
+Buton sayisi az tutulmali, asil guven "sistem bunu nasil anladigini" gosteren
+onay formundan gelmelidir.
+
+Iki ayri ogrenme yolu vardir:
+
+1. Otomatik tekrar sinyali:
+   Musavir hic not yazmasa bile ayni mukellef, ayni cari/VKN, ayni belge yonu
+   ve ayni urun/hizmet mantiginda tutarli kararlar birikirse sistem bunu
+   "kural adayi" olarak fark eder. Ornek: ayni stok faturasi 3 kez ayni sekilde
+   onaylandiysa 4. benzer belgede veya 3. onaydan hemen sonra musavire
+   "Bu faturadaki islemi kural olarak kaydetmek ister misiniz?" uyarisi
+   gosterilebilir.
+
+2. Acik musavir notu:
+   Musavir bilincli olarak "bundan sonra bu VKN'den gelen faturalar kargo
+   gideridir" veya "bu mukellefte Kolay Soft e-fatura hizmeti 770.05'e gider"
+   gibi bir not yazar. Bu not tek alan olmali: `Karar notu` veya
+   `Egitim notu`. Sistem notu, fis uzerindeki son degisikliklerle birlikte
+   yorumlar ve yapilandirilmis kural adayina cevirir.
+
+Otomatik tekrar sinyalinde onerilen karar secenekleri:
+
+- `Evet`: Bu karari kural adayi olarak ac ve onay formunu goster.
+- `Hayir`: Bu belge icin kural olusturma, normal review akisiyle devam et.
+- `Tekrar onerme`: Bu benzerlik anahtari icin ayni uyariyi bastir.
+
+Acik musavir notu akisi:
+
+1. Musavir fisi duzeltir veya onaylar.
+2. Tek not alanina gerekcesini yazar.
+3. `Egitim notunu kaydet` aksiyonu notu ve fis farkini birlikte inceler.
+4. Sistem bir modal/form acar ve "bunu boyle anladim" diye yapilandirilmis
+   kural adayini gosterir.
+5. Musavir form alanlarini gerekirse duzeltir.
+6. Musavir sonucu `Kural olarak kaydet` veya `Benzerlerde oner` olarak secer.
+
+Formun temel alanlari:
+
+```text
+Kapsam: Bu mukellefe ozel / Musavir ofisi geneli / Firma geneli aday
+Tetikleyici: Yurtiçi Kargo / VKN 9860008925 / alis faturasi
+Uygulama: Bu caride 320.01.888 kullanilacak; gider hesabi 760.03.010 olacak
+Guvenlik: Ilk uygulamalarda musavir kontrolu iste
+Durum: Kural adayi
+```
+
+Kapsam karari keskin olmalidir:
+
+- Mukellefe ozel: Ayni mukellef icinde uygulanir. Varsayilan guvenli secim budur.
+- Musavir/ofis geneli: Ayni musavir ofisinin diger mukelleflerinde once oneri
+  olarak cikar; yeterli guven ve celiskisiz tekrar olmadan otomasyon olmaz.
+- Firma geneli aday: Urun/hizmet veya kanuni muhasebe mantigi genelse sadece
+  merkezi kural kutuphanesine aday olur; tek musavir karariyla aktif olmaz.
+
+`Kural olarak kaydet` ile `Benzerlerde oner` farki:
+
+- `Kural olarak kaydet`: Kapsam, tetikleyici ve uygulama yeterince netse daha
+  guclu kural adayi olusur. Pilot boyunca ilk uygulamalarda yine musavir onayi
+  istenir; direkt export ready verilmez.
+- `Benzerlerde oner`: Sistem sonraki benzer belgelerde fisi bu mantikla hazirlar
+  veya one cikarir, ama baska bir guvenli kural ya da yeterli skor yoksa export
+  ready yapmaz.
+
+Export guvenlik karari:
+
+- Pilot icinde yeni ogrenilen kural tek basina direkt export ready yapmamalidir.
+- Kural aktif olsa bile ilk uygulamalarda musavir kontrolu istenir.
+- Pilot cikisinda, tekrarli ve celiskisiz kural icin ayrica onay alinarak
+  otomasyon seviyesi artirilabilir.
+- Direction conflict, dusuk parse/OCR guveni, eksik VKN/cari kimligi, KDV
+  tutarsizligi veya faaliyet-urun catismasi varsa kural otomasyon degil, sadece
+  oneri olur.
+
+UI prensibi:
+
+- Yeni buton sayisi artirilmaz; ana ekranda tek not/egitim aksiyonu yeterlidir.
+- Ayrintili secimler ana review ekraninda degil, sadece modal/form icinde
+  gosterilir.
+- Form dili "kural JSON'u" gibi degil, musavirin okuyacagi muhasebe cumleleriyle
+  yazilir.
+- Sistem sadece "not kaydedildi" dememeli; "bu nottan sunu anladim" diyerek
+  tetikleyici, kapsam ve uygulamayi gostermelidir.
+
 ## AI kalite farkini nasil anlayacagiz?
 
 Mevcut sistemde bazi sinyaller zaten var: statik siniflandirma guveni, AI kullanildi bilgisi, provider, AI guveni, risk flag'leri, review reason'lari, research confidence, hesap aday uygunlugu, export hazirligi, musavir duzeltmesi ve learning event.

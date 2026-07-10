@@ -14,6 +14,7 @@ const {
   createWorkspaceExportPackage,
   deleteClientDocuments,
   ensureUploadWorkspace,
+  fetchQnbConnectionStatus,
   loginWithPassword,
   sessionAuthErrorMessage,
   pickUploadUser,
@@ -21,13 +22,16 @@ const {
   parseTaxCertificateFromBackend,
   applyDocumentRetentionAction,
   previewDocumentRetention,
+  previewReviewRule,
   requestStatementAiSuggestions,
   reprocessClient,
   reprocessDocument,
   resetTestData,
   resolveApiBaseUrl,
+  saveQnbConnectionToBackend,
   setPortalPassword,
   storeReviewDecision,
+  syncQnbIncomingInvoices,
   updateClientPortalAccess,
   uploadChartAccountsToBackend,
   uploadDocumentToBackend,
@@ -826,6 +830,94 @@ test("createWorkspaceExportPackage posts selected Zirve mapping adapter", async 
   assert.equal(result.package.download_url, "/download.csv");
 });
 
+test("saveQnbConnectionToBackend posts QNB credentials to the selected client endpoint", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ status: "active", username: "5********1" }) };
+  };
+
+  const result = await saveQnbConnectionToBackend({
+    apiBaseUrl: "http://localhost:8000/",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    connection: {
+      baseUrl: "https://erpefaturatest2.qnbesolutions.com.tr/efatura/ws",
+      username: "5910611341",
+      password: "secret-password",
+      vkn: "5910611341",
+      erpCode: "FSR31422",
+    },
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/qnb/connections/client-1");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    base_url: "https://erpefaturatest2.qnbesolutions.com.tr/efatura/ws",
+    username: "5910611341",
+    password: "secret-password",
+    vkn: "5910611341",
+    erp_code: "FSR31422",
+  });
+  assert.deepEqual(result, { status: "active", username: "5********1" });
+});
+
+test("fetchQnbConnectionStatus reads the masked QNB connection state", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ status: "active", username: "5********1", sync_enabled: true }) };
+  };
+
+  const result = await fetchQnbConnectionStatus({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/qnb/connections/client-1");
+  assert.equal(request.init.method, "GET");
+  assert.deepEqual(request.init.headers, { "X-Fisora-User-Id": "mali-musavir" });
+  assert.deepEqual(result, { status: "active", username: "5********1", sync_enabled: true });
+});
+
+test("syncQnbIncomingInvoices posts the requested date window", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ listed_count: 2, downloaded_count: 1, queued_processing_count: 1 }) };
+  };
+
+  const result = await syncQnbIncomingInvoices({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    startDate: "2026-07-01",
+    endDate: "2026-07-09",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/qnb/connections/client-1/sync-incoming-invoices");
+  assert.equal(request.init.method, "POST");
+  assert.deepEqual(request.init.headers, {
+    "Content-Type": "application/json",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(JSON.parse(request.init.body), {
+    start_date: "2026-07-01",
+    end_date: "2026-07-09",
+  });
+  assert.deepEqual(result, { listed_count: 2, downloaded_count: 1, queued_processing_count: 1 });
+});
+
 test("requestStatementAiSuggestions posts structured statement lines", async () => {
   let request;
   const fetchImpl = async (url, init) => {
@@ -1059,6 +1151,74 @@ test("storeReviewDecision marks one-click rule requests as apply-to-similar", as
   assert.equal(request.url, "http://localhost:8000/phase0/store/review-decision");
   assert.equal(JSON.parse(request.init.body).decision.apply_to_similar, true);
   assert.equal(JSON.parse(request.init.body).decision.action, "suggest_for_similar");
+});
+
+test("previewReviewRule posts accountant note and draft context without storing a decision", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return {
+      ok: true,
+      json: async () => ({
+        rule_interpretation: { status: "ready", summary_tr: "Kargo gideri onerilecek." },
+      }),
+    };
+  };
+
+  const result = await previewReviewRule({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "kargo.xml",
+    action: "suggest_for_similar",
+    reviewer: "mali-musavir",
+    correctedAccountCode: "760.03.010",
+    decisionNote: "Bundan sonra bu VKN'den gelen faturalar kargo gideridir.",
+    draftLines: [{ account_code: "760.03.010", description: "Kargo", debit: "100.00", credit: "0.00" }],
+    fetchImpl,
+  });
+
+  const payload = JSON.parse(request.init.body);
+  assert.equal(request.url, "http://localhost:8000/phase0/store/review-rule/preview");
+  assert.equal(payload.client_id, "client-1");
+  assert.equal(payload.decision.decision_note, "Bundan sonra bu VKN'den gelen faturalar kargo gideridir.");
+  assert.equal(payload.decision.draft_lines[0].account_code, "760.03.010");
+  assert.equal(result.rule_interpretation.status, "ready");
+});
+
+test("storeReviewDecision includes learning confirmation and confirmed interpretation", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ learning_event: { scope: "client_rule" } }) };
+  };
+
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "kargo.xml",
+    action: "suggest_for_similar",
+    reviewer: "mali-musavir",
+    correctedAccountCode: "760.03.010",
+    decisionNote: "Kargo gideri olarak ogren.",
+    learningConfirmation: "save_rule",
+    confirmedRuleInterpretation: {
+      status: "ready",
+      summaryTr: "Kargo gideri onerilecek.",
+      triggerTr: "VKN 9860008925",
+      actionTr: "Hesap 760.03.010",
+      guardrailTr: "Ilk uygulamalarda musavir kontrolu istenir.",
+      confidence: 88,
+      reasonCodes: ["account_rule"],
+    },
+    fetchImpl,
+  });
+
+  const decision = JSON.parse(request.init.body).decision;
+  assert.equal(decision.learning_confirmation, "save_rule");
+  assert.equal(decision.confirmed_rule_interpretation.summary_tr, "Kargo gideri onerilecek.");
+  assert.deepEqual(decision.confirmed_rule_interpretation.reason_codes, ["account_rule"]);
 });
 
 test("reprocessDocument posts an existing document back to the processing queue", async () => {

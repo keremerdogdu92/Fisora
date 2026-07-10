@@ -87,6 +87,116 @@ oturumdan devam etmek icin son durumu ozetler.
 `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY` ve varsa fallback provider keyleri
 sadece serverdaki bu dosyada tutulur.
 
+## 2026-07-08 QNB e-Belge Entegrasyon Karari
+
+QNB eSolutions test ortami basvurusu sonucunda Fisora, SaaS/ERP entegrasyonu
+olarak kabul edildi ve Fisora'ya ERP kodu tanimlandi. ERP kodu QNB SOAP
+parametrelerinde kullanilacak sabit uygulama kodudur; tum firmalarda ayni
+kalir. Tam kod, test kullanici sifreleri ve canli kimlik bilgileri repoya
+yazilmaz; mail/secret kaynagindan alinarak ignored env icinde tutulmalidir.
+
+QNB tarafindan bildirilen teknik durum:
+
+- Rate limit: dakikada 180 request.
+- e-Fatura ve e-Irsaliye testleri `erpefaturatest1` ve `erpefaturatest2`
+  ortamlarinda yapilacak. Bu iki ortam karsilikli belge gonderip alabilecek
+  sekilde tanimli; ayni ortamdan ayni ortama belge gonderimi testte yok.
+- e-Arsiv, e-Defter, eSMM, eMM, e-Adisyon ve e-SKGB testleri
+  `portaltest` / `connectortest` / `earsivtest` ortamlarinda yapilacak.
+- Canli ortamda tek kullanici adi/sifre ile butun servislere erisilebilecegi
+  bildirildi; testte ortamlar ayridir.
+- QNB, portal kullanicisi ile web servis kullanicisinin ayrilmasini onerdi.
+  Portal sifresi degisimleri WS login tarafini bloke edebilecegi icin Fisora
+  entegrasyonunda ayri WS kullanicisi olusturulmalidir.
+- `Ext` ile biten metotlarda ERP kodu dogrudan `erpkodu` parametresiyle
+  gonderilmeli; Ext olmayan metotlarda `erpBilgileriBelirle` akisi gerekiyor.
+  SOAP header kullanan entegrasyonda Ext metotlari tercih edilmelidir.
+
+Bu karar urun yonunu degistirdi: ana belge girisi artik "mukellef dosya
+yuklesin" degil, "QNB'den otomatik belge senkronizasyonu" olmalidir. Manuel
+upload sistemi cope gitmez; QNB disi entegratorler, eski belgeler, banka
+ekstreleri, vergi levhasi, sozlesme, dekont ve API kesintisi durumlari icin
+yedek/manual kaynak adaptoru olarak kalir.
+
+Yeni hedef akisi:
+
+```text
+QNB baglantisi/yetkisi -> belge senkronizasyonu -> UBL/PDF/status alma
+-> canonical invoice -> iptal/red/itiraz kaniti -> muhasebe fisi taslagi
+-> musavir kontrolu -> export
+```
+
+Belge saklama politikasi yeniden tasarlanacak. QNB kaynakli belgelerde QNB
+yeniden indirme kaynagi olabilir, fakat Fisora yine minimum kanit tutmalidir:
+
+- QNB belge kimligi: ETTN/UUID, belge no, VKN/TCKN, tarih.
+- Kaynak ve cekilme zamani.
+- UBL/PDF hash'i ve islenen canonical veri.
+- Muhasebe fisi taslagi, review kararlari ve export sonucu.
+- Iptal/red/itiraz/status kaniti ve son sorgulama zamani.
+- Pilot icin UBL/PDF cache tutulmasi onerilir; uzun vadede saklama politikasi
+  musteri/mevzuat ihtiyacina gore ayarlanabilir.
+
+QNB entegrasyonu tamamlaninca etkilenecek ana sistemler:
+
+- Onboarding: mukelleften yalniz dosya istemek yerine QNB kullaniyor mu,
+  VKN/TCKN, servis kullanicisi/yetki, senkron baslangic tarihi ve musavir
+  yetkisi alinacak.
+- Mukellef portali: belge yukleyen ana kullanici yerine baglanti/yetki veren,
+  eksikleri tamamlayan ve yorum/onay veren role kayar.
+- Musavir portali: cok mukellefli belge akisi, QNB baglanti durumu, yeni gelen
+  belgeler, iptal/red uyarilari, fis taslaklari ve kontrol kuyrugu ana ekran
+  haline gelir.
+- Parser: UBL canonical veri birincil kaynak olur; PDF daha cok onizleme ve
+  gorsel kanit/fallback icin kullanilir.
+- Iptal politikasi: "UBL'de iptal yoksa iptal degildir" denmez. QNB status,
+  uygulama yaniti, e-Arsiv iptal/itiraz bilgisi, iptalTarihi ve PDF gorsel
+  damga ayri kanit katmani olarak izlenir.
+- Storage: manuel document store kalir ama QNB icin source-adapter + metadata +
+  evidence snapshot modeli hedeflenir.
+- Rate limit/worker: dakikada 180 request siniri icin kuyruk, throttle, retry
+  ve idempotent sync zorunludur.
+- Cok mustavirli SaaS: Fisora platformu altinda birden fazla musavir ofisi,
+  her musavirin altinda birden fazla mukellef ve her mukellef icin ayri QNB
+  yetki/credential modeli hedeflenir.
+
+Urun modulu kapsami:
+
+- e-Fatura: ilk oncelik. Gelen/giden listeleme, UBL/PDF indirme, durum
+  sorgulama, ticari faturada kabul/red uygulama yaniti, ileride Fisora'dan
+  fatura kesme.
+- e-Arsiv: ilk oncelik. e-Fatura mukellefi olmayanlara/son tuketiciye kesilen
+  faturalar; UBL/PDF alma, sorgulama, iptal/itiraz/status kaniti ayrica test
+  edilecek.
+- e-Irsaliye: e-Fatura ile benzer altyapi ama sevkiyat belgesi. Fatura
+  temelinden sonra daha hizli eklenebilir; alanlari ve is kurallari farklidir.
+- e-Defter: fatura kesme degil, yasal defter/berat/donem kapanisi sureci.
+  QNB donusunde testte CSV format hazirlayip portal upload ile deneme
+  anlatildi. Fisora icin ileride e-Defter export/donem hazirligi olabilir.
+- eSMM/eMM: muhasebe fisi degil, serbest meslek makbuzu ve mustahsil makbuzu
+  gibi fatura benzeri resmi belge tipleri. Kesildikten sonra muhasebe fisine
+  kaynak olabilir.
+- e-Adisyon/e-SKGB: restoran/adisyon ve sigorta komisyon gider belgesi gibi
+  nis alanlar; simdilik ana oncelik degil.
+
+Bir sonraki planlama icin acik kararlar:
+
+1. QNB'den cekilen UBL/PDF dosyalari pilotta kalici mi saklanacak, yoksa
+   hash + canonical veri + yeniden indirme modeli mi uygulanacak?
+2. Ilk entegrasyon yalniz belge okuma/status mu olacak, yoksa ayni fazda
+   fatura kesme/gonderme de kapsama alinacak mi?
+3. Cok mustavirli modelde credential sahipligi musavir ofisi bazinda mi,
+   mukellef bazinda mi, yoksa ikisi birlikte mi tutulacak?
+4. Manuel upload UI ana aksiyon olmaktan cikarilip "manuel/yedek kaynak" olarak
+   yeniden konumlandirilacak mi?
+5. QNB disi entegratorler icin simdiden generic `document_source_adapter`
+   arayuzu tasarlanacak mi?
+
+Pratik siradaki is: QNB entegrasyonu icin tasarim/spec yaz. Once mevcut
+document upload pipeline'i kaynak-adaptorlu hale getiren mimariyi netlestir,
+sonra kucuk bir proof hedefi sec: SOAP login + e-Fatura/e-Arsiv listeleme veya
+belge indirme + status kaniti.
+
 ## Yeni Bilgisayarda Devam Etme
 
 GitHub hesabi private repoya yetkili olmalidir. Aktif pilot branch'ini almak icin:

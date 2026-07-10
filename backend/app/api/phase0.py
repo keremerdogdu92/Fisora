@@ -6,6 +6,7 @@ from app.api import (
     phase0_routes_ai,
     phase0_routes_auth,
     phase0_routes_operations,
+    phase0_routes_qnb,
     phase0_routes_review_export,
     phase0_routes_research,
     phase0_routes_simulation,
@@ -68,6 +69,7 @@ from app.api.phase0_schemas import (
     ProductClassificationPayload,
     RelevancePayload,
     ReviewDecisionPayload,
+    ReviewRulePreviewPayload,
     SimulationPayload,
     StatementAiSuggestionPolicyPayload,
     StatementAiSuggestionsPayload,
@@ -84,6 +86,7 @@ from app.domain.tax_certificates import parse_tax_certificate_file
 router = APIRouter()
 router.include_router(phase0_routes_auth.router)
 router.include_router(phase0_routes_operations.router)
+router.include_router(phase0_routes_qnb.router)
 router.include_router(phase0_routes_upload_processing.router)
 router.include_router(phase0_routes_review_export.router)
 router.include_router(phase0_routes_research.router)

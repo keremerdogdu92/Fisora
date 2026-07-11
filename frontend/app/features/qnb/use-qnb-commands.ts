@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import {
+  disableQnbConnection,
   fetchQnbConnectionStatus,
   resolveApiBaseUrl,
   saveQnbConnectionToBackend,
@@ -28,7 +29,6 @@ export function useQnbCommands({
     username: "",
     password: "",
     vkn: "",
-    erpCode: "",
   });
   const [qnbStatus, setQnbStatus] = useState({ message: "", maskedUsername: "", status: "" });
   const [qnbSyncStartDate, setQnbSyncStartDate] = useState("");
@@ -42,7 +42,7 @@ export function useQnbCommands({
     }));
   }, [selectedClient?.clientId, selectedClient?.taxId, selectedClient?.vkn]);
 
-  function updateQnbConnection(field: "baseUrl" | "username" | "password" | "vkn" | "erpCode", value: string) {
+  function updateQnbConnection(field: "baseUrl" | "username" | "password" | "vkn", value: string) {
     setQnbConnection((current) => ({ ...current, [field]: value }));
   }
 
@@ -64,12 +64,27 @@ export function useQnbCommands({
         maskedUsername: String(payload?.username || ""),
         status: String(payload?.status || ""),
       });
+      setQnbConnection((current) => ({ ...current, password: "" }));
     } catch (error) {
       setQnbStatus({
         message: `QNB bağlantı durumu okunamadı. ${error instanceof Error ? error.message : String(error)}`,
         maskedUsername: "",
         status: "error",
       });
+    }
+  }
+
+  async function disableQnb() {
+    if (!selectedClient?.clientId) return;
+    try {
+      const payload = await disableQnbConnection({
+        apiBaseUrl: resolveApiBaseUrl(pageUrl()), clientId: selectedClient.clientId,
+        userId: loginUserId, sessionToken: session?.sessionToken || "",
+      });
+      setQnbStatus({ message: "QNB bağlantısı devre dışı bırakıldı.", maskedUsername: String(payload?.username || ""), status: String(payload?.status || "disabled") });
+      setQnbConnection((current) => ({ ...current, password: "" }));
+    } catch (error) {
+      setQnbStatus({ message: `QNB bağlantısı kapatılamadı. ${error instanceof Error ? error.message : String(error)}`, maskedUsername: "", status: "error" });
     }
   }
 
@@ -92,6 +107,7 @@ export function useQnbCommands({
         maskedUsername: String(payload?.username || ""),
         status: String(payload?.status || ""),
       });
+      setQnbConnection((current) => ({ ...current, password: "" }));
     } catch (error) {
       setQnbStatus({
         message: `QNB bağlantısı kaydedilemedi. ${error instanceof Error ? error.message : String(error)}`,
@@ -136,6 +152,7 @@ export function useQnbCommands({
       message: qnbSyncMessage,
     },
     refreshQnbStatus,
+    disableQnb,
     saveQnbConnection,
     syncQnbIncoming,
     updateQnbConnection,

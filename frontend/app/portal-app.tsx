@@ -179,6 +179,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     qnbConnection,
     qnbStatus,
     qnbSyncWindow,
+    disableQnb,
     refreshQnbStatus,
     saveQnbConnection,
     syncQnbIncoming,
@@ -576,7 +577,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           lockedRole={lockedRole}
           onLogin={login}
           onLogout={logout}
-          onQnbConnectionChange={updateQnbConnection} onQnbRefreshStatus={refreshQnbStatus} onQnbSaveConnection={saveQnbConnection} onQnbSyncIncoming={syncQnbIncoming}
+          onQnbConnectionChange={updateQnbConnection} onQnbDisable={disableQnb} onQnbRefreshStatus={refreshQnbStatus} onQnbSaveConnection={saveQnbConnection} onQnbSyncIncoming={syncQnbIncoming}
           localFallbackAllowed={localFallbackAllowed}
           qnbConnection={qnbConnection} qnbStatus={qnbStatus} qnbSyncWindow={qnbSyncWindow}
           readinessView={readinessView}

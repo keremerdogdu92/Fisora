@@ -633,6 +633,28 @@ test("fetchBackendPilotData loads clients then each allowed summary workspace wi
   assert.equal(requests[1].init.signal.aborted, false);
 });
 
+test("normalizeBackendWorkspaces exposes QNB status evidence on a processed document", () => {
+  const workspace = structuredClone(workspaceRecord);
+  workspace.uploaded_documents.push({
+    document_ref: "processed-1",
+    content_type: "application/xml",
+    source_provider: "qnb_esolutions",
+    source_qnb_normalized_status: "rejected",
+    source_qnb_status_checked_at: "2026-07-11T12:00:00+00:00",
+    source_qnb_status_changed: true,
+    source_qnb_status_detail: "Ticari fatura reddedildi",
+    qnb_review_required: true,
+  });
+  const data = normalizeBackendWorkspaces({ clients: [clientRecord], workspaces: [workspace] });
+  const document = data.documents.find((item) => item.id === "processed-1");
+
+  assert.equal(document.qnbStatus, "rejected");
+  assert.equal(document.qnbStatusCheckedAt, "2026-07-11T12:00:00+00:00");
+  assert.equal(document.qnbStatusChanged, true);
+  assert.equal(document.qnbReviewRequired, true);
+  assert.equal(document.qnbStatusDetail, "Ticari fatura reddedildi");
+});
+
 test("fetchBackendReadiness loads the system readiness payload without auth headers", async () => {
   const requests = [];
   const fetchImpl = async (url, init = {}) => {

@@ -92,6 +92,7 @@ export function SettingsView({
   onLogin,
   onLogout,
   onQnbConnectionChange,
+  onQnbDisable,
   onQnbRefreshStatus,
   onQnbSaveConnection,
   onQnbSyncIncoming,
@@ -126,7 +127,8 @@ export function SettingsView({
   localFallbackAllowed: boolean;
   onLogin: () => void | Promise<void>;
   onLogout: () => void;
-  onQnbConnectionChange: (field: "baseUrl" | "username" | "password" | "vkn" | "erpCode", value: string) => void;
+  onQnbConnectionChange: (field: "baseUrl" | "username" | "password" | "vkn", value: string) => void;
+  onQnbDisable: () => void | Promise<void>;
   onQnbRefreshStatus: () => void | Promise<void>;
   onQnbSaveConnection: () => void | Promise<void>;
   onQnbSyncIncoming: () => void | Promise<void>;
@@ -136,7 +138,6 @@ export function SettingsView({
     username: string;
     password: string;
     vkn: string;
-    erpCode: string;
   };
   qnbStatus: {
     message: string;
@@ -223,16 +224,11 @@ export function SettingsView({
               placeholder="Mükellef VKN"
               value={qnbConnection.vkn}
             />
-            <input
-              aria-label="ERP kodu"
-              onChange={(event) => onQnbConnectionChange("erpCode", event.target.value)}
-              placeholder="ERP kodu"
-              value={qnbConnection.erpCode}
-            />
           </div>
           <div className="session-controls">
             <button disabled={!selectedClient} onClick={onQnbSaveConnection} type="button">Bağlantıyı kaydet</button>
             <button className="secondary" disabled={!selectedClient} onClick={onQnbRefreshStatus} type="button">Durumu yenile</button>
+            <button className="secondary" disabled={!selectedClient || qnbStatus.status === "disabled"} onClick={onQnbDisable} type="button">Bağlantıyı kapat</button>
           </div>
           <div className="qnb-sync-row">
             <input

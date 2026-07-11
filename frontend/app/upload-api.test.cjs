@@ -864,7 +864,7 @@ test("saveQnbConnectionToBackend posts QNB credentials to the selected client en
     username: "5910611341",
     password: "secret-password",
     vkn: "5910611341",
-    erp_code: "FSR31422",
+    environment: "test",
   });
   assert.deepEqual(result, { status: "active", username: "5********1" });
 });

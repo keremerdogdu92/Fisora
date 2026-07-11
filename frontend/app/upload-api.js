@@ -538,7 +538,7 @@ async function saveQnbConnectionToBackend({
       username: String(connection?.username || "").trim(),
       password: String(connection?.password || ""),
       vkn: String(connection?.vkn || "").trim(),
-      erp_code: String(connection?.erpCode || connection?.erp_code || "").trim(),
+      environment: String(connection?.baseUrl || connection?.base_url || "").toLowerCase().includes("test") ? "test" : "production",
     },
     headers: backendAuthHeaders({ sessionToken, userId }),
     fetchImpl,
@@ -555,6 +555,22 @@ async function fetchQnbConnectionStatus({
   return getJson({
     apiBaseUrl,
     path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
+async function disableQnbConnection({
+  apiBaseUrl,
+  clientId,
+  userId = DEFAULT_UPLOAD_USER_ID,
+  sessionToken = "",
+  fetchImpl = fetch,
+}) {
+  return postJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}/disable`,
+    payload: {},
     headers: backendAuthHeaders({ sessionToken, userId }),
     fetchImpl,
   });
@@ -1064,6 +1080,7 @@ module.exports = {
   createPortalInvite,
   createWorkspaceExportPackage,
   deleteClientDocuments,
+  disableQnbConnection,
   ensureUploadWorkspace,
   fetchQnbConnectionStatus,
   loginWithPassword,

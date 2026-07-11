@@ -2,7 +2,10 @@
 
 **Goal:** Bring incoming QNB eSolutions e-Fatura documents into Fisora as canonical UBL XML documents, then process them through the existing storage, parser, review, and export-gate flow.
 
-**Status:** Design approved for phased implementation. This document captures the product and architecture decisions before writing the implementation plan.
+**Status:** Phase 1 core implemented on 2026-07-08. Real TEST2 login and an
+empty incoming-list smoke passed; a real sandbox document download and the
+remaining end-to-end phases are tracked in
+`docs/superpowers/plans/2026-07-10-qnb-end-to-end-integration.md`.
 
 **References:**
 - QNB API technical page: https://www.qnbesolutions.com.tr/destek/api-teknik

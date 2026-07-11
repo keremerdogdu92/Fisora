@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
+from app.domain.qnb_credentials import QnbCredentialCipher
 from app.domain.portal_access import (
     PORTAL_USERS_CLIENT_ID,
     build_portal_user_record,
@@ -43,6 +44,11 @@ def empty_store() -> dict[str, Any]:
         "auth_tokens": {},
         "qnb_connections": {},
         "qnb_sync_runs": {},
+        "qnb_sync_cursors": {},
+        "qnb_document_identities": {},
+        "qnb_outgoing_invoices": {},
+        "qnb_outgoing_status_snapshots": {},
+        "qnb_incoming_status_snapshots": {},
         "ai_usage_events": [],
         "ai_capacity_snapshots": {},
         "operation_events": [],
@@ -481,6 +487,9 @@ class JsonWorkflowStore:
             "provider": connection.get("provider") or "qnb_esolutions",
             "updated_at": timestamp,
         }
+        raw_password = str(record.pop("password", "") or "")
+        if raw_password and not record.get("credential_ciphertext"):
+            record["credential_ciphertext"] = QnbCredentialCipher.from_env().encrypt(raw_password)
         record.setdefault("created_at", timestamp)
         data.setdefault("qnb_connections", {})[client_id] = record
         self._write(data)
@@ -503,6 +512,82 @@ class JsonWorkflowStore:
         key = f"{client_id}:{record['sync_run_id']}"
         data.setdefault("qnb_sync_runs", {})[key] = record
         self._write(data)
+        return deepcopy(record)
+
+    def get_qnb_sync_cursor(self, *, client_id: str) -> str:
+        data = self._read()
+        return str(data.get("qnb_sync_cursors", {}).get(client_id) or "")
+
+    def save_qnb_sync_cursor(self, *, client_id: str, cursor: str) -> str:
+        with self._lock:
+            data = self._read()
+            data.setdefault("qnb_sync_cursors", {})[client_id] = str(cursor or "")
+            self._write(data)
+        return str(cursor or "")
+
+    def claim_qnb_document_identity(
+        self,
+        *,
+        client_id: str,
+        identity_key: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        key = f"{client_id}:{identity_key}"
+        with self._lock:
+            data = self._read()
+            identities = data.setdefault("qnb_document_identities", {})
+            if key in identities:
+                return False
+            identities[key] = {
+                "client_id": client_id,
+                "identity_key": identity_key,
+                "metadata": metadata or {},
+                "claimed_at": utc_now(),
+            }
+            self._write(data)
+        return True
+
+    def release_qnb_document_identity(self, *, client_id: str, identity_key: str) -> None:
+        key = f"{client_id}:{identity_key}"
+        with self._lock:
+            data = self._read()
+            data.setdefault("qnb_document_identities", {}).pop(key, None)
+            self._write(data)
+
+    def save_qnb_outgoing_invoice(self, *, client_id: str, invoice: dict[str, Any]) -> dict[str, Any]:
+        oid = str(invoice.get("document_oid") or "")
+        if not oid:
+            raise ValueError("QNB outgoing document OID is required")
+        key = f"{client_id}:{oid}"
+        with self._lock:
+            data = self._read()
+            rows = data.setdefault("qnb_outgoing_invoices", {})
+            record = {**rows.get(key, {}), **invoice, "client_id": client_id}
+            rows[key] = record
+            self._write(data)
+        return deepcopy(record)
+
+    def get_qnb_outgoing_invoice(self, *, client_id: str, document_oid: str) -> dict[str, Any] | None:
+        record = self._read().get("qnb_outgoing_invoices", {}).get(f"{client_id}:{document_oid}")
+        return deepcopy(record) if record else None
+
+    def list_qnb_outgoing_invoices(self, *, client_id: str) -> list[dict[str, Any]]:
+        return [deepcopy(row) for row in self._read().get("qnb_outgoing_invoices", {}).values() if row.get("client_id") == client_id]
+
+    def append_qnb_outgoing_status_snapshot(self, *, client_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        record = {**snapshot, "client_id": client_id}
+        with self._lock:
+            data = self._read()
+            data.setdefault("qnb_outgoing_status_snapshots", {})[f"{client_id}:{record['snapshot_id']}"] = record
+            self._write(data)
+        return deepcopy(record)
+
+    def append_qnb_incoming_status_snapshot(self, *, client_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        record = {**snapshot, "client_id": client_id}
+        with self._lock:
+            data = self._read()
+            data.setdefault("qnb_incoming_status_snapshots", {})[f"{client_id}:{record['snapshot_id']}"] = record
+            self._write(data)
         return deepcopy(record)
 
     def record_document_pipeline_event(

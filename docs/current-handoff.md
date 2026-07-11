@@ -83,6 +83,35 @@ oturumdan devam etmek icin son durumu ozetler.
   route'u: `/portal/bilgi-havuzu`.
 - Server env dosyasi: `/opt/fisora/app/deploy/production.env`
 
+### QNB Faz 3 durum uzlastirma - 2026-07-11
+
+- Giden e-Fatura status uzlastirma backend hatti eklendi.
+- Gercek TEST2 -> TEST1 kaniti: `FSR2026713888654`, OID
+  `0wmqkswwso125r`, QNB kodu `3`, normalize durum `processed`.
+- Her sorgu append-only snapshot; son durum ayrica tutuluyor ve degisim
+  `previous_processing_state/changed` ile kanitlaniyor.
+- Tekli endpoint:
+  `POST /phase0/qnb/connections/{client_id}/outgoing-invoices/status`.
+- Toplu endpoint:
+  `POST /phase0/qnb/connections/{client_id}/outgoing-invoices/status/bulk`.
+- Liste endpoint:
+  `GET /phase0/qnb/connections/{client_id}/outgoing-invoices`.
+- Unknown provider kodu basarili sayilmiyor. Muhasebe kaydi status sorgusuyla
+  otomatik silinmiyor veya ters cevrilmiyor.
+- Gelen belge Faz 3 tamamlama: `gelenBelgeDurumSorgulaExt` kontrati ve
+  `yanitDurumu` kodlari dogrulandi. Gercek TEST1 ETTN sorgusu `-1/received`
+  dondu. `1=rejected`, `2=accepted`, `iptalTarihi=cancelled`; unknown ayrica
+  warning olarak kalir. Red/iptal/unknown otomasyon hold + review flag +
+  pipeline event olusturur. Belge panelinde QNB durumu ve kontrol zamani
+  gorunur; muhasebe kaydi otomatik ters cevrilmez.
+- QNB Faz 4 tamamlandi: credential store'da Fernet ciphertext olarak tutulur;
+  production anahtari `FISORA_QNB_CREDENTIAL_KEY`, ERP config'i
+  `FISORA_QNB_ERP_CODE` ile server env'den gelir. Frontend ERP alani kaldirildi.
+  Bos parola metadata update'te mevcut credential'i korur; yeni parola rotate
+  ve connection test yapar. Disable endpoint/UI, QNB host allowlist'i,
+  test-production ortam eslesmesi, actor/target audit ve client izolasyon
+  negatif testi eklendi. Siradaki faz scheduler ve operasyon dayanıkliligi.
+
 `deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD`, `GROQ_API_KEY`,
 `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY` ve varsa fallback provider keyleri
 sadece serverdaki bu dosyada tutulur.
@@ -196,6 +225,92 @@ Pratik siradaki is: QNB entegrasyonu icin tasarim/spec yaz. Once mevcut
 document upload pipeline'i kaynak-adaptorlu hale getiren mimariyi netlestir,
 sonra kucuk bir proof hedefi sec: SOAP login + e-Fatura/e-Arsiv listeleme veya
 belge indirme + status kaniti.
+
+### 2026-07-10 QNB uygulama plani guncellemesi
+
+Onceki "tasarim/spec yaz" adimi tamamlandi ve gelen e-Fatura Phase 1 cekirdegi
+`main` branch'inde uygulandi. Mulkellef bazli QNB baglantisi, gercek SOAP
+adapter, manuel tarih aralikli listeleme, UBL indirme/acma, duplicate kontrolu,
+document/job kaydi ve portal ayarlari mevcuttur. Gercek TEST2 login ve bos liste
+smoke'u basarili oldu; test gelen kutusu bos oldugu icin gercek QNB UBL'sinin
+canonical invoice ve muhasebe taslagina kadar ilerlemesi henuz kanitlanmadi.
+
+Uctan uca master plan:
+
+`docs/superpowers/plans/2026-07-10-qnb-end-to-end-integration.md`
+
+Siradaki is, kiralik sunucuyu acmadan yerel ortamda QNB test hesaplari arasinda
+kontrollu bir e-Fatura olusturmak; alici hesaptan Fisora ile listelemek,
+indirmek, canonical invoice ve fis taslagina kadar islemek ve tekrar sync'te
+duplicate olusmadigini kanitlamaktir. Ardindan sirasiyla sayfalama/cursor,
+status-iptal-red kaniti, credential guvenligi, scheduler/lease/retry, musavir
+operasyon UX'i ve kapali pilot server dogrulamasi yapilacaktir.
+
+Mevcut kiralik sunucu odeme nedeniyle kullanici beyanina gore kapali durumdadir.
+Bu durum yerel QNB gelistirmesini engellemez. Ancak hosting panelindeki disk
+saklama/silinme tarihi ayri bir veri koruma isi olarak kontrol edilmelidir.
+
+2026-07-10 ilk uygulama ilerlemesi:
+
+- Yerel ignored `.env.qnb.local` icinde receiver `TEST1`, sender `TEST2`
+  rolleri dogrulandi.
+- Iki hesabin gercek SOAP login'i basarili; TEST1 son 30 gun gelen listesi bos.
+- Secret gostermeyen ve kalici local JSON store ile tekrar/duplicate smoke'u
+  calistirabilen `backend/scripts/run_qnb_sandbox_smoke.py` eklendi.
+- Yeni smoke araci ve mevcut QNB entegrasyon testleri birlikte 11 testle
+  basarili oldu.
+- TEST2 portalinin zorunlu ilk/90 gunluk parola degisikligi kullanici tarafindan
+  tamamlandi ve yeni deger ignored local env'e kaydedildi. Ayri WS
+  kullanicisi/credential'i ile portal credential'i production oncesi ayrilmali.
+
+2026-07-10 QNB uctan uca sandbox kaniti tamamlandi:
+
+- TEST2 credential rotate edildi ve yeni degerle SOAP login `active` kaldi.
+- Resmi QNB API/WSDL kontratina gore `belgeGonderExt`, aktif PK/GB etiket
+  sorgusu ve `gidenBelgeDurumSorgulaExt` adapter davranisi eklendi.
+- `send_qnb_sandbox_invoice.py` TEST2 -> TEST1 tek satirli UBL-TR test faturasi
+  uretip gonderdi. QNB OID dondu ve durum `3 / processed` oldu.
+- Ayni ETTN TEST1 gelen listesinde goruldu; `run_qnb_sandbox_smoke.py` UBL'yi
+  indirdi, document/job olusturdu ve worker bir belgeyi basariyla tamamladi.
+- Canonical sonuc: `TEMELFATURA`, `SATIS`, purchase yonu, 1 satir, 100 TRY
+  matrah, yuzde 20 KDV, 120 TRY odenecek tutar.
+- Dengeli taslak: 770.01 borc 100, 191.01 borc 20, 320.5910611341 alacak 120.
+  Profil/hesap plani olmadigi icin sonuc dogru bicimde `review_required` kaldi.
+- Ikinci sync listede ayni belgeyi gordu ama `downloaded_count=0`,
+  `skipped_duplicate_count=1`; ikinci document/job olusmadi.
+- Sandbox gonderim araci non-test QNB endpoint'lerini reddeder, UBL
+  fatura/gonderici/alici/toplam kontrollerini yapar, gercek gonderim icin
+  `--confirm-send` ister ve sonraki gonderimlerde OID/status receipt saklar.
+- QNB odak testleri 16/16, tam backend paketi 378/378 basarili; `git diff
+  --check` temiz.
+
+Siradaki teknik faz: gelen belge sayfalama/cursor, retry/rate limit ve kalici
+idempotency hardening. Giden e-Fatura adapter cekirdegi yeniden kullanilabilir
+hale geldi; musavir UI/API ve production gonderim yetkisi ayri kabul kapisi
+olmadan acilmayacak.
+
+2026-07-11 QNB Faz 2 sync hardening tamamlandi:
+
+- Liste kontrati `items`, `last_sequence_no`, `has_more` alanli sayfa modeline
+  cevrildi; gercek response'ta `belgeSiraNo` zorunlu.
+- Cursor modu 100'luk sayfalari tarih filtresi eklemeden ilerletiyor. Cursor
+  yalniz sayfanin tum belgeleri duplicate veya basarili oldugunda JSON/Postgres
+  store'a kalici yaziliyor.
+- Bir download/job hatasinda run `partial_failed`; cursor ilerlemiyor ve hatali
+  ETTN identity claim'i serbest birakilarak yeniden denemeye acik kaliyor.
+- Tarihli backfill ile cursor ayni QNB request'ine konmuyor. Tarihli sonuc 100
+  sinirina dayanirsa sessiz eksik alma yerine `backfill_truncated` donuyor.
+- JSON store'da lock altinda, Postgres'te unique workflow record + `ON CONFLICT
+  DO NOTHING` ile mukellef kapsamli ETTN/fallback identity claim eklendi.
+- Gercek TEST1 cursor smoke: cursor `1`; ardisik iki run `listed_count=0`,
+  `status=completed`, cursor degismeden `1` kaldi; QNB logout basarili.
+- Adapter konservatif 150 request/dakika throttle, timeout/429/5xx exponential
+  backoff, max sayfa, guvenli hata kodlari, base64/ZIP boyut ve dosya sayisi,
+  path traversal ve tek XML kontrolleriyle sertlestirildi.
+
+Siradaki faz: QNB gelen belge status/iptal/red/kabul mutabakati. Once gercek
+`gelenBelgeDurumSorgulaExt` response kontrati sandbox'tan alinacak; ardindan
+append-only status evidence, review flag ve portal gorunurlugu eklenecek.
 
 ## Yeni Bilgisayarda Devam Etme
 

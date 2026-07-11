@@ -34,6 +34,16 @@ function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
 }
 
+function qnbStatusLabel(status?: string) {
+  return {
+    received: "Alındı / cevap bekleniyor",
+    accepted: "Kabul edildi",
+    rejected: "Reddedildi",
+    cancelled: "İptal edildi",
+    unknown: "Durum doğrulanamadı",
+  }[String(status || "")] || String(status || "-");
+}
+
 function statementDirectionLabel(direction: StatementLineReview["direction"]) {
   if (direction === "in") return "Giriş";
   if (direction === "out") return "Çıkış";
@@ -415,6 +425,14 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
           />
           <Info label="AI okuma" value={document.canonicalExtractionAiUsed ? "Kullanildi" : "Yok"} />
           <Info label="Sağlayıcı" value={document.provider || document.aiProvider || "-"} />
+          {document.qnbStatus ? <Info label="QNB durumu" value={qnbStatusLabel(document.qnbStatus)} /> : null}
+          {document.qnbStatusCheckedAt ? <Info label="QNB kontrol" value={document.qnbStatusCheckedAt} /> : null}
+          {document.qnbReviewRequired ? (
+            <div className="preview-error-panel" role="status">
+              <strong>{document.qnbStatus === "unknown" ? "QNB durumu doğrulanamadı" : `QNB belgesi ${qnbStatusLabel(document.qnbStatus).toLocaleLowerCase("tr-TR")}`}</strong>
+              <p>{document.qnbStatusDetail || "Muhasebe kaydı otomatik değiştirilmedi. Müşavir kontrolü gerekiyor."}</p>
+            </div>
+          ) : null}
           <Info label="Orijinal ref" value={document.originalDocumentRef || "-"} />
         </aside>
       </div>

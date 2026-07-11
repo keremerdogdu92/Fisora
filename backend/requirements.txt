@@ -10,3 +10,4 @@ xlrd==2.0.1
 psycopg[binary]==3.3.4
 python-multipart==0.0.20
 openai-agents==0.17.6
+cryptography==48.0.0

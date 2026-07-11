@@ -449,8 +449,26 @@ class QnbConnectionPayload(BaseModel):
     password: str
     vkn: str = ""
     erp_code: str = ""
+    environment: Literal["test", "production"] = "test"
 
 
 class QnbSyncPayload(BaseModel):
     start_date: str = ""
     end_date: str = ""
+
+
+class QnbOutgoingStatusPayload(BaseModel):
+    document_oid: str
+    invoice_no: str = ""
+
+
+class QnbOutgoingBulkStatusPayload(BaseModel):
+    document_oids: list[str] = Field(default_factory=list)
+
+
+class QnbIncomingStatusPayload(BaseModel):
+    ettn: str
+
+
+class QnbIncomingBulkStatusPayload(BaseModel):
+    ettns: list[str] = Field(default_factory=list)

@@ -146,6 +146,11 @@ export type PilotDocument = {
   originalDocumentRef: string;
   originalDocumentMimeType: string;
   provider: string;
+  qnbStatus?: string;
+  qnbStatusCheckedAt?: string;
+  qnbStatusChanged?: boolean;
+  qnbReviewRequired?: boolean;
+  qnbStatusDetail?: string;
   issueDate: string;
   amount: string;
   vatRates: string[];

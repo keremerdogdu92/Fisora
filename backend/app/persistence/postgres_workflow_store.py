@@ -14,6 +14,7 @@ from app.domain.portal_access import (
     decide_portal_access,
 )
 from app.domain.session_auth import auth_token_public_payload, credential_public_payload, is_expired, session_public_payload
+from app.domain.qnb_credentials import QnbCredentialCipher
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
@@ -486,6 +487,9 @@ class PostgresWorkflowStore:
             "provider": connection.get("provider") or "qnb_esolutions",
             "updated_at": timestamp,
         }
+        raw_password = str(record.pop("password", "") or "")
+        if raw_password and not record.get("credential_ciphertext"):
+            record["credential_ciphertext"] = QnbCredentialCipher.from_env().encrypt(raw_password)
         record.setdefault("created_at", timestamp)
         return self._upsert_record(client_id, "qnb_connection", client_id, record)
 
@@ -502,6 +506,84 @@ class PostgresWorkflowStore:
         record.setdefault("sync_run_id", str(uuid4()))
         record.setdefault("created_at", timestamp)
         return self._upsert_record(client_id, "qnb_sync_run", str(record["sync_run_id"]), record)
+
+    def get_qnb_sync_cursor(self, *, client_id: str) -> str:
+        record = self._get_record(client_id, "qnb_sync_cursor", client_id) or {}
+        return str(record.get("cursor") or "")
+
+    def save_qnb_sync_cursor(self, *, client_id: str, cursor: str) -> str:
+        self._upsert_record(
+            client_id,
+            "qnb_sync_cursor",
+            client_id,
+            {"client_id": client_id, "cursor": str(cursor or ""), "updated_at": utc_now()},
+        )
+        return str(cursor or "")
+
+    def claim_qnb_document_identity(
+        self,
+        *,
+        client_id: str,
+        identity_key: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        self._ensure_tenant()
+        record = {
+            "client_id": client_id,
+            "identity_key": identity_key,
+            "metadata": metadata or {},
+            "claimed_at": utc_now(),
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    insert into workflow_records (
+                        id, tenant_id, client_id, record_type, record_key, payload
+                    )
+                    values (%s, %s, %s, 'qnb_document_identity', %s, %s)
+                    on conflict (tenant_id, client_id, record_type, record_key) do nothing
+                    returning id
+                    """,
+                    (uuid4(), self.tenant_id, client_id, identity_key, self._json(record)),
+                )
+                return cursor.fetchone() is not None
+
+    def release_qnb_document_identity(self, *, client_id: str, identity_key: str) -> None:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    delete from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'qnb_document_identity' and record_key = %s
+                    """,
+                    (self.tenant_id, client_id, identity_key),
+                )
+
+    def save_qnb_outgoing_invoice(self, *, client_id: str, invoice: dict[str, Any]) -> dict[str, Any]:
+        oid = str(invoice.get("document_oid") or "")
+        if not oid:
+            raise ValueError("QNB outgoing document OID is required")
+        existing = self._get_record(client_id, "qnb_outgoing_invoice", oid) or {}
+        return self._upsert_record(client_id, "qnb_outgoing_invoice", oid, {**existing, **invoice, "client_id": client_id})
+
+    def get_qnb_outgoing_invoice(self, *, client_id: str, document_oid: str) -> dict[str, Any] | None:
+        return self._get_record(client_id, "qnb_outgoing_invoice", document_oid)
+
+    def list_qnb_outgoing_invoices(self, *, client_id: str) -> list[dict[str, Any]]:
+        return self._payloads(client_id, "qnb_outgoing_invoice")
+
+    def append_qnb_outgoing_status_snapshot(self, *, client_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        return self._upsert_record(
+            client_id, "qnb_outgoing_status_snapshot", str(snapshot["snapshot_id"]), {**snapshot, "client_id": client_id}
+        )
+
+    def append_qnb_incoming_status_snapshot(self, *, client_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+        return self._upsert_record(
+            client_id, "qnb_incoming_status_snapshot", str(snapshot["snapshot_id"]), {**snapshot, "client_id": client_id}
+        )
 
     def record_document_pipeline_event(
         self,

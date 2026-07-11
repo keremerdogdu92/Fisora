@@ -126,6 +126,17 @@ def production_readiness_payload(
     real_data_pilot_enabled = _env_bool(source.get("FISORA_REAL_DATA_PILOT_ENABLED", ""), default=False)
     real_data_access_mode = source.get("FISORA_REAL_DATA_ACCESS_MODE", "").strip().lower()
     restricted_live_access = real_data_access_mode in {"tls", "restricted_network", "vpn", "ip_allowlist"}
+    qnb_adapter = source.get("FISORA_QNB_ADAPTER", "fake").strip().lower() or "fake"
+    qnb_runtime = {
+        "adapter": qnb_adapter,
+        "soap_adapter_active": qnb_adapter == "soap",
+        "credential_key_present": bool(source.get("FISORA_QNB_CREDENTIAL_KEY", "").strip()),
+        "erp_code_present": bool(source.get("FISORA_QNB_ERP_CODE", "").strip()),
+        "scheduler_enabled": True,
+    }
+    qnb_runtime["incoming_ready"] = all(
+        qnb_runtime[key] for key in ("soap_adapter_active", "credential_key_present", "erp_code_present", "scheduler_enabled")
+    )
     checks = {
         "auth_not_anonymous": not bool(auth["allows_anonymous_access"]),
         "document_storage_writable": bool(document_storage["ok"]),
@@ -233,6 +244,19 @@ def production_readiness_payload(
         "blocking": real_data_pilot_blocking,
         "checks": real_data_pilot_checks,
     }
+    qnb_pilot_checks = {
+        "incoming_runtime_ready": bool(qnb_runtime["incoming_ready"]),
+        "postgres_store_active": bool(pilot_checks["postgres_store_active"]),
+        "backup_available": bool(backup["ok"]),
+        "restricted_live_access": restricted_live_access,
+    }
+    qnb_pilot_blocking = [key for key, passed in qnb_pilot_checks.items() if not passed]
+    qnb_pilot = {
+        "ready": not qnb_pilot_blocking,
+        "blocking": qnb_pilot_blocking,
+        "checks": qnb_pilot_checks,
+        "runtime": qnb_runtime,
+    }
     return {
         "ready": not blocking,
         "pilot_sellable": pilot_sellable,
@@ -244,6 +268,7 @@ def production_readiness_payload(
         "pilot_blocking": pilot_blocking,
         "commercial_readiness": commercial_readiness,
         "real_data_pilot": real_data_pilot,
+        "qnb_pilot": qnb_pilot,
         "auth": auth,
         "document_storage": document_storage,
         "export_storage": export_storage,

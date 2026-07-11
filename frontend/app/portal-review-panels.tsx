@@ -427,11 +427,15 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
           <Info label="Sağlayıcı" value={document.provider || document.aiProvider || "-"} />
           {document.qnbStatus ? <Info label="QNB durumu" value={qnbStatusLabel(document.qnbStatus)} /> : null}
           {document.qnbStatusCheckedAt ? <Info label="QNB kontrol" value={document.qnbStatusCheckedAt} /> : null}
+          {document.qnbPulledAt ? <Info label="QNB'den alınma" value={document.qnbPulledAt} /> : null}
           {document.qnbReviewRequired ? (
             <div className="preview-error-panel" role="status">
               <strong>{document.qnbStatus === "unknown" ? "QNB durumu doğrulanamadı" : `QNB belgesi ${qnbStatusLabel(document.qnbStatus).toLocaleLowerCase("tr-TR")}`}</strong>
               <p>{document.qnbStatusDetail || "Muhasebe kaydı otomatik değiştirilmedi. Müşavir kontrolü gerekiyor."}</p>
             </div>
+          ) : null}
+          {document.canonicalValidationStatus === "insufficient_evidence" ? (
+            <div className="decision-warning"><strong>Belge kanıtı yetersiz</strong><p>Satır veya toplam bilgileri güvenle doğrulanamadı. Muhasebe taslağını onaylamadan önce özgün belgeyi kontrol edin.</p></div>
           ) : null}
           <Info label="Orijinal ref" value={document.originalDocumentRef || "-"} />
         </aside>

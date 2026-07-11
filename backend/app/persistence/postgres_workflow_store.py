@@ -507,6 +507,44 @@ class PostgresWorkflowStore:
         record.setdefault("created_at", timestamp)
         return self._upsert_record(client_id, "qnb_sync_run", str(record["sync_run_id"]), record)
 
+    def list_qnb_sync_runs(self, *, client_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._payloads(client_id, "qnb_sync_run")
+        return sorted(rows, key=lambda row: str(row.get("updated_at") or ""), reverse=True)[:max(limit, 1)]
+
+    def save_qnb_sync_policy(self, *, client_id: str, policy: dict[str, Any]) -> dict[str, Any]:
+        existing = self._get_record(client_id, "qnb_sync_policy", client_id) or {}
+        timestamp = utc_now()
+        record = {**existing, **policy, "client_id": client_id, "updated_at": timestamp}
+        record.setdefault("created_at", timestamp)
+        return self._upsert_record(client_id, "qnb_sync_policy", client_id, record)
+
+    def get_qnb_sync_policy(self, *, client_id: str) -> dict[str, Any] | None:
+        return self._get_record(client_id, "qnb_sync_policy", client_id)
+
+    def claim_due_qnb_sync_policy(self, *, worker_id: str, now: str, lease_expires_at: str) -> dict[str, Any] | None:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, payload from workflow_records
+                    where tenant_id = %s and record_type = 'qnb_sync_policy'
+                      and coalesce((payload->>'enabled')::boolean, false) = true
+                      and coalesce(payload->>'next_run_at', '') <= %s
+                      and coalesce(payload->>'lease_expires_at', '') <= %s
+                    order by payload->>'next_run_at'
+                    for update skip locked limit 1
+                    """,
+                    (self.tenant_id, now, now),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                record = dict(row[1] or {})
+                record.update({"lease_owner": worker_id, "lease_expires_at": lease_expires_at, "last_attempt_at": now})
+                cursor.execute("update workflow_records set payload = %s, updated_at = now() where id = %s", (self._json(record), row[0]))
+                return record
+
     def get_qnb_sync_cursor(self, *, client_id: str) -> str:
         record = self._get_record(client_id, "qnb_sync_cursor", client_id) or {}
         return str(record.get("cursor") or "")

@@ -457,6 +457,14 @@ class QnbSyncPayload(BaseModel):
     end_date: str = ""
 
 
+class QnbSyncPolicyPayload(BaseModel):
+    enabled: bool = False
+    start_from_date: str = ""
+    frequency_minutes: int = Field(default=60, ge=5, le=1440)
+    max_documents_per_run: int = Field(default=100, ge=1, le=1000)
+    status_reconciliation_enabled: bool = True
+
+
 class QnbOutgoingStatusPayload(BaseModel):
     document_oid: str
     invoice_no: str = ""

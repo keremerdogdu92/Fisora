@@ -597,6 +597,40 @@ async function syncQnbIncomingInvoices({
   });
 }
 
+async function fetchQnbSyncPolicy({ apiBaseUrl, clientId, userId = DEFAULT_UPLOAD_USER_ID, sessionToken = "", fetchImpl = fetch }) {
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}/sync-policy`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
+async function fetchQnbHealth({ apiBaseUrl, clientId, userId = DEFAULT_UPLOAD_USER_ID, sessionToken = "", fetchImpl = fetch }) {
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}/health`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
+async function saveQnbSyncPolicy({ apiBaseUrl, clientId, userId = DEFAULT_UPLOAD_USER_ID, sessionToken = "", policy, fetchImpl = fetch }) {
+  return postJson({
+    apiBaseUrl,
+    path: `/phase0/qnb/connections/${encodeURIComponent(String(clientId || "").trim())}/sync-policy`,
+    payload: {
+      enabled: Boolean(policy?.enabled),
+      start_from_date: String(policy?.startFromDate || ""),
+      frequency_minutes: Number(policy?.frequencyMinutes || 60),
+      max_documents_per_run: Number(policy?.maxDocumentsPerRun || 100),
+      status_reconciliation_enabled: Boolean(policy?.statusReconciliationEnabled),
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
 async function uploadChartAccountsToBackend({
   apiBaseUrl,
   clientId,
@@ -1083,6 +1117,8 @@ module.exports = {
   disableQnbConnection,
   ensureUploadWorkspace,
   fetchQnbConnectionStatus,
+  fetchQnbHealth,
+  fetchQnbSyncPolicy,
   loginWithPassword,
   parseDelegatedSessionHash,
   parseChartAccountsFromBackend,
@@ -1096,6 +1132,7 @@ module.exports = {
   resetTestData,
   resolveApiBaseUrl,
   saveQnbConnectionToBackend,
+  saveQnbSyncPolicy,
   sessionAuthErrorMessage,
   setPortalPassword,
   storeReviewDecision,

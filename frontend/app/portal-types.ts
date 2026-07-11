@@ -148,6 +148,7 @@ export type PilotDocument = {
   provider: string;
   qnbStatus?: string;
   qnbStatusCheckedAt?: string;
+  qnbPulledAt?: string;
   qnbStatusChanged?: boolean;
   qnbReviewRequired?: boolean;
   qnbStatusDetail?: string;

@@ -105,6 +105,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       provider: safeText(row.providerHint, "Tedarikçi bilinmiyor"),
       qnbStatus: safeText(rowRecord.source_qnb_normalized_status ?? rowRecord.sourceQnbNormalizedStatus),
       qnbStatusCheckedAt: safeText(rowRecord.source_qnb_status_checked_at ?? rowRecord.sourceQnbStatusCheckedAt),
+      qnbPulledAt: safeText(rowRecord.source_pulled_at ?? rowRecord.sourcePulledAt),
       qnbStatusChanged: Boolean(rowRecord.source_qnb_status_changed ?? rowRecord.sourceQnbStatusChanged),
       qnbReviewRequired: Boolean(rowRecord.qnb_review_required ?? rowRecord.qnbReviewRequired),
       qnbStatusDetail: safeText(rowRecord.source_qnb_status_detail ?? rowRecord.sourceQnbStatusDetail),

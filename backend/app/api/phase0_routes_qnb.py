@@ -15,7 +15,9 @@ from app.api.phase0_schemas import (
     QnbOutgoingBulkStatusPayload,
     QnbOutgoingStatusPayload,
     QnbSyncPayload,
+    QnbSyncPolicyPayload,
 )
+from app.domain.qnb_scheduler import normalize_qnb_sync_policy
 
 
 router = APIRouter()
@@ -101,6 +103,59 @@ def sync_qnb_incoming_invoices(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/qnb/connections/{client_id}/sync-policy")
+def get_qnb_sync_policy(
+    client_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    _require_qnb_admin_access(client_id, request_user_id(x_fisora_user_id, x_fisora_session, fisora_session))
+    store = get_qnb_connection_service().store
+    return store.get_qnb_sync_policy(client_id=client_id) or normalize_qnb_sync_policy({})
+
+
+@router.get("/qnb/connections/{client_id}/health")
+def get_qnb_health(
+    client_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    _require_qnb_admin_access(client_id, request_user_id(x_fisora_user_id, x_fisora_session, fisora_session))
+    service = get_qnb_connection_service()
+    connection = service.public_connection(client_id=client_id)
+    policy = service.store.get_qnb_sync_policy(client_id=client_id) or normalize_qnb_sync_policy({})
+    runs = service.store.list_qnb_sync_runs(client_id=client_id, limit=10)
+    latest = runs[0] if runs else {}
+    return {
+        "client_id": client_id,
+        "connection": connection,
+        "policy": policy,
+        "latest_run": latest,
+        "recent_runs": runs,
+        "cursor": service.store.get_qnb_sync_cursor(client_id=client_id),
+        "health_status": "error" if policy.get("last_run_status") == "failed" else "active" if connection.get("status") == "active" else connection.get("status", "missing"),
+        "safe_message": "Son otomatik senkronizasyon başarısız; bağlantıyı test edin." if policy.get("last_run_status") == "failed" else "QNB otomatik belge akışı çalışıyor." if connection.get("status") == "active" and policy.get("enabled") else "QNB bağlantısı hazır; otomatik akış kapalı." if connection.get("status") == "active" else "QNB bağlantısı kurulmalı.",
+    }
+
+
+@router.post("/qnb/connections/{client_id}/sync-policy")
+def save_qnb_sync_policy(
+    client_id: str,
+    payload: QnbSyncPolicyPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    _require_qnb_admin_access(client_id, request_user_id(x_fisora_user_id, x_fisora_session, fisora_session))
+    service = get_qnb_connection_service()
+    if payload.enabled:
+        service._active_credentials(client_id)
+    policy = normalize_qnb_sync_policy(payload.model_dump())
+    return service.store.save_qnb_sync_policy(client_id=client_id, policy=policy)
+
+
 @router.post("/qnb/connections/{client_id}/outgoing-invoices/status")
 def reconcile_qnb_outgoing_invoice(
     client_id: str,
@@ -153,6 +208,21 @@ def reconcile_qnb_incoming_invoice(
     _require_qnb_admin_access(client_id, request_user_id(x_fisora_user_id, x_fisora_session, fisora_session))
     try:
         return get_qnb_connection_service().reconcile_incoming_invoice(client_id=client_id, ettn=payload.ettn)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/qnb/connections/{client_id}/incoming-invoices/pdf")
+def download_qnb_incoming_pdf(
+    client_id: str,
+    payload: QnbIncomingStatusPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    _require_qnb_admin_access(client_id, request_user_id(x_fisora_user_id, x_fisora_session, fisora_session))
+    try:
+        return get_qnb_connection_service().download_incoming_pdf(client_id=client_id, ettn=payload.ettn)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -451,6 +451,7 @@ function processedBackendDocument(document, workspace, client) {
     provider: safeText(result.provider_hint, "Çalışma alanı"),
     qnbStatus: safeText(uploadedDocument?.source_qnb_normalized_status),
     qnbStatusCheckedAt: safeText(uploadedDocument?.source_qnb_status_checked_at),
+    qnbPulledAt: safeText(uploadedDocument?.source_pulled_at),
     qnbStatusChanged: Boolean(uploadedDocument?.source_qnb_status_changed),
     qnbReviewRequired: Boolean(uploadedDocument?.qnb_review_required),
     qnbStatusDetail: safeText(uploadedDocument?.source_qnb_status_detail),

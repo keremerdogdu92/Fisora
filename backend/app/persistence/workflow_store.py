@@ -44,6 +44,7 @@ def empty_store() -> dict[str, Any]:
         "auth_tokens": {},
         "qnb_connections": {},
         "qnb_sync_runs": {},
+        "qnb_sync_policies": {},
         "qnb_sync_cursors": {},
         "qnb_document_identities": {},
         "qnb_outgoing_invoices": {},
@@ -513,6 +514,40 @@ class JsonWorkflowStore:
         data.setdefault("qnb_sync_runs", {})[key] = record
         self._write(data)
         return deepcopy(record)
+
+    def list_qnb_sync_runs(self, *, client_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        rows = [deepcopy(row) for row in self._read().get("qnb_sync_runs", {}).values() if row.get("client_id") == client_id]
+        return sorted(rows, key=lambda row: str(row.get("updated_at") or ""), reverse=True)[:max(limit, 1)]
+
+    def save_qnb_sync_policy(self, *, client_id: str, policy: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            data = self._read()
+            timestamp = utc_now()
+            existing = data.setdefault("qnb_sync_policies", {}).get(client_id, {})
+            record = {**existing, **policy, "client_id": client_id, "updated_at": timestamp}
+            record.setdefault("created_at", timestamp)
+            data["qnb_sync_policies"][client_id] = record
+            self._write(data)
+        return deepcopy(record)
+
+    def get_qnb_sync_policy(self, *, client_id: str) -> dict[str, Any] | None:
+        record = self._read().get("qnb_sync_policies", {}).get(client_id)
+        return deepcopy(record) if record else None
+
+    def claim_due_qnb_sync_policy(self, *, worker_id: str, now: str, lease_expires_at: str) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._read()
+            policies = data.setdefault("qnb_sync_policies", {})
+            candidates = sorted(policies.values(), key=lambda row: str(row.get("next_run_at") or ""))
+            for policy in candidates:
+                if not policy.get("enabled") or str(policy.get("next_run_at") or "") > now:
+                    continue
+                if str(policy.get("lease_expires_at") or "") > now:
+                    continue
+                policy.update({"lease_owner": worker_id, "lease_expires_at": lease_expires_at, "last_attempt_at": now})
+                self._write(data)
+                return deepcopy(policy)
+        return None
 
     def get_qnb_sync_cursor(self, *, client_id: str) -> str:
         data = self._read()

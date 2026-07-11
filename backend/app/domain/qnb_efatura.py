@@ -126,6 +126,13 @@ class QnbEfaturaAdapter(Protocol):
     ) -> QnbDownloadedDocument:
         ...
 
+    def download_incoming_invoice_pdf(
+        self,
+        credentials: QnbConnectionCredentials,
+        invoice: QnbInvoiceSummary,
+    ) -> QnbDownloadedDocument:
+        ...
+
     def get_outgoing_invoice_status(self, credentials: QnbConnectionCredentials, *, document_oid: str) -> QnbOutgoingInvoiceStatus:
         ...
 
@@ -149,12 +156,14 @@ class FakeQnbEfaturaAdapter:
         page_size: int = QNB_LIST_PAGE_SIZE,
         outgoing_statuses: dict[str, QnbOutgoingInvoiceStatus] | None = None,
         incoming_statuses: dict[str, QnbIncomingInvoiceStatus] | None = None,
+        pdf_downloads: dict[str, bytes] | None = None,
     ) -> None:
         self.invoices = invoices or []
         self.downloads = downloads or {}
         self.page_size = page_size
         self.outgoing_statuses = outgoing_statuses or {}
         self.incoming_statuses = incoming_statuses or {}
+        self.pdf_downloads = pdf_downloads or {}
 
     def test_connection(self, credentials: QnbConnectionCredentials) -> QnbConnectionTestResult:
         if not credentials.username or not credentials.password:
@@ -217,6 +226,12 @@ class FakeQnbEfaturaAdapter:
             document_oid,
             QnbOutgoingInvoiceStatus(document_oid, "", "unknown", description="status unavailable"),
         )
+
+    def download_incoming_invoice_pdf(self, credentials: QnbConnectionCredentials, invoice: QnbInvoiceSummary) -> QnbDownloadedDocument:
+        content = self.pdf_downloads.get(invoice.ettn)
+        if content is None:
+            raise ValueError(f"fake QNB PDF download missing for ETTN: {invoice.ettn}")
+        return QnbDownloadedDocument(invoice.ettn, f"qnb-{invoice.ettn}.pdf", content, "application/pdf")
 
     def get_incoming_invoice_status(self, credentials: QnbConnectionCredentials, *, ettn: str) -> QnbIncomingInvoiceStatus:
         return self.incoming_statuses.get(ettn, QnbIncomingInvoiceStatus(ettn, "", "unknown"))
@@ -325,6 +340,17 @@ class QnbSoapEfaturaAdapter:
             file_name=f"qnb-{invoice.ettn}.xml",
             content=content,
         )
+
+    def download_incoming_invoice_pdf(self, credentials: QnbConnectionCredentials, invoice: QnbInvoiceSummary) -> QnbDownloadedDocument:
+        self._login(credentials)
+        body = _soap_operation(
+            "gelenBelgeleriIndirExt",
+            _incoming_parameter_xml(credentials=credentials, ettn=invoice.ettn, document_format="PDF"),
+            namespace=QNB_CONNECTOR_NAMESPACE,
+        )
+        response_xml = self._post_soap(_service_url(credentials.base_url, "connectorService"), "gelenBelgeleriIndirExt", body)
+        content = _decode_qnb_download_payload(_first_return_text(response_xml), expected_suffix=".pdf")
+        return QnbDownloadedDocument(invoice.ettn, f"qnb-{invoice.ettn}.pdf", content, "application/pdf")
 
     def list_active_mailbox_labels(self, credentials: QnbConnectionCredentials) -> list[QnbMailboxLabel]:
         self._login(credentials)
@@ -715,14 +741,14 @@ def _parse_qnb_invoice_summaries(text: str, *, require_sequence: bool = False) -
     return invoices
 
 
-def _decode_qnb_download_payload(encoded: str) -> bytes:
+def _decode_qnb_download_payload(encoded: str, *, expected_suffix: str = ".xml") -> bytes:
     try:
         decoded = base64.b64decode(str(encoded or "").strip(), validate=True)
     except Exception as exc:
         raise ValueError("QNB download payload is not valid base64") from exc
     if len(decoded) > QNB_MAX_COMPRESSED_BYTES:
         raise ValueError("QNB download payload exceeds compressed size limit")
-    if decoded.lstrip().startswith(b"<"):
+    if expected_suffix == ".xml" and decoded.lstrip().startswith(b"<"):
         if len(decoded) > QNB_MAX_UNCOMPRESSED_BYTES:
             raise ValueError("QNB XML payload exceeds size limit")
         return decoded
@@ -737,10 +763,14 @@ def _decode_qnb_download_payload(encoded: str) -> bytes:
                     raise ValueError("QNB download zip includes an unsafe path")
                 if entry.file_size > QNB_MAX_UNCOMPRESSED_BYTES:
                     raise ValueError("QNB download zip entry exceeds size limit")
-            xml_entries = [entry for entry in entries if entry.filename.lower().endswith(".xml")]
-            if len(xml_entries) != 1:
-                raise ValueError("QNB download zip must include exactly one XML document")
-            return archive.read(xml_entries[0])
+            matching_entries = [entry for entry in entries if entry.filename.lower().endswith(expected_suffix)]
+            if len(matching_entries) != 1:
+                label = "XML" if expected_suffix == ".xml" else expected_suffix.upper().lstrip(".")
+                raise ValueError(f"QNB download zip must include exactly one {label} document")
+            content = archive.read(matching_entries[0])
+            if expected_suffix == ".pdf" and not content.startswith(b"%PDF-"):
+                raise ValueError("QNB PDF payload has an invalid header")
+            return content
     except zipfile.BadZipFile as exc:
         raise ValueError("QNB download payload is neither XML nor a zip archive") from exc
 
@@ -773,11 +803,13 @@ class QnbSyncService:
         document_storage_path: Path,
         adapter: QnbEfaturaAdapter,
         max_pages: int = 20,
+        max_documents: int = 100,
     ) -> None:
         self.store = store
         self.document_storage_path = Path(document_storage_path)
         self.adapter = adapter
         self.max_pages = max(max_pages, 1)
+        self.max_documents = max(max_documents, 1)
 
     def sync_incoming_invoices(
         self,
@@ -820,6 +852,10 @@ class QnbSyncService:
             result["listed_count"] += len(page.items)
             page_failed = False
             for invoice in page.items:
+                if int(result["downloaded_count"]) >= self.max_documents:
+                    result["status"] = "partial_completed"
+                    result["limit_reached"] = True
+                    break
                 if self._is_duplicate(client_id=client_id, invoice=invoice):
                     result["skipped_duplicate_count"] += 1
                     self._record_operation(client_id, "qnb_duplicate_skipped", sync_run_id, {"ettn": invoice.ettn})
@@ -860,6 +896,8 @@ class QnbSyncService:
                     )
                     if identity_key and hasattr(self.store, "release_qnb_document_identity"):
                         self.store.release_qnb_document_identity(client_id=client_id, identity_key=identity_key)
+            if result.get("limit_reached"):
+                break
             if page_failed:
                 result["status"] = "partial_failed"
                 break
@@ -964,6 +1002,7 @@ class QnbSyncService:
                 "source_sync_run_id": sync_run_id,
                 "source_content_sha256": content_sha256,
                 "source_identity_key": _fallback_identity_key(invoice),
+                "source_pulled_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
         )
         saved = self.store.save_uploaded_document(client_id=client_id, document=payload)
@@ -1102,6 +1141,8 @@ class QnbConnectionService:
                 "erp_code": platform_erp_code,
                 "status": test.status,
                 "last_error": "" if test.ok else test.status,
+                "last_tested_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "last_success_at": datetime.now(UTC).isoformat(timespec="seconds") if test.ok else str(existing.get("last_success_at") or ""),
             },
         )
         self._record_connection_audit(client_id, actor_user_id, "qnb_connection_saved")
@@ -1121,7 +1162,7 @@ class QnbConnectionService:
     def public_connection(self, *, client_id: str) -> dict[str, object]:
         return public_qnb_connection_payload(self.store.get_qnb_connection(client_id=client_id))
 
-    def sync_incoming_invoices(self, *, client_id: str, start_date: str = "", end_date: str = "") -> dict[str, object]:
+    def sync_incoming_invoices(self, *, client_id: str, start_date: str = "", end_date: str = "", max_documents: int = 100) -> dict[str, object]:
         credentials = self._active_credentials(client_id)
         cursor = ""
         if not start_date and not end_date and hasattr(self.store, "get_qnb_sync_cursor"):
@@ -1130,6 +1171,7 @@ class QnbConnectionService:
             store=self.store,
             document_storage_path=self.document_storage_path,
             adapter=self.adapter,
+            max_documents=max_documents,
         ).sync_incoming_invoices(
             client_id=client_id,
             credentials=credentials,
@@ -1167,6 +1209,26 @@ class QnbConnectionService:
             self.store.append_qnb_outgoing_status_snapshot(client_id=client_id, snapshot=snapshot)
             current = self.store.save_qnb_outgoing_invoice(client_id=client_id, invoice=snapshot)
             return {**current, "snapshot_id": snapshot["snapshot_id"]}
+        finally:
+            if hasattr(self.adapter, "close_session"):
+                self.adapter.close_session(credentials)
+
+    def download_incoming_pdf(self, *, client_id: str, ettn: str) -> dict[str, object]:
+        normalized_ettn = str(ettn or "").strip()
+        workspace = self.store.get_workspace(client_id)
+        source = next((item for item in workspace.get("uploaded_documents", []) if str(item.get("source_external_uuid") or item.get("source_qnb_ettn") or "") == normalized_ettn and str(item.get("source_provider") or "") == SOURCE_PROVIDER), None)
+        if not source:
+            raise ValueError("QNB incoming document was not found in the client workspace")
+        existing = next((item for item in workspace.get("uploaded_documents", []) if str(item.get("source_parent_document_ref") or "") == str(source.get("document_ref") or "") and str(item.get("source_evidence_kind") or "") == "qnb_pdf"), None)
+        if existing:
+            return existing
+        credentials = self._active_credentials(client_id)
+        invoice = QnbInvoiceSummary(normalized_ettn, str(source.get("source_invoice_no") or ""), str(source.get("source_qnb_sequence_no") or ""), str(source.get("source_issue_date") or ""), str(source.get("source_supplier_tax_id") or ""), str(source.get("source_supplier_title") or ""), str(source.get("source_payable_total") or ""))
+        try:
+            downloaded = self.adapter.download_incoming_invoice_pdf(credentials, invoice)
+            stored = store_document_content(base_dir=self.document_storage_path, client_id=client_id, file_name=downloaded.file_name, document_type="invoice", intake_category="purchase_invoice", uploaded_by="qnb_esolutions", content=downloaded.content)
+            payload = {**asdict(stored), "source_provider": SOURCE_PROVIDER, "source_external_uuid": normalized_ettn, "source_parent_document_ref": str(source.get("document_ref") or ""), "source_evidence_kind": "qnb_pdf", "source_content_sha256": hashlib.sha256(downloaded.content).hexdigest(), "source_pulled_at": datetime.now(UTC).isoformat(timespec="seconds"), "processing_status": "evidence_only"}
+            return self.store.save_uploaded_document(client_id=client_id, document=payload)
         finally:
             if hasattr(self.adapter, "close_session"):
                 self.adapter.close_session(credentials)

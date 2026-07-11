@@ -98,6 +98,8 @@ export function SettingsView({
   onQnbSyncIncoming,
   onResetTestData,
   qnbConnection,
+  qnbHealth,
+  qnbPolicy,
   qnbStatus,
   qnbSyncWindow,
   selectedClient,
@@ -139,10 +141,26 @@ export function SettingsView({
     password: string;
     vkn: string;
   };
+  qnbHealth: {
+    safeMessage: string; lastSuccessAt: string; lastAttemptAt: string; nextRunAt: string; cursor: string;
+    listedCount: number; downloadedCount: number; duplicateCount: number; failedCount: number;
+  };
+  qnbPolicy: {
+    enabled: boolean;
+    frequencyMinutes: number;
+    maxDocumentsPerRun: number;
+    statusReconciliationEnabled: boolean;
+    message: string;
+    set: (patch: Record<string, unknown>) => void;
+    save: () => void | Promise<void>;
+  };
   qnbStatus: {
     message: string;
     maskedUsername: string;
     status: string;
+    environment: string;
+    lastTestedAt: string;
+    lastError: string;
   };
   qnbSyncWindow: {
     startDate: string;
@@ -247,7 +265,26 @@ export function SettingsView({
           </div>
           <div className="settings-grid">
             <Info label="Kullanıcı" value={qnbStatus.maskedUsername || "-"} />
+            <Info label="Ortam" value={qnbStatus.environment === "production" ? "Canlı" : qnbStatus.environment === "test" ? "Test" : "-"} />
+            <Info label="Son bağlantı testi" value={qnbStatus.lastTestedAt || "-"} />
+            <Info label="Bağlantı sonucu" value={qnbStatus.lastError || (qnbStatus.status === "active" ? "Bağlantı başarılı" : "-")} />
             <Info label="Sync" value={qnbSyncWindow.message || "Henüz çalışmadı"} />
+          </div>
+          <div className="qnb-sync-row">
+            <label><input checked={qnbPolicy.enabled} onChange={(event) => qnbPolicy.set({ enabled: event.target.checked })} type="checkbox" /> Otomatik al</label>
+            <select aria-label="QNB senkronizasyon sıklığı" onChange={(event) => qnbPolicy.set({ frequencyMinutes: Number(event.target.value) })} value={qnbPolicy.frequencyMinutes}>
+              <option value={15}>15 dakikada</option><option value={30}>30 dakikada</option><option value={60}>Saatte bir</option><option value={240}>4 saatte bir</option>
+            </select>
+            <button className="secondary" disabled={!selectedClient || qnbStatus.status !== "active"} onClick={qnbPolicy.save} type="button">Otomatik akışı kaydet</button>
+          </div>
+          {qnbPolicy.message ? <p>{qnbPolicy.message}</p> : null}
+          <div className="settings-grid" aria-label="QNB senkronizasyon sağlığı">
+            <Info label="Akış" value={qnbHealth.safeMessage || "Henüz otomatik çalışma yok"} />
+            <Info label="Son başarılı" value={qnbHealth.lastSuccessAt || "-"} />
+            <Info label="Son deneme" value={qnbHealth.lastAttemptAt || "-"} />
+            <Info label="Sonraki çalışma" value={qnbHealth.nextRunAt || "-"} />
+            <Info label="Cursor" value={qnbHealth.cursor || "Henüz oluşmadı"} />
+            <Info label="Son sonuç" value={`${qnbHealth.listedCount} listelendi / ${qnbHealth.downloadedCount} alındı / ${qnbHealth.duplicateCount} tekrar / ${qnbHealth.failedCount} hata`} />
           </div>
         </section>
       ) : null}

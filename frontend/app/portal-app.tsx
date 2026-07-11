@@ -176,8 +176,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const clients = data.clients;
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
   const {
-    qnbConnection,
-    qnbStatus,
+    qnbConnection, qnbStatus, qnbHealth,
+    qnbPolicy,
     qnbSyncWindow,
     disableQnb,
     refreshQnbStatus,
@@ -579,7 +579,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onLogout={logout}
           onQnbConnectionChange={updateQnbConnection} onQnbDisable={disableQnb} onQnbRefreshStatus={refreshQnbStatus} onQnbSaveConnection={saveQnbConnection} onQnbSyncIncoming={syncQnbIncoming}
           localFallbackAllowed={localFallbackAllowed}
-          qnbConnection={qnbConnection} qnbStatus={qnbStatus} qnbSyncWindow={qnbSyncWindow}
+          qnbConnection={qnbConnection} qnbStatus={qnbStatus} qnbSyncWindow={qnbSyncWindow} qnbPolicy={qnbPolicy} qnbHealth={qnbHealth}
           readinessView={readinessView}
           selectedClient={selectedClient}
           session={session}

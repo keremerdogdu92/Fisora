@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from datetime import UTC, datetime
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -41,6 +42,7 @@ from app.domain.qnb_efatura import (
 )
 from app.domain.qnb_sandbox_outgoing import QnbSandboxParty, build_qnb_sandbox_invoice_ubl
 from app.domain.qnb_credentials import QnbCredentialCipher, validate_qnb_endpoint
+from app.domain.qnb_scheduler import QnbScheduler, due_qnb_status_ettns, normalize_qnb_sync_policy
 from app.persistence.workflow_store import JsonWorkflowStore
 
 
@@ -92,7 +94,81 @@ def zipped_base64_xml(content: bytes) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+def zipped_base64_file(name: str, content: bytes) -> str:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(name, content)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 class QnbIntegrationTests(unittest.TestCase):
+    def test_qnb_scheduler_claims_due_policy_and_schedules_next_run(self) -> None:
+        class Service:
+            def sync_incoming_invoices(self, *, client_id: str, max_documents: int = 100):
+                return {"status": "completed", "downloaded_count": 1}
+
+            def reconcile_incoming_invoices(self, *, client_id: str):
+                return {"status": "completed", "updated_count": 1}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=UTC)
+            store.save_qnb_sync_policy(
+                client_id="client-1",
+                policy=normalize_qnb_sync_policy({"enabled": True, "frequency_minutes": 30}, now=now),
+            )
+            result = QnbScheduler(store=store, service_factory=Service, worker_id="worker-a").run_due_once(now=now)
+
+            self.assertEqual(result["client_id"], "client-1")
+            policy = store.get_qnb_sync_policy(client_id="client-1")
+            self.assertEqual(policy["last_run_status"], "completed")
+            self.assertEqual(policy["consecutive_failure_count"], 0)
+            self.assertEqual(policy["lease_owner"], "")
+            self.assertEqual(policy["next_run_at"], "2026-07-11T12:30:00+00:00")
+
+    def test_qnb_scheduler_lease_prevents_double_claim_and_failure_backs_off(self) -> None:
+        class FailingService:
+            def sync_incoming_invoices(self, *, client_id: str, max_documents: int = 100):
+                raise RuntimeError("provider unavailable")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=UTC)
+            store.save_qnb_sync_policy(
+                client_id="client-1",
+                policy=normalize_qnb_sync_policy({"enabled": True, "frequency_minutes": 15}, now=now),
+            )
+            claimed = store.claim_due_qnb_sync_policy(
+                worker_id="worker-a", now="2026-07-11T12:00:00+00:00", lease_expires_at="2026-07-11T12:10:00+00:00"
+            )
+            self.assertIsNotNone(claimed)
+            self.assertIsNone(store.claim_due_qnb_sync_policy(
+                worker_id="worker-b", now="2026-07-11T12:00:00+00:00", lease_expires_at="2026-07-11T12:10:00+00:00"
+            ))
+            store.save_qnb_sync_policy(client_id="client-1", policy={**claimed, "lease_owner": "", "lease_expires_at": ""})
+            result = QnbScheduler(store=store, service_factory=FailingService, worker_id="worker-b").run_due_once(now=now)
+            self.assertEqual(result["error_code"], "RuntimeError")
+            self.assertEqual(result["policy"]["next_run_at"], "2026-07-11T12:30:00+00:00")
+
+    def test_qnb_status_schedule_prioritizes_recent_and_risk_sensitive_documents(self) -> None:
+        now = datetime(2026, 7, 11, 12, 0, tzinfo=UTC)
+        workspace = {"uploaded_documents": [
+            {"source_provider": "qnb_esolutions", "source_qnb_ettn": "recent", "source_issue_date": "2026-07-10", "source_qnb_status_checked_at": "2026-07-11T05:00:00+00:00"},
+            {"source_provider": "qnb_esolutions", "source_qnb_ettn": "old-safe", "source_issue_date": "2026-01-01", "source_qnb_status_checked_at": "2026-07-10T12:00:00+00:00"},
+            {"source_provider": "qnb_esolutions", "source_qnb_ettn": "exported", "source_issue_date": "2026-06-01", "source_qnb_status_checked_at": "2026-07-10T11:00:00+00:00", "export_status": "exported"},
+        ]}
+        self.assertEqual(due_qnb_status_ettns(workspace, now=now, limit=10), ["recent", "exported"])
+
+    def test_qnb_expired_lease_can_be_reclaimed_after_worker_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            now = datetime(2026, 7, 11, 12, 0, tzinfo=UTC)
+            store.save_qnb_sync_policy(client_id="client-1", policy=normalize_qnb_sync_policy({"enabled": True}, now=now))
+            first = store.claim_due_qnb_sync_policy(worker_id="worker-before-restart", now="2026-07-11T12:00:00+00:00", lease_expires_at="2026-07-11T12:10:00+00:00")
+            self.assertIsNotNone(first)
+            reclaimed = store.claim_due_qnb_sync_policy(worker_id="worker-after-restart", now="2026-07-11T12:11:00+00:00", lease_expires_at="2026-07-11T12:21:00+00:00")
+            self.assertEqual(reclaimed["lease_owner"], "worker-after-restart")
+
     def test_qnb_connection_secret_is_encrypted_and_metadata_update_preserves_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             key_file = Path(temp_dir) / "qnb.key"
@@ -191,7 +267,7 @@ class QnbIntegrationTests(unittest.TestCase):
             )
             store.save_uploaded_document(
                 client_id="client-1",
-                document={"document_id": "doc-1", "source_provider": "qnb_esolutions", "source_qnb_ettn": ettn},
+                document={"document_id": "doc-1", "source_provider": "qnb_esolutions", "source_external_uuid": ettn},
             )
             result = QnbConnectionService(
                 store=store, document_storage_path=Path(temp_dir) / "documents", adapter=adapter
@@ -354,11 +430,36 @@ class QnbIntegrationTests(unittest.TestCase):
             ),
             invoice,
         )
-
         self.assertEqual(document.file_name, "qnb-11111111-2222-3333-4444-555555555555.xml")
         self.assertEqual(document.content, UBL_XML)
         self.assertIn("<belgeFormati>UBL</belgeFormati>", str(http_client.requests[1]["content"]))
         self.assertIn("<ettn>11111111-2222-3333-4444-555555555555</ettn>", str(http_client.requests[1]["content"]))
+
+    def test_qnb_soap_adapter_downloads_pdf_evidence_with_official_format_parameter(self) -> None:
+        pdf = b"%PDF-1.7\nQNB test evidence"
+        http_client = FakeSoapHttpClient([
+            soap_body("<ns2:wsLoginResponse xmlns:ns2=\"http://service.earsiv.qnb.com/\" />"),
+            soap_body(f"<ns2:gelenBelgeleriIndirExtResponse xmlns:ns2=\"http://service.efatura.qnb.com/\"><return>{zipped_base64_file('invoice.pdf', pdf)}</return></ns2:gelenBelgeleriIndirExtResponse>"),
+        ])
+        adapter = QnbSoapEfaturaAdapter(http_client=http_client)
+        invoice = QnbInvoiceSummary("ettn-1", "QNB1", "42", "20260709", "5910611341", "Satici", "120")
+        document = adapter.download_incoming_invoice_pdf(QnbConnectionCredentials("https://erpefaturatest2.qnbesolutions.com.tr/efatura/ws", "user", "secret", "5910611341", "FSR31422"), invoice)
+        self.assertEqual(document.content, pdf)
+        self.assertEqual(document.content_type, "application/pdf")
+        self.assertIn("<belgeFormati>PDF</belgeFormati>", str(http_client.requests[1]["content"]))
+
+    def test_qnb_pdf_evidence_is_linked_to_ubl_and_idempotent(self) -> None:
+        pdf = b"%PDF-1.7\nlinked evidence"
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(os.environ, {"FISORA_QNB_CREDENTIAL_KEY_FILE": str(Path(temp_dir) / "qnb.key")}):
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.save_qnb_connection(client_id="client-1", connection={"status": "active", "base_url": "https://erpefaturatest1.qnbesolutions.com.tr/efatura/ws", "username": "u", "password": "p", "vkn": "1", "erp_code": "ERP"})
+            source = store.save_uploaded_document(client_id="client-1", document={"document_ref": "ubl-1", "document_type": "einvoice_xml", "source_provider": "qnb_esolutions", "source_external_uuid": "ettn-1", "source_invoice_no": "QNB1"})
+            service = QnbConnectionService(store=store, document_storage_path=Path(temp_dir) / "documents", adapter=FakeQnbEfaturaAdapter(pdf_downloads={"ettn-1": pdf}))
+            first = service.download_incoming_pdf(client_id="client-1", ettn="ettn-1")
+            second = service.download_incoming_pdf(client_id="client-1", ettn="ettn-1")
+        self.assertEqual(first["document_ref"], second["document_ref"])
+        self.assertEqual(first["source_parent_document_ref"], source["document_ref"])
+        self.assertEqual(first["processing_status"], "evidence_only")
 
     def test_qnb_download_rejects_unsafe_or_ambiguous_zip(self) -> None:
         from app.domain.qnb_efatura import _decode_qnb_download_payload

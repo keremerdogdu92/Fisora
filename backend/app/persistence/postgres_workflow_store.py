@@ -623,6 +623,86 @@ class PostgresWorkflowStore:
             client_id, "qnb_incoming_status_snapshot", str(snapshot["snapshot_id"]), {**snapshot, "client_id": client_id}
         )
 
+    def save_outgoing_invoice(self, *, client_id: str, invoice: dict[str, Any]) -> dict[str, Any]:
+        invoice_id = str(invoice.get("invoice_id") or "")
+        if not invoice_id:
+            raise ValueError("Outgoing invoice ID is required")
+        existing = self._get_record(client_id, "outgoing_invoice", invoice_id) or {}
+        return self._upsert_record(client_id, "outgoing_invoice", invoice_id, {**existing, **invoice, "client_id": client_id})
+
+    def get_outgoing_invoice(self, *, client_id: str, invoice_id: str) -> dict[str, Any] | None:
+        return self._get_record(client_id, "outgoing_invoice", invoice_id)
+
+    def list_outgoing_invoices(self, *, client_id: str) -> list[dict[str, Any]]:
+        return self._payloads(client_id, "outgoing_invoice")
+
+    def claim_outgoing_invoice_send(
+        self, *, client_id: str, invoice_id: str, idempotency_key: str
+    ) -> tuple[bool, dict[str, Any] | None]:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_key' and record_key = %s
+                    """,
+                    (self.tenant_id, client_id, idempotency_key),
+                )
+                existing_claim = cursor.fetchone()
+                if existing_claim:
+                    if existing_claim[0].get("invoice_id") != invoice_id:
+                        raise ValueError("Idempotency key is already used for another invoice")
+                    cursor.execute(
+                        """
+                        select payload from workflow_records
+                        where tenant_id = %s and client_id = %s
+                          and record_type = 'outgoing_invoice' and record_key = %s
+                        """,
+                        (self.tenant_id, client_id, invoice_id),
+                    )
+                    row = cursor.fetchone()
+                    return False, deepcopy(row[0]) if row else None
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, invoice_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("Outgoing invoice not found")
+                invoice = row[0]
+                if invoice.get("status") != "approved":
+                    raise ValueError("Only an approved invoice can be sent")
+                claim = {
+                    "client_id": client_id,
+                    "invoice_id": invoice_id,
+                    "idempotency_key": idempotency_key,
+                    "claimed_at": utc_now(),
+                }
+                cursor.execute(
+                    """
+                    insert into workflow_records (id, tenant_id, client_id, record_type, record_key, payload)
+                    values (%s, %s, %s, 'outgoing_invoice_send_key', %s, %s)
+                    """,
+                    (uuid4(), self.tenant_id, client_id, idempotency_key, self._json(claim)),
+                )
+                invoice = {**invoice, "status": "sending", "updated_at": utc_now()}
+                cursor.execute(
+                    """
+                    update workflow_records set payload = %s, updated_at = now()
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice' and record_key = %s
+                    """,
+                    (self._json(invoice), self.tenant_id, client_id, invoice_id),
+                )
+                return True, deepcopy(invoice)
+
     def record_document_pipeline_event(
         self,
         *,

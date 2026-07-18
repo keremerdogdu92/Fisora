@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Mapping
 
@@ -14,9 +15,12 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from app.domain.qnb_efatura import (  # noqa: E402
     QnbConnectionCredentials,
+    QnbConnectionService,
+    QnbInvoiceSummary,
     QnbSoapEfaturaAdapter,
     QnbSyncService,
 )
+from app.domain.qnb_scheduler import QnbScheduler, normalize_qnb_sync_policy  # noqa: E402
 from app.persistence.workflow_store import JsonWorkflowStore  # noqa: E402
 from app.workflows.document_processing import process_queued_documents  # noqa: E402
 
@@ -81,6 +85,8 @@ def run_smoke(
     end_date: str,
     process_worker: bool,
     repeat_sync: bool,
+    download_pdf: bool = False,
+    scheduler_mode: bool = False,
 ) -> dict[str, object]:
     environment, credentials = receiver_credentials(env)
     adapter = QnbSoapEfaturaAdapter(timeout=30)
@@ -127,6 +133,12 @@ def run_smoke(
         output["repeat_sync"] = safe_sync_summary(second)
 
     workspace = store.get_workspace(client_id)
+    if download_pdf:
+        source = next((item for item in workspace.get("uploaded_documents") or [] if item.get("source_external_uuid")), None)
+        if source:
+            invoice = QnbInvoiceSummary(str(source.get("source_external_uuid") or ""), str(source.get("source_invoice_no") or ""), str(source.get("source_qnb_sequence_no") or ""), str(source.get("source_issue_date") or ""), str(source.get("source_supplier_tax_id") or ""), str(source.get("source_supplier_title") or ""), str(source.get("source_payable_total") or ""))
+            pdf = adapter.download_incoming_invoice_pdf(credentials, invoice)
+            output["pdf_evidence"] = {"ok": pdf.content.startswith(b"%PDF-"), "size_bytes": len(pdf.content), "sha256": hashlib.sha256(pdf.content).hexdigest(), "ettn_suffix": invoice.ettn[-8:]}
     output["workspace"] = {
         "uploaded_document_count": len(workspace.get("uploaded_documents") or []),
         "processed_document_count": len(workspace.get("documents") or []),
@@ -142,6 +154,13 @@ def run_smoke(
         ),
         "saved_cursor": store.get_qnb_sync_cursor(client_id=client_id),
     }
+    if scheduler_mode:
+        store.save_qnb_connection(client_id=client_id, connection={"status": "active", "base_url": credentials.base_url, "username": credentials.username, "password": credentials.password, "vkn": credentials.vkn, "erp_code": credentials.erp_code, "environment": "test"})
+        now = datetime.now(UTC)
+        store.save_qnb_sync_policy(client_id=client_id, policy=normalize_qnb_sync_policy({"enabled": True, "frequency_minutes": 60, "status_reconciliation_enabled": True}, now=now))
+        scheduler = QnbScheduler(store=store, service_factory=lambda: QnbConnectionService(store=store, document_storage_path=work_dir / "documents", adapter=QnbSoapEfaturaAdapter(timeout=30)), worker_id="qnb-sandbox-scheduler")
+        scheduled = scheduler.run_due_once(now=now) or {}
+        output["scheduler"] = {"claimed": bool(scheduled), "sync_status": (scheduled.get("sync") or {}).get("status"), "status_updated_count": (scheduled.get("status_reconciliation") or {}).get("updated_count"), "status_error_count": (scheduled.get("status_reconciliation") or {}).get("error_count"), "next_run_at": (scheduled.get("policy") or {}).get("next_run_at")}
     return output
 
 
@@ -157,6 +176,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end-date", default="")
     parser.add_argument("--process-worker", action="store_true")
     parser.add_argument("--repeat-sync", action="store_true")
+    parser.add_argument("--download-pdf", action="store_true", help="Download PDF evidence for the first stored QNB document.")
+    parser.add_argument("--scheduler-mode", action="store_true", help="Run one real cursor and status reconciliation through the QNB scheduler.")
     parser.add_argument(
         "--cursor-mode",
         action="store_true",
@@ -183,6 +204,8 @@ def main() -> int:
             end_date=end_date,
             process_worker=args.process_worker,
             repeat_sync=args.repeat_sync,
+            download_pdf=args.download_pdf,
+            scheduler_mode=args.scheduler_mode,
         )
     except Exception as exc:
         print(json.dumps({"ok": False, "error_type": type(exc).__name__}, ensure_ascii=True))

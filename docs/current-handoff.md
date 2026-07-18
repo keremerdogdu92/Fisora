@@ -112,6 +112,65 @@ oturumdan devam etmek icin son durumu ozetler.
   test-production ortam eslesmesi, actor/target audit ve client izolasyon
   negatif testi eklendi. Siradaki faz scheduler ve operasyon dayanıkliligi.
 
+- QNB Faz 5 scheduler cekirdegi eklendi: mukellef bazli sync policy API/UI,
+  worker tick, JSON lock ve Postgres `FOR UPDATE SKIP LOCKED` ile atomik claim,
+  10 dakikalik lease expiry ve hata sonrasi exponential backoff mevcut. Aktif
+  credential olmadan otomatik akis acilamaz; policy kapatmak belge/status
+  kanitini silmez. Basarili cursor sync ardindan gelen belge status mutabakati
+  calisir. Backend 398/398 ve frontend production build basarili. Faz 5'in
+  kalan kabul kapisi iki workerli Docker restart/lease kaniti ile belge
+  yasi/riskine gore status sikligi ve ortak provider request butcesidir.
+
+- QNB Faz 5 uygulama kapsami tamamlandi: yeni belgeler 6 saat, 90 gun icindeki
+  riskli/onayli/export edilmis belgeler 24 saat, eski stabil belgeler 7 gun
+  aralikla status kontrolune girer. Liste/download/status ayni 150 request run
+  butcesini paylasir. Double-claim ve restart sonrasi expired lease reclaim
+  testli. Izole `fisero-qnb-test` Docker projesinde Postgres, Redis, migration,
+  saglikli backend ve iki worker ayaga kalkti; iki worker restart sonrasi da
+  idle tick uretmeye devam etti. Test container/volume'lari temizlendi.
+- QNB Faz 6 tamamlandi: health API; maskeli WS kullanicisi, ortam ve son
+  baglanti testi; son basarili/son deneme/sonraki run; cursor ve run sayilari;
+  guvenli hata metni portal ayarlarinda gorunur. Belge paneli QNB cekilme ve
+  status kontrol zamanini, resmi durum uyarilarini ve yetersiz canonical kaniti
+  musavir dilinde gosterir. Siradaki faz sunucu/kapali pilot Faz 7'dir.
+- QNB Faz 7 ilk kontrolu: `185.184.208.188:22` SSH baglantisi 2026-07-11'de
+  timeout verdi; onceki "odeme nedeniyle kapali" sunucu beyaninin degistigine
+  dair canli kanit yok. Bu nedenle disk/backup/env/deploy smoke kosulamadi.
+  Sunucu acilana kadar production compose duzeltildi: QNB adapter, ERP kodu ve
+  credential key artik scheduler'i calistiran worker'a da aktarilir. Readiness
+  `qnb_pilot` altinda SOAP adapter, credential key varligi, ERP config,
+  Postgres, backup ve restricted-access kapilarini secret gostermeden raporlar.
+- Sunucusuz QNB PDF isi tamamlandi: resmi `gelenBelgeleriIndirExt` metodunda
+  `belgeFormati=PDF` kullanilir. Tek PDF/ZIP/header guvenlik kontrolu, ETTN +
+  parent UBL baglantisi, hash, pulled-at ve idempotent evidence API eklendi.
+  e-Arsiv kamu dokumani gelen belge liste/download/status kontrati vermedigi
+  icin varsayimsal adapter yazilmadi; gereken QNB WSDL/yetki listesi
+  `docs/superpowers/specs/2026-07-11-qnb-pdf-and-earsiv-boundary.md` icinde.
+- 2026-07-11 gercek local kapanis smoke'u: TEST1 connection `active`; 30 gunluk
+  backfill 2 belge listeledi, 1 yeni UBL indirip worker'da tamamladi, tekrar
+  sync 2/2 duplicate atladi. Ayni gercek belgenin QNB PDF'i 38.184 byte ve
+  `%PDF-` header ile dogrulandi; SHA-256 secret-safe smoke ozetinde tutuldu.
+  Cursor `1 -> 2` ilerledi, ikinci cursor run sifir belge dondu. Gercek
+  scheduler policy'yi claim etti, cursor sync `completed` ve gelen status
+  mutabakati `updated_count=2`, `error_count=0` oldu. Bu nedenle QNB gelen
+  e-Fatura cekirdeginin local/sandbox kapsami kapanmistir.
+- 2026-07-13 e-Arsiv gonderim spike'i: QNB mailindeki `portaltest`,
+  `connectortest` ve `earsivtest` bilgileri ignored `.env.qnb.local` dosyasina
+  alindi. Gercek WSDL/XSD; `faturaOlusturExt`, sorgu/liste, iptal/itiraz,
+  taslak ve onizleme metotlarini dogruladi. `qnb_earsiv.py` Ext adapteri ve
+  yalniz test hostlarini kabul eden, `--confirm-send` kapili secret-safe smoke
+  araci eklendi. Gercek login `EF0556` dondu: portal kullanicisi mali muhur veya
+  e-imza ile dogrulanmali ve QNB onerisine uygun ayri WS kullanicisi
+  olusturulmali. Bu dis adim tamamlanmadan fatura gonderilmedi. Backend 406/406,
+  frontend 144/144, production build ve `git diff --check` basarili.
+- 2026-07-13 QNB cevabi beklenirken Faz 9 local cekirdegi ilerletildi:
+  provider-bagimsiz `efatura`/`earsiv` taslagi, cok satirli kesin KDV/toplam
+  hesabi, onayda dondurulan UBL 2.1 + SHA-256, `draft -> approved -> sending ->
+  sent/failed` durumlari ve JSON/PostgreSQL atomik idempotency kaydi eklendi.
+  Giden fatura API'si yalniz musavir/admin rollerine acik; onaysiz gonderim ve
+  mukellefler arasi erisim reddedilir. Provider varsayilan olarak local `fake`
+  ve receipt uretir; QNB blokaji kalkana kadar gercek dis gonderim kapali.
+
 `deploy/production.env` GitHub'a girmez. `POSTGRES_PASSWORD`, `GROQ_API_KEY`,
 `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY` ve varsa fallback provider keyleri
 sadece serverdaki bu dosyada tutulur.

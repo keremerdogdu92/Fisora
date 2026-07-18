@@ -557,29 +557,56 @@ senkronizasyona donusturmek.
 - Modify `frontend/app/portal-settings-view.tsx`
 - Test backend ve frontend QNB testleri
 
-- [ ] Mulkellef bazli enabled, baslangic tarihi, siklik ve run limiti kaydet.
-- [ ] Ilk otomatik run'dan once baglanti `active` ve credential erisilebilir
+- [x] Mulkellef bazli enabled, baslangic tarihi, siklik ve run limiti kaydet.
+- [x] Ilk otomatik run'dan once baglanti `active` ve credential erisilebilir
   olmali.
-- [ ] Manuel backfill otomatik cursor'u geriye cekmemeli.
-- [ ] Policy disable islemi mevcut belge/status kanitini silmemeli.
+- [x] Manuel backfill otomatik cursor'u geriye cekmemeli.
+- [x] Policy disable islemi mevcut belge/status kanitini silmemeli.
 
 ### Task 5.2 - Due-run claim ve lease
 
-- [ ] Worker'in zamani gelen QNB policy'lerini atomik claim etmesini sagla.
-- [ ] Ayni policy'nin iki worker tarafindan ayni anda calismasini lease ile
+- [x] Worker'in zamani gelen QNB policy'lerini atomik claim etmesini sagla.
+- [x] Ayni policy'nin iki worker tarafindan ayni anda calismasini lease ile
   engelle.
-- [ ] Worker cokerse lease expiry sonrasi yeniden alinabilsin.
-- [ ] Basarisiz run icin `next_run_at` backoff uygula; sonsuz hizli retry yapma.
-- [ ] Bir mukellefin hatasi diger mukelleflerin sync'ini durdurmasin.
+- [x] Worker cokerse lease expiry sonrasi yeniden alinabilsin.
+- [x] Basarisiz run icin `next_run_at` backoff uygula; sonsuz hizli retry yapma.
+- [x] Bir mukellefin hatasi diger mukelleflerin sync'ini durdurmasin.
 
 ### Task 5.3 - Status reconciliation takvimi
 
-- [ ] Yeni belgelerde ilk status kontrolunu yakin zamanda yap.
-- [ ] Eski belgelerde sorgu sikligini azalt.
-- [ ] Onaylanmis/export edilmis belgelerde risk penceresine gore periyodik
+- [x] Yeni belgelerde ilk status kontrolunu yakin zamanda yap.
+- [x] Eski belgelerde sorgu sikligini azalt.
+- [x] Onaylanmis/export edilmis belgelerde risk penceresine gore periyodik
   kontrol politikasini dokumante et.
-- [ ] Provider rate limit butcesini belge listeleme, indirme ve status
+- [x] Provider rate limit butcesini belge listeleme, indirme ve status
   sorgulari arasinda paylastir.
+
+### Faz 5 ara uygulama notu - 2026-07-11
+
+Mulkellef bazli sync policy JSON ve Postgres store'a eklendi. Policy; aktiflik,
+siklik, run limiti, status mutabakati, sonraki calisma, lease ve hata sayacini
+tutuyor. API ve musavir ayarlari otomatik akisi acip kapatabiliyor; aktif QNB
+baglantisi olmadan policy acilamiyor. Worker her tick'te zamani gelen tek
+policy'yi atomik claim ediyor. JSON store lock, Postgres `FOR UPDATE SKIP
+LOCKED` kullaniyor. Lease 10 dakika sonra yeniden alinabilir; hata sonrasi
+sinirli exponential backoff uygulanir ve hata bir sonraki mukellefin claim
+edilmesini engellemez. Her basarili otomatik sync'in ardindan mevcut gelen
+belgeler icin status mutabakati calisir.
+
+Status kontrol sikligi, ortak request butcesi ve yerel Docker iki-worker
+restart/lease kabul kaniti tamamlandi.
+
+### Faz 5 tamamlama notu - 2026-07-11
+
+Yeni belgeler 6 saat, riskli/onaylanmis/export edilmis 90 gun icindeki belgeler
+24 saat, eski stabil belgeler 7 gun aralikla status sorgusuna girer. Her run
+150 request ortak butcesini listeleme, indirme ve status arasinda paylastirir;
+run belge limiti bu butceyi asamaz. Iki worker double-claim ve worker restart
+sonrasi lease expiry/reclaim regression testleri eklendi. Izole
+`fisero-qnb-test` Docker projesinde PostgreSQL, Redis, migration, saglikli
+backend ve iki worker ayaga kalkti. Iki worker birlikte idle tick uretti;
+ikisi yeniden baslatildiktan sonra da saglikli calismaya devam etti. Test
+container ve volume'lari kanit sonrasi temizlendi. Faz 5 tamamlandi.
 
 **Faz 5 cikis kapisi:** Yerel Docker stack'te scheduler birden fazla policy'yi
 claim ediyor; duplicate run olusmuyor; cursor, retry ve status isi yeniden
@@ -594,33 +621,42 @@ anlasilir hale getirmek.
 
 ### Task 6.1 - Baglanti karti
 
-- [ ] Durum: aktif, kimlik dogrulama hatasi, baglanti hatasi, devre disi.
-- [ ] Maskeli WS kullanicisi ve ortam.
-- [ ] Son basarili baglanti testi.
-- [ ] Credential yenile/test et/devre disi birak aksiyonlari.
-- [ ] ERP kodunu kullanici girdisi olarak gostermek yerine salt-okunur
+- [x] Durum: aktif, kimlik dogrulama hatasi, baglanti hatasi, devre disi.
+- [x] Maskeli WS kullanicisi ve ortam.
+- [x] Son basarili baglanti testi.
+- [x] Credential yenile/test et/devre disi birak aksiyonlari.
+- [x] ERP kodunu kullanici girdisi olarak gostermek yerine salt-okunur
   platform bilgisi veya tamamen gizli config yap.
 
 ### Task 6.2 - Sync saglik ozeti
 
-- [ ] Son basarili sync ve son deneme.
-- [ ] Listelenen, indirilen, duplicate, status guncellenen, hatali sayilari.
-- [ ] Cursor ve bekleyen sonraki calisma.
-- [ ] Guvenli, eyleme donuk hata aciklamasi.
-- [ ] Tarih aralikli manuel backfill aksiyonu.
+- [x] Son basarili sync ve son deneme.
+- [x] Listelenen, indirilen, duplicate, status guncellenen, hatali sayilari.
+- [x] Cursor ve bekleyen sonraki calisma.
+- [x] Guvenli, eyleme donuk hata aciklamasi.
+- [x] Tarih aralikli manuel backfill aksiyonu.
 
 ### Task 6.3 - Belge ve review UX'i
 
-- [ ] Kaynak: QNB eSolutions.
-- [ ] Cekilme zamani ve son status kontrolu.
-- [ ] Guncel resmi durum ve status degisikligi uyarisi.
-- [ ] Canonical veri yetersizse acik `insufficient evidence` mesaji.
-- [ ] QNB/engine/AI teknik ayrimini one cikarmadan sistemin ne anladigini
+- [x] Kaynak: QNB eSolutions.
+- [x] Cekilme zamani ve son status kontrolu.
+- [x] Guncel resmi durum ve status degisikligi uyarisi.
+- [x] Canonical veri yetersizse acik `insufficient evidence` mesaji.
+- [x] QNB/engine/AI teknik ayrimini one cikarmadan sistemin ne anladigini
   musavir dilinde goster.
 
 **Faz 6 cikis kapisi:** Musavir bir baglantinin neden calismadigini, en son ne
 zaman belge cekildigini ve bir belgenin QNB durumunun degisip degismedigini
 portal uzerinden anlayabiliyor.
+
+### Faz 6 uygulama notu - 2026-07-11
+
+QNB health endpoint'i baglanti, policy, son 10 run, cursor, son/sonraki
+calisma ve guvenli hata mesajini tek sozlesmede toplar. Ayarlar karti maskeli
+WS kullanicisi, test/canli ortam, son baglanti testi, otomatik akis ve son run
+sayilarini gosterir. Baglanti/policy/health istekleri portalda paralel alinir.
+Belge panelinde QNB'den alinma zamani, son resmi durum kontrolu, status uyari
+ve canonical kanit yetersizligi musavir dilinde gorunur. Faz 6 tamamlandi.
 
 ---
 
@@ -628,6 +664,10 @@ portal uzerinden anlayabiliyor.
 
 **Amac:** Yerelde kanitlanan akis icin surekli calisan, yedekli pilot ortami
 kurmak.
+
+**2026-07-11 durum:** Sunucu SSH portu timeout veriyor; canli disk, backup ve
+deploy kontrolleri sunucu yeniden aktif edilene kadar bloke. Production worker
+QNB env wiring'i ve `qnb_pilot` readiness kapilari yerelde tamamlandi ve testli.
 
 ### Task 7.1 - Eski sunucu verisini koruma karari
 
@@ -685,20 +725,46 @@ kanitli; readiness QNB pilot aciklarini acikca raporluyor.
 
 ### Task 8.1 - QNB PDF kaniti
 
-- [ ] Guncel method ve format parametrelerini WSDL/dokumandan dogrula.
-- [ ] UBL ile PDF'yi ayni external UUID altinda iliskilendir.
-- [ ] PDF hash, cekilme zamani ve provider status kanitini sakla.
-- [ ] Portal onizlemesini mevcut guvenli document-file yoluna bagla.
-- [ ] PDF'yi canonical UBL'nin yerine gecirme; yalniz gorsel kanit/fallback yap.
+- [x] Guncel method ve format parametrelerini WSDL/dokumandan dogrula.
+- [x] UBL ile PDF'yi ayni external UUID altinda iliskilendir.
+- [x] PDF hash, cekilme zamani ve provider status kanitini sakla.
+- [x] Portal onizlemesini mevcut guvenli document-file yoluna bagla.
+- [x] PDF'yi canonical UBL'nin yerine gecirme; yalniz gorsel kanit/fallback yap.
 
 ### Task 8.2 - e-Arsiv incoming/source flow
 
-- [ ] `portaltest`/`connectortest`/`earsivtest` gercek dokuman ve WSDL'lerini
+- [x] `portaltest`/`connectortest`/`earsivtest` gercek dokuman ve WSDL'lerini
   ayri spike ile dogrula.
 - [ ] e-Arsiv iptal/itiraz/status alanlarini e-Fatura status degerleriyle
   zorla birlestirme; belge turune ozgu mapping yaz.
 - [ ] Ortak source/sync/evidence kontratini yeniden kullan.
 - [ ] e-Arsiv UBL/PDF'yi mevcut canonical invoice ve review akisina bagla.
+
+### Faz 8 ara notu - 2026-07-11
+
+Resmi QNB teknik sayfasindaki `gelenBelgeleriIndirExt` + `belgeFormati=PDF`
+kontrati uygulandi. PDF tek dosyali guvenli ZIP olarak dogrulanir, ayni ETTN ve
+parent UBL ref altinda hash/pulled-at evidence kaydina donusur; tekrar cagrisi
+ikinci kayit olusturmaz. Kamuya acik QNB e-Arsiv dokumani yalniz gonderim
+metotlarini acikliyor. Gelen e-Arsiv liste/download/status WSDL'i olmadan
+varsayimsal kod yazilmadi; gereken provider kanitlari ayri spec'e kaydedildi.
+
+Gercek TEST1 local smoke'unda PDF 38.184 byte olarak `%PDF-` header ile indi.
+30 gunluk backfill, duplicate tekrar, cursor `1 -> 2`, scheduler claim ve iki
+belgelik status mutabakati birlikte basarili oldu. QNB gelen e-Fatura + PDF
+local/sandbox kapanis kapisi tamamlandi. e-Arsiv provider WSDL/yetkisi ve canli
+sunucu pilotu ayri dis bagimliliklardir.
+
+### Faz 8 e-Arsiv WSDL notu - 2026-07-13
+
+Gercek `EarsivWebService?wsdl`, `?wsdl=1` ve `?xsd=1` kontratlari okundu.
+Servis fatura olusturma, sorgu, liste, iptal, itiraz, taslak ve onizleme
+metotlarini sunuyor. Bunlar QNB e-Arsiv ortaminda olusturulan giden faturalar
+icin kullanilacak; harici kaynaktan gelen e-Arsiv adapteri gibi yorumlanmayacak.
+Cookie login gercek `portaltest` credential'i ile `EF0556` dondu: firma
+kullanicisinin once portalda mali muhur/e-imza ile dogrulanmasi ve ardindan
+ayri WS kullanicisi olusturulmasi gerekiyor. Bu provider kapisi disinda Ext
+adapteri ve secret-safe smoke araci yerelde testlidir.
 
 **Faz 8 cikis kapisi:** QNB PDF kaniti UBL ile bagli; en az bir gercek e-Arsiv
 test belgesi canonical/review akisindan geciyor; iptal/itiraz kaniti korunuyor.
@@ -710,17 +776,34 @@ test belgesi canonical/review akisindan geciyor; iptal/itiraz kaniti korunuyor.
 **Bu faz erken MVP kapsami degildir.** Gelen belge ve status cekirdegi stabil
 olmadan baslatilmaz.
 
+- [x] e-Arsiv `faturaOlusturExt` JSON + base64 UBL request/response kontrati.
+- [x] QNB test host guard'i, `EARSIVFATURA` profil kontrolu ve acik
+  `--confirm-send` kapili secret-safe sandbox araci.
+- [ ] Portal mali muhur/e-imza dogrulamasi ve portal hesabindan ayri WS
+  kullanicisi.
+- [ ] Ayri WS kullanicisi ile gercek test e-Arsiv faturasi olusturma ve
+  UBL/PDF/receipt kaniti.
 - [ ] Giden e-Fatura listeleme ve durum takibi.
 - [ ] Ticari faturada kabul/red uygulama yaniti.
 - [ ] Taslak fatura veri modeli ve numara/seri politikasi.
 - [ ] QNB'ye gonderim, imza/muhur, zarf ve hata kontratlari.
-- [ ] Idempotent send key ve tekrar gonderim korumasi.
-- [ ] Yetki/onay ayrimi; musavir onayi olmadan gondermeme.
+- [x] Provider-bagimsiz taslak/onay UBL 2.1 cekirdegi ve kesin toplam hesabi.
+- [x] Idempotent send key ve tekrar gonderim korumasi (JSON + PostgreSQL).
+- [x] Yetki/onay ayrimi; musavir/admin onayi olmadan gondermeme.
+- [x] Gercek provider kapali kalacak sekilde local fake send/receipt kaniti.
 - [ ] e-Arsiv kesme ve iptal/itiraz akisi.
 - [ ] Hukuki/operasyonel alan testi ve QNB production kabul sureci.
 
 **Faz 9 cikis kapisi:** Ayri bir design/spec, sandbox kabul matrisi, hukuk ve
 yetki kararlari tamamlanmadan production gonderim acilmaz.
+
+2026-07-13 local ilerleme: `efatura` ve `earsiv` icin ortak giden fatura
+servisi; `draft -> approved -> sending -> sent/failed` durumlari, onayda
+dondurulan UBL/hash, musteri izolasyonu ve atomik idempotency claim ile
+tamamlandi. API yalniz `accountant/admin` rollerine acik. Varsayilan provider
+bilerek `fake`; QNB tarafindaki blokaj kalkip sandbox kaniti alinana kadar bu
+API gercek belge gondermez. Seri/numara tahsis politikasi, gercek QNB dispatch,
+iptal/itiraz ve production kabul kapilari acik kalir.
 
 ---
 

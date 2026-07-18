@@ -1263,7 +1263,7 @@ class QnbConnectionService:
             (
                 item for item in documents
                 if str(item.get("source_provider") or "") == SOURCE_PROVIDER
-                and str(item.get("source_qnb_ettn") or "") == normalized_ettn
+                and str(item.get("source_qnb_ettn") or item.get("source_external_uuid") or "") == normalized_ettn
             ),
             None,
         )
@@ -1333,7 +1333,7 @@ class QnbConnectionService:
         requested = [str(item).strip() for item in (ettns or []) if str(item).strip()]
         if not requested:
             requested = [
-                str(item.get("source_qnb_ettn") or "")
+                str(item.get("source_qnb_ettn") or item.get("source_external_uuid") or "")
                 for item in self.store.get_workspace(client_id).get("uploaded_documents", [])
                 if str(item.get("source_provider") or "") == SOURCE_PROVIDER
             ]

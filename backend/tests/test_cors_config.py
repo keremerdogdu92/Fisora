@@ -30,6 +30,9 @@ class CorsConfigTests(unittest.TestCase):
         self.assertIn("FISORA_RATE_LIMIT_ENABLED: ${FISORA_RATE_LIMIT_ENABLED:-true}", compose_text)
         self.assertGreaterEqual(compose_text.count("FISORA_AUTH_MODE:"), 2)
         self.assertGreaterEqual(compose_text.count("FISORA_AUTH_HEADER:"), 2)
+        self.assertGreaterEqual(compose_text.count("FISORA_QNB_ADAPTER:"), 2)
+        self.assertGreaterEqual(compose_text.count("FISORA_QNB_ERP_CODE:"), 2)
+        self.assertGreaterEqual(compose_text.count("FISORA_QNB_CREDENTIAL_KEY:"), 2)
 
     def test_cors_origins_are_configurable_from_environment(self) -> None:
         main_file = ROOT / "backend" / "app" / "main.py"

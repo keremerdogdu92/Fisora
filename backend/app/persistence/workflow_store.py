@@ -50,6 +50,8 @@ def empty_store() -> dict[str, Any]:
         "qnb_outgoing_invoices": {},
         "qnb_outgoing_status_snapshots": {},
         "qnb_incoming_status_snapshots": {},
+        "outgoing_invoices": {},
+        "outgoing_invoice_send_keys": {},
         "ai_usage_events": [],
         "ai_capacity_snapshots": {},
         "operation_events": [],
@@ -624,6 +626,57 @@ class JsonWorkflowStore:
             data.setdefault("qnb_incoming_status_snapshots", {})[f"{client_id}:{record['snapshot_id']}"] = record
             self._write(data)
         return deepcopy(record)
+
+    def save_outgoing_invoice(self, *, client_id: str, invoice: dict[str, Any]) -> dict[str, Any]:
+        invoice_id = str(invoice.get("invoice_id") or "")
+        if not invoice_id:
+            raise ValueError("Outgoing invoice ID is required")
+        key = f"{client_id}:{invoice_id}"
+        with self._lock:
+            data = self._read()
+            rows = data.setdefault("outgoing_invoices", {})
+            record = {**rows.get(key, {}), **invoice, "client_id": client_id}
+            rows[key] = record
+            self._write(data)
+        return deepcopy(record)
+
+    def get_outgoing_invoice(self, *, client_id: str, invoice_id: str) -> dict[str, Any] | None:
+        record = self._read().get("outgoing_invoices", {}).get(f"{client_id}:{invoice_id}")
+        return deepcopy(record) if record else None
+
+    def list_outgoing_invoices(self, *, client_id: str) -> list[dict[str, Any]]:
+        rows = self._read().get("outgoing_invoices", {}).values()
+        return [deepcopy(row) for row in rows if row.get("client_id") == client_id]
+
+    def claim_outgoing_invoice_send(
+        self, *, client_id: str, invoice_id: str, idempotency_key: str
+    ) -> tuple[bool, dict[str, Any] | None]:
+        claim_key = f"{client_id}:{idempotency_key}"
+        invoice_key = f"{client_id}:{invoice_id}"
+        with self._lock:
+            data = self._read()
+            claims = data.setdefault("outgoing_invoice_send_keys", {})
+            if claim_key in claims:
+                existing_invoice = claims[claim_key].get("invoice_id")
+                if existing_invoice != invoice_id:
+                    raise ValueError("Idempotency key is already used for another invoice")
+                return False, deepcopy(data.setdefault("outgoing_invoices", {}).get(invoice_key))
+            invoices = data.setdefault("outgoing_invoices", {})
+            invoice = invoices.get(invoice_key)
+            if not invoice:
+                raise ValueError("Outgoing invoice not found")
+            if invoice.get("status") != "approved":
+                raise ValueError("Only an approved invoice can be sent")
+            claims[claim_key] = {
+                "client_id": client_id,
+                "invoice_id": invoice_id,
+                "idempotency_key": idempotency_key,
+                "claimed_at": utc_now(),
+            }
+            invoice = {**invoice, "status": "sending", "updated_at": utc_now()}
+            invoices[invoice_key] = invoice
+            self._write(data)
+        return True, deepcopy(invoice)
 
     def record_document_pipeline_event(
         self,

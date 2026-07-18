@@ -11,6 +11,9 @@ node_modules/
 out/
 frontend/playwright-report/
 frontend/test-results/
+.npm-cache/
+*.log
+
 
 # Local outputs
 exports/*

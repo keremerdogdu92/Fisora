@@ -50,6 +50,10 @@ gecis icin kullanilir.
   `FISORA_RESEARCH_CONFIDENCE_THRESHOLD=70` ve server env dosyasinda
   `TAVILY_API_KEY` gerekir. OpenAI research sonraki iterasyona birakilir.
 - `FISORA_BACKUP_PATH=/opt/fisora/data/backups`.
+- QNB kapali pilot icin backend ve worker'da `FISORA_QNB_ADAPTER=soap`,
+  `FISORA_QNB_ERP_CODE` ve `FISORA_QNB_CREDENTIAL_KEY` ayni server env'den
+  gecmelidir. Readiness `qnb_pilot.runtime` bu degerlerin varligini secret'i
+  gostermeden raporlar.
 
 ## 4. TLS ve Nginx
 

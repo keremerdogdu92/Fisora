@@ -570,6 +570,20 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("rate_limit_missing", payload["warnings"])
         self.assertIn("zirve_field_test_pending", payload["warnings"])
 
+    def test_qnb_pilot_readiness_requires_real_adapter_key_erp_backup_and_restricted_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260711T100000Z.sql").write_text("backup", encoding="utf-8")
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents", export_path=base / "exports", backup_path=backup_path,
+                env={"FISORA_STORE_BACKEND": "postgres", "DATABASE_URL": "postgresql://test", "FISORA_REAL_DATA_ACCESS_MODE": "vpn", "FISORA_QNB_ADAPTER": "soap", "FISORA_QNB_CREDENTIAL_KEY": "secret", "FISORA_QNB_ERP_CODE": "ERP"},
+            )
+        self.assertTrue(payload["qnb_pilot"]["ready"])
+        self.assertTrue(payload["qnb_pilot"]["runtime"]["incoming_ready"])
+        self.assertNotIn("secret", str(payload["qnb_pilot"]))
+
     def test_pilot_sellable_blocks_anonymous_or_json_store_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

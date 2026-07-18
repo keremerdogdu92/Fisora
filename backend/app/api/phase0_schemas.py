@@ -480,3 +480,35 @@ class QnbIncomingStatusPayload(BaseModel):
 
 class QnbIncomingBulkStatusPayload(BaseModel):
     ettns: list[str] = Field(default_factory=list)
+
+
+class OutgoingInvoicePartyPayload(BaseModel):
+    tax_id: str
+    title: str
+    tax_office: str = ""
+    city: str = "ISTANBUL"
+    district: str = ""
+    email: str = ""
+
+
+class OutgoingInvoiceLinePayload(BaseModel):
+    name: str
+    quantity: str
+    unit_price: str
+    vat_rate: str = "20"
+    unit_code: str = "C62"
+
+
+class OutgoingInvoiceDraftPayload(BaseModel):
+    document_type: Literal["efatura", "earsiv"]
+    profile: Literal["TEMELFATURA", "TICARIFATURA", "EARSIVFATURA"]
+    invoice_no: str
+    issue_date: str
+    currency: str = "TRY"
+    supplier: OutgoingInvoicePartyPayload
+    customer: OutgoingInvoicePartyPayload
+    lines: list[OutgoingInvoiceLinePayload] = Field(min_length=1)
+
+
+class OutgoingInvoiceSendPayload(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=200)

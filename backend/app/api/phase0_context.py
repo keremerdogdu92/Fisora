@@ -20,6 +20,7 @@ from app.api.phase0_uploads import save_uploaded_document_with_job as _save_uplo
 from app.persistence.store_factory import build_workflow_store
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
 from app.domain.qnb_efatura import QnbConnectionService, build_qnb_adapter_from_env
+from app.domain.outgoing_invoices import OutgoingInvoiceService
 from app.workflows.document_processing import _provider_chain_from_env
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
@@ -120,6 +121,12 @@ def get_qnb_connection_service() -> QnbConnectionService:
         document_storage_path=default_document_storage_path(),
         adapter=build_qnb_adapter_from_env(os.environ),
     )
+
+
+def get_outgoing_invoice_service() -> OutgoingInvoiceService:
+    # Provider dispatch deliberately stays local/fake until a provider connection
+    # has passed its own test-environment readiness gate.
+    return OutgoingInvoiceService(store=get_workflow_store())
 
 
 def request_user_id(

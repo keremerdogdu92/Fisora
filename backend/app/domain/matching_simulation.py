@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
-from app.domain.ai_classification import AiCandidateStrategy, AiClassificationContext, AiClassificationPolicy, AiClassificationResult, ProductClassifier
+from app.domain.ai_classification import AiCandidateStrategy, AiClassificationContext, AiClassificationPolicy, AiClassificationResult, ProductClassifier, StaticFirstClassifier
 from app.domain.business_relevance import (
     BusinessRelevance,
     ClientProfile,
@@ -30,7 +30,14 @@ from app.domain.chart_accounts import (
     validate_vat_accounts,
 )
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
-from app.domain.invoice_ai_gate import invoice_ai_gate
+from app.domain.canonical_invoices import validate_line_decision_coverage
+from app.domain.invoice_ai_gate import (
+    AcceptedSemanticAttemptRef,
+    LineAccountAuthority,
+    SemanticAccountAuthoritySet,
+    VerifiedRuleAuthorityV1,
+    invoice_ai_gate,
+)
 from app.domain.journal_entries import (
     JournalEntry,
     JournalLine,
@@ -115,6 +122,7 @@ class SimulatedInvoiceResult:
     ai_classification_reason: str
     ai_estimated_input_chars: int
     ai_suggested_account_code: str
+    ai_attempted_account_code: str
     ai_suggested_counterparty_code: str
     ai_risk_flags: tuple[str, ...]
     ai_account_reason: str
@@ -162,6 +170,8 @@ class SimulatedInvoiceResult:
     ai_account_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_counterparty_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_trace: tuple[dict[str, object], ...] = ()
+    semantic_attempts: tuple[dict[str, object], ...] = ()
+    accepted_semantic_attempt_id: str = ""
     ai_account_candidate_count: int = 0
     ai_counterparty_candidate_count: int = 0
     ai_quality_scorecard: dict[str, object] = field(default_factory=dict)
@@ -172,7 +182,10 @@ class SimulatedInvoiceResult:
     canonical_line_count: int = 0
     canonical_validation_status: str = ""
     canonical_validation_reasons: tuple[str, ...] = ()
+    canonical_extraction_notes: tuple[str, ...] = ()
     canonical_extraction_ai_used: bool = False
+    line_decisions: tuple[dict[str, object], ...] = ()
+    line_decision_coverage: dict[str, object] = field(default_factory=dict)
     decision_narrative: dict[str, object] = field(default_factory=dict)
 
 
@@ -223,6 +236,8 @@ def _candidate_payload(account: ChartAccount, reason: str) -> dict[str, Any]:
         "reason": reason,
         "semantic_roles": semantic_roles_for_account(account),
         "vat_rate": account.vat_rate_hint,
+        "is_detail_account": account.is_detail_account is True,
+        "is_active": True,
     }
 
 
@@ -373,41 +388,277 @@ def _sales_vat_account_for_rate(selection: AccountSelection, rate: Decimal) -> s
     return _vat_account_for_rate(selection.account_candidates.get("sales_vat"), rate=rate, fallback=selection.sales_vat_account)
 
 
-def _candidate_accounts_as_chart_accounts(candidates: tuple[dict[str, Any], ...] | None) -> list[ChartAccount]:
-    return [
-        ChartAccount(
-            raw_account_code=str(candidate.get("code") or ""),
-            normalized_account_code=str(candidate.get("code") or ""),
-            account_name=str(candidate.get("name") or candidate.get("code") or ""),
-            is_detail_account=True,
-        )
-        for candidate in candidates or ()
-        if str(candidate.get("code") or "").strip()
-    ]
-
-
-def _purchase_expense_account_for_line(selection: AccountSelection, raw_line: str) -> str:
-    candidates = _candidate_accounts_as_chart_accounts(selection.account_candidates.get("purchase_expense"))
-    selected = select_usage_account(candidates, raw_line, "purchase", account_treatment="expense")
-    return selected.normalized_account_code if selected else selection.expense_account
-
-
-def _purchase_stock_account_for_line(selection: AccountSelection, raw_line: str) -> str:
-    candidates = _candidate_accounts_as_chart_accounts(selection.account_candidates.get("purchase_stock"))
-    selected = select_usage_account(candidates, raw_line, "purchase", account_treatment="stock")
-    return selected.normalized_account_code if selected else selection.stock_account
-
-
-def _ai_retry_reason(*, ai_skipped_reason: str, ai_used: bool, ai_suggested_account_code: str, ai_research_requested: bool) -> str:
+def _ai_retry_reason(
+    *,
+    ai_skipped_reason: str,
+    ai_used: bool,
+    ai_suggested_account_code: str,
+    ai_attempted_account_code: str,
+    ai_research_requested: bool,
+) -> str:
     if ai_suggested_account_code:
         return ""
     if ai_skipped_reason:
         return ai_skipped_reason
     if ai_research_requested:
         return "research_required"
+    if ai_attempted_account_code:
+        return "selected_account_not_in_candidates"
     if ai_used:
         return "ai_account_missing"
     return "ai_not_resolved"
+
+
+def _classify_with_semantic_authority(
+    classifier: ProductClassifier,
+    raw_line: str,
+    *,
+    supplier_hint: str,
+    context: AiClassificationContext,
+) -> AiClassificationResult:
+    if isinstance(classifier, StaticFirstClassifier) and classifier.policy.static_confidence_threshold <= 100:
+        forced_classifier = StaticFirstClassifier(
+            provider=classifier.provider,
+            policy=replace(classifier.policy, static_confidence_threshold=101),
+        )
+        forced_classifier.provider_calls = classifier.provider_calls
+        result = forced_classifier.classify(raw_line, supplier_hint=supplier_hint, context=context)
+        classifier.provider_calls = forced_classifier.provider_calls
+        return result
+    return classifier.classify(raw_line, supplier_hint=supplier_hint, context=context)
+
+
+def _attempted_ai_account_code(result: AiClassificationResult | None) -> str:
+    if result is None:
+        return ""
+    if result.suggested_account_code:
+        return result.suggested_account_code
+    for trace in reversed(result.ai_trace):
+        response = trace.get("provider_response")
+        if not isinstance(response, dict):
+            continue
+        candidate = str(response.get("suggested_account_code") or "").strip()
+        if candidate:
+            return candidate
+        for decision in response.get("line_decisions") or ():
+            if isinstance(decision, dict):
+                candidate = str(decision.get("suggested_account_code") or "").strip()
+                if candidate:
+                    return candidate
+    return ""
+
+
+_SEMANTIC_GROUPS_BY_DIRECTION = {
+    "purchase": ("purchase_expense", "purchase_stock", "non_deductible"),
+    "sales": ("sales_revenue", "zero_vat_revenue"),
+}
+_SEMANTIC_ROLE_GROUPS = {
+    "expense": ("purchase_expense",),
+    "stock": ("purchase_stock",),
+    "non_deductible": ("non_deductible",),
+    "revenue": ("sales_revenue", "zero_vat_revenue"),
+}
+_VERIFIED_SEMANTIC_ROLES_BY_DIRECTION = {
+    "purchase": frozenset({"expense", "stock", "non_deductible"}),
+    "sales": frozenset({"revenue"}),
+}
+_CHART_ROLE_BY_VERIFIED_SEMANTIC_ROLE = {
+    "expense": "expense",
+    "stock": "stock",
+    "revenue": "sales_revenue",
+    "non_deductible": "non_deductible",
+}
+
+
+def _semantic_candidate_codes(
+    selection: AccountSelection,
+    *,
+    direction: str,
+    semantic_role: str = "",
+    require_verified_detail: bool = False,
+) -> set[str]:
+    if require_verified_detail:
+        if semantic_role not in _VERIFIED_SEMANTIC_ROLES_BY_DIRECTION.get(direction, frozenset()):
+            return set()
+        groups = _SEMANTIC_ROLE_GROUPS[semantic_role]
+    else:
+        groups = _SEMANTIC_ROLE_GROUPS.get(semantic_role) or _SEMANTIC_GROUPS_BY_DIRECTION.get(direction, ())
+    codes: set[str] = set()
+    for group in groups:
+        if group not in _SEMANTIC_GROUPS_BY_DIRECTION.get(direction, ()):
+            continue
+        for candidate in selection.account_candidates.get(group, ()):
+            code = str(candidate.get("code") or "").strip()
+            if not code:
+                continue
+            if require_verified_detail and (
+                candidate.get("is_detail_account") is not True
+                or candidate.get("is_active") is not True
+            ):
+                continue
+            if require_verified_detail:
+                chart_roles = semantic_roles_for_account(
+                    ChartAccount(
+                        raw_account_code=code,
+                        normalized_account_code=code,
+                        account_name=str(candidate.get("name") or ""),
+                        is_detail_account=True,
+                    )
+                )
+                if _CHART_ROLE_BY_VERIFIED_SEMANTIC_ROLE[semantic_role] not in chart_roles:
+                    continue
+            if code.startswith(("120", "191", "320", "391")):
+                continue
+            codes.add(code)
+    return codes
+
+
+def _resolve_verified_rule_authority(
+    *,
+    capabilities: tuple[VerifiedRuleAuthorityV1, ...],
+    canonical_items: tuple[object, ...],
+    selection: AccountSelection,
+    client_id: str,
+    direction: str,
+    invoice_mode: str,
+) -> SemanticAccountAuthoritySet:
+    if not capabilities or not canonical_items:
+        return SemanticAccountAuthoritySet()
+    expected_ids = {
+        str(getattr(line, "canonical_line_id", "") or "")
+        for line in canonical_items
+    }
+    resolved: list[LineAccountAuthority] = []
+    seen: set[str] = set()
+    for capability in capabilities:
+        if not isinstance(capability, VerifiedRuleAuthorityV1):
+            return SemanticAccountAuthoritySet()
+        line_id = capability.canonical_line_id.strip()
+        account_code = capability.account_code.strip()
+        if (
+            capability.schema_version != "v1"
+            or capability.client_id != client_id
+            or not capability.rule_id.strip()
+            or not capability.rule_version.strip()
+            or not capability.activation_event_id.strip()
+            or not capability.source_review_decision_id.strip()
+            or not capability.confirmed_actor_id.strip()
+            or line_id not in expected_ids
+            or line_id in seen
+            or capability.direction != direction
+            or capability.invoice_mode != invoice_mode
+            or not account_code
+            or account_code not in _semantic_candidate_codes(
+                selection,
+                direction=direction,
+                semantic_role=capability.semantic_role,
+                require_verified_detail=True,
+            )
+        ):
+            return SemanticAccountAuthoritySet()
+        seen.add(line_id)
+        resolved.append(
+            LineAccountAuthority(
+                canonical_line_id=line_id,
+                account_code=account_code,
+                semantic_role=capability.semantic_role,
+                source="verified_rule",
+                source_id=f"{capability.rule_id}:{capability.rule_version}",
+            )
+        )
+    return SemanticAccountAuthoritySet(line_authorities=tuple(resolved))
+
+
+def _resolve_accepted_ai_authority(
+    *,
+    semantic_attempts: tuple[dict[str, object], ...],
+    accepted_attempt_id: str,
+    canonical_items: tuple[object, ...],
+    selection: AccountSelection,
+    direction: str,
+) -> SemanticAccountAuthoritySet:
+    expected_ids = tuple(
+        str(getattr(line, "canonical_line_id", "") or "").strip()
+        for line in canonical_items
+        if str(getattr(line, "canonical_line_id", "") or "").strip()
+    )
+    if not expected_ids or not accepted_attempt_id:
+        return SemanticAccountAuthoritySet()
+    matching = [item for item in semantic_attempts if str(item.get("attempt_id") or "") == accepted_attempt_id]
+    if len(matching) != 1:
+        return SemanticAccountAuthoritySet()
+    attempt = matching[0]
+    attempt_line_ids = tuple(str(item) for item in (attempt.get("canonical_line_ids") or ()))
+    if (
+        attempt.get("accepted") is not True
+        or str(attempt.get("superseded_by_attempt_id") or "")
+        or str(attempt.get("stage") or "") not in {
+            "initial_account_decision",
+            "account_correction",
+            "correction_account_decision",  # legacy persisted stage name
+            "research_synthesis",
+        }
+        or len(attempt_line_ids) != len(expected_ids)
+        or len(set(attempt_line_ids)) != len(attempt_line_ids)
+        or set(attempt_line_ids) != set(expected_ids)
+        or tuple(attempt.get("validation_errors") or ())
+    ):
+        return SemanticAccountAuthoritySet()
+    response = attempt.get("validated_response")
+    if not isinstance(response, dict) or response.get("needs_research") is not False:
+        return SemanticAccountAuthoritySet()
+    attempt_candidates = {
+        str(code).strip() for code in (attempt.get("candidate_account_codes") or ()) if str(code).strip()
+    }
+    current_candidates = _semantic_candidate_codes(selection, direction=direction)
+    allowed_codes = attempt_candidates & current_candidates
+    raw_decisions = response.get("line_decisions")
+    decisions = tuple(raw_decisions) if isinstance(raw_decisions, (list, tuple)) else ()
+    by_line: dict[str, dict[str, object]] = {}
+    for decision in decisions:
+        if not isinstance(decision, dict):
+            return SemanticAccountAuthoritySet()
+        line_id = str(decision.get("canonical_line_id") or "").strip()
+        if not line_id or line_id in by_line:
+            return SemanticAccountAuthoritySet()
+        by_line[line_id] = decision
+    top_level_code = str(response.get("suggested_account_code") or "").strip()
+    resolved: list[LineAccountAuthority] = []
+    if len(expected_ids) == 1 and not decisions:
+        if top_level_code not in allowed_codes:
+            return SemanticAccountAuthoritySet()
+        resolved.append(LineAccountAuthority(expected_ids[0], top_level_code, "semantic_account", "accepted_ai", accepted_attempt_id))
+    else:
+        if set(by_line) != set(expected_ids):
+            return SemanticAccountAuthoritySet()
+        for line_id in expected_ids:
+            decision = by_line[line_id]
+            code = str(decision.get("suggested_account_code") or "").strip()
+            if not code or code not in allowed_codes or decision.get("needs_research") is not False:
+                return SemanticAccountAuthoritySet()
+            if len(expected_ids) == 1 and top_level_code and top_level_code != code:
+                return SemanticAccountAuthoritySet()
+            resolved.append(LineAccountAuthority(line_id, code, "semantic_account", "accepted_ai", accepted_attempt_id))
+    return SemanticAccountAuthoritySet(
+        line_authorities=tuple(resolved),
+        accepted_attempt=AcceptedSemanticAttemptRef(accepted_attempt_id),
+    )
+
+
+def _combine_authorities(
+    verified: SemanticAccountAuthoritySet,
+    accepted_ai: SemanticAccountAuthoritySet,
+) -> SemanticAccountAuthoritySet:
+    combined: dict[str, LineAccountAuthority] = {}
+    for item in (*verified.line_authorities, *accepted_ai.line_authorities):
+        existing = combined.get(item.canonical_line_id)
+        if existing and existing.account_code != item.account_code:
+            return SemanticAccountAuthoritySet()
+        combined[item.canonical_line_id] = existing or item
+    return SemanticAccountAuthoritySet(
+        line_authorities=tuple(combined.values()),
+        accepted_attempt=accepted_ai.accepted_attempt,
+    )
 
 
 def _normalize_intended_direction(value: str | None) -> str:
@@ -1331,6 +1582,11 @@ def _entry_lines(entry: JournalEntry | None, account_names: dict[str, str] | Non
             "description": names.get(line.account_code, ""),
             "debit": f"{line.debit:.2f}",
             "credit": f"{line.credit:.2f}",
+            **(
+                {"tax_rate": f"{line.tax_rate:.4f}"}
+                if line.tax_rate is not None
+                else {}
+            ),
         }
         for line in entry.lines
     )
@@ -1620,6 +1876,116 @@ def _not_assessed_relevance(raw_line: str) -> BusinessRelevance:
     )
 
 
+def _line_decision_invoice_entry(
+    *,
+    invoice: ParsedInvoice,
+    canonical_items: tuple[object, ...],
+    line_decisions: list[dict[str, object]],
+    selection: AccountSelection,
+    direction: str,
+    counterparty_account: str,
+    return_invoice: bool = False,
+    non_deductible: bool = False,
+) -> JournalEntry | None:
+    decisions = {
+        str(item.get("canonical_line_id") or ""): str(item.get("account_code") or "")
+        for item in line_decisions
+    }
+    net_groups: dict[str, Decimal] = {}
+    tax_groups: dict[tuple[str, Decimal], Decimal] = {}
+    gross_total = Decimal("0.00")
+    for item in canonical_items:
+        line_id = str(getattr(item, "canonical_line_id", "") or "")
+        account_code = decisions.get(line_id, "")
+        net = _decimal_or_none(str(getattr(item, "taxable_amount", "") or ""))
+        tax = _decimal_or_none(str(getattr(item, "tax_amount", "") or ""))
+        raw_rate = str(getattr(item, "vat_rate", "") or "0").replace(",", ".")
+        try:
+            rate_percent = Decimal(raw_rate)
+        except (InvalidOperation, ValueError):
+            return None
+        if not account_code or net is None or tax is None or net < 0 or tax < 0:
+            return None
+        hearing_device_zero_vat = (
+            direction == "sales"
+            and rate_percent > 0
+            and _is_hearing_device_line(str(getattr(item, "description", "") or ""))
+        )
+        semantic_amount = (
+            net + tax
+            if (non_deductible and direction == "purchase") or hearing_device_zero_vat
+            else net
+        )
+        net_groups[account_code] = (net_groups.get(account_code, Decimal("0.00")) + semantic_amount).quantize(
+            Decimal("0.01")
+        )
+        if tax > 0 and not (non_deductible and direction == "purchase") and not hearing_device_zero_vat:
+            vat_account = (
+                _sales_vat_account_for_rate(selection, rate_percent / Decimal("100"))
+                if direction == "sales"
+                else _purchase_vat_account_for_rate(selection, rate_percent / Decimal("100"))
+            )
+            key = (vat_account, rate_percent)
+            tax_groups[key] = (tax_groups.get(key, Decimal("0.00")) + tax).quantize(
+                Decimal("0.01")
+            )
+        gross_total = (gross_total + net + tax).quantize(Decimal("0.01"))
+    expected_total = _decimal_or_none(invoice.payable_total)
+    if (
+        not counterparty_account
+        or not net_groups
+        or expected_total is None
+        or abs(gross_total - expected_total) > MONEY_TOLERANCE
+    ):
+        return None
+    lines: list[JournalLine] = []
+    if direction == "sales":
+        lines.append(
+            JournalLine(counterparty_account, "Alici cari", credit=gross_total)
+            if return_invoice
+            else JournalLine(counterparty_account, "Alici cari", debit=gross_total)
+        )
+        lines.extend(
+            JournalLine(account_code, "Satis iadesi", debit=amount)
+            if return_invoice
+            else JournalLine(account_code, "Satis", credit=amount)
+            for account_code, amount in net_groups.items()
+        )
+        lines.extend(
+            JournalLine(account_code, "Hesaplanan KDV iadesi", debit=amount, tax_rate=rate)
+            if return_invoice
+            else JournalLine(account_code, "Hesaplanan KDV", credit=amount, tax_rate=rate)
+            for (account_code, rate), amount in tax_groups.items()
+        )
+    elif direction == "purchase":
+        lines.extend(
+            JournalLine(account_code, "Alis iadesi", credit=amount)
+            if return_invoice
+            else JournalLine(account_code, "Alis", debit=amount)
+            for account_code, amount in net_groups.items()
+        )
+        lines.extend(
+            JournalLine(account_code, "Indirilecek KDV iadesi", credit=amount, tax_rate=rate)
+            if return_invoice
+            else JournalLine(account_code, "Indirilecek KDV", debit=amount, tax_rate=rate)
+            for (account_code, rate), amount in tax_groups.items()
+        )
+        lines.append(
+            JournalLine(counterparty_account, "Satici cari", debit=gross_total)
+            if return_invoice
+            else JournalLine(counterparty_account, "Satici cari", credit=gross_total)
+        )
+    else:
+        return None
+    entry = JournalEntry(
+        entry_type=f"line_decision_{direction}_{'return' if return_invoice else 'invoice'}",
+        entry_date=invoice.issue_date or "1900-01-01",
+        description=invoice.file_name,
+        lines=tuple(lines),
+    )
+    return entry if entry.is_balanced else None
+
+
 def _line_items_missing_relevance() -> BusinessRelevance:
     classification = ProductClassification(
         raw_line="",
@@ -1860,6 +2226,8 @@ def simulate_invoice(
     processing_mode: ProcessingMode | str = "controlled_automation",
     intended_direction: str | None = None,
     classification_override: ProductClassification | None = None,
+    verified_rule_bindings: tuple[dict[str, object], ...] = (),
+    verified_rule_authorities: tuple[VerifiedRuleAuthorityV1, ...] = (),
 ) -> SimulatedInvoiceResult:
     mode = _normalize_processing_mode(processing_mode)
     reasons = tuple(dict.fromkeys((*invoice.risk_flags, *invoice.parse_notes)))
@@ -1899,6 +2267,9 @@ def simulate_invoice(
     )
     canonical_validation_status = str(getattr(canonical_validation, "status", "") or "")
     canonical_validation_reasons = tuple(str(reason) for reason in getattr(canonical_validation, "reason_codes", ()) or ())
+    canonical_extraction_notes = tuple(
+        str(note) for note in getattr(canonical_invoice, "extraction_notes", ()) or ()
+    )
     canonical_extraction_ai_used = bool(getattr(canonical_invoice, "ai_used", False)) if canonical_invoice else False
     supplier_account = _selected_purchase_supplier_account(
         selection=selection,
@@ -1934,12 +2305,29 @@ def simulate_invoice(
     ai_suggested_counterparty_code = ""
     ai_risk_flags: tuple[str, ...] = ()
     ai_account_reason = ""
+    canonical_items = tuple(getattr(canonical_invoice, "line_items", ()) or ()) if canonical_invoice else ()
+    return_invoice = _is_return_invoice(invoice)
+    invoice_mode = "return" if return_invoice else "ordinary"
+    verified_authority = _resolve_verified_rule_authority(
+        capabilities=verified_rule_authorities,
+        canonical_items=canonical_items,
+        selection=selection,
+        client_id=client_profile.client_id if client_profile else "",
+        direction=direction,
+        invoice_mode=invoice_mode,
+    )
+    # Compatibility dictionaries are intentionally non-authoritative.
+    del verified_rule_bindings
     ai_gate = invoice_ai_gate(
         product_category=relevance.classification.category,
         product_confidence=relevance.classification.confidence,
         business_relation=relevance.relation,
         account_treatment=relevance.account_treatment,
         line_hint=raw_line,
+        canonical_line_ids=tuple(
+            str(getattr(line, "canonical_line_id", "") or "") for line in canonical_items
+        ),
+        semantic_authority=verified_authority,
     )
     ai_product_identity = ""
     ai_research_requested = False
@@ -1948,11 +2336,26 @@ def simulate_invoice(
     ai_selected_account_families: tuple[str, ...] = ()
     ai_stage_evidence: tuple[dict[str, object], ...] = ()
     ai_trace_records: list[dict[str, object]] = []
+    semantic_attempt_records: list[dict[str, object]] = []
+    accepted_semantic_attempt_id = ""
     ai_account_candidate_count = 0
     ai_counterparty_candidate_count = 0
+    base_context: AiClassificationContext | None = None
+    classification_result: AiClassificationResult | None = None
+    canonical_ai_lines = tuple(
+        {
+            "canonical_line_id": str(getattr(line, "canonical_line_id", "") or ""),
+            "source_position": str(getattr(line, "source_position", "") or ""),
+            "description": str(getattr(line, "description", "") or ""),
+            "taxable_amount": str(getattr(line, "taxable_amount", "") or ""),
+            "vat_rate": str(getattr(line, "vat_rate", "") or ""),
+        }
+        for line in canonical_items
+    )
+    use_line_batch = len(canonical_items) > 1
     if line_items_missing:
         ai_skipped_reason = "line_items_missing"
-    elif client_profile and product_classifier and ai_gate.needs_ai and classification_override is None:
+    elif client_profile and product_classifier and ai_gate.needs_ai:
         policy = _ai_policy_from_classifier(product_classifier)
         base_context = _ai_context(
             invoice=invoice,
@@ -1985,13 +2388,18 @@ def simulate_invoice(
                     counterparty_candidate_count=len(base_context.counterparty_candidates),
                 ),
             )
-            family_result = product_classifier.classify(
+            family_result = _classify_with_semantic_authority(
+                product_classifier,
                 raw_line,
                 supplier_hint=invoice.provider_hint,
                 context=family_context,
             )
             selected_families = family_result.selected_account_families
             ai_trace_records.extend(family_result.ai_trace)
+            semantic_attempt_records.extend(family_result.semantic_attempts)
+            accepted_semantic_attempt_id = (
+                family_result.accepted_semantic_attempt_id or accepted_semantic_attempt_id
+            )
             fallback_reason = ""
             if not selected_families:
                 selected_families = tuple(
@@ -2003,32 +2411,50 @@ def simulate_invoice(
             ai_selected_account_families = selected_families
             stage_records.append(_stage_evidence(family_result, fallback_reason=fallback_reason))
             final_context = _filter_context_for_families(base_context, selected_families=selected_families, policy=policy)
-            classification_result = product_classifier.classify(
+            final_context = replace(final_context, canonical_lines=canonical_ai_lines)
+            if use_line_batch:
+                final_context = replace(
+                    final_context,
+                    canonical_lines=canonical_ai_lines,
+                    candidate_strategy=replace(final_context.candidate_strategy, stage="line_batch"),
+                )
+            classification_result = _classify_with_semantic_authority(
+                product_classifier,
                 raw_line,
                 supplier_hint=invoice.provider_hint,
                 context=final_context,
             )
             ai_trace_records.extend(classification_result.ai_trace)
+            semantic_attempt_records.extend(classification_result.semantic_attempts)
+            accepted_semantic_attempt_id = (
+                classification_result.accepted_semantic_attempt_id or accepted_semantic_attempt_id
+            )
             stage_records.append(_stage_evidence(classification_result))
         else:
             single_context = replace(
                 base_context,
+                canonical_lines=canonical_ai_lines,
                 account_candidate_limit=policy.single_stage_account_limit,
                 counterparty_candidate_limit=policy.counterparty_limit,
                 account_candidate_details_limit=policy.single_stage_account_limit,
                 candidate_strategy=AiCandidateStrategy(
                     mode="single_stage",
-                    stage="final_account",
+                    stage="line_batch" if use_line_batch else "final_account",
                     account_candidate_count=len(base_context.account_candidates),
                     counterparty_candidate_count=len(base_context.counterparty_candidates),
                 ),
             )
-            classification_result = product_classifier.classify(
+            classification_result = _classify_with_semantic_authority(
+                product_classifier,
                 raw_line,
                 supplier_hint=invoice.provider_hint,
                 context=single_context,
             )
             ai_trace_records.extend(classification_result.ai_trace)
+            semantic_attempt_records.extend(classification_result.semantic_attempts)
+            accepted_semantic_attempt_id = (
+                classification_result.accepted_semantic_attempt_id or accepted_semantic_attempt_id
+            )
             stage_records.append(_stage_evidence(classification_result))
         if len(base_context.counterparty_candidates) > policy.counterparty_limit:
             counterparty_context = _counterparty_resolution_context(
@@ -2036,12 +2462,17 @@ def simulate_invoice(
                 policy=policy,
                 mode=ai_candidate_strategy,
             )
-            counterparty_result = product_classifier.classify(
+            counterparty_result = _classify_with_semantic_authority(
+                product_classifier,
                 raw_line,
                 supplier_hint=invoice.provider_hint,
                 context=counterparty_context,
             )
             ai_trace_records.extend(counterparty_result.ai_trace)
+            semantic_attempt_records.extend(counterparty_result.semantic_attempts)
+            accepted_semantic_attempt_id = (
+                counterparty_result.accepted_semantic_attempt_id or accepted_semantic_attempt_id
+            )
             stage_records.append(_stage_evidence(counterparty_result))
             if counterparty_result.suggested_counterparty_code:
                 classification_result = replace(
@@ -2080,36 +2511,67 @@ def simulate_invoice(
         ai_skipped_reason = ai_gate.reason
     elif client_profile:
         ai_skipped_reason = "classifier_not_configured"
-    guarded_ai_account = ai_suggested_account_code
+    ai_attempted_account_code = _attempted_ai_account_code(classification_result)
+    accepted_ai_authority = _resolve_accepted_ai_authority(
+        semantic_attempts=tuple(semantic_attempt_records),
+        accepted_attempt_id=accepted_semantic_attempt_id,
+        canonical_items=canonical_items,
+        selection=selection,
+        direction=direction,
+    )
+    semantic_authority = _combine_authorities(verified_authority, accepted_ai_authority)
+    authority_by_line = semantic_authority.account_by_line()
+    structured_line_decisions: list[dict[str, object]] = []
+    for index, canonical_line in enumerate(canonical_items):
+        line_id = str(getattr(canonical_line, "canonical_line_id", "") or "")
+        authority = authority_by_line.get(line_id)
+        if authority is None:
+            continue
+        structured_line_decisions.append(
+            {
+                "canonical_line_id": line_id,
+                "source_position": str(getattr(canonical_line, "source_position", "") or ""),
+                "account_code": authority.account_code,
+                "counterparty_code": ai_suggested_counterparty_code,
+                "product_identity": ai_product_identity,
+                "reason": "Accepted semantic account authority.",
+                "provider": ai_provider if authority.source == "accepted_ai" else "verified_rule",
+                "needs_research": False,
+                "research_query": "",
+                "decision_source": authority.source,
+                "authority_source_id": authority.source_id,
+                "line_index": index + 1,
+            }
+        )
+    if canonical_items:
+        line_coverage = validate_line_decision_coverage(canonical_items, structured_line_decisions)
+        if line_coverage.status != "valid" or any(
+            not str(decision.get("account_code") or "") for decision in structured_line_decisions
+        ):
+            reasons = tuple(dict.fromkeys((*reasons, "ai_line_decision_incomplete")))
+    else:
+        line_coverage = validate_line_decision_coverage(canonical_items, structured_line_decisions)
+    authoritative_account = (
+        semantic_authority.line_authorities[0].account_code
+        if semantic_authority.exactly_covers(tuple(
+            str(getattr(item, "canonical_line_id", "") or "") for item in canonical_items
+        ))
+        else ""
+    )
     static_fallback_account = ""
     static_fallback_suppressed = False
     ai_resolution_status = "resolved"
     ai_retry_reason = ""
-    return_invoice = _is_return_invoice(invoice)
-    suppress_static_purchase_fallback = (
-        direction == "purchase"
-        and not return_invoice
-        and ai_gate.needs_ai
-        and client_profile is not None
-        and product_classifier is not None
-        and not guarded_ai_account
-        and relevance.account_treatment not in {"non_deductible_review", "stock_or_cogs"}
-    )
-    if relevance.account_treatment == "stock_or_cogs":
-        static_fallback_account = _purchase_stock_account_for_line(selection, raw_line)
-        purchase_account = guarded_ai_account or ("" if suppress_static_purchase_fallback else static_fallback_account)
-    elif relevance.account_treatment == "non_deductible_review":
-        purchase_account = selection.non_deductible_account
-    else:
-        static_fallback_account = _purchase_expense_account_for_line(selection, raw_line)
-        purchase_account = guarded_ai_account or ("" if suppress_static_purchase_fallback else static_fallback_account)
-    if suppress_static_purchase_fallback:
+    semantic_authority_missing = not authoritative_account
+    purchase_account = authoritative_account if direction == "purchase" else ""
+    if semantic_authority_missing:
         static_fallback_suppressed = True
-        ai_resolution_status = "ai_retry_required"
+        ai_resolution_status = "ai_correction_required"
         ai_retry_reason = _ai_retry_reason(
             ai_skipped_reason=ai_skipped_reason,
             ai_used=ai_used,
             ai_suggested_account_code=ai_suggested_account_code,
+            ai_attempted_account_code=ai_attempted_account_code,
             ai_research_requested=ai_research_requested,
         )
     hearing_device_vat_review = direction == "sales" and _sales_hearing_device_vat_review_needed(invoice)
@@ -2119,9 +2581,9 @@ def simulate_invoice(
         reasons = tuple(dict.fromkeys((*reasons, "line_items_missing")))
 
     if static_fallback_suppressed:
-        reasons = tuple(dict.fromkeys((*reasons, "ai_retry_required")))
+        reasons = tuple(dict.fromkeys((*reasons, "ai_correction_required")))
         status = "review_required"
-        draft_quality = "ai_retry_required"
+        draft_quality = "ai_correction_required"
     elif return_invoice and amount is not None and amount > 0:
         reasons = tuple(dict.fromkeys((*reasons, "return_invoice_manual_review")))
         vat_rate = _single_vat_rate(invoice) if len(invoice.vat_rates) <= 1 else Decimal("0.00")
@@ -2195,7 +2657,7 @@ def simulate_invoice(
         if hearing_device_vat_review:
             vat_rate = Decimal("0.00")
         sales_vat_account = _sales_vat_account_for_rate(selection, vat_rate)
-        selected_revenue_account = _sales_revenue_account(selection, vat_rate)
+        selected_revenue_account = authoritative_account
         selected_sales_vat_account = sales_vat_account if vat_rate > Decimal("0.00") else ""
         selected_customer_account = _selected_sales_customer_account(
             selection=selection,
@@ -2220,7 +2682,7 @@ def simulate_invoice(
         draft_quality = "full_basic_sales" if not reasons else "partial_review_required"
         status = "auto_ready" if not reasons else "review_required"
     elif direction == "sales":
-        selected_revenue_account = selection.revenue_account
+        selected_revenue_account = authoritative_account
         selected_sales_vat_account = selection.sales_vat_account
         selected_customer_account = _selected_sales_customer_account(
             selection=selection,
@@ -2358,6 +2820,40 @@ def simulate_invoice(
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
+    authority_complete = semantic_authority.exactly_covers(tuple(
+        str(getattr(item, "canonical_line_id", "") or "") for item in canonical_items
+    ))
+    if authority_complete and amount is not None and amount > 0:
+        deterministic_entry_type = entry.entry_type if entry is not None else ""
+        deterministic_draft_quality = draft_quality
+        if direction == "sales":
+            selected_revenue_account = authoritative_account
+        elif direction == "purchase":
+            purchase_account = authoritative_account
+        line_entry = _line_decision_invoice_entry(
+            invoice=invoice,
+            canonical_items=canonical_items,
+            line_decisions=structured_line_decisions,
+            selection=selection,
+            direction=direction,
+            counterparty_account=selected_customer_account if direction == "sales" else supplier_account,
+            return_invoice=return_invoice,
+            non_deductible=relevance.account_treatment == "non_deductible_review",
+        )
+        if line_entry is not None:
+            entry = replace(line_entry, entry_type=deterministic_entry_type or line_entry.entry_type)
+            authority_accounts = {item.account_code for item in semantic_authority.line_authorities}
+            draft_quality = (
+                "line_decision_grouped_draft"
+                if len(authority_accounts) > 1 and not return_invoice
+                else deterministic_draft_quality or (
+                    "line_decision_return_review" if return_invoice else "line_decision_grouped_draft"
+                )
+            )
+        else:
+            reasons = tuple(dict.fromkeys((*reasons, "line_decision_journal_incomplete")))
+            entry = None
+
     counterparty_reasons: tuple[str, ...] = ()
     if counterparty_match and counterparty_match.requires_review:
         counterparty_reasons = (f"counterparty_{counterparty_match.match_reason}",)
@@ -2406,7 +2902,7 @@ def simulate_invoice(
         entry=entry,
     )
     if static_fallback_suppressed:
-        export_gate_reason = "AI ajani karar tamamlayamadi; belge tekrar denenecek."
+        export_gate_reason = "AI semantik hesap karari gecersiz veya tamamlanamadi; duzeltme gerekli."
     accountant_explanation = _accountant_explanation(
         direction=direction,
         direction_evidence=direction_evidence,
@@ -2539,6 +3035,7 @@ def simulate_invoice(
         ai_classification_reason=ai_reason,
         ai_estimated_input_chars=ai_estimated_chars,
         ai_suggested_account_code=ai_suggested_account_code,
+        ai_attempted_account_code=ai_attempted_account_code,
         ai_suggested_counterparty_code=ai_suggested_counterparty_code,
         ai_risk_flags=ai_risk_flags,
         ai_account_reason=ai_account_reason,
@@ -2561,6 +3058,8 @@ def simulate_invoice(
             record for record in ai_stage_evidence if record.get("ai_stage") == "counterparty_resolve"
         ),
         ai_trace=tuple(ai_trace_records),
+        semantic_attempts=tuple(semantic_attempt_records),
+        accepted_semantic_attempt_id=accepted_semantic_attempt_id,
         ai_account_candidate_count=ai_account_candidate_count,
         ai_counterparty_candidate_count=ai_counterparty_candidate_count,
         ai_quality_scorecard=ai_quality_scorecard,
@@ -2571,7 +3070,10 @@ def simulate_invoice(
         canonical_line_count=canonical_line_count,
         canonical_validation_status=canonical_validation_status,
         canonical_validation_reasons=canonical_validation_reasons,
+        canonical_extraction_notes=canonical_extraction_notes,
         canonical_extraction_ai_used=canonical_extraction_ai_used,
+        line_decisions=tuple(structured_line_decisions),
+        line_decision_coverage=asdict(line_coverage),
         decision_narrative=decision_narrative,
         learning_rule_applied=False,
         learning_rule_scope="",
@@ -2650,8 +3152,22 @@ def simulate_private_matching(
     chart_paths: list[Path],
     client_profile: ClientProfile | None = None,
     product_classifier: ProductClassifier | None = None,
+    *,
+    canonical_extraction_provider: object | None = None,
+    canonical_extraction_policy: object | None = None,
 ) -> list[SimulatedChartRun]:
-    invoices = parse_invoice_folder(invoice_dir)
+    client_identity = None
+    if client_profile is not None:
+        client_identity = {
+            "title": client_profile.title,
+            "tax_id": client_profile.tax_id,
+        }
+    invoices = parse_invoice_folder(
+        invoice_dir,
+        canonical_extraction_provider=canonical_extraction_provider,
+        canonical_extraction_policy=canonical_extraction_policy,
+        client_identity=client_identity,
+    )
     return [simulate_chart_run(chart_path, invoices, client_profile, product_classifier) for chart_path in chart_paths]
 
 
@@ -2773,6 +3289,7 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "canonicalLineCount": result.canonical_line_count,
                     "canonicalValidationStatus": result.canonical_validation_status,
                     "canonicalValidationReasons": list(result.canonical_validation_reasons),
+                    "canonicalExtractionNotes": list(result.canonical_extraction_notes),
                     "canonicalExtractionAiUsed": result.canonical_extraction_ai_used,
                     "decisionNarrative": result.decision_narrative,
                     "productLineHint": result.product_line_hint,
@@ -2799,6 +3316,8 @@ def build_review_ui_payload(runs: list[SimulatedChartRun]) -> dict[str, object]:
                     "aiSelectedAccountFamilies": list(result.ai_selected_account_families),
                     "aiStageEvidence": list(result.ai_stage_evidence),
                     "aiTrace": list(result.ai_trace),
+                    "semanticAttempts": list(result.semantic_attempts),
+                    "acceptedSemanticAttemptId": result.accepted_semantic_attempt_id,
                     "aiAccountCandidateCount": result.ai_account_candidate_count,
                     "aiCounterpartyCandidateCount": result.ai_counterparty_candidate_count,
                     "aiProviderStatus": result.ai_classification_skipped_reason or ("used" if result.ai_classification_used else "not_used"),
@@ -2869,6 +3388,20 @@ def private_benchmark_summary(
         "auto_ready_count": sum(1 for result in results if result.simulated_status == "auto_ready"),
         "review_required_count": sum(1 for result in results if result.simulated_status == "review_required"),
         "blocked_count": sum(1 for result in results if result.export_status == "blocked"),
+        "balanced_count": sum(1 for result in results if result.is_balanced),
+        "export_ready_count": sum(1 for result in results if result.export_status == "export_ready"),
+        "canonical_valid_count": sum(1 for result in results if result.canonical_validation_status == "valid"),
+        "canonical_invalid_count": sum(1 for result in results if result.canonical_validation_status == "invalid"),
+        "canonical_missing_count": sum(1 for result in results if not result.canonical_validation_status),
+        "canonical_ai_used_count": sum(1 for result in results if result.canonical_extraction_ai_used),
+        "canonical_ai_failure_count": sum(
+            1
+            for result in results
+            if any(note.startswith("canonical_ai_error:") for note in result.canonical_extraction_notes)
+        ),
+        "canonical_ai_rejected_count": sum(
+            1 for result in results if "canonical_ai_rejected" in result.canonical_extraction_notes
+        ),
         "mixed_vat_review_count": sum(1 for result in results if "mixed_vat_manual_review" in result.review_reason_codes),
         "sales_direction_purchase_draft_count": sum(
             1
@@ -2889,7 +3422,12 @@ def private_benchmark_summary(
         "counterparty_missing_count": sum(1 for result in results if not result.counterparty_match_code),
         "unknown_product_count": sum(1 for result in results if result.product_confidence < 70),
         "ai_used_count": sum(1 for result in results if result.ai_classification_used),
-        "provider_failure_count": sum(1 for result in results if "ai_provider_error" in result.ai_risk_flags),
+        "provider_failure_count": sum(
+            1
+            for result in results
+            if "ai_provider_error" in result.ai_risk_flags
+            or any(note.startswith("canonical_ai_error:") for note in result.canonical_extraction_notes)
+        ),
         "review_reason_counts": {
             reason: review_reasons.count(reason)
             for reason in sorted(set(review_reasons))

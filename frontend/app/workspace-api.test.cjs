@@ -593,6 +593,50 @@ test("processed backend documents expose AI retry without promoting static fallb
   assert.deepEqual(document.pipelineEvents.map((event) => event.step), ["ai_retry_required"]);
 });
 
+test("processed backend documents preserve AI correction draft status and attempted account evidence", () => {
+  const workspace = {
+    client: clientRecord,
+    portal_users: workspaceRecord.portal_users,
+    uploaded_documents: [],
+    documents: [{
+      client_id: "client-1",
+      document_ref: "ai-correction-doc",
+      export_status: "review_required",
+      result: {
+        file_name: "duzeltme-gerekli.xml",
+        invoice_type: "ALIS",
+        accounting_direction: "purchase",
+        ai_resolution_status: "ai_correction_required",
+        ai_retry_reason: "selected_account_not_in_candidates",
+        ai_attempted_account_code: "770.99",
+        draft_status: "ai_correction_required",
+        draft_lines: [],
+        selected_expense_account: "",
+        accountant_summary: "AI hesap karari tamamlanamadi; duzeltme gerekli.",
+      },
+    }],
+    document_pipeline_events: [{
+      document_ref: "ai-correction-doc",
+      step: "ai_correction_required",
+      status: "warning",
+      message_tr: "AI hesap karari tamamlanamadi; duzeltme gerekli.",
+      debug_code: "ai_correction_required",
+    }],
+  };
+
+  const data = normalizeBackendWorkspaces({
+    clients: [clientRecord],
+    workspaces: [workspace],
+    source: "test",
+  });
+
+  const document = data.documents[0];
+  assert.equal(document.aiResolutionStatus, "ai_correction_required");
+  assert.equal(document.aiAttemptedAccountCode, "770.99");
+  assert.equal(document.draftStatus, "ai_correction_required");
+  assert.deepEqual(document.pipelineEvents.map((event) => event.step), ["ai_correction_required"]);
+});
+
 test("fetchBackendPilotData loads clients then each allowed summary workspace with a longer backend timeout", async () => {
   const requests = [];
   const fetchImpl = async (url, init = {}) => {

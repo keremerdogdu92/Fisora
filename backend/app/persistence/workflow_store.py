@@ -5,10 +5,12 @@ import shutil
 import threading
 from copy import deepcopy
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.domain.ai_classification import merge_semantic_attempt_result, sanitize_semantic_evidence
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
 from app.domain.qnb_credentials import QnbCredentialCipher
 from app.domain.portal_access import (
@@ -25,6 +27,68 @@ from app.domain.workspace_review_updates import (
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+PROCESSING_ATTEMPT_MARKER_KEY = "_processing_attempt"
+
+
+class ProcessingAttemptConflict(RuntimeError):
+    def __init__(self, *, attempt_id: str) -> None:
+        super().__init__(f"processing attempt input conflict: {attempt_id}")
+        self.attempt_id = attempt_id
+
+
+class ResearchProfileConflict(RuntimeError):
+    def __init__(self, *, expected_revision: int, actual_revision: int) -> None:
+        super().__init__(
+            f"research profile revision conflict: expected {expected_revision}, actual {actual_revision}"
+        )
+        self.expected_revision = expected_revision
+        self.actual_revision = actual_revision
+
+
+def simulation_input_digest(result: dict[str, Any]) -> str:
+    """Digest the sanitized caller input before normalized persistence metadata."""
+
+    sanitized = merge_semantic_attempt_result(result)
+    sanitized.pop("normalized_revision", None)
+    sanitized.pop("normalized_revision_status", None)
+    encoded = json.dumps(
+        sanitized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return sha256(encoded).hexdigest()
+
+
+def matching_processing_attempt(
+    record: dict[str, Any],
+    *,
+    attempt_id: str,
+    input_digest: str,
+) -> bool:
+    marker = record.get(PROCESSING_ATTEMPT_MARKER_KEY)
+    if not isinstance(marker, dict) or str(marker.get("attempt_id") or "") != attempt_id:
+        return False
+    if str(marker.get("input_digest") or "") != input_digest:
+        raise ProcessingAttemptConflict(attempt_id=attempt_id)
+    return True
+
+
+def processing_attempt_marker(
+    *,
+    attempt_id: str,
+    input_digest: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "attempt_id": attempt_id,
+        "input_digest": input_digest,
+        "normalized_revision": result.get("normalized_revision"),
+        "normalized_revision_status": str(result.get("normalized_revision_status") or ""),
+    }
 
 
 def empty_store() -> dict[str, Any]:
@@ -68,6 +132,26 @@ def normalize_nace_code(value: str) -> str:
 
 def normalize_brand_name(value: str) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def research_profile_is_visible(
+    profile: dict[str, Any],
+    *,
+    allowed_client_ids: set[str] | None,
+) -> bool:
+    """Apply server-derived client scope; ``None`` is trusted internal/admin access."""
+
+    if allowed_client_ids is None or "*" in allowed_client_ids:
+        return True
+    owner = str(
+        profile.get("owner_client_id")
+        or profile.get("client_id")
+        or profile.get("tenant_id")
+        or ""
+    )
+    if owner:
+        return owner in allowed_client_ids
+    return str(profile.get("scope_type") or "legacy_unowned") == "office_public"
 
 
 class JsonWorkflowStore:
@@ -699,7 +783,7 @@ class JsonWorkflowStore:
             "status": status,
             "message_tr": message_tr,
             "debug_code": debug_code,
-            "details": details or {},
+            "details": sanitize_semantic_evidence(details or {}),
             "created_at": utc_now(),
         }
         data["document_pipeline_events"].append(record)
@@ -721,56 +805,99 @@ class JsonWorkflowStore:
         ]
         return events[-max(limit, 1):]
 
-    def save_nace_research_profile(self, *, nace_code: str, profile: dict[str, Any]) -> dict[str, Any]:
+    def save_nace_research_profile(
+        self,
+        *,
+        nace_code: str,
+        profile: dict[str, Any],
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         normalized = normalize_nace_code(nace_code)
-        data = self._read()
-        existing = data["nace_research_profiles"].get(normalized, {})
-        timestamp = utc_now()
-        record = {
-            **existing,
-            **profile,
-            "nace_code": normalized,
-            "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
-            "updated_at": timestamp,
-        }
-        data["nace_research_profiles"][normalized] = record
-        self._write(data)
-        return deepcopy(record)
+        with self._lock:
+            data = self._read()
+            existing = data["nace_research_profiles"].get(normalized, {})
+            actual_revision = int(existing.get("revision") or 0)
+            if expected_revision is not None and actual_revision != expected_revision:
+                raise ResearchProfileConflict(
+                    expected_revision=expected_revision,
+                    actual_revision=actual_revision,
+                )
+            timestamp = utc_now()
+            record = {
+                **existing,
+                **profile,
+                "nace_code": normalized,
+                "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+                "updated_at": timestamp,
+                "revision": actual_revision + 1,
+            }
+            data["nace_research_profiles"][normalized] = record
+            self._write(data)
+            return deepcopy(record)
 
     def get_nace_research_profile(self, nace_code: str) -> dict[str, Any] | None:
         data = self._read()
         profile = data["nace_research_profiles"].get(normalize_nace_code(nace_code))
         return deepcopy(profile) if profile else None
 
-    def save_brand_research_profile(self, *, brand_name: str, profile: dict[str, Any]) -> dict[str, Any]:
+    def save_brand_research_profile(
+        self,
+        *,
+        brand_name: str,
+        profile: dict[str, Any],
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         normalized = normalize_brand_name(brand_name)
-        data = self._read()
-        existing = data["brand_research_profiles"].get(normalized, {})
-        timestamp = utc_now()
-        record = {
-            **existing,
-            **profile,
-            "brand_name": normalized,
-            "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
-            "updated_at": timestamp,
-        }
-        data["brand_research_profiles"][normalized] = record
-        self._write(data)
-        return deepcopy(record)
+        with self._lock:
+            data = self._read()
+            existing = data["brand_research_profiles"].get(normalized, {})
+            actual_revision = int(existing.get("revision") or 0)
+            if expected_revision is not None and actual_revision != expected_revision:
+                raise ResearchProfileConflict(
+                    expected_revision=expected_revision,
+                    actual_revision=actual_revision,
+                )
+            timestamp = utc_now()
+            record = {
+                **existing,
+                **profile,
+                "brand_name": normalized,
+                "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+                "updated_at": timestamp,
+                "revision": actual_revision + 1,
+            }
+            data["brand_research_profiles"][normalized] = record
+            self._write(data)
+            return deepcopy(record)
 
     def get_brand_research_profile(self, brand_name: str) -> dict[str, Any] | None:
         data = self._read()
         profile = data["brand_research_profiles"].get(normalize_brand_name(brand_name))
         return deepcopy(profile) if profile else None
 
-    def get_research_profile(self, *, kind: str, key: str) -> dict[str, Any] | None:
+    def get_research_profile(
+        self,
+        *,
+        kind: str,
+        key: str,
+        allowed_client_ids: set[str] | None = None,
+    ) -> dict[str, Any] | None:
         if kind == "nace":
-            return self.get_nace_research_profile(key)
-        if kind == "brand":
-            return self.get_brand_research_profile(key)
+            profile = self.get_nace_research_profile(key)
+        elif kind == "brand":
+            profile = self.get_brand_research_profile(key)
+        else:
+            return None
+        if profile and research_profile_is_visible(profile, allowed_client_ids=allowed_client_ids):
+            return profile
         return None
 
-    def list_research_profiles(self, *, kind: str = "") -> list[dict[str, Any]]:
+    def list_research_profiles(
+        self,
+        *,
+        kind: str = "",
+        allowed_client_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         data = self._read()
         profiles: list[dict[str, Any]] = []
         if kind in {"", "brand"}:
@@ -778,7 +905,11 @@ class JsonWorkflowStore:
         if kind in {"", "nace"}:
             profiles.extend(deepcopy(profile) for profile in data["nace_research_profiles"].values())
         return sorted(
-            profiles,
+            [
+                profile
+                for profile in profiles
+                if research_profile_is_visible(profile, allowed_client_ids=allowed_client_ids)
+            ],
             key=lambda profile: str(profile.get("updated_at") or profile.get("researched_at") or ""),
             reverse=True,
         )
@@ -999,25 +1130,47 @@ class JsonWorkflowStore:
         client_id: str,
         document_ref: str,
         result: dict[str, Any],
+        attempt_id: str = "",
     ) -> dict[str, Any]:
-        data = self._read()
-        document_key = self._document_key(client_id, document_ref)
-        existing = data["documents"].get(document_key, {})
-        record = {
-            **existing,
-            "client_id": client_id,
-            "document_ref": document_ref,
-            "status": result.get("simulated_status", "review_required"),
-            "export_status": result.get("export_status", "review_required"),
-            "review_reason_codes": result.get("review_reason_codes", []),
-            "result": result,
-            "updated_at": utc_now(),
-        }
-        record.setdefault("id", str(uuid4()))
-        record.setdefault("created_at", record["updated_at"])
-        data["documents"][document_key] = record
-        self._write(data)
-        return deepcopy(record)
+        sanitized_result = merge_semantic_attempt_result(result)
+        input_digest = simulation_input_digest(sanitized_result) if attempt_id else ""
+        with self._lock:
+            data = self._read()
+            document_key = self._document_key(client_id, document_ref)
+            existing = data["documents"].get(document_key, {})
+            if attempt_id and matching_processing_attempt(
+                existing,
+                attempt_id=attempt_id,
+                input_digest=input_digest,
+            ):
+                return deepcopy(existing)
+            persisted_result = merge_semantic_attempt_result(
+                sanitized_result,
+                previous_result=(
+                    existing.get("result") if isinstance(existing.get("result"), dict) else None
+                ),
+            )
+            record = {
+                **existing,
+                "client_id": client_id,
+                "document_ref": document_ref,
+                "status": persisted_result.get("simulated_status", "review_required"),
+                "export_status": persisted_result.get("export_status", "review_required"),
+                "review_reason_codes": persisted_result.get("review_reason_codes", []),
+                "result": persisted_result,
+                "updated_at": utc_now(),
+            }
+            if attempt_id:
+                record[PROCESSING_ATTEMPT_MARKER_KEY] = processing_attempt_marker(
+                    attempt_id=attempt_id,
+                    input_digest=input_digest,
+                    result=persisted_result,
+                )
+            record.setdefault("id", str(uuid4()))
+            record.setdefault("created_at", record["updated_at"])
+            data["documents"][document_key] = record
+            self._write(data)
+            return deepcopy(record)
 
     def create_processing_job(
         self,
@@ -1027,6 +1180,7 @@ class JsonWorkflowStore:
         document_type: str,
         parser_kind: str,
         intake_category: str = "",
+        force_requeue: bool = False,
     ) -> dict[str, Any]:
         data = self._read()
         created_at = utc_now()
@@ -1075,6 +1229,7 @@ class JsonWorkflowStore:
         status: str,
         error_message: str = "",
         processing_metrics: dict[str, Any] | None = None,
+        attempt_id: str = "",
     ) -> dict[str, Any] | None:
         data = self._read()
         for job in data["processing_jobs"]:

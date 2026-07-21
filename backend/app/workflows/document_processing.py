@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from os import environ
@@ -9,9 +9,16 @@ import re
 import time
 from typing import Any
 
-from app.domain.ai_classification import AiClassificationPolicy, ProductClassifier, StaticFirstClassifier
+from app.domain.ai_classification import (
+    AiClassificationContext,
+    AiClassificationPolicy,
+    ProductClassifier,
+    StaticFirstClassifier,
+    merge_semantic_attempt_result,
+    serialize_semantic_decision_attempt,
+)
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
-from app.domain.business_relevance import ClientProfile, ProductClassification, assess_business_relevance
+from app.domain.business_relevance import ClientProfile, ProductClassification
 from app.domain.canonical_invoices import CanonicalExtractionPolicy
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
@@ -29,13 +36,15 @@ from app.domain.openai_provider import (
     FallbackAccountingProvider,
     GroqAccountingProvider,
     OpenAiAccountingProvider,
+    TaskRoutingAccountingProvider,
 )
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
-from app.domain.product_research_cache import normalize_product_research_key
 from app.domain.research_harness import (
     ResearchHarness,
     apply_research_to_result,
     build_research_runtime_from_env,
+    research_brand_cache_key,
+    research_profile_is_fresh,
     sanitize_research_query,
 )
 from app.domain.statement_ai_suggestions import (
@@ -232,6 +241,16 @@ def _serializable_simulation(
         [rule_from_event_payload(event) for event in workspace.get("learning_events") or []],
     )
     data = asdict(result)
+    if invoice.canonical_invoice is not None:
+        data["canonical_invoice"] = asdict(invoice.canonical_invoice)
+    data["invoice_no"] = invoice.invoice_no
+    data["ettn"] = invoice.ettn
+    data["goods_services_total"] = invoice.goods_services_total
+    data["vat_total"] = invoice.vat_total
+    data["issuer_title"] = invoice.issuer_title
+    data["issuer_tax_id"] = invoice.issuer_tax_id
+    data["recipient_title"] = invoice.recipient_title
+    data["recipient_tax_id"] = invoice.recipient_tax_id
     for key in (
         "vat_rates",
         "risk_flags",
@@ -245,6 +264,7 @@ def _serializable_simulation(
         "ai_account_stage_evidence",
         "ai_counterparty_stage_evidence",
         "ai_trace",
+        "semantic_attempts",
         "draft_lines",
     ):
         data[key] = list(data[key])
@@ -297,27 +317,64 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
     )
 
 
-def _provider_chain_from_env(source: dict[str, str] | Any) -> OpenAiAccountingProvider | FallbackAccountingProvider | None:
-    chain = [
-        name.strip().lower()
-        for name in source.get("FISORA_AI_PROVIDER_CHAIN", "").split(",")
-        if name.strip()
-    ]
+SUPPORTED_ACCOUNTING_PROVIDERS = {"openai", "groq", "openrouter", "cerebras"}
+
+
+def _configured_provider_names(source: dict[str, str] | Any) -> tuple[str, ...]:
+    chain = tuple(
+        dict.fromkeys(
+            name.strip().lower()
+            for name in source.get("FISORA_AI_PROVIDER_CHAIN", "").split(",")
+            if name.strip().lower() in SUPPORTED_ACCOUNTING_PROVIDERS
+        )
+    )
     provider_name = source.get("FISORA_AI_PROVIDER", "disabled").strip().lower()
-    supported_providers = {"openai", "groq", "openrouter", "cerebras"}
-    if not chain and provider_name in supported_providers:
-        chain = [provider_name]
-    chain = [name for name in chain if name in supported_providers]
-    if not chain:
+    if not chain and provider_name in SUPPORTED_ACCOUNTING_PROVIDERS:
+        return (provider_name,)
+    return chain
+
+
+def _task_provider_names(
+    source: dict[str, str] | Any,
+    *,
+    env_key: str,
+    preferred_order: tuple[str, ...],
+) -> tuple[str, ...]:
+    configured = _configured_provider_names(source)
+    configured_set = set(configured)
+    override = tuple(
+        dict.fromkeys(
+            name.strip().lower()
+            for name in source.get(env_key, "").split(",")
+            if name.strip().lower() in configured_set
+        )
+    )
+    if override:
+        return (*override, *(name for name in configured if name not in set(override)))
+    return (
+        *(name for name in preferred_order if name in configured_set),
+        *(name for name in configured if name not in set(preferred_order)),
+    )
+
+
+def _provider_chain_from_names(
+    names: tuple[str, ...],
+    source: dict[str, str] | Any,
+) -> OpenAiAccountingProvider | FallbackAccountingProvider | None:
+    if not names:
         return None
-    providers = [_accounting_provider_from_env(name, source) for name in chain]
+    providers = [_accounting_provider_from_env(name, source) for name in names]
     return providers[0] if len(providers) == 1 else FallbackAccountingProvider(providers)
+
+
+def _provider_chain_from_env(source: dict[str, str] | Any) -> OpenAiAccountingProvider | FallbackAccountingProvider | None:
+    return _provider_chain_from_names(_configured_provider_names(source), source)
 
 
 def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, object]:
     source = env or environ
-    provider = _provider_chain_from_env(source)
-    if provider is None:
+    statement_provider = _provider_chain_from_env(source)
+    if statement_provider is None:
         return {
             "product_classifier": None,
             "canonical_extraction_provider": None,
@@ -325,6 +382,35 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
             "statement_ai_provider": None,
             "statement_ai_policy": StatementAiSuggestionPolicy(),
         }
+    canonical_provider = _provider_chain_from_names(
+        _task_provider_names(
+            source,
+            env_key="FISORA_AI_CANONICAL_PROVIDER_CHAIN",
+            preferred_order=("cerebras", "groq", "openrouter", "openai"),
+        ),
+        source,
+    )
+    classification_provider = _provider_chain_from_names(
+        _task_provider_names(
+            source,
+            env_key="FISORA_AI_CLASSIFICATION_PROVIDER_CHAIN",
+            preferred_order=("groq", "cerebras", "openrouter", "openai"),
+        ),
+        source,
+    )
+    counterparty_provider = _provider_chain_from_names(
+        _task_provider_names(
+            source,
+            env_key="FISORA_AI_COUNTERPARTY_PROVIDER_CHAIN",
+            preferred_order=("cerebras", "groq", "openrouter", "openai"),
+        ),
+        source,
+    )
+    semantic_provider = TaskRoutingAccountingProvider(
+        classification_provider=classification_provider,
+        counterparty_provider=counterparty_provider,
+        configured_provider=statement_provider,
+    )
     product_policy = AiClassificationPolicy(
         enabled=True,
         static_confidence_threshold=int(source.get("FISORA_AI_STATIC_CONFIDENCE_THRESHOLD", "101")),
@@ -347,10 +433,10 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         max_provider_calls=int(source.get("FISORA_AI_CANONICAL_MAX_PROVIDER_CALLS", "1")),
     )
     return {
-        "product_classifier": StaticFirstClassifier(provider=provider, policy=product_policy),
-        "canonical_extraction_provider": provider,
+        "product_classifier": StaticFirstClassifier(provider=semantic_provider, policy=product_policy),
+        "canonical_extraction_provider": canonical_provider,
         "canonical_extraction_policy": canonical_policy,
-        "statement_ai_provider": provider,
+        "statement_ai_provider": statement_provider,
         "statement_ai_policy": statement_policy,
     }
 
@@ -367,11 +453,16 @@ def _invoice_has_expected_shape(invoice: ParsedInvoice) -> bool:
     return bool(invoice.invoice_no or invoice.ettn or invoice.issue_date or invoice.payable_total or invoice.tax_ids)
 
 
+def _ai_attention_status(result: dict[str, Any]) -> str:
+    status = str(result.get("ai_resolution_status") or "")
+    return status if status in {"ai_retry_required", "ai_correction_required"} else ""
+
+
 def _draft_status(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "wrong_document_type"
-    if result.get("ai_resolution_status") == "ai_retry_required":
-        return "ai_retry_required"
+    if attention := _ai_attention_status(result):
+        return attention
     if result.get("draft_lines"):
         return "draft_ready"
     return "manual_draft_required"
@@ -380,8 +471,10 @@ def _draft_status(result: dict[str, Any]) -> str:
 def _accountant_summary(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "Bu dosya beklenen fatura/ekstre yapisinda gorunmuyor. Dogru belge yeniden istenmeli."
-    if result.get("ai_resolution_status") == "ai_retry_required":
+    if _ai_attention_status(result) == "ai_retry_required":
         return "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek."
+    if _ai_attention_status(result) == "ai_correction_required":
+        return "AI hesap karari tamamlanamadi; duzeltme gerekli ve fis taslagi olusturulmadi."
     if result.get("draft_lines"):
         if result.get("is_balanced"):
             return "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir."
@@ -402,10 +495,13 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "ai_reason": str(result.get("ai_classification_reason") or ""),
         "ai_resolution_status": str(result.get("ai_resolution_status") or ""),
         "ai_retry_reason": str(result.get("ai_retry_reason") or ""),
+        "ai_attempted_account_code": str(result.get("ai_attempted_account_code") or ""),
         "ai_stage_evidence": list(result.get("ai_stage_evidence") or []),
         "ai_account_stage_evidence": list(result.get("ai_account_stage_evidence") or []),
         "ai_counterparty_stage_evidence": list(result.get("ai_counterparty_stage_evidence") or []),
         "ai_trace": list(result.get("ai_trace") or []),
+        "semantic_attempts": list(result.get("semantic_attempts") or []),
+        "accepted_semantic_attempt_id": str(result.get("accepted_semantic_attempt_id") or ""),
         "direction_uncertainty": bool(result.get("direction_uncertainty")),
         "static_fallback_account": str(result.get("static_fallback_account") or ""),
         "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
@@ -421,8 +517,12 @@ def _ai_explanation_tr(result: dict[str, Any]) -> str:
     account = str(result.get("ai_suggested_account_code") or result.get("selected_expense_account") or "-")
     counterparty = str(result.get("ai_suggested_counterparty_code") or result.get("selected_supplier_account") or "-")
     risks = ", ".join(str(flag) for flag in result.get("ai_risk_flags") or result.get("review_reason_codes") or []) or "risk yok"
-    if result.get("ai_resolution_status") == "ai_retry_required":
+    if _ai_attention_status(result):
         retry_reason = str(result.get("ai_retry_reason") or skipped or "ai_not_resolved")
+        if _ai_attention_status(result) == "ai_correction_required":
+            if skipped == "ai_provider_error":
+                return f"AI karari alinamadi. Provider {provider} hata verdi. Duzeltme gerekli. Sebep: {retry_reason}. Riskler: {risks}."
+            return f"AI hesap karari gecersiz veya eksik; Provider {provider} icin duzeltme gerekli. Sebep: {retry_reason}. Hesap onerisi nihai taslaga yazilmadi. Riskler: {risks}."
         if skipped == "ai_provider_error":
             return f"AI karari alinamadi. Provider {provider} hata verdi; belge tekrar denenecek. Sebep: {retry_reason}. Riskler: {risks}."
         return f"AI karari tamamlanamadi; belge tekrar denenecek. Sebep: {retry_reason}. Hesap onerisi nihai taslaga yazilmadi. Riskler: {risks}."
@@ -438,8 +538,8 @@ def _ai_explanation_tr(result: dict[str, Any]) -> str:
 def _with_review_summary(result: dict[str, Any], *, document_validation_status: str = "expected_document") -> dict[str, Any]:
     updated = dict(result)
     updated.setdefault("document_validation_status", document_validation_status)
-    if updated.get("ai_resolution_status") == "ai_retry_required":
-        updated["draft_status"] = "ai_retry_required"
+    if attention := _ai_attention_status(updated):
+        updated["draft_status"] = attention
     updated.setdefault("draft_status", _draft_status(updated))
     draft_lines = list(updated.get("draft_lines") or [])
     statement_entries = list(updated.get("statement_entries") or [])
@@ -453,7 +553,7 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
     updated.setdefault(
         "accountant_action_hint",
         "AI kararini tamamlayinca belge otomatik yeniden denenecek."
-        if updated.get("ai_resolution_status") == "ai_retry_required"
+        if _ai_attention_status(updated)
         else "Taslak hazir; mustavir kontrolu bekliyor." if draft_lines or statement_entries else "Manuel kontrol gerekiyor.",
     )
     updated.setdefault(
@@ -475,7 +575,7 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
             "export_gate_reason": updated.get("export_gate_reason") or "",
         },
     )
-    if updated.get("ai_resolution_status") == "ai_retry_required":
+    if _ai_attention_status(updated):
         updated["accountant_summary"] = _accountant_summary(updated)
         updated["accountant_explanation_tr"] = _ai_explanation_tr(updated)
         updated["ai_explanation_tr"] = _ai_explanation_tr(updated)
@@ -483,7 +583,7 @@ def _with_review_summary(result: dict[str, Any], *, document_validation_status: 
         updated.setdefault("accountant_summary", _accountant_summary(updated))
         updated.setdefault("accountant_explanation_tr", updated.get("accountant_explanation_tr") or _ai_explanation_tr(updated))
         updated.setdefault("ai_explanation_tr", _ai_explanation_tr(updated))
-    updated.setdefault("technical_details", _technical_details(updated))
+    updated["technical_details"] = _technical_details(updated)
     return updated
 
 
@@ -501,8 +601,6 @@ def _research_candidate_from_result(result: dict[str, Any], document: dict[str, 
 
 
 def _should_run_research_for_result(result: dict[str, Any]) -> bool:
-    if result.get("ai_resolution_status") == "ai_retry_required":
-        return True
     if bool(result.get("ai_research_requested")):
         return True
     category = str(result.get("product_category") or "").strip()
@@ -521,74 +619,137 @@ def _should_run_research_for_result(result: dict[str, Any]) -> bool:
     return status == "is_alani_disi"
 
 
-def _apply_research_accounting_effect(
-    result: dict[str, Any],
-    profile: dict[str, Any],
+def _canonical_line_ids_for_research(result: dict[str, Any]) -> tuple[str, ...]:
+    for attempt in reversed(result.get("semantic_attempts") or []):
+        if not isinstance(attempt, dict):
+            continue
+        line_ids = tuple(
+            str(item).strip()
+            for item in attempt.get("canonical_line_ids") or []
+            if str(item).strip()
+        )
+        if line_ids:
+            return line_ids
+    canonical_invoice = result.get("canonical_invoice") if isinstance(result.get("canonical_invoice"), dict) else {}
+    return tuple(
+        str(item.get("canonical_line_id") or "").strip()
+        for item in canonical_invoice.get("line_items") or []
+        if isinstance(item, dict) and str(item.get("canonical_line_id") or "").strip()
+    )
+
+
+def _research_semantic_attempt(result: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+    candidate_account_codes = tuple(
+        str(candidate.get("code") or "")
+        for candidates in (result.get("account_candidates") or {}).values()
+        for candidate in candidates
+        if isinstance(candidate, dict) and str(candidate.get("code") or "")
+    ) if isinstance(result.get("account_candidates"), dict) else ()
+    canonical_line_ids = tuple(profile.get("canonical_line_ids") or ()) or _canonical_line_ids_for_research(result)
+    confidence = int(profile.get("research_confidence") or profile.get("confidence") or 0)
+    research_evidence = [
+        {
+            **item,
+            "url": str(item.get("source_url") or ""),
+            "source_type": str(item.get("source_kind") or "other"),
+            "summary_tr": str(item.get("evidence_summary") or item.get("raw_summary") or ""),
+            "accepted": bool(item.get("accepted", True)),
+        }
+        for item in profile.get("research_evidence") or []
+        if isinstance(item, dict) and str(item.get("source_url") or "")
+    ]
+    if not research_evidence:
+        research_evidence = [
+            {
+                "url": str(url),
+                "title": "",
+                "source_type": "",
+                "summary_tr": "",
+                "accepted": True,
+            }
+            for url in profile.get("source_urls") or []
+            if str(url)
+        ]
+    return serialize_semantic_decision_attempt(
+        stage="research_evidence_collection",
+        canonical_line_ids=canonical_line_ids,
+        prompt_version=str(profile.get("prompt_version") or "research-synthesis-v1"),
+        provider=str(profile.get("provider") or profile.get("provider_name") or "research_harness"),
+        model=str(profile.get("model") or ""),
+        candidate_account_codes=candidate_account_codes,
+        candidate_counterparty_codes=(),
+        validated_response={
+            "confidence": confidence,
+            "display_name": str(profile.get("display_name") or ""),
+            "research_confidence": int(profile.get("research_confidence") or 0),
+            "question": str(profile.get("question") or ""),
+            "canonical_line_ids": list(canonical_line_ids),
+            "conflicts": list(profile.get("conflicts") or []),
+            "evidence_gaps": list(profile.get("evidence_gaps") or []),
+            "cache_provenance": dict(profile.get("cache_provenance") or {}),
+            "authority": "evidence_only",
+            "research_evidence": research_evidence,
+        },
+        validation_errors=(),
+        accepted=False,
+    )
+
+
+class _ResearchSynthesisClassifier:
+    def __init__(self, base: ProductClassifier, profile: dict[str, Any], prior_result: dict[str, Any]) -> None:
+        self.base = base
+        self.profile = profile
+        self.prior_result = prior_result
+        self.policy = getattr(base, "policy", None)
+
+    def classify(
+        self,
+        raw_line: str,
+        *,
+        supplier_hint: str = "",
+        context: AiClassificationContext | None = None,
+    ) -> Any:
+        resolved = context or AiClassificationContext()
+        prior_attempts = [
+            item for item in self.prior_result.get("semantic_attempts") or [] if isinstance(item, dict)
+        ]
+        staged = replace(
+            resolved,
+            semantic_stage="research_synthesis",
+            research_evidence=tuple(
+                item for item in self.profile.get("research_evidence") or [] if isinstance(item, dict)
+            ),
+            prior_semantic_attempt=dict(prior_attempts[-1]) if prior_attempts else {},
+            validation_errors=(),
+        )
+        return self.base.classify(raw_line, supplier_hint=supplier_hint, context=staged)
+
+
+def _merge_ai_result_history(
+    rebuilt: dict[str, Any],
+    original: dict[str, Any],
     *,
-    client_profile: ClientProfile | None,
+    appended_attempts: tuple[dict[str, Any], ...] = (),
+    accepted_attempt_id: str | None = None,
 ) -> dict[str, Any]:
-    category = str(profile.get("product_category") or "").strip()
-    if not category or not client_profile:
-        return result
-    confidence = int(profile.get("accounting_impact_confidence") or profile.get("research_confidence") or 0)
-    classification = ProductClassification(
-        raw_line=str(result.get("product_line_hint") or profile.get("display_name") or ""),
-        category=category,
-        confidence=confidence,
-        evidence=("research_profile",),
+    merged = {**original, **rebuilt}
+    merged.update({key: value for key, value in original.items() if key.startswith("ai_")})
+    merged = merge_semantic_attempt_result(
+        merged,
+        previous_result=original,
+        appended_attempts=appended_attempts,
+        accepted_attempt_id=accepted_attempt_id,
     )
-    relevance = assess_business_relevance(
-        str(result.get("product_line_hint") or profile.get("display_name") or ""),
-        client_profile,
-        supplier_hint=str(result.get("provider_hint") or ""),
-        classification=classification,
+    accepted_id = str(merged.get("accepted_semantic_attempt_id") or "")
+    merged["accepted_semantic_stage"] = next(
+        (
+            str(item.get("stage") or "")
+            for item in merged.get("semantic_attempts") or []
+            if isinstance(item, dict) and str(item.get("attempt_id") or "") == accepted_id
+        ),
+        "",
     )
-    updated = dict(result)
-    updated["product_category"] = relevance.classification.category
-    updated["product_confidence"] = relevance.classification.confidence
-    updated["business_relevance_status"] = relevance.status
-    updated["business_relevance_confidence"] = relevance.confidence
-    updated["business_relevance_reason"] = relevance.reason
-    updated["business_relevance_evidence"] = list(relevance.evidence)
-    updated["business_relevance_relation"] = relevance.relation
-    updated["business_relevance_account_treatment"] = relevance.account_treatment
-    updated["business_relevance_requires_review"] = relevance.requires_accountant_review
-    return updated
-
-
-def _research_classification_from_profile(result: dict[str, Any], profile: dict[str, Any]) -> ProductClassification | None:
-    category = str(profile.get("product_category") or "").strip()
-    if not category:
-        return None
-    confidence = int(profile.get("accounting_impact_confidence") or profile.get("research_confidence") or 0)
-    return ProductClassification(
-        raw_line=str(result.get("product_line_hint") or profile.get("display_name") or ""),
-        category=category,
-        confidence=confidence,
-        evidence=("research_profile",),
-    )
-
-
-def _preserve_ai_fields(rebuilt: dict[str, Any], original: dict[str, Any]) -> dict[str, Any]:
-    preserved = dict(rebuilt)
-    for key in (
-        "ai_classification_used",
-        "ai_classification_provider",
-        "ai_classification_skipped_reason",
-        "ai_classification_reason",
-        "ai_estimated_input_chars",
-        "ai_suggested_account_code",
-        "ai_suggested_counterparty_code",
-        "ai_risk_flags",
-        "ai_account_reason",
-        "ai_gate_reason",
-        "ai_product_identity",
-        "ai_research_requested",
-        "ai_research_query",
-    ):
-        if key in original:
-            preserved[key] = original[key]
-    return _with_review_summary(preserved)
+    return _with_review_summary(merged)
 
 
 def _rebuild_result_with_research(
@@ -598,20 +759,36 @@ def _rebuild_result_with_research(
     job: dict[str, Any],
     workspace: dict[str, Any],
     profile: dict[str, Any],
+    product_classifier: ProductClassifier | None = None,
+    canonical_extraction_provider: object | None = None,
+    canonical_extraction_policy: CanonicalExtractionPolicy | None = None,
 ) -> dict[str, Any]:
-    classification = _research_classification_from_profile(result, profile)
-    path = _stored_path(document)
-    if classification is None or path is None:
-        return _apply_research_accounting_effect(result, profile, client_profile=_client_profile(workspace))
-    document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
-    invoice = _parse_invoice_document(path, document_type)
-    rebuilt = _serializable_simulation(
-        invoice,
+    evidence_only = dict(result)
+    evidence_only["research_evidence"] = list(profile.get("research_evidence") or [])
+    evidence_only["research_evidence_gaps"] = list(profile.get("evidence_gaps") or [])
+    if not profile.get("canonical_line_ids") or not evidence_only["research_evidence"]:
+        return _merge_ai_result_history(evidence_only, result)
+    if product_classifier is None:
+        research_attempt = _research_semantic_attempt(evidence_only, profile)
+        return _merge_ai_result_history(
+            evidence_only,
+            result,
+            appended_attempts=(research_attempt,),
+        )
+    rebuilt = build_processing_result(
+        document,
+        job,
         workspace,
-        intended_direction=str(document.get("intake_category") or job.get("intake_category") or ""),
-        classification_override=classification,
+        product_classifier=_ResearchSynthesisClassifier(product_classifier, profile, result),
+        canonical_extraction_provider=canonical_extraction_provider,
+        canonical_extraction_policy=canonical_extraction_policy,
     )
-    return _preserve_ai_fields(rebuilt, result)
+    return _merge_ai_result_history(
+        {**rebuilt, "research_evidence": evidence_only["research_evidence"], "research_evidence_gaps": evidence_only["research_evidence_gaps"]},
+        result,
+        appended_attempts=tuple(rebuilt.get("semantic_attempts") or ()),
+        accepted_attempt_id=str(rebuilt.get("accepted_semantic_attempt_id") or ""),
+    )
 
 
 def _canonical_client_identity(workspace: dict[str, Any]) -> dict[str, object]:
@@ -1260,22 +1437,38 @@ def process_next_job_once(
         research_document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
         if effective_research_runtime and research_document_type not in {"bank_statement", "pos_statement"}:
             raw_line = _research_candidate_from_result(result, document)
-            if raw_line and _should_run_research_for_result(result):
+            should_run_research = bool(raw_line and _should_run_research_for_result(result))
+            canonical_line_ids = _canonical_line_ids_for_research(result) if should_run_research else ()
+            if should_run_research and not canonical_line_ids:
+                result = {
+                    **result,
+                    "research_evidence": [],
+                    "research_evidence_gaps": ["line-missing"],
+                }
+                pipeline_event(
+                    "research_scope_missing",
+                    "warning",
+                    "Canonical fatura satiri bulunmadigi icin arastirma baslatilmadi.",
+                    "line-missing",
+                    {"evidence_gaps": ["line-missing"]},
+                )
+            if should_run_research and canonical_line_ids:
                 activity_context = str((workspace.get("client") or {}).get("profile", {}).get("activity_description") or "")
                 query = sanitize_research_query(
                     kind="brand",
                     raw_line=raw_line,
                     supplier_hint=str(result.get("provider_hint") or ""),
                     activity_context=activity_context,
+                    canonical_line_ids=canonical_line_ids,
                 )
-                cache_key = normalize_product_research_key(query.search_text or query.key)
+                cache_key = research_brand_cache_key(query, cache_scope=str(client_id))
                 cached = store.get_brand_research_profile(cache_key) if hasattr(store, "get_brand_research_profile") else None
-                research_cache_hit = bool(cached)
+                research_cache_hit = bool(cached and research_profile_is_fresh(cached))
                 pipeline_event(
-                    "research_cache_hit" if cached else "research_started",
+                    "research_cache_hit" if research_cache_hit else "research_started",
                     "ok",
-                    "Research cache kullanildi." if cached else "Marka/NACE arastirmasi basladi.",
-                    "research_cache_hit" if cached else "research_started",
+                    "Research cache kullanildi." if research_cache_hit else "Marka/NACE arastirmasi basladi.",
+                    "research_cache_hit" if research_cache_hit else "research_started",
                     {
                         "kind": "brand",
                         "search_text": query.search_text,
@@ -1292,6 +1485,8 @@ def process_next_job_once(
                     raw_line=raw_line,
                     supplier_hint=str(result.get("provider_hint") or ""),
                     activity_context=activity_context,
+                    canonical_line_ids=canonical_line_ids,
+                    cache_scope=str(client_id),
                 )
                 research_ms += _duration_ms(research_start)
                 if harness.call_count > 0:
@@ -1308,22 +1503,42 @@ def process_next_job_once(
                     job=job,
                     workspace=workspace,
                     profile=profile,
+                    product_classifier=runtime.get("product_classifier"),
+                    canonical_extraction_provider=runtime.get("canonical_extraction_provider"),
+                    canonical_extraction_policy=runtime.get("canonical_extraction_policy"),
                 )
                 result = apply_research_to_result(result, profile, confidence_threshold=threshold)
                 confidence = int(profile.get("research_confidence") or profile.get("confidence") or 0)
-                research_ok = confidence >= threshold
+                has_accepted_evidence = any(
+                    isinstance(item, dict) and item.get("accepted") is True
+                    for item in profile.get("research_evidence") or []
+                )
+                research_ok = confidence >= threshold and has_accepted_evidence
+                research_step = (
+                    "research_completed"
+                    if research_ok
+                    else "research_insufficient_evidence"
+                    if not has_accepted_evidence
+                    else "research_low_confidence"
+                )
                 pipeline_event(
-                    "research_completed" if research_ok else "research_low_confidence",
+                    research_step,
                     "ok" if research_ok else "warning",
-                    "Arastirma profili hazirlandi." if research_ok else "Arastirma guveni dusuk; belge kontrolde kaldi.",
-                    "research_completed" if research_ok else "research_low_confidence",
+                    "Arastirma profili hazirlandi."
+                    if research_ok
+                    else "Arastirma kaniti yetersiz."
+                    if not has_accepted_evidence
+                    else "Arastirma guveni dusuk; belge kontrolde kaldi.",
+                    research_step,
                     {
                         "display_name": str(profile.get("display_name") or ""),
                         "confidence": confidence,
                         "source_urls": list(profile.get("source_urls") or []),
+                        "semantic_attempts": list(result.get("semantic_attempts") or []),
+                        "accepted_semantic_attempt_id": str(result.get("accepted_semantic_attempt_id") or ""),
                     },
                 )
-                if "research_source_rejected" in set(result.get("review_reason_codes") or []):
+                if "source-rejected" in set(profile.get("evidence_gaps") or []):
                     pipeline_event(
                         "research_source_rejected",
                         "warning",
@@ -1332,14 +1547,21 @@ def process_next_job_once(
                         {"source_urls": list(profile.get("source_urls") or [])},
                     )
         result = _with_review_summary(result)
-        if result.get("ai_resolution_status") == "ai_retry_required":
+        if attention := _ai_attention_status(result):
+            event_step = "ai_correction_required" if attention == "ai_correction_required" else "ai_retry_required"
             pipeline_event(
-                "ai_retry_required",
+                event_step,
                 "warning",
-                "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek.",
-                "ai_retry_required",
+                (
+                    "AI hesap karari tamamlanamadi; duzeltme gerekli."
+                    if attention == "ai_correction_required"
+                    else "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek."
+                ),
+                event_step,
                 {
                     "reason": str(result.get("ai_retry_reason") or ""),
+                    "ai_resolution_status": attention,
+                    "ai_attempted_account_code": str(result.get("ai_attempted_account_code") or ""),
                     "static_fallback_account": str(result.get("static_fallback_account") or ""),
                     "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
                 },
@@ -1375,6 +1597,11 @@ def process_next_job_once(
             client_id=client_id,
             document_ref=document_ref,
             result=result,
+            **(
+                {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+                if job.get("normalized_attempt_id")
+                else {}
+            ),
         )
         _record_ai_usage_from_result(store, client_id=client_id, result=result)
         processing_metrics = {
@@ -1387,7 +1614,16 @@ def process_next_job_once(
             "research_cache_hit": research_cache_hit,
             "nace_cache_hit": nace_cache_hit,
         }
-        store.update_processing_job(job_id=str(job["id"]), status="completed", processing_metrics=processing_metrics)
+        store.update_processing_job(
+            job_id=str(job["id"]),
+            status="completed",
+            processing_metrics=processing_metrics,
+            **(
+                {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+                if job.get("normalized_attempt_id")
+                else {}
+            ),
+        )
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
         pipeline_event(
@@ -1412,6 +1648,11 @@ def process_next_job_once(
             status="failed",
             error_message=str(exc),
             processing_metrics=processing_metrics,
+            **(
+                {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+                if job.get("normalized_attempt_id")
+                else {}
+            ),
         )
         return {"processed_count": 1, "completed_count": 0, "failed_count": 1}
 

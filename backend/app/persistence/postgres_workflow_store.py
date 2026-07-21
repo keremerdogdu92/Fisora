@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from hashlib import sha256
 import os
 from pathlib import Path
 from typing import Any, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from app.domain.ai_classification import merge_semantic_attempt_result, sanitize_semantic_evidence
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
 from app.domain.portal_access import (
     PORTAL_USERS_CLIENT_ID,
@@ -19,7 +21,17 @@ from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
 )
-from app.persistence.workflow_store import _clear_directory_contents
+from app.persistence.workflow_store import (
+    PROCESSING_ATTEMPT_MARKER_KEY,
+    ProcessingAttemptConflict as ProcessingAttemptConflict,
+    ResearchProfileConflict,
+    _clear_directory_contents,
+    matching_processing_attempt,
+    processing_attempt_marker,
+    research_profile_is_visible,
+    simulation_input_digest,
+)
+from app.persistence.normalized_accounting_repository import NormalizedAccountingRepository
 
 
 ConnectFactory = Callable[[], Any]
@@ -33,8 +45,19 @@ def tenant_uuid(value: str) -> UUID:
     return uuid5(NAMESPACE_URL, f"fisora:tenant:{value}")
 
 
-def taxpayer_uuid(client_id: str) -> UUID:
-    return uuid5(NAMESPACE_URL, f"fisora:taxpayer:{client_id}")
+def workflow_document_lock_key(
+    tenant_id: object,
+    client_id: str,
+    document_ref: str,
+) -> int:
+    """Stable signed bigint key for a tenant/client/document advisory lock."""
+
+    scope = f"{tenant_id}\x1f{client_id}\x1f{document_ref}".encode("utf-8")
+    return int.from_bytes(sha256(scope).digest()[:8], "big", signed=True)
+
+
+def taxpayer_uuid(tenant_id: UUID, client_id: str) -> UUID:
+    return uuid5(NAMESPACE_URL, f"fisora:taxpayer:{tenant_id}:{client_id}")
 
 
 def normalize_nace_code(value: str) -> str:
@@ -46,12 +69,7 @@ def normalize_brand_name(value: str) -> str:
 
 
 class PostgresWorkflowStore:
-    """PostgreSQL-backed MVP workspace store.
-
-    This first production adapter keeps the same payload contract as the JSON
-    store in a `workflow_records` compatibility table. The normalized accounting
-    tables remain available for later hardening once real pilot data stabilizes.
-    """
+    """PostgreSQL store with a compatibility API and optional normalized owner."""
 
     def __init__(
         self,
@@ -59,6 +77,8 @@ class PostgresWorkflowStore:
         *,
         tenant_key: str | None = None,
         connect: ConnectFactory | None = None,
+        accounting_store_target: str | None = None,
+        normalized_repository: Any | None = None,
     ) -> None:
         if not dsn.strip():
             raise ValueError("PostgreSQL workflow store requires a database dsn")
@@ -66,6 +86,23 @@ class PostgresWorkflowStore:
         self.tenant_key = tenant_key or os.environ.get("FISORA_TENANT_KEY", "default")
         self.tenant_id = tenant_uuid(self.tenant_key)
         self._connect_factory = connect
+        self.accounting_store_target = (
+            accounting_store_target
+            or os.environ.get("FISORA_ACCOUNTING_STORE_TARGET", "compatibility")
+        ).strip().lower()
+        if self.accounting_store_target not in {"compatibility", "normalized"}:
+            raise ValueError("FISORA_ACCOUNTING_STORE_TARGET must be compatibility or normalized")
+        self.normalized_repository = normalized_repository
+        if self.accounting_store_target == "normalized" and self.normalized_repository is None:
+            self.normalized_repository = NormalizedAccountingRepository(
+                connect=self._connect,
+                tenant_id=self.tenant_id,
+                json_value=self._json,
+            )
+
+    @property
+    def normalized_accounting_enabled(self) -> bool:
+        return self.accounting_store_target == "normalized"
 
     def upsert_client(self, *, client_id: str, profile: dict[str, Any], onboarding: dict[str, Any]) -> dict[str, Any]:
         timestamp = utc_now()
@@ -87,6 +124,64 @@ class PostgresWorkflowStore:
 
     def replace_chart_accounts(self, *, client_id: str, accounts: list[dict[str, Any]]) -> dict[str, Any]:
         timestamp = utc_now()
+        if self.normalized_accounting_enabled:
+            taxpayer_id = taxpayer_uuid(self.tenant_id, client_id)
+            with self._connect() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        update chart_accounts
+                        set is_active = false, updated_at = now()
+                        where tenant_id = %s and taxpayer_id = %s
+                        """,
+                        (self.tenant_id, taxpayer_id),
+                    )
+                    for account in accounts:
+                        normalized_code = str(
+                            account.get("normalized_account_code")
+                            or account.get("raw_account_code")
+                            or account.get("code")
+                            or ""
+                        ).strip()
+                        if not normalized_code:
+                            continue
+                        raw_code = str(account.get("raw_account_code") or normalized_code).strip()
+                        account_id = uuid5(
+                            NAMESPACE_URL,
+                            f"fisora:chart-account:{self.tenant_id}:{client_id}:{normalized_code}",
+                        )
+                        cursor.execute(
+                            """
+                            insert into chart_accounts (
+                                id, tenant_id, taxpayer_id, raw_account_code,
+                                normalized_account_code, account_name,
+                                is_detail_account, tax_id, tax_office, iban, is_active
+                            )
+                            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true)
+                            on conflict (tenant_id, taxpayer_id, normalized_account_code)
+                            do update set
+                                raw_account_code = excluded.raw_account_code,
+                                account_name = excluded.account_name,
+                                is_detail_account = excluded.is_detail_account,
+                                tax_id = excluded.tax_id,
+                                tax_office = excluded.tax_office,
+                                iban = excluded.iban,
+                                is_active = true,
+                                updated_at = now()
+                            """,
+                            (
+                                account_id,
+                                self.tenant_id,
+                                taxpayer_id,
+                                raw_code,
+                                normalized_code,
+                                str(account.get("account_name") or account.get("name") or normalized_code),
+                                bool(account.get("is_detail_account")),
+                                str(account.get("tax_id") or "") or None,
+                                str(account.get("tax_office") or "") or None,
+                                str(account.get("iban") or "") or None,
+                            ),
+                        )
         record = {
             "client_id": client_id,
             "account_count": len(accounts),
@@ -724,7 +819,7 @@ class PostgresWorkflowStore:
             "status": status,
             "message_tr": message_tr,
             "debug_code": debug_code,
-            "details": details or {},
+            "details": sanitize_semantic_evidence(details or {}),
             "created_at": utc_now(),
         }
         return self._upsert_record(client_id, "document_pipeline_event", event_id, record)
@@ -743,8 +838,23 @@ class PostgresWorkflowStore:
         ]
         return events[-max(limit, 1):]
 
-    def save_nace_research_profile(self, *, nace_code: str, profile: dict[str, Any]) -> dict[str, Any]:
+    def save_nace_research_profile(
+        self,
+        *,
+        nace_code: str,
+        profile: dict[str, Any],
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         normalized = normalize_nace_code(nace_code)
+        if expected_revision is not None:
+            return self._save_research_profile_with_revision(
+                record_type="nace_research_profile",
+                record_key=normalized,
+                profile=profile,
+                expected_revision=expected_revision,
+                key_field="nace_code",
+                default_bucket="__research_office__",
+            )
         existing = self.get_nace_research_profile(normalized) or {}
         timestamp = utc_now()
         record = {
@@ -753,14 +863,32 @@ class PostgresWorkflowStore:
             "nace_code": normalized,
             "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
             "updated_at": timestamp,
+            "revision": int(existing.get("revision") or 0) + 1,
         }
-        return self._upsert_record("nace", "nace_research_profile", normalized, record)
+        bucket = str(record.get("owner_client_id") or record.get("client_id") or "__research_office__")
+        return self._upsert_record(bucket, "nace_research_profile", normalized, record)
 
     def get_nace_research_profile(self, nace_code: str) -> dict[str, Any] | None:
-        return self._get_record("nace", "nace_research_profile", normalize_nace_code(nace_code))
+        row = self._get_record_by_key("nace_research_profile", normalize_nace_code(nace_code))
+        return deepcopy(row["payload"]) if row else None
 
-    def save_brand_research_profile(self, *, brand_name: str, profile: dict[str, Any]) -> dict[str, Any]:
+    def save_brand_research_profile(
+        self,
+        *,
+        brand_name: str,
+        profile: dict[str, Any],
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         normalized = normalize_brand_name(brand_name)
+        if expected_revision is not None:
+            return self._save_research_profile_with_revision(
+                record_type="brand_research_profile",
+                record_key=normalized,
+                profile=profile,
+                expected_revision=expected_revision,
+                key_field="brand_name",
+                default_bucket="__research_office__",
+            )
         existing = self.get_brand_research_profile(normalized) or {}
         timestamp = utc_now()
         record = {
@@ -769,30 +897,145 @@ class PostgresWorkflowStore:
             "brand_name": normalized,
             "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
             "updated_at": timestamp,
+            "revision": int(existing.get("revision") or 0) + 1,
         }
-        return self._upsert_record("brand", "brand_research_profile", normalized, record)
+        bucket = str(record.get("owner_client_id") or record.get("client_id") or "__research_office__")
+        return self._upsert_record(bucket, "brand_research_profile", normalized, record)
 
     def get_brand_research_profile(self, brand_name: str) -> dict[str, Any] | None:
-        return self._get_record("brand", "brand_research_profile", normalize_brand_name(brand_name))
+        row = self._get_record_by_key("brand_research_profile", normalize_brand_name(brand_name))
+        return deepcopy(row["payload"]) if row else None
 
-    def get_research_profile(self, *, kind: str, key: str) -> dict[str, Any] | None:
+    def get_research_profile(
+        self,
+        *,
+        kind: str,
+        key: str,
+        allowed_client_ids: set[str] | None = None,
+    ) -> dict[str, Any] | None:
         if kind == "nace":
-            return self.get_nace_research_profile(key)
-        if kind == "brand":
+            normalized = normalize_nace_code(key)
+            record_type = "nace_research_profile"
+        elif kind == "brand":
+            normalized = normalize_brand_name(key)
+            record_type = "brand_research_profile"
+        else:
+            return None
+        if allowed_client_ids is None:
+            if kind == "nace":
+                return self.get_nace_research_profile(key)
             return self.get_brand_research_profile(key)
+        for row in self._scoped_research_rows(
+            record_type,
+            allowed_client_ids=allowed_client_ids,
+        ):
+            if str(row.get("record_key") or "") != normalized:
+                continue
+            profile = deepcopy(row["payload"])
+            if research_profile_is_visible(profile, allowed_client_ids=allowed_client_ids):
+                return profile
         return None
 
-    def list_research_profiles(self, *, kind: str = "") -> list[dict[str, Any]]:
+    def list_research_profiles(
+        self,
+        *,
+        kind: str = "",
+        allowed_client_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
         profiles: list[dict[str, Any]] = []
         if kind in {"", "brand"}:
-            profiles.extend(deepcopy(row["payload"]) for row in self._list_records("brand_research_profile", client_id="brand"))
+            profiles.extend(
+                deepcopy(row["payload"])
+                for row in self._scoped_research_rows(
+                    "brand_research_profile",
+                    allowed_client_ids=allowed_client_ids,
+                )
+            )
         if kind in {"", "nace"}:
-            profiles.extend(deepcopy(row["payload"]) for row in self._list_records("nace_research_profile", client_id="nace"))
+            profiles.extend(
+                deepcopy(row["payload"])
+                for row in self._scoped_research_rows(
+                    "nace_research_profile",
+                    allowed_client_ids=allowed_client_ids,
+                )
+            )
         return sorted(
-            profiles,
+            [
+                profile
+                for profile in profiles
+                if research_profile_is_visible(profile, allowed_client_ids=allowed_client_ids)
+            ],
             key=lambda profile: str(profile.get("updated_at") or profile.get("researched_at") or ""),
             reverse=True,
         )
+
+    def _scoped_research_rows(
+        self,
+        record_type: str,
+        *,
+        allowed_client_ids: set[str] | None,
+    ) -> list[dict[str, Any]]:
+        if allowed_client_ids is None:
+            return self._list_records(record_type)
+        rows: list[dict[str, Any]] = []
+        for client_id in sorted(allowed_client_ids | {"__research_office__"}):
+            rows.extend(self._list_records(record_type, client_id=client_id))
+        return rows
+
+    def _save_research_profile_with_revision(
+        self,
+        *,
+        record_type: str,
+        record_key: str,
+        profile: dict[str, Any],
+        expected_revision: int,
+        key_field: str,
+        default_bucket: str,
+    ) -> dict[str, Any]:
+        """Compare and update one opaque research profile inside one DB transaction."""
+
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select client_id, payload
+                    from workflow_records
+                    where tenant_id = %s and record_type = %s and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, record_type, record_key),
+                )
+                row = cursor.fetchone()
+                existing = dict(row[1]) if row else {}
+                actual_revision = int(existing.get("revision") or 0)
+                if actual_revision != expected_revision:
+                    raise ResearchProfileConflict(
+                        expected_revision=expected_revision,
+                        actual_revision=actual_revision,
+                    )
+                timestamp = utc_now()
+                record = {
+                    **existing,
+                    **profile,
+                    key_field: record_key,
+                    "researched_at": profile.get("researched_at") or existing.get("researched_at") or timestamp,
+                    "updated_at": timestamp,
+                    "revision": actual_revision + 1,
+                }
+                bucket = str(
+                    record.get("owner_client_id")
+                    or record.get("client_id")
+                    or (row[0] if row else "")
+                    or default_bucket
+                )
+                return self._upsert_record_with_cursor(
+                    cursor,
+                    bucket,
+                    record_type,
+                    record_key,
+                    record,
+                )
 
     def save_research_benchmark_run(self, run: dict[str, Any]) -> dict[str, Any]:
         timestamp = utc_now()
@@ -811,8 +1054,58 @@ class PostgresWorkflowStore:
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         document_ref = str(document.get("document_id") or document.get("original_file_name") or uuid4())
         timestamp = utc_now()
+        normalized: dict[str, Any] = {}
+        if self.normalized_accounting_enabled:
+            client = self._get_record(client_id, "client", client_id) or {}
+            profile = client.get("profile") if isinstance(client.get("profile"), dict) else {}
+            self._ensure_taxpayer(client_id=client_id, profile=profile or {"client_id": client_id})
+        if (
+            self.normalized_accounting_enabled
+            and isinstance(self.normalized_repository, NormalizedAccountingRepository)
+        ):
+            with self._connect() as connection:
+                transactional_repository = self.normalized_repository.with_connection(
+                    connection
+                )
+                normalized = transactional_repository.store_source_document(
+                    client_id=client_id,
+                    document=document,
+                )
+                document_ref = str(normalized["document_ref"])
+                record = {
+                    **document,
+                    **normalized,
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "updated_at": timestamp,
+                }
+                existing = self._get_record(
+                    client_id,
+                    "uploaded_document",
+                    document_ref,
+                )
+                record["created_at"] = (
+                    existing.get("created_at", timestamp)
+                    if existing
+                    else timestamp
+                )
+                with connection.cursor() as cursor:
+                    return self._upsert_record_with_cursor(
+                        cursor,
+                        client_id,
+                        "uploaded_document",
+                        document_ref,
+                        record,
+                    )
+        if self.normalized_accounting_enabled:
+            normalized = self.normalized_repository.store_source_document(
+                client_id=client_id,
+                document=document,
+            )
+            document_ref = str(normalized["document_ref"])
         record = {
             **document,
+            **normalized,
             "client_id": client_id,
             "document_ref": document_ref,
             "updated_at": timestamp,
@@ -1020,22 +1313,148 @@ class PostgresWorkflowStore:
         client_id: str,
         document_ref: str,
         result: dict[str, Any],
+        attempt_id: str = "",
     ) -> dict[str, Any]:
-        timestamp = utc_now()
-        existing = self._get_record(client_id, "document", document_ref) or {}
-        record = {
-            **existing,
-            "client_id": client_id,
-            "document_ref": document_ref,
-            "status": result.get("simulated_status", "review_required"),
-            "export_status": result.get("export_status", "review_required"),
-            "review_reason_codes": result.get("review_reason_codes", []),
-            "result": result,
-            "updated_at": timestamp,
-        }
-        record.setdefault("id", str(uuid4()))
-        record.setdefault("created_at", timestamp)
-        return self._upsert_record(client_id, "document", document_ref, record)
+        sanitized_result = merge_semantic_attempt_result(result)
+        input_digest = simulation_input_digest(sanitized_result) if attempt_id else ""
+        normalized_required = (
+            self.normalized_accounting_enabled
+            and str(sanitized_result.get("accounting_direction") or "")
+            in {"purchase", "sales"}
+        )
+
+        def record_for(
+            existing: dict[str, Any],
+            current_result: dict[str, Any],
+        ) -> dict[str, Any]:
+            timestamp = utc_now()
+            record = {
+                **existing,
+                "client_id": client_id,
+                "document_ref": document_ref,
+                "status": current_result.get(
+                    "simulated_status",
+                    "review_required",
+                ),
+                "export_status": current_result.get(
+                    "export_status",
+                    "review_required",
+                ),
+                "review_reason_codes": current_result.get(
+                    "review_reason_codes",
+                    [],
+                ),
+                "result": current_result,
+                "updated_at": timestamp,
+            }
+            if attempt_id:
+                record[PROCESSING_ATTEMPT_MARKER_KEY] = processing_attempt_marker(
+                    attempt_id=attempt_id,
+                    input_digest=input_digest,
+                    result=current_result,
+                )
+            record.setdefault("id", str(uuid4()))
+            record.setdefault("created_at", timestamp)
+            return record
+
+        # Test doubles and legacy injected repositories cannot share this store's
+        # transaction. Keep their compatibility path without weakening the real
+        # NormalizedAccountingRepository transaction below.
+        if normalized_required and not isinstance(
+            self.normalized_repository,
+            NormalizedAccountingRepository,
+        ):
+            existing = self._get_record(client_id, "document", document_ref) or {}
+            if attempt_id and matching_processing_attempt(
+                existing,
+                attempt_id=attempt_id,
+                input_digest=input_digest,
+            ):
+                return deepcopy(existing)
+            persisted_result = merge_semantic_attempt_result(
+                sanitized_result,
+                previous_result=(
+                    existing.get("result") if isinstance(existing.get("result"), dict) else None
+                ),
+            )
+            normalized = self.normalized_repository.persist_canonical_journal(
+                client_id=client_id,
+                document_ref=document_ref,
+                result=persisted_result,
+                **({"attempt_id": attempt_id} if attempt_id else {}),
+            )
+            persisted_result = {
+                **persisted_result,
+                "normalized_revision": normalized["revision_no"],
+            }
+            return self._upsert_record(
+                client_id,
+                "document",
+                document_ref,
+                record_for(existing, persisted_result),
+            )
+
+        self._ensure_tenant()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "select pg_advisory_xact_lock(%s)",
+                    (
+                        workflow_document_lock_key(
+                            self.tenant_id,
+                            client_id,
+                            document_ref,
+                        ),
+                    ),
+                )
+                cursor.execute(
+                    """
+                    select payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'document' and record_key = %s
+                    limit 1
+                    """,
+                    (self.tenant_id, client_id, document_ref),
+                )
+                row = cursor.fetchone()
+                existing = deepcopy(row[0]) if row else {}
+
+            if attempt_id and matching_processing_attempt(
+                existing,
+                attempt_id=attempt_id,
+                input_digest=input_digest,
+            ):
+                return deepcopy(existing)
+
+            persisted_result = merge_semantic_attempt_result(
+                sanitized_result,
+                previous_result=(
+                    existing.get("result") if isinstance(existing.get("result"), dict) else None
+                ),
+            )
+            if normalized_required:
+                transactional_repository = self.normalized_repository.with_connection(connection)
+                normalized = transactional_repository.persist_canonical_journal(
+                    client_id=client_id,
+                    document_ref=document_ref,
+                    result=persisted_result,
+                    **({"attempt_id": attempt_id} if attempt_id else {}),
+                )
+                persisted_result = {
+                    **persisted_result,
+                    "normalized_revision": normalized["revision_no"],
+                }
+
+            record = record_for(existing, persisted_result)
+            with connection.cursor() as cursor:
+                return self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    "document",
+                    document_ref,
+                    record,
+                )
 
     def create_processing_job(
         self,
@@ -1045,7 +1464,28 @@ class PostgresWorkflowStore:
         document_type: str,
         parser_kind: str,
         intake_category: str = "",
+        force_requeue: bool = False,
     ) -> dict[str, Any]:
+        if self.normalized_accounting_enabled:
+            existing = next(
+                (
+                    item
+                    for item in self._payloads(client_id, "processing_job")
+                    if str(item.get("document_ref") or "") == document_ref
+                ),
+                None,
+            )
+            if existing is not None and not force_requeue:
+                return existing
+            record = self.normalized_repository.create_processing_job(
+                client_id=client_id,
+                document_ref=document_ref,
+                document_type=document_type,
+                parser_kind=parser_kind,
+                intake_category=intake_category,
+                force_requeue=force_requeue,
+            )
+            return self._upsert_record(client_id, "processing_job", str(record["id"]), record)
         timestamp = utc_now()
         record = {
             "id": str(uuid4()),
@@ -1069,6 +1509,18 @@ class PostgresWorkflowStore:
         ]
 
     def claim_next_processing_job(self) -> dict[str, Any] | None:
+        if self.normalized_accounting_enabled:
+            claimed = self.normalized_repository.claim_next_processing_job()
+            if claimed is None:
+                return None
+            client_id = self._client_id_for_taxpayer_job(str(claimed["id"]))
+            if not client_id:
+                row = self._get_record_by_key("processing_job", str(claimed["id"]))
+                client_id = str(row["client_id"]) if row is not None else ""
+            if client_id:
+                claimed["client_id"] = client_id
+                self._upsert_record(client_id, "processing_job", str(claimed["id"]), claimed)
+            return claimed
         self._ensure_tenant()
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -1120,7 +1572,26 @@ class PostgresWorkflowStore:
         status: str,
         error_message: str = "",
         processing_metrics: dict[str, Any] | None = None,
+        attempt_id: str = "",
     ) -> dict[str, Any] | None:
+        if self.normalized_accounting_enabled:
+            update_kwargs = {
+                "job_id": job_id,
+                "status": status,
+                "error_message": error_message,
+                "processing_metrics": processing_metrics,
+            }
+            if attempt_id:
+                update_kwargs["attempt_id"] = attempt_id
+            updated = self.normalized_repository.update_processing_job(**update_kwargs)
+            if updated is None:
+                return None
+            row = self._get_record_by_key("processing_job", job_id)
+            if row is not None:
+                client_id = str(row["client_id"])
+                updated["client_id"] = client_id
+                return self._upsert_record(client_id, "processing_job", job_id, updated)
+            return updated
         row = self._get_record_by_key("processing_job", job_id)
         if row is None:
             return None
@@ -1132,6 +1603,10 @@ class PostgresWorkflowStore:
         payload["updated_at"] = utc_now()
         return self._upsert_record(str(row["client_id"]), "processing_job", job_id, payload)
 
+    def _client_id_for_taxpayer_job(self, job_id: str) -> str:
+        row = self._get_record_by_key("processing_job", job_id)
+        return str(row["client_id"]) if row is not None else ""
+
     def save_review_decision(
         self,
         *,
@@ -1140,17 +1615,123 @@ class PostgresWorkflowStore:
         learning_event: dict[str, Any],
     ) -> dict[str, Any]:
         timestamp = utc_now()
+        document_ref = str(decision.get("document_ref") or learning_event.get("document_ref") or "")
+        document = self._get_record(client_id, "document", document_ref)
+        corrected_document: dict[str, Any] | None = None
+        if document is not None:
+            corrected_document = apply_review_decision_to_document(
+                document,
+                decision=decision,
+                learning_event=learning_event,
+                reviewed_at=timestamp,
+            )
+        normalized_review: dict[str, Any] = {}
+        corrected_result = (
+            corrected_document.get("result")
+            if corrected_document is not None
+            else None
+        )
+        normalized_review_required = (
+            self.normalized_accounting_enabled
+            and isinstance(corrected_result, dict)
+            and str(corrected_result.get("accounting_direction") or "")
+            in {"purchase", "sales"}
+        )
+        if (
+            normalized_review_required
+            and isinstance(self.normalized_repository, NormalizedAccountingRepository)
+        ):
+            with self._connect() as connection:
+                transactional_repository = self.normalized_repository.with_connection(
+                    connection
+                )
+                normalized_review = transactional_repository.save_review(
+                    client_id=client_id,
+                    document_ref=document_ref,
+                    decision=decision,
+                    corrected_result=corrected_result,
+                )
+                corrected_result["normalized_revision"] = normalized_review[
+                    "revision_no"
+                ]
+                corrected_result["normalized_revision_status"] = (
+                    "approved"
+                    if normalized_review["approved"]
+                    else "review_required"
+                )
+                with connection.cursor() as cursor:
+                    return self._persist_review_records(
+                        cursor=cursor,
+                        client_id=client_id,
+                        decision=decision,
+                        learning_event=learning_event,
+                        normalized_review=normalized_review,
+                        corrected_document=corrected_document,
+                        timestamp=timestamp,
+                    )
+        if normalized_review_required:
+            normalized_review = self.normalized_repository.save_review(
+                client_id=client_id,
+                document_ref=document_ref,
+                decision=decision,
+                corrected_result=corrected_result,
+            )
+            corrected_result["normalized_revision"] = normalized_review["revision_no"]
+            corrected_result["normalized_revision_status"] = (
+                "approved" if normalized_review["approved"] else "review_required"
+            )
+        return self._persist_review_records(
+            cursor=None,
+            client_id=client_id,
+            decision=decision,
+            learning_event=learning_event,
+            normalized_review=normalized_review,
+            corrected_document=corrected_document,
+            timestamp=timestamp,
+        )
+
+    def _persist_review_records(
+        self,
+        *,
+        cursor: Any | None,
+        client_id: str,
+        decision: dict[str, Any],
+        learning_event: dict[str, Any],
+        normalized_review: dict[str, Any],
+        corrected_document: dict[str, Any] | None,
+        timestamp: str,
+    ) -> dict[str, Any]:
+        def upsert(
+            record_type: str,
+            record_key: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            if cursor is not None:
+                return self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    record_type,
+                    record_key,
+                    payload,
+                )
+            return self._upsert_record(
+                client_id,
+                record_type,
+                record_key,
+                payload,
+            )
+
         record = {
             "id": str(uuid4()),
             "client_id": client_id,
             "decision": decision,
             "learning_event": learning_event,
+            "normalized_review": normalized_review,
             "created_at": timestamp,
         }
-        self._upsert_record(client_id, "review_decision", record["id"], record)
+        upsert("review_decision", record["id"], record)
         learning_event_id = str(uuid4())
-        self._upsert_record(
-            client_id,
+        upsert(
             "learning_event",
             learning_event_id,
             {
@@ -1160,18 +1741,15 @@ class PostgresWorkflowStore:
                 "created_at": timestamp,
             },
         )
-        document_ref = str(decision.get("document_ref") or learning_event.get("document_ref") or "")
-        document = self._get_record(client_id, "document", document_ref)
-        if document is not None:
-            corrected_document = apply_review_decision_to_document(
-                document,
-                decision=decision,
-                learning_event=learning_event,
-                reviewed_at=timestamp,
+        if corrected_document is not None:
+            document_ref = str(
+                decision.get("document_ref")
+                or learning_event.get("document_ref")
+                or ""
             )
-            self._upsert_record(client_id, "document", document_ref, corrected_document)
+            upsert("document", document_ref, corrected_document)
             record["corrected_document"] = corrected_document
-            self._upsert_record(client_id, "review_decision", record["id"], record)
+            upsert("review_decision", record["id"], record)
         return deepcopy(record)
 
     def save_export_package(self, *, client_id: str, package: dict[str, Any]) -> dict[str, Any]:
@@ -1195,7 +1773,7 @@ class PostgresWorkflowStore:
         return None
 
     def get_workspace(self, client_id: str) -> dict[str, Any]:
-        return {
+        workspace = {
             "client": self._get_record(client_id, "client", client_id),
             "chart_accounts": self._get_record(client_id, "chart_accounts", client_id),
             "uploaded_documents": self._payloads(client_id, "uploaded_document"),
@@ -1213,6 +1791,94 @@ class PostgresWorkflowStore:
             "operation_events": self.list_operation_events(client_id=client_id),
             "document_pipeline_events": self._payloads(client_id, "document_pipeline_event"),
         }
+        if self.normalized_accounting_enabled:
+            projections = {
+                str(item.get("document_ref") or ""): item
+                for item in self.normalized_repository.project_documents(client_id=client_id)
+            }
+            workspace["documents"] = [
+                {**document, **projections.get(str(document.get("document_ref") or ""), {})}
+                for document in workspace["documents"]
+            ]
+        return workspace
+
+    def authoritative_export_workspace(self, client_id: str) -> dict[str, Any]:
+        workspace = self.get_workspace(client_id)
+        if not self.normalized_accounting_enabled:
+            return workspace
+        workspace["documents"] = self.normalized_repository.project_documents(
+            client_id=client_id,
+            approved_only=True,
+        )
+        return workspace
+
+    def reopen_journal(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        expected_revision: int,
+        reviewer: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if not self.normalized_accounting_enabled:
+            raise RuntimeError("journal reopen requires normalized accounting storage")
+        document = self._get_record(client_id, "document", document_ref)
+        if isinstance(self.normalized_repository, NormalizedAccountingRepository):
+            with self._connect() as connection:
+                transactional_repository = self.normalized_repository.with_connection(
+                    connection
+                )
+                reopened = transactional_repository.reopen(
+                    client_id=client_id,
+                    document_ref=document_ref,
+                    expected_revision=expected_revision,
+                    reviewer=reviewer,
+                    reason=reason,
+                )
+                if document is not None:
+                    updated = self._reopened_document_projection(
+                        document,
+                        reopened=reopened,
+                    )
+                    with connection.cursor() as cursor:
+                        self._upsert_record_with_cursor(
+                            cursor,
+                            client_id,
+                            "document",
+                            document_ref,
+                            updated,
+                        )
+                return reopened
+        reopened = self.normalized_repository.reopen(
+            client_id=client_id,
+            document_ref=document_ref,
+            expected_revision=expected_revision,
+            reviewer=reviewer,
+            reason=reason,
+        )
+        if document is not None:
+            updated = self._reopened_document_projection(
+                document,
+                reopened=reopened,
+            )
+            self._upsert_record(client_id, "document", document_ref, updated)
+        return reopened
+
+    @staticmethod
+    def _reopened_document_projection(
+        document: dict[str, Any],
+        *,
+        reopened: dict[str, Any],
+    ) -> dict[str, Any]:
+        updated = deepcopy(document)
+        updated["status"] = "working_draft"
+        updated["export_status"] = "review_required"
+        updated["result"] = reopened["result"]
+        updated["result"]["normalized_revision"] = reopened["revision_no"]
+        updated["result"]["normalized_revision_status"] = "working_draft"
+        updated["updated_at"] = utc_now()
+        return updated
 
     def _payloads(self, client_id: str, record_type: str) -> list[dict[str, Any]]:
         return [deepcopy(row["payload"]) for row in self._list_records(record_type, client_id=client_id)]
@@ -1227,17 +1893,40 @@ class PostgresWorkflowStore:
         self._ensure_tenant()
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    insert into workflow_records (
-                        id, tenant_id, client_id, record_type, record_key, payload
-                    )
-                    values (%s, %s, %s, %s, %s, %s)
-                    on conflict (tenant_id, client_id, record_type, record_key)
-                    do update set payload = excluded.payload, updated_at = now()
-                    """,
-                    (uuid4(), self.tenant_id, client_id, record_type, record_key, self._json(payload)),
+                return self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    record_type,
+                    record_key,
+                    payload,
                 )
+
+    def _upsert_record_with_cursor(
+        self,
+        cursor: Any,
+        client_id: str,
+        record_type: str,
+        record_key: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        cursor.execute(
+            """
+            insert into workflow_records (
+                id, tenant_id, client_id, record_type, record_key, payload
+            )
+            values (%s, %s, %s, %s, %s, %s)
+            on conflict (tenant_id, client_id, record_type, record_key)
+            do update set payload = excluded.payload, updated_at = now()
+            """,
+            (
+                uuid4(),
+                self.tenant_id,
+                client_id,
+                record_type,
+                record_key,
+                self._json(payload),
+            ),
+        )
         return deepcopy(payload)
 
     def _get_record(self, client_id: str, record_type: str, record_key: str) -> dict[str, Any] | None:
@@ -1357,7 +2046,7 @@ class PostgresWorkflowStore:
                         updated_at = now()
                     """,
                     (
-                        taxpayer_uuid(client_id),
+                        taxpayer_uuid(self.tenant_id, client_id),
                         self.tenant_id,
                         display_name,
                         display_name,

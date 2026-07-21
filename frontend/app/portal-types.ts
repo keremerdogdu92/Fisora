@@ -5,6 +5,7 @@ export type DraftLine = {
   description: string;
   debit: string;
   credit: string;
+  tax_rate?: string;
 };
 
 export type ChartAccountOption = {
@@ -169,6 +170,7 @@ export type PilotDocument = {
   aiResearchQuery?: string;
   aiResolutionStatus?: string;
   aiRetryReason?: string;
+  aiAttemptedAccountCode?: string;
   aiSuggestedAccountCode: string;
   aiSuggestedCounterpartyCode: string;
   aiRiskFlags: string[];
@@ -183,6 +185,8 @@ export type PilotDocument = {
   canonicalValidationStatus?: string;
   canonicalValidationReasons?: string[];
   canonicalExtractionAiUsed?: boolean;
+  normalizedRevision?: number;
+  normalizedRevisionStatus?: string;
   deterministicSummary: string;
   exportGateReason: string;
   draftStatus: string;
@@ -358,12 +362,14 @@ export type ResearchSourceView = {
 export type ResearchProfileView = {
   kind: string;
   key: string;
+  profile_id: string;
+  display_key: string;
+  revision: number;
+  client_id?: string;
+  tenant_id?: string;
   summary?: string;
   summary_tr?: string;
-  product_category?: string;
   common_product_categories?: string[];
-  business_relation?: string;
-  account_treatment?: string;
   confidence?: number;
   research_confidence?: number;
   accounting_impact_confidence?: number;
@@ -372,6 +378,10 @@ export type ResearchProfileView = {
   evidence?: ResearchSourceView[];
   sources?: ResearchSourceView[];
   override?: boolean;
+  non_authoritative_display?: {
+    product_category?: string;
+    account_treatment?: string;
+  };
 };
 
 export type ResearchBenchmarkCaseView = {
@@ -451,6 +461,7 @@ export type ReviewData = {
     aiResearchQuery?: string;
     aiResolutionStatus?: string;
     aiRetryReason?: string;
+    aiAttemptedAccountCode?: string;
     aiSuggestedAccountCode?: string;
     aiSuggestedCounterpartyCode?: string;
     aiRiskFlags?: string[];

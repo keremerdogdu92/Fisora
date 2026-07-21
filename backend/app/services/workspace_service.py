@@ -404,6 +404,8 @@ def compact_result(result: object) -> dict[str, object]:
         "learning_rule_scope",
         "learning_rule_source_summary",
         "learning_audit",
+        "normalized_revision",
+        "normalized_revision_status",
         "payable_total",
         "period",
         "primary_suggestion",

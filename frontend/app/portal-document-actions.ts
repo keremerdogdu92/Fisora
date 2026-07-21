@@ -270,6 +270,7 @@ export async function saveStatementLineDecisionAction({
       reviewer,
       applyToSimilar,
       statementLineNo: lineNo,
+      expectedRevision: selectedDocument.normalizedRevision || 0,
       correctedAccountCode,
       correctedCounterpartyCode,
       category: selectedLine.transaction_type,
@@ -363,6 +364,7 @@ export async function saveDecisionAction({
       confirmedRuleInterpretation: learningOptions.confirmedRuleInterpretation || null,
       suppressRulePromptKey: learningOptions.suppressRulePromptKey || "",
       draftLines: manualDraftLines,
+      expectedRevision: selectedDocument.normalizedRevision || 0,
       sessionToken: session?.sessionToken,
     });
     setDecisionStatus(`${selectedDocument.fileName}: ${label} backend'e kaydedildi.`);

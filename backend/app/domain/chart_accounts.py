@@ -298,7 +298,7 @@ def semantic_roles_for_account(account: ChartAccount) -> list[str]:
             roles.append("tobacco_stock")
         if any(token in normalized_name for token in ("gida", "mesrubat", "icecek")):
             roles.append("food_stock")
-    elif family == "600":
+    elif family in {"600", "601", "602"}:
         roles.append("sales_revenue")
         if "3065" in normalized_name or any(token in normalized_name for token in ("%0", "0 kdv", "istisna")):
             roles.append("zero_vat_3065_revenue")
@@ -314,6 +314,8 @@ def semantic_roles_for_account(account: ChartAccount) -> list[str]:
             roles.append("food_supplier")
     elif family == "689":
         roles.append("non_deductible")
+    elif family in {"730", "740", "760", "770"}:
+        roles.append("expense")
     return roles
 
 
@@ -387,6 +389,7 @@ def select_usage_account(
     *,
     account_treatment: str = "",
 ) -> ChartAccount | None:
+    """Rank chart candidates for context assembly; never authorize a journal account."""
     normalized_hint = f" {normalize_text(line_hint)} "
     desired_tags = {
         tag

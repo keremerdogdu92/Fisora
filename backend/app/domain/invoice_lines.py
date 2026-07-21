@@ -48,6 +48,7 @@ class InvoiceLine:
     description: str
     amount_hint: str = ""
     source: str = "pdf_text"
+    source_position: str = ""
     vat_rate: str = ""
     taxable_amount: str = ""
     tax_amount: str = ""
@@ -200,6 +201,8 @@ def _extract_table_invoice_lines(lines: list[str], *, max_lines: int) -> tuple[I
                         raw_text=description,
                         description=description,
                         amount_hint=gross_amount,
+                        source=f"pdf:table:{start + 1}:row:{index + 1}",
+                        source_position=f"pdf:table:{start + 1}:row:{index + 1}",
                         vat_rate=vat_rate,
                         taxable_amount=taxable_amount,
                         tax_amount=tax_amount,
@@ -220,7 +223,7 @@ def extract_invoice_lines_from_text(text: str, *, max_lines: int = 20) -> tuple[
         return table_lines
 
     lines: list[InvoiceLine] = []
-    for line in raw_lines:
+    for source_index, line in enumerate(raw_lines, start=1):
         if len(line) < 3 or _is_noise(line) or _is_value_or_unit(line):
             continue
         amount_match = AMOUNT_AT_END_RE.search(line)
@@ -230,7 +233,15 @@ def extract_invoice_lines_from_text(text: str, *, max_lines: int = 20) -> tuple[
             continue
         if len(description) > 120:
             description = description[:120].rstrip()
-        lines.append(InvoiceLine(raw_text=line, description=description, amount_hint=amount_hint))
+        lines.append(
+            InvoiceLine(
+                raw_text=line,
+                description=description,
+                amount_hint=amount_hint,
+                source=f"pdf:text:line:{source_index}",
+                source_position=f"pdf:text:line:{source_index}",
+            )
+        )
         if len(lines) >= max_lines:
             break
     return tuple(lines)

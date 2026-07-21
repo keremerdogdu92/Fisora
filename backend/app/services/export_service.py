@@ -66,7 +66,12 @@ class ExportService:
             user_id=user_id,
             allowed_roles=("accountant", "admin"),
         )
-        workspace = self.store.get_workspace(payload.client_id)
+        workspace_reader = getattr(self.store, "authoritative_export_workspace", None)
+        workspace = (
+            workspace_reader(payload.client_id)
+            if callable(workspace_reader)
+            else self.store.get_workspace(payload.client_id)
+        )
         try:
             adapter = get_export_adapter(payload.export_type)
         except ValueError as exc:

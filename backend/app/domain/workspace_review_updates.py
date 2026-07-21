@@ -99,6 +99,11 @@ def apply_review_decision_to_document(
             result["counterparty_match_code"] = corrected_counterparty
             result["counterparty_match_confidence"] = 100
             result["counterparty_match_reason"] = "accountant_corrected"
+            result["review_reason_codes"] = [
+                reason
+                for reason in result.get("review_reason_codes") or []
+                if str(reason) != "counterparty_missing"
+            ]
 
     if corrected_account or corrected_counterparty:
         result["learning_rule_applied"] = True

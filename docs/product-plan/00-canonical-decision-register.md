@@ -139,6 +139,15 @@ arrives later, it may be attached as additional source evidence under the
 accepted version/duplicate policy, but Fisero never searches for or downloads a
 pair as a routine quality step.
 
+For a text-readable PDF, canonical extraction has two explicit modes. `repair`
+may fill only the canonical rows already found by the deterministic parser;
+`discovery` may propose missing rows only when deterministic extraction is
+missing or arithmetically inconsistent. Fisero assigns canonical line identity
+from unique source positions after validation; a provider-supplied line ID is
+never authoritative. Amounts, VAT reconciliation and journal balance remain
+deterministic responsibilities. Image-only/scanned PDF OCR is a separate
+capability and is not implied by text-PDF discovery.
+
 ### Compact AI chart and counterparty context
 
 Status: Accepted
@@ -602,10 +611,13 @@ temporarily unavailable, the system uses a special outage-only behavior:
 
 ### Provider order within one attempt
 
-- Try each configured, benchmark-approved provider once in the configured
-  chain before declaring the attempt unavailable.
-- The accepted ordering change places Cerebras before OpenRouter. The current
-  minimum chain therefore becomes `groq -> cerebras -> openrouter`.
+- Try each configured, benchmark-approved provider once in the task-specific
+  ordering before declaring the attempt unavailable. Task ordering may only
+  reorder providers already admitted by the configured base chain.
+- Default semantic ordering is `Groq -> Cerebras -> OpenRouter`; canonical PDF
+  extraction and counterparty resolution prefer
+  `Cerebras -> Groq -> OpenRouter`. Statement work preserves the configured
+  base ordering. Environment overrides may reorder admitted providers per task.
 - Gemini is a candidate additional provider, but a free quota alone is not an
   admission criterion. A provider may enter the production chain only with
   valid credentials, cost controls, structured-output compatibility, accepted

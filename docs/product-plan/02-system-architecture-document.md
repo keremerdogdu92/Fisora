@@ -255,6 +255,11 @@ Exact duplicates do not create a second authoritative accounting document.
 - Do not routinely fetch a provider PDF merely to compare formats.
 - Use PDF/image extraction when no canonical XML source exists.
 - Attach a later independent source as evidence after identity verification.
+- For text-readable PDFs, use `repair` for incomplete fields on known rows and
+  `discovery` only when rows are missing or totals are inconsistent.
+- In discovery, validate unique source positions and create canonical line IDs
+  server-side; discard provider-supplied row identity.
+- Image-only/scanned PDF OCR remains a separate ingestion capability.
 
 ### 7.3 Line identity and validation
 
@@ -268,8 +273,10 @@ Each canonical line carries:
 - VAT/tax behavior;
 - source position and evidence.
 
-AI receives canonical IDs and must return exactly one structured decision per
-supplied ID. The validator rejects missing, duplicate and unknown IDs.
+In repair mode AI receives canonical IDs and must return exactly one structured
+decision per supplied ID. The validator rejects missing, duplicate and unknown
+IDs. Discovery returns source-positioned candidate rows; Fisero validates and
+assigns their canonical IDs before any accounting decision.
 
 ## 8. Accounting decision architecture
 
@@ -346,9 +353,16 @@ Every provider adapter must expose:
 - data-use/retention admission metadata;
 - normalized error categories.
 
-The current minimum attempt order is:
+The configured base chain is the provider admission boundary. Within that set,
+the default task order is:
 
-`Groq -> Cerebras -> OpenRouter`
+- classification/account selection: `Groq -> Cerebras -> OpenRouter`;
+- canonical PDF extraction: `Cerebras -> Groq -> OpenRouter`;
+- counterparty resolution: `Cerebras -> Groq -> OpenRouter`;
+- statement processing: configured base order.
+
+Task-specific environment overrides may reorder but cannot admit a provider
+that is absent from the base chain.
 
 Additional providers, including Gemini paid-tier use, require privacy,
 structured-output, accounting-quality and cost-control admission.

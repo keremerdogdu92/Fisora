@@ -6,11 +6,21 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.api.phase0_review_export import workspace_document
-from app.api.phase0_schemas import JournalLinePayload, ReviewDecisionPayload, ReviewRulePreviewPayload, StoredReviewDecisionPayload
+from app.api.phase0_schemas import (
+    JournalLinePayload,
+    JournalReopenPayload,
+    ReviewDecisionPayload,
+    ReviewRulePreviewPayload,
+    StoredReviewDecisionPayload,
+)
 from app.domain.chart_accounts import normalize_account_code
 from app.domain.learning_intelligence import enrich_learning_event
 from app.domain.review_rule_interpretation import build_review_rule_interpretation
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.persistence.normalized_accounting_repository import (
+    NormalizedAccountingError,
+    NormalizedRevisionConflict,
+)
 
 
 OperationRecorder = Callable[..., dict[str, object]]
@@ -78,6 +88,14 @@ class ReviewService:
             user_id=user_id,
             allowed_roles=("accountant", "admin"),
         )
+        authenticated_actor = str(user_id or "authenticated_session")
+        payload = payload.model_copy(
+            update={
+                "decision": payload.decision.model_copy(
+                    update={"reviewer": authenticated_actor}
+                )
+            }
+        )
         workspace = self.store.get_workspace(payload.client_id)
         document = workspace_document(workspace, payload.decision.document_ref)
         decision = self._validated_review_decision(payload.decision, workspace=workspace, document=document)
@@ -117,16 +135,28 @@ class ReviewService:
         rule_interpretation = self._rule_interpretation(event=event, document=document, decision=decision)
         if rule_interpretation is not None:
             event["rule_interpretation"] = rule_interpretation
+        try:
+            saved = self.store.save_review_decision(
+                client_id=payload.client_id,
+                decision=decision.model_dump(),
+                learning_event=event,
+            )
+        except NormalizedRevisionConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "journal_revision_conflict",
+                    "expected_revision": exc.expected,
+                    "actual_revision": exc.actual,
+                },
+            ) from exc
+        except NormalizedAccountingError as exc:
+            raise HTTPException(status_code=409, detail={"code": "normalized_journal_error", "message": str(exc)}) from exc
         self._record_learning_pipeline_events(
             client_id=payload.client_id,
             document_ref=decision.document_ref,
             event=event,
             interpretation=rule_interpretation,
-        )
-        saved = self.store.save_review_decision(
-            client_id=payload.client_id,
-            decision=decision.model_dump(),
-            learning_event=event,
         )
         document_ref = decision.document_ref
         if (
@@ -202,6 +232,33 @@ class ReviewService:
             },
         )
         return saved
+
+    def reopen_journal(self, *, payload: JournalReopenPayload, user_id: str | None) -> dict[str, object]:
+        self.require_client_access(
+            client_id=payload.client_id,
+            user_id=user_id,
+            allowed_roles=("accountant", "admin"),
+        )
+        authenticated_actor = str(user_id or "authenticated_session")
+        try:
+            return self.store.reopen_journal(
+                client_id=payload.client_id,
+                document_ref=payload.document_ref,
+                expected_revision=payload.expected_revision,
+                reviewer=authenticated_actor,
+                reason=payload.reason,
+            )
+        except NormalizedRevisionConflict as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "journal_revision_conflict",
+                    "expected_revision": exc.expected,
+                    "actual_revision": exc.actual,
+                },
+            ) from exc
+        except (NormalizedAccountingError, RuntimeError) as exc:
+            raise HTTPException(status_code=409, detail={"code": "journal_reopen_failed", "message": str(exc)}) from exc
 
     def _record_learning_pipeline_events(
         self,

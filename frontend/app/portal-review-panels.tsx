@@ -77,6 +77,8 @@ function formatDraftStatus(status: string) {
     manual_draft_unbalanced: "Fiş dengesi kontrol edilmeli",
     processing: "İşleniyor",
     provider_failed: "AI taslak alınamadı",
+    ai_retry_required: "AI yeniden denenecek",
+    ai_correction_required: "AI hesap düzeltmesi gerekli",
   };
   return labels[status] ?? (status || "-");
 }

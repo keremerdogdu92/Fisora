@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from hashlib import sha256
 from typing import Any, Mapping
 
 
@@ -24,13 +25,19 @@ class CanonicalInvoiceHeader:
     ettn: str = ""
     scenario: str = ""
     invoice_type: str = ""
+    original_invoice_no: str = ""
+    original_invoice_date: str = ""
     evidence: tuple[str, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
 class CanonicalInvoiceLine:
     description: str
+    canonical_line_id: str = ""
+    source_position: str = ""
+    external_line_id: str = ""
     quantity: str = ""
+    unit_code: str = ""
     unit_price: str = ""
     taxable_amount: str = ""
     vat_rate: str = ""
@@ -65,6 +72,16 @@ class CanonicalInvoiceValidation:
 
 
 @dataclass(frozen=True)
+class CanonicalLineDecisionCoverage:
+    status: str
+    expected_ids: tuple[str, ...] = ()
+    received_ids: tuple[str, ...] = ()
+    missing_ids: tuple[str, ...] = ()
+    duplicate_ids: tuple[str, ...] = ()
+    unknown_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CanonicalInvoice:
     source: str
     supplier_party: CanonicalInvoiceParty = CanonicalInvoiceParty()
@@ -91,22 +108,45 @@ class CanonicalExtractionRequest:
     deterministic_payload: Mapping[str, object] = field(default_factory=dict)
     client_identity: Mapping[str, object] = field(default_factory=dict)
     max_input_chars: int = 12000
+    mode: str = "repair"
 
     def to_schema_payload(self) -> dict[str, object]:
+        mode = str(self.mode or "repair").strip().lower()
+        if mode not in {"repair", "discovery"}:
+            raise ValueError("canonical extraction mode must be repair or discovery")
+        raw_lines = self.deterministic_payload.get("line_items", ())
+        line_ids = tuple(
+            str(item.get("canonical_line_id") or "")
+            for item in raw_lines
+            if isinstance(item, Mapping) and str(item.get("canonical_line_id") or "")
+        )
         return {
+            "mode": mode,
             "document_text": self.document_text[: max(self.max_input_chars, 0)].strip(),
             "deterministic_payload": dict(self.deterministic_payload),
             "client_identity": dict(self.client_identity),
             "instructions": (
-                "PDF metnini UBL benzeri canonical fatura JSON'una cevir. "
-                "Urun/hizmet anlamini satici adindan cikarma; line_items sadece fatura satirlarindan gelsin. "
-                "Hesap kodu, export karari veya muhasebe onayi uretme."
+                "Belgedeki tum fatura satirlarini ve kesin kaynak konumlarini gozlemle. "
+                "Belgede yazmayan degeri bos birak; hesaplama veya muhasebe karari yapma. "
+                "canonical_line_id ve external_line_id alanlarini bos don."
+                if mode == "discovery"
+                else
+                "Yalniz verilen canonical line_items satirlarini belge kanitiyla tamamla. "
+                "Her canonical_line_id icin tam bir sonuc don; kimlik ekleme, silme veya degistirme. "
+                "Bir deger belgede acikca yazmiyorsa bos string don; hesaplama yapma."
             ),
-            "output_schema": canonical_extraction_output_schema(),
+            "output_schema": canonical_extraction_output_schema(line_ids=line_ids, mode=mode),
         }
 
 
-def canonical_extraction_output_schema() -> dict[str, Any]:
+def canonical_extraction_output_schema(
+    *,
+    line_ids: tuple[str, ...] = (),
+    mode: str = "repair",
+) -> dict[str, Any]:
+    resolved_mode = str(mode or "repair").strip().lower()
+    if resolved_mode not in {"repair", "discovery"}:
+        raise ValueError("canonical extraction mode must be repair or discovery")
     text_field = {"type": "string"}
     evidence_field = {"type": "array", "items": {"type": "string"}}
     party_schema = {
@@ -118,59 +158,105 @@ def canonical_extraction_output_schema() -> dict[str, Any]:
             "address": text_field,
             "evidence": evidence_field,
         },
-        "required": ["title", "tax_id"],
-        "additionalProperties": True,
+        "required": ["title", "tax_id", "tax_office", "address", "evidence"],
+        "additionalProperties": False,
     }
     line_schema = {
         "type": "object",
         "properties": {
+            "canonical_line_id": {
+                "type": "string",
+                **(
+                    {"enum": [""]}
+                    if resolved_mode == "discovery"
+                    else ({"enum": list(line_ids)} if line_ids else {})
+                ),
+            },
+            "source_position": text_field,
+            "external_line_id": text_field,
             "description": text_field,
-            "quantity": text_field,
-            "unit_price": text_field,
-            "taxable_amount": text_field,
-            "vat_rate": text_field,
-            "tax_amount": text_field,
-            "gross_amount": text_field,
+            "observed_quantity": text_field,
+            "observed_unit_code": text_field,
+            "observed_unit_price": text_field,
+            "observed_taxable_amount": text_field,
+            "observed_vat_rate": text_field,
+            "observed_tax_amount": text_field,
+            "observed_gross_amount": text_field,
             "evidence": evidence_field,
         },
-        "required": ["description"],
-        "additionalProperties": True,
+        "required": [
+            "canonical_line_id",
+            "source_position",
+            "external_line_id",
+            "description",
+            "observed_quantity",
+            "observed_unit_code",
+            "observed_unit_price",
+            "observed_taxable_amount",
+            "observed_vat_rate",
+            "observed_tax_amount",
+            "observed_gross_amount",
+            "evidence",
+        ],
+        "additionalProperties": False,
     }
     vat_schema = {
         "type": "object",
         "properties": {
-            "rate": text_field,
-            "taxable_amount": text_field,
-            "tax_amount": text_field,
+            "observed_rate": text_field,
+            "observed_taxable_amount": text_field,
+            "observed_tax_amount": text_field,
             "evidence": evidence_field,
         },
-        "required": ["rate"],
-        "additionalProperties": True,
+        "required": ["observed_rate", "observed_taxable_amount", "observed_tax_amount", "evidence"],
+        "additionalProperties": False,
     }
     return {
         "type": "object",
         "properties": {
             "supplier_party": party_schema,
             "customer_party": party_schema,
-            "line_items": {"type": "array", "items": line_schema},
-            "vat_summary": {"type": "array", "items": vat_schema},
-            "totals": {
+            "line_items": {
+                "type": "array",
+                "items": line_schema,
+                **(
+                    {"minItems": 1}
+                    if resolved_mode == "discovery"
+                    else ({"minItems": len(line_ids), "maxItems": len(line_ids)} if line_ids else {})
+                ),
+            },
+            "observed_vat_summary": {"type": "array", "items": vat_schema},
+            "observed_totals": {
                 "type": "object",
                 "properties": {
-                    "goods_services_total": text_field,
-                    "vat_total": text_field,
-                    "special_tax_total": text_field,
-                    "tax_inclusive_total": text_field,
-                    "payable_total": text_field,
+                    "observed_goods_services_total": text_field,
+                    "observed_vat_total": text_field,
+                    "observed_special_tax_total": text_field,
+                    "observed_tax_inclusive_total": text_field,
+                    "observed_payable_total": text_field,
                     "evidence": evidence_field,
                 },
-                "required": [],
-                "additionalProperties": True,
+                "required": [
+                    "observed_goods_services_total",
+                    "observed_vat_total",
+                    "observed_special_tax_total",
+                    "observed_tax_inclusive_total",
+                    "observed_payable_total",
+                    "evidence",
+                ],
+                "additionalProperties": False,
             },
             "extraction_notes": evidence_field,
         },
-        "required": ["supplier_party", "customer_party", "line_items", "vat_summary", "totals"],
-        "additionalProperties": True,
+        "required": [
+            "supplier_party",
+            "customer_party",
+            "line_items",
+            "observed_vat_summary",
+            "observed_totals",
+            "extraction_notes",
+        ],
+        "additionalProperties": False,
     }
 
 
@@ -191,16 +277,20 @@ def _mapping(value: object) -> Mapping[str, object]:
 def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> CanonicalInvoice:
     supplier = _mapping(payload.get("supplier_party"))
     customer = _mapping(payload.get("customer_party"))
-    totals = _mapping(payload.get("totals"))
+    totals = _mapping(payload.get("observed_totals") or payload.get("totals"))
     line_items = tuple(
         CanonicalInvoiceLine(
             description=_string(line.get("description")),
-            quantity=_string(line.get("quantity")),
-            unit_price=_string(line.get("unit_price")),
-            taxable_amount=_string(line.get("taxable_amount")),
-            vat_rate=_string(line.get("vat_rate")),
-            tax_amount=_string(line.get("tax_amount")),
-            gross_amount=_string(line.get("gross_amount")),
+            canonical_line_id=_string(line.get("canonical_line_id")),
+            source_position=_string(line.get("source_position")),
+            external_line_id=_string(line.get("external_line_id")),
+            quantity=_string(line.get("observed_quantity") or line.get("quantity")),
+            unit_code=_string(line.get("observed_unit_code") or line.get("unit_code")),
+            unit_price=_string(line.get("observed_unit_price") or line.get("unit_price")),
+            taxable_amount=_string(line.get("observed_taxable_amount") or line.get("taxable_amount")),
+            vat_rate=_string(line.get("observed_vat_rate") or line.get("vat_rate")),
+            tax_amount=_string(line.get("observed_tax_amount") or line.get("tax_amount")),
+            gross_amount=_string(line.get("observed_gross_amount") or line.get("gross_amount")),
             evidence=_strings(line.get("evidence")),
         )
         for item in payload.get("line_items") or []
@@ -209,14 +299,14 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
     )
     vat_summary = tuple(
         CanonicalVatSummaryLine(
-            rate=_string(line.get("rate")),
-            taxable_amount=_string(line.get("taxable_amount")),
-            tax_amount=_string(line.get("tax_amount")),
+            rate=_string(line.get("observed_rate") or line.get("rate")),
+            taxable_amount=_string(line.get("observed_taxable_amount") or line.get("taxable_amount")),
+            tax_amount=_string(line.get("observed_tax_amount") or line.get("tax_amount")),
             evidence=_strings(line.get("evidence")),
         )
-        for item in payload.get("vat_summary") or []
+        for item in payload.get("observed_vat_summary") or payload.get("vat_summary") or []
         if isinstance(item, Mapping)
-        if (line := _mapping(item)).get("rate") or line.get("taxable_amount") or line.get("tax_amount")
+        if (line := _mapping(item)).get("observed_rate") or line.get("rate")
     )
     invoice = CanonicalInvoice(
         source="ai_canonical",
@@ -237,17 +327,114 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
         line_items=line_items,
         vat_summary=vat_summary,
         totals=CanonicalInvoiceTotals(
-            goods_services_total=_string(totals.get("goods_services_total")),
-            vat_total=_string(totals.get("vat_total")),
-            special_tax_total=_string(totals.get("special_tax_total")),
-            tax_inclusive_total=_string(totals.get("tax_inclusive_total")),
-            payable_total=_string(totals.get("payable_total")),
+            goods_services_total=_string(
+                totals.get("observed_goods_services_total") or totals.get("goods_services_total")
+            ),
+            vat_total=_string(totals.get("observed_vat_total") or totals.get("vat_total")),
+            special_tax_total=_string(
+                totals.get("observed_special_tax_total") or totals.get("special_tax_total")
+            ),
+            tax_inclusive_total=_string(
+                totals.get("observed_tax_inclusive_total") or totals.get("tax_inclusive_total")
+            ),
+            payable_total=_string(totals.get("observed_payable_total") or totals.get("payable_total")),
             evidence=_strings(totals.get("evidence")),
         ),
         ai_used=True,
         extraction_notes=_strings(payload.get("extraction_notes")),
     )
     return with_validation(invoice)
+
+
+def stable_canonical_line_id(
+    *,
+    source: str,
+    source_position: str,
+    external_line_id: str = "",
+    description: str = "",
+    taxable_amount: str = "",
+    tax_amount: str = "",
+    ordinal: int = 0,
+) -> str:
+    """Build a deterministic identity without depending on parser output order.
+
+    Provider/XML line identifiers win. A durable source locator is the second
+    choice. Content and ordinal are only a conservative fallback for sources
+    that cannot expose a better locator.
+    """
+
+    source_key = " ".join(str(source or "unknown").strip().lower().split())
+    external_key = " ".join(str(external_line_id or "").strip().split())
+    position_key = " ".join(str(source_position or "").strip().split())
+    if external_key:
+        identity = f"{source_key}:external:{external_key}"
+    elif position_key:
+        identity = f"{source_key}:position:{position_key}"
+    else:
+        normalized_description = " ".join(str(description or "").strip().lower().split())
+        identity = (
+            f"{source_key}:fallback:{normalized_description}:"
+            f"{str(taxable_amount or '').strip()}:{str(tax_amount or '').strip()}:{ordinal}"
+        )
+    return f"line_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
+def with_stable_line_id(
+    line: CanonicalInvoiceLine,
+    *,
+    source: str,
+    ordinal: int,
+) -> CanonicalInvoiceLine:
+    trusted_external_line_id = line.external_line_id if source != "ai_canonical" else ""
+    return replace(
+        line,
+        canonical_line_id=stable_canonical_line_id(
+            source=source,
+            source_position=line.source_position,
+            external_line_id=trusted_external_line_id,
+            description=line.description,
+            taxable_amount=line.taxable_amount,
+            tax_amount=line.tax_amount,
+            ordinal=ordinal,
+        ),
+    )
+
+
+def ensure_stable_line_ids(invoice: CanonicalInvoice) -> CanonicalInvoice:
+    return replace(
+        invoice,
+        line_items=tuple(
+            with_stable_line_id(line, source=invoice.source, ordinal=index)
+            for index, line in enumerate(invoice.line_items, start=1)
+        ),
+    )
+
+
+def validate_line_decision_coverage(
+    lines: tuple[CanonicalInvoiceLine, ...] | list[CanonicalInvoiceLine],
+    decisions: object,
+) -> CanonicalLineDecisionCoverage:
+    expected = tuple(line.canonical_line_id for line in lines if line.canonical_line_id)
+    received: list[str] = []
+    if isinstance(decisions, (list, tuple)):
+        for decision in decisions:
+            if isinstance(decision, Mapping):
+                received.append(_string(decision.get("canonical_line_id")))
+    counts = {line_id: received.count(line_id) for line_id in set(received) if line_id}
+    duplicate = tuple(sorted(line_id for line_id, count in counts.items() if count > 1))
+    expected_set = set(expected)
+    received_set = {line_id for line_id in received if line_id}
+    missing = tuple(sorted(expected_set - received_set))
+    unknown = tuple(sorted(received_set - expected_set))
+    status = "valid" if expected and not missing and not duplicate and not unknown and len(received) == len(expected) else "invalid"
+    return CanonicalLineDecisionCoverage(
+        status=status,
+        expected_ids=expected,
+        received_ids=tuple(received),
+        missing_ids=missing,
+        duplicate_ids=duplicate,
+        unknown_ids=unknown,
+    )
 
 
 def _decimal(value: str) -> Decimal | None:
@@ -284,11 +471,23 @@ def _line_tax(line: CanonicalInvoiceLine) -> Decimal | None:
 
 
 def validate_canonical_invoice(invoice: CanonicalInvoice) -> CanonicalInvoiceValidation:
+    invoice = ensure_stable_line_ids(invoice)
     reasons: list[str] = []
     evidence: list[str] = []
 
     if not invoice.line_items:
         reasons.append("line_items_missing")
+    line_ids = [line.canonical_line_id for line in invoice.line_items]
+    if any(not line_id for line_id in line_ids):
+        reasons.append("canonical_line_id_missing")
+    if len(set(line_ids)) != len(line_ids):
+        reasons.append("canonical_line_id_duplicate")
+    if any(not line.source_position and not line.external_line_id for line in invoice.line_items):
+        reasons.append("canonical_source_position_missing")
+    if any(not str(line.vat_rate).strip() for line in invoice.line_items):
+        reasons.append("line_vat_rate_missing")
+    if any(not str(line.tax_amount).strip() for line in invoice.line_items):
+        reasons.append("line_tax_amount_missing")
 
     line_taxables = [_decimal(line.taxable_amount) for line in invoice.line_items]
     line_taxes = [_decimal(line.tax_amount) for line in invoice.line_items]
@@ -337,4 +536,5 @@ def validate_canonical_invoice(invoice: CanonicalInvoice) -> CanonicalInvoiceVal
 
 
 def with_validation(invoice: CanonicalInvoice) -> CanonicalInvoice:
-    return replace(invoice, validation=validate_canonical_invoice(invoice))
+    identified = ensure_stable_line_ids(invoice)
+    return replace(identified, validation=validate_canonical_invoice(identified))

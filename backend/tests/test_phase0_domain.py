@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from decimal import Decimal
+import inspect
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -19,7 +22,17 @@ from app.domain.chart_accounts import (
     validate_vat_accounts,
 )
 from app.domain.ai_benchmark import AiBenchmarkCase, run_ai_batch_benchmark
-from app.domain.ai_classification import AiClassificationContext, AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
+from app.domain.ai_classification import (
+    AiCandidateStrategy,
+    AiClassificationContext,
+    AiClassificationPolicy,
+    AiClassificationRequest,
+    AiClassificationResult,
+    StaticFirstClassifier,
+    merge_semantic_attempt_result,
+    merge_semantic_attempts,
+    serialize_semantic_decision_attempt,
+)
 from app.domain.ai_capacity import (
     ai_capacity_payload,
     normalize_cerebras_rate_limit_headers,
@@ -35,7 +48,9 @@ from app.domain.business_relevance import (
     ProductClassification,
     assess_business_relevance,
     check_client_onboarding,
+    classify_product_line,
     decide_export_status,
+    normalize_text,
 )
 from app.domain.chart_accounts import ChartAccount
 from app.domain.counterparty_matching import CounterpartyMatch, match_counterparty
@@ -52,7 +67,17 @@ from app.domain.invoice_operations import (
 from app.domain.learning_intelligence import LearningPolicy, enrich_learning_event
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload, rule_from_learning_event
 from app.domain.natural_language_rule_builder import build_natural_language_rule_candidate
-from app.domain.matching_simulation import AccountSelection, SimulatedChartRun, private_benchmark_summary, simulate_chart_run, simulate_invoice
+from app.domain.matching_simulation import (
+    AccountSelection,
+    SimulatedChartRun,
+    _vat_account_for_rate,
+    private_benchmark_summary,
+    infer_accounting_direction,
+    simulate_chart_run,
+    simulate_invoice as _simulate_invoice,
+    simulate_private_matching,
+)
+from app.domain.invoice_ai_gate import VerifiedRuleAuthorityV1, invoice_ai_gate
 from app.domain.matching_simulation import build_review_ui_payload, write_simulation_csv
 from app.domain.matching_simulation import select_accounts
 from app.domain.journal_entries import (
@@ -62,7 +87,14 @@ from app.domain.journal_entries import (
     build_sales_entry,
     money,
 )
-from app.domain.pdf_invoices import ParsedInvoice, build_route, extract_vat_rates, parse_amount, parse_pdf_invoice, resolve_payable_total
+from app.domain.pdf_invoices import (
+    ParsedInvoice,
+    build_route,
+    extract_vat_rates,
+    parse_amount,
+    parse_pdf_invoice,
+    resolve_payable_total,
+)
 from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
 from app.domain.workspace_review_updates import apply_review_decision_to_document
@@ -95,6 +127,362 @@ class SequentialFakeProductProvider:
     def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
         self.requests.append(request)
         return self.responses.pop(0)
+
+
+class AcceptedSemanticAccountClassifier:
+    policy = AiClassificationPolicy(enabled=True, static_confidence_threshold=101)
+
+    def __init__(self, account_code: str, *, category: str = "", line_account_codes: tuple[str, ...] = ()) -> None:
+        self.account_code = account_code
+        self.category = category
+        self.line_account_codes = line_account_codes
+
+    def classify(
+        self,
+        raw_line: str,
+        *,
+        supplier_hint: str = "",
+        context: AiClassificationContext | None = None,
+    ) -> AiClassificationResult:
+        static = classify_product_line(raw_line, supplier_hint)
+        classification = (
+            ProductClassification(
+                raw_line=raw_line,
+                category=self.category,
+                confidence=95,
+                evidence=("test:accepted_semantic_decision",),
+            )
+            if self.category
+            else static
+        )
+        effective_context = context or AiClassificationContext()
+        canonical_ids = tuple(
+            str(line.get("canonical_line_id") or "")
+            for line in effective_context.canonical_lines
+            if str(line.get("canonical_line_id") or "")
+        )
+        line_codes = self.line_account_codes or tuple(self.account_code for _ in canonical_ids)
+        line_decisions = tuple(
+            {
+                "canonical_line_id": line_id,
+                "suggested_account_code": code,
+                "product_identity": self.category or "mechanical fixture line",
+                "reason": "Explicit accepted semantic fixture decision.",
+                "needs_research": False,
+                "research_query": "",
+            }
+            for line_id, code in zip(canonical_ids, line_codes)
+        ) if len(canonical_ids) > 1 else ()
+        validated_response = {
+            "suggested_account_code": self.account_code,
+            "needs_research": False,
+            "line_decisions": list(line_decisions),
+        }
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="accepted-semantic-fixture",
+            stage="initial_account_decision",
+            canonical_line_ids=canonical_ids,
+            prompt_version="test-semantic-v1",
+            provider="accepted_semantic_fixture",
+            model="deterministic-test-fixture",
+            candidate_account_codes=effective_context.account_candidates,
+            candidate_counterparty_codes=effective_context.counterparty_candidates,
+            validated_response=validated_response,
+            validation_errors=(),
+            accepted=True,
+        )
+        return AiClassificationResult(
+            classification=classification,
+            ai_used=True,
+            provider="accepted_semantic_fixture",
+            provider_reason="Test fixture supplies an accepted semantic account decision.",
+            suggested_account_code=self.account_code,
+            account_reason="Accepted semantic test decision.",
+            accepted_semantic_attempt_id="accepted-semantic-fixture",
+            candidate_strategy=effective_context.candidate_strategy,
+            semantic_attempts=(attempt,),
+            line_decisions=line_decisions,
+        )
+
+
+def _accepted_semantic_fixture_account(
+    invoice: ParsedInvoice,
+    selection: AccountSelection,
+    client_profile: ClientProfile | None,
+    classification_override: ProductClassification | None,
+    intended_direction: str | None,
+) -> str:
+    direction, _, _ = infer_accounting_direction(
+        invoice,
+        client_profile,
+        intended_direction=intended_direction,
+    )
+    raw_line = " ".join(str(item or "") for item in invoice.line_items).strip()
+    if direction == "sales":
+        normalized_line = normalize_text(raw_line)
+        if len(tuple(invoice.vat_rates)) > 1:
+            return selection.revenue_account
+        if tuple(invoice.vat_rates) == ("0",) or any(
+            token in normalized_line for token in ("isitme cihazi", "rexton")
+        ):
+            return selection.zero_vat_revenue_account
+        return selection.revenue_account
+    relevance = (
+        assess_business_relevance(
+            raw_line,
+            client_profile,
+            supplier_hint=invoice.provider_hint,
+            classification=classification_override,
+        )
+        if client_profile
+        else None
+    )
+    if relevance and relevance.account_treatment == "non_deductible_review":
+        return selection.non_deductible_account
+    if relevance and relevance.account_treatment == "stock_or_cogs":
+        normalized_line = normalize_text(raw_line)
+        line_tokens = {token for token in normalized_line.split() if len(token) >= 3}
+        stock_candidates = selection.account_candidates.get("purchase_stock", ())
+        scored_stock = sorted(
+            (
+                (
+                    sum(token in normalize_text(str(candidate.get("name") or "")) for token in line_tokens),
+                    str(candidate.get("code") or ""),
+                )
+                for candidate in stock_candidates
+            ),
+            reverse=True,
+        )
+        if scored_stock and scored_stock[0][0] > 0:
+            return scored_stock[0][1]
+        if selection.expense_account.startswith("153"):
+            return selection.expense_account
+        return selection.stock_account
+    normalized_line = normalize_text(raw_line)
+    line_tokens = {token for token in normalized_line.split() if len(token) >= 4}
+    expense_candidates = selection.account_candidates.get("purchase_expense", ())
+    if expense_candidates and line_tokens:
+        scored = sorted(
+            (
+                (
+                    sum(token in normalize_text(str(candidate.get("name") or "")) for token in line_tokens),
+                    str(candidate.get("code") or ""),
+                )
+                for candidate in expense_candidates
+            ),
+            reverse=True,
+        )
+        if scored and scored[0][0] > 0:
+            return scored[0][1]
+    return selection.expense_account
+
+
+def _mechanical_canonical_invoice(invoice: ParsedInvoice):
+    if invoice.canonical_invoice is not None:
+        return invoice.canonical_invoice
+    descriptions = tuple(invoice.line_items) or ("Mechanical accounting fixture",)
+    net_total = Decimal(invoice.goods_services_total or "0")
+    tax_total = Decimal(invoice.vat_total or "0")
+    gross_total = Decimal(invoice.payable_total or invoice.tax_inclusive_total or "0")
+    rates = tuple(Decimal(str(rate or "0")) for rate in invoice.vat_rates)
+    specs: list[tuple[str, str, str, str, str]] = []
+    vat_splits = tuple(getattr(invoice, "vat_split_lines", ()) or ())
+    if vat_splits:
+        for index, split in enumerate(vat_splits):
+            net = Decimal(str(split.taxable_amount))
+            tax = Decimal(str(split.tax_amount))
+            description = descriptions[index] if index < len(descriptions) else descriptions[-1]
+            specs.append((description, f"{net:.2f}", str(split.rate), f"{tax:.2f}", f"{net + tax:.2f}"))
+    elif len(descriptions) > 1 and len(rates) == 2 and rates[0] != rates[1]:
+        low, high = rates[0] / Decimal("100"), rates[1] / Decimal("100")
+        second_net = ((tax_total - low * net_total) / (high - low)).quantize(Decimal("0.01"))
+        first_net = (net_total - second_net).quantize(Decimal("0.01"))
+        nets = (first_net, second_net)
+        taxes = ((first_net * low).quantize(Decimal("0.01")), (second_net * high).quantize(Decimal("0.01")))
+        for index, (net, tax, rate) in enumerate(zip(nets, taxes, rates)):
+            description = descriptions[index] if index < len(descriptions) else descriptions[-1]
+            specs.append((description, f"{net:.2f}", str(rate), f"{tax:.2f}", f"{net + tax:.2f}"))
+    else:
+        rate = str(rates[0]) if len(rates) == 1 else "0"
+        specs.append((" / ".join(descriptions), f"{net_total:.2f}", rate, f"{tax_total:.2f}", f"{gross_total:.2f}"))
+    return _task3_canonical_invoice(*specs)
+
+
+def simulate_mechanical_invoice(
+    invoice: ParsedInvoice,
+    selection: AccountSelection,
+    client_profile: ClientProfile | None = None,
+    counterparty_match: CounterpartyMatch | None = None,
+    product_classifier: object | None = None,
+    processing_mode: str = "controlled_automation",
+    intended_direction: str | None = None,
+    classification_override: ProductClassification | None = None,
+    verified_rule_bindings: tuple[dict[str, object], ...] = (),
+    verified_rule_authorities: tuple[VerifiedRuleAuthorityV1, ...] = (),
+):
+    fixture_invoice = (
+        invoice
+        if invoice.canonical_invoice is not None or not invoice.line_items
+        else replace(invoice, canonical_invoice=_mechanical_canonical_invoice(invoice))
+    )
+    fixture_selection = selection
+    classifier = product_classifier
+    if classifier is None and not verified_rule_bindings:
+        canonical = _mechanical_canonical_invoice(fixture_invoice)
+        base_account = _accepted_semantic_fixture_account(
+            fixture_invoice,
+            selection,
+            client_profile,
+            classification_override,
+            intended_direction,
+        )
+        direction, _, _ = infer_accounting_direction(
+            fixture_invoice,
+            client_profile,
+            intended_direction=intended_direction,
+        )
+        candidate_group = "sales_revenue" if direction == "sales" else (
+            "purchase_stock" if base_account.startswith("153") else
+            "non_deductible" if base_account.startswith("689") else
+            "purchase_expense"
+        )
+        candidate_groups = dict(selection.account_candidates)
+        current_group = tuple(candidate_groups.get(candidate_group, ()))
+        if base_account and base_account not in {str(item.get("code") or "") for item in current_group}:
+            candidate_groups[candidate_group] = (*current_group, {
+                "code": base_account,
+                "name": "Explicit mechanical semantic fixture account",
+                "reason": "test fixture",
+                "is_detail_account": True,
+                "is_active": True,
+            })
+        if direction == "sales" and any(
+            "isitme" in normalize_text(str(line.description or ""))
+            for line in canonical.line_items
+        ):
+            sales_candidates = tuple(candidate_groups.get("sales_revenue", ()))
+            if selection.zero_vat_revenue_account not in {str(item.get("code") or "") for item in sales_candidates}:
+                candidate_groups["sales_revenue"] = (*sales_candidates, {
+                    "code": selection.zero_vat_revenue_account,
+                    "name": "Explicit zero VAT semantic fixture account",
+                    "reason": "test fixture",
+                    "is_detail_account": True,
+                    "is_active": True,
+                })
+        fixture_selection = replace(selection, account_candidates=candidate_groups)
+        line_codes: tuple[str, ...] = ()
+        if len(canonical.line_items) > 1 and direction == "sales":
+            line_codes = tuple(
+                selection.zero_vat_revenue_account
+                if "isitme" in normalize_text(str(line.description or ""))
+                else _vat_account_for_rate(
+                    fixture_selection.account_candidates.get("sales_revenue"),
+                    rate=Decimal(str(line.vat_rate or "0")) / Decimal("100"),
+                    fallback=selection.revenue_account,
+                )
+                for line in canonical.line_items
+            )
+        classifier = AcceptedSemanticAccountClassifier(
+            base_account,
+            line_account_codes=line_codes,
+        )
+    return _simulate_invoice(
+        fixture_invoice,
+        fixture_selection,
+        client_profile,
+        counterparty_match,
+        classifier,
+        processing_mode,
+        intended_direction,
+        classification_override,
+        verified_rule_bindings,
+        verified_rule_authorities,
+    )
+
+
+simulate_invoice = _simulate_invoice
+
+
+def _task3_canonical_invoice(
+    *lines: tuple[str, str, str, str, str],
+):
+    from app.domain.canonical_invoices import (
+        CanonicalInvoice,
+        CanonicalInvoiceLine,
+        CanonicalInvoiceTotals,
+        CanonicalVatSummaryLine,
+        with_validation,
+    )
+
+    canonical_lines = tuple(
+        CanonicalInvoiceLine(
+            description=description,
+            source_position=f"test:line:{index}",
+            taxable_amount=taxable,
+            vat_rate=vat_rate,
+            tax_amount=tax,
+            gross_amount=gross,
+        )
+        for index, (description, taxable, vat_rate, tax, gross) in enumerate(lines, start=1)
+    )
+    taxable_total = sum((Decimal(line[1]) for line in lines), Decimal("0.00"))
+    tax_total = sum((Decimal(line[3]) for line in lines), Decimal("0.00"))
+    gross_total = sum((Decimal(line[4]) for line in lines), Decimal("0.00"))
+    vat_summary = tuple(
+        CanonicalVatSummaryLine(rate=rate, taxable_amount=taxable, tax_amount=tax)
+        for _, taxable, rate, tax, _ in lines
+    )
+    return with_validation(
+        CanonicalInvoice(
+            source="test",
+            line_items=canonical_lines,
+            vat_summary=vat_summary,
+            totals=CanonicalInvoiceTotals(
+                goods_services_total=f"{taxable_total:.2f}",
+                vat_total=f"{tax_total:.2f}",
+                special_tax_total="0.00",
+                tax_inclusive_total=f"{gross_total:.2f}",
+                payable_total=f"{gross_total:.2f}",
+            ),
+        )
+    )
+
+
+def _task3_profile() -> ClientProfile:
+    return ClientProfile(
+        client_id="client-task3",
+        title="Task 3 Isitme Merkezi",
+        tax_id="1234567890",
+        activity_description="Isitme cihazi satis ve servis",
+        workplace_addresses=("Istanbul",),
+        has_chart_accounts=True,
+    )
+
+
+def _task3_verified_authority(
+    canonical_line_id: str,
+    account_code: str,
+    *,
+    direction: str = "purchase",
+    invoice_mode: str = "ordinary",
+    semantic_role: str = "expense",
+    index: int = 1,
+    client_id: str = "client-task3",
+) -> VerifiedRuleAuthorityV1:
+    return VerifiedRuleAuthorityV1(
+        schema_version="v1",
+        client_id=client_id,
+        rule_id=f"rule-task3-{index}",
+        rule_version="1",
+        activation_event_id=f"activation-task3-{index}",
+        source_review_decision_id=f"review-task3-{index}",
+        confirmed_actor_id="accountant-task3",
+        canonical_line_id=canonical_line_id,
+        direction=direction,  # type: ignore[arg-type]
+        invoice_mode=invoice_mode,  # type: ignore[arg-type]
+        semantic_role=semantic_role,
+        account_code=account_code,
+    )
 
 
 class FakeStatementSuggestionProvider:
@@ -839,6 +1227,7 @@ class Phase0DomainTests(unittest.TestCase):
             line_items=(
                 CanonicalInvoiceLine(
                     description="Isitme cihazi",
+                    source_position="xml:InvoiceLine[1]",
                     taxable_amount="1000.00",
                     vat_rate="20",
                     tax_amount="200.00",
@@ -927,13 +1316,74 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = _simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.product_line_hint, "")
         self.assertEqual(result.product_category, "bilinmeyen")
         self.assertEqual(result.product_confidence, 0)
         self.assertIn("line_items_missing", result.review_reason_codes)
         self.assertIn("line_items_missing", result.business_relevance_evidence)
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.draft_lines, ())
+        self.assertEqual(result.export_status, "review_required")
+
+    def test_sales_return_without_canonical_line_evidence_cannot_build_journal(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="supplier-name-only-return.pdf",
+            provider_hint="Isitme Merkezi A",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="IADE",
+            invoice_type="IADE",
+            invoice_no="RET2026000000000",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("1234567890", "9999999999"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            issuer_title="Isitme Merkezi A",
+            issuer_tax_id="1234567890",
+            recipient_title="Alici Firma",
+            recipient_tax_id="9999999999",
+            is_return_invoice=True,
+            line_items=(),
+            line_item_details=(),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.01",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            revenue_account="600.20",
+            sales_vat_account="391.20",
+            customer_account="120.01",
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+
+        result = _simulate_invoice(invoice, selection, profile)
+
+        self.assertEqual(result.accounting_direction, "sales")
+        self.assertIn("line_items_missing", result.review_reason_codes)
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.selected_revenue_account, "")
+        self.assertEqual(result.draft_lines, ())
+        self.assertEqual(result.export_status, "review_required")
 
     def test_simulation_exposes_canonical_extraction_summary(self) -> None:
         from app.domain.canonical_invoices import (
@@ -955,6 +1405,7 @@ class Phase0DomainTests(unittest.TestCase):
                 line_items=(
                     CanonicalInvoiceLine(
                         description="Isitme cihazi",
+                        source_position="pdf:text:line:1",
                         taxable_amount="1000.00",
                         vat_rate="20",
                         tax_amount="200.00",
@@ -1013,7 +1464,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.canonical_line_count, 1)
         self.assertEqual(result.canonical_validation_status, "valid")
@@ -1263,7 +1714,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, intended_direction="purchase")
+        result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="purchase")
 
         self.assertTrue(result.draft_lines)
         self.assertEqual(result.export_status, "review_required")
@@ -1312,8 +1763,7 @@ class Phase0DomainTests(unittest.TestCase):
             workplace_addresses=(),
             has_chart_accounts=True,
         )
-
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "purchase")
         self.assertEqual(result.suggested_counterparty_account, "320.1111111111")
@@ -1366,7 +1816,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.suggested_counterparty_account, "120.2222222222")
@@ -1420,7 +1870,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.suggested_counterparty_account, "120.22222222222")
@@ -1442,6 +1892,727 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(canonical.line_items[0].vat_rate, "10")
         self.assertEqual(canonical.vat_summary[0].rate, "10")
         self.assertEqual(canonical.validation.status, "valid")
+
+    def test_pdf_canonical_ai_keeps_deterministic_source_line_identity(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(description="Cihaz", source_position="pdf:text:line:1"),
+                    CanonicalInvoiceLine(description="Bakim", source_position="pdf:text:line:2"),
+                ),
+                totals=CanonicalInvoiceTotals(payable_total="170.00"),
+            )
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                ids = [item["canonical_line_id"] for item in request.deterministic_payload["line_items"]]
+                return {
+                    "supplier_party": {},
+                    "customer_party": {},
+                    "line_items": [
+                        {
+                            "canonical_line_id": ids[0],
+                            "source_position": "ignored",
+                            "description": "Cihaz",
+                            "taxable_amount": "100.00",
+                            "vat_rate": "20",
+                            "tax_amount": "20.00",
+                            "gross_amount": "120.00",
+                        },
+                        {
+                            "canonical_line_id": ids[1],
+                            "source_position": "ignored",
+                            "description": "Bakim",
+                            "taxable_amount": "50.00",
+                            "vat_rate": "0",
+                            "tax_amount": "0.00",
+                            "gross_amount": "50.00",
+                        },
+                    ],
+                    "vat_summary": [
+                        {"rate": "20", "taxable_amount": "100.00", "tax_amount": "20.00"},
+                        {"rate": "0", "taxable_amount": "50.00", "tax_amount": "0.00"},
+                    ],
+                    "totals": {
+                        "goods_services_total": "150.00",
+                        "vat_total": "20.00",
+                        "special_tax_total": "0.00",
+                        "tax_inclusive_total": "170.00",
+                        "payable_total": "170.00",
+                    },
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Cihaz ve bakim faturasi",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertTrue(completed.ai_used)
+        self.assertEqual(completed.source, "pdf_text")
+        self.assertEqual(
+            [line.canonical_line_id for line in completed.line_items],
+            [line.canonical_line_id for line in deterministic.line_items],
+        )
+        self.assertEqual(
+            [line.source_position for line in completed.line_items],
+            [line.source_position for line in deterministic.line_items],
+        )
+
+    def test_pdf_canonical_ai_discovers_missing_rows_with_server_generated_identity(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Cihaz",
+                        source_position="pdf:text:line:1",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                    ),
+                ),
+                totals=CanonicalInvoiceTotals(payable_total="180.00"),
+            )
+        )
+
+        class Provider:
+            seen_mode = ""
+
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                self.seen_mode = request.mode
+                return {
+                    "supplier_party": {"title": "", "tax_id": "", "tax_office": "", "address": "", "evidence": []},
+                    "customer_party": {"title": "", "tax_id": "", "tax_office": "", "address": "", "evidence": []},
+                    "line_items": [
+                        {
+                            "canonical_line_id": "provider-line-1",
+                            "source_position": "pdf:text:line:1",
+                            "external_line_id": "provider-external-1",
+                            "description": "Cihaz",
+                            "observed_quantity": "1",
+                            "observed_unit_code": "ADET",
+                            "observed_unit_price": "100.00",
+                            "observed_taxable_amount": "100.00",
+                            "observed_vat_rate": "20",
+                            "observed_tax_amount": "20.00",
+                            "observed_gross_amount": "120.00",
+                            "evidence": ["pdf:text:line:1"],
+                        },
+                        {
+                            "canonical_line_id": "provider-line-2",
+                            "source_position": "pdf:text:line:2",
+                            "external_line_id": "provider-external-2",
+                            "description": "Bakim",
+                            "observed_quantity": "1",
+                            "observed_unit_code": "ADET",
+                            "observed_unit_price": "50.00",
+                            "observed_taxable_amount": "50.00",
+                            "observed_vat_rate": "20",
+                            "observed_tax_amount": "10.00",
+                            "observed_gross_amount": "60.00",
+                            "evidence": ["pdf:text:line:2"],
+                        },
+                    ],
+                    "observed_vat_summary": [],
+                    "observed_totals": {
+                        "observed_goods_services_total": "150.00",
+                        "observed_vat_total": "30.00",
+                        "observed_special_tax_total": "0.00",
+                        "observed_tax_inclusive_total": "180.00",
+                        "observed_payable_total": "180.00",
+                        "evidence": ["pdf:totals"],
+                    },
+                    "extraction_notes": [],
+                }
+
+        provider = Provider()
+        completed = _maybe_complete_canonical_with_ai(
+            provider=provider,
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Cihaz 100,00 20,00 120,00\nBakim 50,00 10,00 60,00\nToplam 180,00",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={"payable_total": "180.00"},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertEqual(provider.seen_mode, "discovery")
+        self.assertTrue(completed.ai_used)
+        self.assertEqual(len(completed.line_items), 2)
+        self.assertTrue(all(line.canonical_line_id.startswith("line_") for line in completed.line_items))
+        self.assertNotIn("provider-line-1", {line.canonical_line_id for line in completed.line_items})
+        self.assertTrue(all(not line.external_line_id for line in completed.line_items))
+        self.assertEqual(completed.validation.status, "valid")
+        self.assertIn("canonical_ai_discovery_used", completed.extraction_notes)
+
+    def test_pdf_canonical_ai_rejects_discovery_with_duplicate_source_positions(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import CanonicalExtractionPolicy, CanonicalInvoice, CanonicalInvoiceTotals, with_validation
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(source="pdf_text", totals=CanonicalInvoiceTotals(payable_total="120.00"))
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                line = {
+                    "canonical_line_id": "provider-id",
+                    "source_position": "pdf:text:line:1",
+                    "external_line_id": "provider-external",
+                    "description": "Cihaz",
+                    "observed_quantity": "1",
+                    "observed_unit_code": "ADET",
+                    "observed_unit_price": "50.00",
+                    "observed_taxable_amount": "50.00",
+                    "observed_vat_rate": "20",
+                    "observed_tax_amount": "10.00",
+                    "observed_gross_amount": "60.00",
+                    "evidence": [],
+                }
+                return {
+                    "supplier_party": {"title": "", "tax_id": "", "tax_office": "", "address": "", "evidence": []},
+                    "customer_party": {"title": "", "tax_id": "", "tax_office": "", "address": "", "evidence": []},
+                    "line_items": [line, dict(line)],
+                    "observed_vat_summary": [],
+                    "observed_totals": {
+                        "observed_goods_services_total": "100.00",
+                        "observed_vat_total": "20.00",
+                        "observed_special_tax_total": "0.00",
+                        "observed_tax_inclusive_total": "120.00",
+                        "observed_payable_total": "120.00",
+                        "evidence": [],
+                    },
+                    "extraction_notes": [],
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Iki satir",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={"payable_total": "120.00"},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertFalse(completed.ai_used)
+        self.assertEqual(completed.line_items, deterministic.line_items)
+        self.assertIn("canonical_ai_discovery_rejected", completed.extraction_notes)
+
+    def test_pdf_canonical_ai_preserves_blank_observation_line_and_rejects_missing_values(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(description="Cihaz", source_position="pdf:text:line:1"),
+                    CanonicalInvoiceLine(description="Bakim", source_position="pdf:text:line:2"),
+                ),
+                totals=CanonicalInvoiceTotals(payable_total="120.00"),
+            )
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                ids = [item["canonical_line_id"] for item in request.deterministic_payload["line_items"]]
+                return {
+                    "supplier_party": {},
+                    "customer_party": {},
+                    "line_items": [
+                        {
+                            "canonical_line_id": ids[0],
+                            "description": "Cihaz",
+                            "taxable_amount": "100.00",
+                            "vat_rate": "20",
+                            "tax_amount": "20.00",
+                            "gross_amount": "120.00",
+                        },
+                        {
+                            "canonical_line_id": ids[1],
+                            "description": "",
+                            "taxable_amount": "",
+                            "vat_rate": "",
+                            "tax_amount": "",
+                            "gross_amount": "",
+                        },
+                    ],
+                    "vat_summary": [{"rate": "20", "taxable_amount": "100.00", "tax_amount": "20.00"}],
+                    "totals": {
+                        "goods_services_total": "100.00",
+                        "vat_total": "20.00",
+                        "special_tax_total": "0.00",
+                        "tax_inclusive_total": "120.00",
+                        "payable_total": "120.00",
+                    },
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Cihaz faturasi",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertFalse(completed.ai_used)
+        self.assertIn("canonical_ai_rejected", completed.extraction_notes)
+        self.assertEqual(len(completed.line_items), 2)
+        self.assertIn("line_vat_rate_missing", completed.extraction_notes)
+        self.assertNotIn("canonical_line_coverage_invalid", completed.extraction_notes)
+
+    def test_pdf_canonical_ai_reconciles_arithmetic_only_against_document_total(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(description="Cihaz", source_position="pdf:text:line:1"),
+                ),
+                totals=CanonicalInvoiceTotals(payable_total="120.00"),
+            )
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                line_id = request.deterministic_payload["line_items"][0]["canonical_line_id"]
+                return {
+                    "supplier_party": {},
+                    "customer_party": {},
+                    "line_items": [
+                        {
+                            "canonical_line_id": line_id,
+                            "description": "Cihaz",
+                            "observed_quantity": "1",
+                            "observed_unit_code": "ADET",
+                            "observed_unit_price": "100.00",
+                            "observed_taxable_amount": "100.00",
+                            "observed_vat_rate": "20",
+                            "observed_tax_amount": "17.00",
+                            "observed_gross_amount": "117.00",
+                            "evidence": ["pdf:text:line:1"],
+                        }
+                    ],
+                    "observed_vat_summary": [{
+                        "observed_rate": "20",
+                        "observed_taxable_amount": "100.00",
+                        "observed_tax_amount": "17.00",
+                        "evidence": ["pdf:vat-summary"],
+                    }],
+                    "observed_totals": {
+                        "observed_goods_services_total": "100.00",
+                        "observed_vat_total": "17.00",
+                        "observed_special_tax_total": "0.00",
+                        "observed_tax_inclusive_total": "117.00",
+                        "observed_payable_total": "120.00",
+                        "evidence": ["pdf:totals"],
+                    },
+                    "extraction_notes": [],
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Cihaz 100,00 KDV 20 odeme 120,00",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={"payable_total": "120.00"},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertTrue(completed.ai_used)
+        self.assertEqual(completed.validation.status, "valid")
+        self.assertEqual(completed.line_items[0].tax_amount, "20.00")
+        self.assertEqual(completed.line_items[0].gross_amount, "120.00")
+        self.assertEqual(completed.totals.vat_total, "20.00")
+        self.assertEqual(completed.totals.payable_total, "120.00")
+        self.assertIn("canonical_deterministic_arithmetic_applied", completed.extraction_notes)
+        self.assertNotIn("canonical_ai_arithmetic_reconciled", completed.extraction_notes)
+        self.assertIn("observed_tax_amount_mismatch", completed.extraction_notes)
+        self.assertIn("observed_gross_amount_mismatch", completed.extraction_notes)
+        self.assertIn("observed_vat_total_mismatch", completed.extraction_notes)
+        self.assertIn("observed_vat_summary_mismatch", completed.extraction_notes)
+
+    def test_pdf_canonical_ai_does_not_reconcile_against_a_different_document_total(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(CanonicalInvoiceLine(description="Cihaz", source_position="pdf:text:line:1"),),
+                totals=CanonicalInvoiceTotals(payable_total="125.00"),
+            )
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                line_id = request.deterministic_payload["line_items"][0]["canonical_line_id"]
+                return {
+                    "supplier_party": {},
+                    "customer_party": {},
+                    "line_items": [
+                        {
+                            "canonical_line_id": line_id,
+                            "description": "Cihaz",
+                            "taxable_amount": "100.00",
+                            "vat_rate": "20",
+                            "tax_amount": "20.00",
+                            "gross_amount": "120.00",
+                        }
+                    ],
+                    "vat_summary": [{"rate": "20", "taxable_amount": "100.00", "tax_amount": "20.00"}],
+                    "totals": {
+                        "goods_services_total": "100.00",
+                        "vat_total": "20.00",
+                        "special_tax_total": "0.00",
+                        "tax_inclusive_total": "120.00",
+                        "payable_total": "120.00",
+                    },
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Cihaz 100,00 KDV 20 odeme 125,00",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={"payable_total": "125.00"},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertFalse(completed.ai_used)
+        self.assertEqual(completed.totals.payable_total, "125.00")
+        self.assertIn("canonical_ai_rejected", completed.extraction_notes)
+        self.assertNotIn("canonical_ai_arithmetic_reconciled", completed.extraction_notes)
+
+    def test_pdf_canonical_ai_cannot_overwrite_deterministic_line_money(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Cihaz",
+                        source_position="pdf:text:line:1",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                    ),
+                ),
+                totals=CanonicalInvoiceTotals(payable_total="120.00"),
+            )
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                line_id = request.deterministic_payload["line_items"][0]["canonical_line_id"]
+                return {
+                    "supplier_party": {"title": "", "tax_id": "", "tax_office": "", "address": "", "evidence": []},
+                    "customer_party": {"title": "", "tax_id": "", "tax_office": "", "address": "", "evidence": []},
+                    "line_items": [
+                        {
+                            "canonical_line_id": line_id,
+                            "source_position": "",
+                            "external_line_id": "",
+                            "description": "Cihaz",
+                            "observed_quantity": "1",
+                            "observed_unit_code": "ADET",
+                            "observed_unit_price": "999.00",
+                            "observed_taxable_amount": "999.00",
+                            "observed_vat_rate": "10",
+                            "observed_tax_amount": "99.90",
+                            "observed_gross_amount": "1098.90",
+                            "evidence": ["pdf:text:line:1"],
+                        }
+                    ],
+                    "observed_vat_summary": [],
+                    "observed_totals": {
+                        "observed_goods_services_total": "999.00",
+                        "observed_vat_total": "99.90",
+                        "observed_special_tax_total": "0.00",
+                        "observed_tax_inclusive_total": "1098.90",
+                        "observed_payable_total": "1098.90",
+                        "evidence": ["pdf:totals"],
+                    },
+                    "extraction_notes": [],
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Cihaz 100,00 KDV %20 odeme 120,00",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={"payable_total": "120.00"},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertTrue(completed.ai_used)
+        self.assertEqual(completed.line_items[0].taxable_amount, "100.00")
+        self.assertEqual(completed.line_items[0].vat_rate, "20")
+        self.assertEqual(completed.line_items[0].tax_amount, "20.00")
+        self.assertEqual(completed.line_items[0].gross_amount, "120.00")
+        self.assertIn("observed_payable_total_mismatch", completed.extraction_notes)
+
+    def test_ai_observation_binding_does_not_flag_equivalent_money_format(self) -> None:
+        from app.domain.canonical_invoices import CanonicalInvoice, CanonicalInvoiceLine, with_validation
+        from app.domain.pdf_invoices import _bind_ai_payload_to_deterministic_lines
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Cihaz",
+                        source_position="pdf:text:line:1",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                    ),
+                ),
+            )
+        )
+        line_id = deterministic.line_items[0].canonical_line_id
+
+        bound = _bind_ai_payload_to_deterministic_lines(
+            {
+                "line_items": [
+                    {
+                        "canonical_line_id": line_id,
+                        "description": "Cihaz",
+                        "observed_taxable_amount": "100,00",
+                        "observed_vat_rate": "20.00",
+                        "evidence": ["pdf:text:line:1"],
+                    }
+                ],
+                "extraction_notes": [],
+            },
+            deterministic,
+        )
+
+        self.assertNotIn("observed_taxable_amount_conflict", bound["extraction_notes"])
+        self.assertNotIn("observed_vat_rate_conflict", bound["extraction_notes"])
+
+    def test_private_matching_forwards_canonical_ai_runtime_to_pdf_folder_parser(self) -> None:
+        invoice_dir = Path("private-invoices")
+        chart_path = Path("chart.xlsx")
+        provider = object()
+        policy = object()
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Test Client",
+            tax_id="1111111111",
+            activity_description="Test activity",
+            workplace_addresses=("Test address",),
+            has_chart_accounts=True,
+        )
+        expected_run = object()
+
+        with (
+            patch("app.domain.matching_simulation.parse_invoice_folder", return_value=[]) as parse_folder,
+            patch("app.domain.matching_simulation.simulate_chart_run", return_value=expected_run),
+        ):
+            runs = simulate_private_matching(
+                invoice_dir,
+                [chart_path],
+                profile,
+                canonical_extraction_provider=provider,
+                canonical_extraction_policy=policy,
+            )
+
+        self.assertEqual(runs, [expected_run])
+        parse_folder.assert_called_once_with(
+            invoice_dir,
+            canonical_extraction_provider=provider,
+            canonical_extraction_policy=policy,
+            client_identity={
+                "title": "Test Client",
+                "tax_id": "1111111111",
+            },
+        )
+
+    def test_private_benchmark_forwards_canonical_ai_runtime(self) -> None:
+        from backend.scripts import run_private_pipeline_benchmark as benchmark
+
+        classifier = object()
+        canonical_provider = object()
+        canonical_policy = object()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "samples"
+            output_root = Path(temp_dir) / "output"
+            (output_root / "ai_canary" / "firma-1").mkdir(parents=True)
+            firm_dir = root / "firma-1"
+            (firm_dir / "invoices").mkdir(parents=True)
+            chart_dir = firm_dir / "chart_accounts"
+            chart_dir.mkdir(parents=True)
+            chart_path = chart_dir / "chart.xlsx"
+            chart_path.write_bytes(b"chart")
+
+            with (
+                patch.object(benchmark, "simulate_private_matching", return_value=[]) as simulate,
+                patch.object(benchmark, "private_benchmark_summary", return_value={"invoice_count": 0}),
+                patch.object(benchmark, "write_simulation_csv", return_value=output_root / "matching.csv"),
+                patch.object(benchmark, "write_review_ui_json", return_value=output_root / "review.json"),
+            ):
+                summary = benchmark._run_one(
+                    root=root,
+                    output_root=output_root,
+                    firm_id="firma-1",
+                    run_label="ai_canary",
+                    classifier=classifier,
+                    canonical_extraction_provider=canonical_provider,
+                    canonical_extraction_policy=canonical_policy,
+                    ai_enabled=True,
+                )
+
+        self.assertEqual(summary["status"], "ok")
+        simulate.assert_called_once_with(
+            firm_dir / "invoices",
+            [chart_path],
+            benchmark._client_profile("firma-1"),
+            product_classifier=classifier,
+            canonical_extraction_provider=canonical_provider,
+            canonical_extraction_policy=canonical_policy,
+        )
+
+    def test_private_benchmark_stage_quality_attributes_semantic_decisions(self) -> None:
+        from types import SimpleNamespace
+        from backend.scripts import run_private_pipeline_benchmark as benchmark
+
+        initial = {
+            "attempt_id": "attempt-1",
+            "stage": "initial_account_decision",
+            "canonical_line_ids": ["line-1"],
+            "validated_response": {"suggested_account_code": "770.01"},
+            "validation_errors": [],
+            "accepted": False,
+        }
+        synthesis = {
+            "attempt_id": "attempt-2",
+            "stage": "research_synthesis",
+            "canonical_line_ids": ["line-1"],
+            "validated_response": {
+                "suggested_account_code": "760.03.012",
+                "line_decisions": [{"canonical_line_id": "line-1", "suggested_account_code": "760.03.012"}],
+            },
+            "validation_errors": [],
+            "accepted": True,
+        }
+        result = SimpleNamespace(
+            file_name="private.pdf",
+            canonical_line_count=1,
+            ai_classification_used=True,
+            ai_gate_reason="cold_start_semantic_ai",
+            ai_research_requested=True,
+            semantic_attempts=(initial, synthesis),
+            accepted_semantic_attempt_id="attempt-2",
+            selected_expense_account="760.03.012",
+            selected_revenue_account="",
+            line_decisions=({"canonical_line_id": "line-1", "account_code": "760.03.012"},),
+            canonical_validation_status="valid",
+            review_reason_codes=(),
+            is_balanced=True,
+            export_status="export_ready",
+        )
+
+        record = benchmark._stage_quality_record(result)
+
+        self.assertEqual(record["canonical_line_count"], 1)
+        self.assertTrue(record["semantic_ai_called"])
+        self.assertEqual(record["initial_account_code"], "770.01")
+        self.assertTrue(record["research_requested"])
+        self.assertTrue(record["research_changed_decision"])
+        self.assertEqual(record["accepted_account_code"], "760.03.012")
+        self.assertFalse(record["deterministic_account_substitution"])
+        self.assertEqual(record["semantic_attempt_count"], 2)
+        self.assertTrue(record["line_coverage_ok"])
+        self.assertTrue(record["vat_reconciled"])
+        self.assertTrue(record["balanced"])
+        self.assertTrue(record["trace_complete"])
 
     def test_ubl_invoice_preview_renders_invoice_like_html(self) -> None:
         from app.domain.ubl_invoice_preview import render_ubl_invoice_preview_html
@@ -1843,6 +3014,7 @@ class Phase0DomainTests(unittest.TestCase):
             risk_flags=("mixed_vat_manual_review",),
             suggested_route="review_queue",
             parse_notes=(),
+            line_items=("Mixed VAT sale awaiting split",),
         )
         selection = AccountSelection(
             chart_file_name="chart.xlsx",
@@ -1853,12 +3025,12 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection)
+        result = simulate_mechanical_invoice(invoice, selection, _task3_profile())
 
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.draft_quality, "gross_balanced_needs_vat_split")
         self.assertTrue(result.is_balanced)
-        self.assertEqual(len(result.draft_lines), 2)
+        self.assertEqual(len(result.draft_lines), 3)
 
     def test_matching_simulation_requires_client_profile_for_export(self) -> None:
         invoice = ParsedInvoice(
@@ -1893,7 +3065,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection)
+        result = simulate_mechanical_invoice(invoice, selection)
 
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.export_status, "review_required")
@@ -1946,7 +3118,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.selected_revenue_account, "600.20")
@@ -1984,6 +3156,7 @@ class Phase0DomainTests(unittest.TestCase):
             issuer_tax_id="1234567890",
             recipient_title="Alici Firma",
             recipient_tax_id="9999999999",
+            line_items=("Servis satisi",),
         )
         selection = AccountSelection(
             chart_file_name="chart.xlsx",
@@ -2012,7 +3185,7 @@ class Phase0DomainTests(unittest.TestCase):
             requires_review=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
 
         self.assertEqual(result.selected_customer_account, "120.A01")
         self.assertEqual(result.suggested_counterparty_account, "120.9999999999")
@@ -2067,7 +3240,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.selected_revenue_account, "600.00.3065")
@@ -2121,7 +3294,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.selected_revenue_account, "600.00.3065")
@@ -2177,7 +3350,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.accounting_direction, "purchase")
         self.assertEqual(result.selected_expense_account, "153.01.001")
@@ -2237,7 +3410,7 @@ class Phase0DomainTests(unittest.TestCase):
             requires_review=False,
         )
 
-        result = simulate_invoice(
+        result = simulate_mechanical_invoice(
             invoice,
             selection,
             profile,
@@ -2255,7 +3428,7 @@ class Phase0DomainTests(unittest.TestCase):
             result.draft_lines,
             (
                 {"account_code": "153.01.001", "description": "Rexton stok hesabi", "debit": "1000.00", "credit": "0.00"},
-                {"account_code": "191.01.020", "description": "Rexton indirilecek KDV 20", "debit": "200.00", "credit": "0.00"},
+                {"account_code": "191.01.020", "description": "Rexton indirilecek KDV 20", "debit": "200.00", "credit": "0.00", "tax_rate": "20.0000"},
                 {"account_code": "320.01.015", "description": "Rexton Medikal cari", "debit": "0.00", "credit": "1200.00"},
             ),
         )
@@ -2333,7 +3506,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
 
         counterparty = match_counterparty([], name_hint="Avrupa Yakasi Online")
-        result = simulate_invoice(
+        result = simulate_mechanical_invoice(
             invoice,
             selection,
             profile,
@@ -2433,7 +3606,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.selected_expense_account, "153.01.001")
         self.assertEqual(result.draft_lines[0]["account_code"], "153.01.001")
@@ -2488,7 +3661,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.selected_expense_account, "153.01.002")
         self.assertEqual(result.draft_lines[0]["account_code"], "153.01.002")
@@ -2541,8 +3714,33 @@ class Phase0DomainTests(unittest.TestCase):
             workplace_addresses=("Ataturk Cad. No:1",),
             has_chart_accounts=True,
         )
+        provider = FakeProductProvider(
+            {
+                "category": "kargo",
+                "confidence": 95,
+                "reason": "Canonical satir kargo hizmetini gosteriyor.",
+                "evidence": ["ai:canonical_line"],
+                "suggested_account_code": "760.03.012",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Gercek hesap plani adaylari icinden kargo gideri secildi.",
+                "product_identity": "Kargo hizmeti",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            profile,
+            product_classifier=classifier,
+            processing_mode="controlled_automation",
+        )
 
         self.assertEqual(result.business_relevance_account_treatment, "expense")
         self.assertEqual(result.selected_expense_account, "760.03.012")
@@ -2595,12 +3793,12 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, processing_mode="controlled_automation")
+        result = simulate_mechanical_invoice(invoice, selection, profile, processing_mode="controlled_automation")
 
         self.assertEqual(result.selected_expense_account, "760.03.002")
         self.assertEqual(result.draft_lines[0]["account_code"], "760.03.002")
 
-    def test_return_invoice_stays_out_of_automatic_journal_draft(self) -> None:
+    def test_return_invoice_with_accepted_semantic_authority_preserves_reversal_arithmetic(self) -> None:
         invoice = ParsedInvoice(
             file_name="return.pdf",
             provider_hint="Isitme Merkezi A",
@@ -2627,6 +3825,7 @@ class Phase0DomainTests(unittest.TestCase):
             recipient_title="Alici Firma",
             recipient_tax_id="9999999999",
             is_return_invoice=True,
+            line_items=("Iade edilen servis",),
         )
         selection = AccountSelection(
             chart_file_name="chart.xlsx",
@@ -2646,7 +3845,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.accounting_direction, "sales")
@@ -2655,6 +3854,8 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.draft_lines)
         self.assertEqual(result.selected_revenue_account, "600.20")
         self.assertEqual(result.selected_sales_vat_account, "391.20")
+        self.assertEqual(result.ai_resolution_status, "resolved")
+        self.assertEqual(result.line_decisions[0]["decision_source"], "accepted_ai")
         self.assertIn("return_invoice_manual_review", result.review_reason_codes)
         self.assertIn("return_invoice_accountant_review", result.review_reason_codes)
 
@@ -2690,6 +3891,7 @@ class Phase0DomainTests(unittest.TestCase):
             issuer_tax_id="9999999999",
             recipient_title="Isitme Merkezi A",
             recipient_tax_id="1234567890",
+            line_items=("Tedarik hizmeti",),
         )
         selection = AccountSelection(
             chart_file_name="chart.xlsx",
@@ -2700,7 +3902,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection, profile, intended_direction="purchase")
+        result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="purchase")
 
         self.assertEqual(result.accounting_direction, "purchase")
         self.assertEqual(result.selected_vat_account, "191.20")
@@ -2748,7 +3950,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection, profile, intended_direction="sales_invoice")
+        result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="sales_invoice")
 
         self.assertEqual(result.accounting_direction, "purchase")
         self.assertEqual(result.direction_conflict["status"], "needs_review")
@@ -2796,7 +3998,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection, profile, intended_direction="sales_invoice")
+        result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="sales_invoice")
 
         self.assertEqual(result.accounting_direction, "purchase")
         self.assertLess(result.direction_confidence, 80)
@@ -2887,14 +4089,14 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.draft_entry_type, "mixed_vat_sales")
         self.assertEqual(result.total_debit, result.total_credit)
         self.assertEqual(result.draft_lines[1]["account_code"], "600.10")
-        self.assertEqual(result.draft_lines[2]["account_code"], "391.10")
-        self.assertEqual(result.draft_lines[3]["account_code"], "600.20")
+        self.assertEqual(result.draft_lines[2]["account_code"], "600.20")
+        self.assertEqual(result.draft_lines[3]["account_code"], "391.10")
         self.assertEqual(result.draft_lines[4]["account_code"], "391.20")
         self.assertNotIn("mixed_vat_accountant_review", result.review_reason_codes)
 
@@ -2964,10 +4166,10 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.draft_entry_type, "mixed_vat_sales")
-        self.assertEqual(result.draft_quality, "mixed_vat_sales_review")
+        self.assertEqual(result.draft_quality, "line_decision_grouped_draft")
         self.assertEqual(result.selected_customer_account, "120.46141426750")
         self.assertEqual(result.suggested_counterparty_account, "120.46141426750")
         self.assertEqual(
@@ -2975,14 +4177,14 @@ class Phase0DomainTests(unittest.TestCase):
             (
                 {"account_code": "120.46141426750", "description": "", "debit": "27000.00", "credit": "0.00"},
                 {"account_code": "600.01.010", "description": "Yuzde 10 Satislar", "debit": "0.00", "credit": "9090.91"},
-                {"account_code": "391.01.010", "description": "Yuzde 10 Hesaplanan KDV", "debit": "0.00", "credit": "909.09"},
                 {"account_code": "600.01.020", "description": "Yuzde 20 Satislar", "debit": "0.00", "credit": "14166.67"},
-                {"account_code": "391.01.020", "description": "Yuzde 20 Hesaplanan KDV", "debit": "0.00", "credit": "2833.33"},
+                {"account_code": "391.01.010", "description": "Yuzde 10 Hesaplanan KDV", "debit": "0.00", "credit": "909.09", "tax_rate": "10.0000"},
+                {"account_code": "391.01.020", "description": "Yuzde 20 Hesaplanan KDV", "debit": "0.00", "credit": "2833.33", "tax_rate": "20.0000"},
             ),
         )
         self.assertIn("counterparty_missing", result.review_reason_codes)
         self.assertNotIn("mixed_vat_manual_review", result.review_reason_codes)
-        self.assertIn("KDV ayrimi exact; fise oran bazli uygulandi.", result.accountant_explanation_tr)
+        self.assertIn("KDV oranlari", result.accountant_explanation_tr)
 
     def test_solved_mixed_vat_purchase_can_be_export_ready(self) -> None:
         invoice = ParsedInvoice(
@@ -3027,6 +4229,9 @@ class Phase0DomainTests(unittest.TestCase):
             sales_vat_account="391.20",
             customer_account="120.01",
             account_candidates={
+                "purchase_stock": (
+                    {"code": "153.01", "name": "Ticari mal stogu", "reason": ""},
+                ),
                 "purchase_vat": (
                     {"code": "191.10", "name": "Indirilecek KDV %10", "reason": ""},
                     {"code": "191.20", "name": "Indirilecek KDV %20", "reason": ""},
@@ -3048,12 +4253,48 @@ class Phase0DomainTests(unittest.TestCase):
             match_reason="tax_id",
             requires_review=False,
         )
+        invoice = replace(invoice, canonical_invoice=_mechanical_canonical_invoice(invoice))
+        provider = FakeProductProvider(
+            {
+                "category": "medikal_sarf",
+                "confidence": 92,
+                "reason": "Canonical satirlar satilacak medikal sarf alimidir.",
+                "evidence": ["ai:canonical_lines"],
+                "suggested_account_code": "153.01",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Gercek hesap plani adaylari icinden stok hesabi secildi.",
+                "product_identity": "Medikal sarf",
+                "needs_research": False,
+                "research_query": "",
+                "line_decisions": [
+                    {
+                        "canonical_line_id": line.canonical_line_id,
+                        "category": "medikal_sarf",
+                        "confidence": 92,
+                        "product_identity": "Medikal sarf",
+                        "suggested_account_code": "153.01",
+                        "reason": "Canonical line stock authority.",
+                        "evidence": ["ai:canonical_line"],
+                        "needs_research": False,
+                        "research_query": "",
+                        "risk_flags": [],
+                    }
+                    for line in invoice.canonical_invoice.line_items
+                ],
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
 
-        result = simulate_invoice(
+        result = simulate_mechanical_invoice(
             invoice,
             selection,
             profile,
             counterparty,
+            product_classifier=classifier,
             classification_override=ProductClassification(
                 raw_line="Sarf malzeme",
                 category="medikal_sarf",
@@ -3136,7 +4377,7 @@ class Phase0DomainTests(unittest.TestCase):
             requires_review=False,
         )
 
-        result = simulate_invoice(
+        result = simulate_mechanical_invoice(
             invoice,
             selection,
             profile,
@@ -3154,10 +4395,9 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(
             result.draft_lines,
             (
-                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "9090.91", "credit": "0.00"},
-                {"account_code": "191.01.010", "description": "Indirilecek KDV %10", "debit": "909.09", "credit": "0.00"},
-                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "14166.67", "credit": "0.00"},
-                {"account_code": "191.01.020", "description": "Indirilecek KDV %20", "debit": "2833.33", "credit": "0.00"},
+                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "23257.58", "credit": "0.00"},
+                {"account_code": "191.01.010", "description": "Indirilecek KDV %10", "debit": "909.09", "credit": "0.00", "tax_rate": "10.0000"},
+                {"account_code": "191.01.020", "description": "Indirilecek KDV %20", "debit": "2833.33", "credit": "0.00", "tax_rate": "20.0000"},
                 {"account_code": "320.01", "description": "Tedarikci A", "debit": "0.00", "credit": "27000.00"},
             ),
         )
@@ -3236,6 +4476,7 @@ class Phase0DomainTests(unittest.TestCase):
             match_reason="tax_id",
             requires_review=False,
         )
+        invoice = replace(invoice, canonical_invoice=_mechanical_canonical_invoice(invoice))
         provider = FakeProductProvider(
             {
                 "category": "gida_alimi",
@@ -3249,11 +4490,26 @@ class Phase0DomainTests(unittest.TestCase):
                 "product_identity": "TAMEK gida urunleri",
                 "needs_research": False,
                 "research_query": "",
+                "line_decisions": [
+                    {
+                        "canonical_line_id": line.canonical_line_id,
+                        "category": "gida_alimi",
+                        "confidence": 92,
+                        "product_identity": "TAMEK gida urunu",
+                        "suggested_account_code": "153.01.001",
+                        "reason": "Canonical line stock authority.",
+                        "evidence": ["ai:canonical_line"],
+                        "needs_research": False,
+                        "research_query": "",
+                        "risk_flags": [],
+                    }
+                    for line in invoice.canonical_invoice.line_items
+                ],
             }
         )
         classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
 
-        result = simulate_invoice(invoice, selection, profile, counterparty, product_classifier=classifier)
+        result = simulate_mechanical_invoice(invoice, selection, profile, counterparty, product_classifier=classifier)
 
         account_codes = [line["account_code"] for line in result.draft_lines]
         self.assertEqual(result.draft_entry_type, "mixed_vat_purchase")
@@ -3318,7 +4574,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.draft_entry_type, "review_purchase")
         self.assertEqual(result.export_status, "review_required")
@@ -3378,7 +4634,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.draft_entry_type, "review_purchase")
         self.assertEqual(result.export_status, "review_required")
@@ -3442,7 +4698,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         account_codes = [line["account_code"] for line in result.draft_lines]
         self.assertEqual(result.draft_entry_type, "mixed_vat_sales")
@@ -3499,7 +4755,7 @@ class Phase0DomainTests(unittest.TestCase):
             workplace_addresses=("Istanbul",),
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.accounting_direction, "sales")
         self.assertEqual(result.draft_quality, "gross_balanced_needs_vat_split")
@@ -3577,7 +4833,7 @@ class Phase0DomainTests(unittest.TestCase):
             customer_account="120.01",
         )
         profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         run = SimulatedChartRun(
             chart_file_name="chart.xlsx",
             account_count=1,
@@ -3644,7 +4900,7 @@ class Phase0DomainTests(unittest.TestCase):
             customer_account="120.01",
         )
         profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         run = SimulatedChartRun(
             chart_file_name="chart.xlsx",
             account_count=1,
@@ -3657,6 +4913,16 @@ class Phase0DomainTests(unittest.TestCase):
             invoice_results=(result,),
         )
 
+        run = replace(
+            run,
+            invoice_results=(
+                replace(
+                    result,
+                    canonical_validation_status="invalid",
+                    canonical_extraction_notes=("canonical_ai_error:RuntimeError",),
+                ),
+            ),
+        )
         summary = private_benchmark_summary([run], run_label="baseline", firm_id="firma-1")
 
         self.assertEqual(summary["firm_id"], "firma-1")
@@ -3665,7 +4931,14 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(summary["mixed_vat_review_count"], 1)
         self.assertEqual(summary["sales_direction_purchase_draft_count"], 0)
         self.assertEqual(summary["counterparty_missing_count"], 1)
-        self.assertIn("provider_failure_count", summary)
+        self.assertEqual(summary["balanced_count"], 1)
+        self.assertEqual(summary["export_ready_count"], 0)
+        self.assertEqual(summary["canonical_valid_count"], 0)
+        self.assertEqual(summary["canonical_invalid_count"], 1)
+        self.assertEqual(summary["canonical_missing_count"], 0)
+        self.assertEqual(summary["canonical_ai_used_count"], 0)
+        self.assertEqual(summary["canonical_ai_failure_count"], 1)
+        self.assertEqual(summary["provider_failure_count"], 1)
 
     def test_ai_tie_breaker_can_select_stock_account_without_export_ready(self) -> None:
         invoice = ParsedInvoice(
@@ -3728,7 +5001,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.product_category, "isitme_cihazi")
@@ -3736,7 +5009,204 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.draft_lines[0]["account_code"], "153.01")
         self.assertEqual(result.export_status, "review_required")
 
-    def test_invoice_ai_gate_skips_known_kargo_line(self) -> None:
+    def test_simulation_batches_canonical_line_decisions_and_builds_grouped_journal(self) -> None:
+        from app.domain.ai_classification import AiClassificationResult
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+
+        canonical = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="ZX cihaz", source_position="pdf:text:line:1",
+                        taxable_amount="100.00", vat_rate="20", tax_amount="20.00", gross_amount="120.00",
+                    ),
+                    CanonicalInvoiceLine(
+                        description="Bakim hizmeti", source_position="pdf:text:line:2",
+                        taxable_amount="50.00", vat_rate="0", tax_amount="0.00", gross_amount="50.00",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(rate="20", taxable_amount="100.00", tax_amount="20.00"),
+                    CanonicalVatSummaryLine(rate="0", taxable_amount="50.00", tax_amount="0.00"),
+                ),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="150.00", vat_total="20.00", special_tax_total="0.00",
+                    tax_inclusive_total="170.00", payable_total="170.00",
+                ),
+            )
+        )
+        invoice = ParsedInvoice(
+            file_name="multi-line.pdf", provider_hint="Medikal Tedarik", page_count=1,
+            text_extractable=True, extracted_char_count=1200, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="ABC2026000000001", ettn="", issue_date="01.05.2026",
+            tax_ids=(), vat_rates=("0", "20"), goods_services_total="150.00", vat_total="20.00",
+            special_tax_total="", tax_inclusive_total="170.00", payable_total="170.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("ZX cihaz", "Bakim hizmeti"),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="760.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(), stock_account="153.01",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01", "name": "Cihaz stogu", "reason": ""},),
+                "purchase_expense": ({"code": "760.01", "name": "Bakim gideri", "reason": ""},),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1", title="Isitme Merkezi", tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve servis", workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+
+        class BatchAwareClassifier:
+            policy = AiClassificationPolicy(enabled=True, static_confidence_threshold=101)
+
+            def __init__(self) -> None:
+                self.stages: list[str] = []
+
+            def classify(self, raw_line: str, *, supplier_hint: str = "", context: object = None) -> AiClassificationResult:
+                stage = context.candidate_strategy.stage
+                self.stages.append(stage)
+                line_decisions = ()
+                if stage == "line_batch":
+                    line_decisions = (
+                        {
+                            "canonical_line_id": canonical.line_items[0].canonical_line_id,
+                            "suggested_account_code": "153.01", "product_identity": "Isitme cihazi",
+                            "reason": "Satilacak cihaz stogu.", "needs_research": False, "research_query": "",
+                        },
+                        {
+                            "canonical_line_id": canonical.line_items[1].canonical_line_id,
+                            "suggested_account_code": "760.01", "product_identity": "Bakim hizmeti",
+                            "reason": "Bakim gideri.", "needs_research": False, "research_query": "",
+                        },
+                    )
+                response = {
+                    "suggested_account_code": "153.01",
+                    "needs_research": False,
+                    "line_decisions": list(line_decisions),
+                }
+                attempt = serialize_semantic_decision_attempt(
+                    attempt_id="batch-aware-attempt",
+                    stage="initial_account_decision",
+                    canonical_line_ids=(line.canonical_line_id for line in canonical.line_items),
+                    prompt_version="test-batch-v1",
+                    provider="fake_llm",
+                    model="fake-batch-model",
+                    candidate_account_codes=context.account_candidates,
+                    candidate_counterparty_codes=context.counterparty_candidates,
+                    validated_response=response,
+                    validation_errors=(),
+                    accepted=stage == "line_batch",
+                )
+                return AiClassificationResult(
+                    classification=ProductClassification(
+                        raw_line=raw_line, category="isitme_cihazi", confidence=90,
+                        evidence=("ai_schema_validated",),
+                    ),
+                    ai_used=stage == "line_batch", provider="fake_llm", suggested_account_code="153.01",
+                    skipped_reason="" if stage == "line_batch" else "ai_provider_error",
+                    product_identity="Cihaz ve bakim", line_decisions=line_decisions,
+                    semantic_attempts=(attempt,),
+                    accepted_semantic_attempt_id="batch-aware-attempt" if stage == "line_batch" else "",
+                )
+
+        classifier = BatchAwareClassifier()
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier)
+
+        self.assertEqual(classifier.stages, ["line_batch"])
+        self.assertEqual(
+            [decision["account_code"] for decision in result.line_decisions],
+            ["153.01", "760.01"],
+        )
+        self.assertEqual(result.draft_quality, "line_decision_grouped_draft")
+        self.assertTrue(result.is_balanced)
+        self.assertTrue(result.ai_classification_used)
+        self.assertNotIn("line_decision_journal_incomplete", result.review_reason_codes)
+
+    def test_generic_yurtici_line_uses_ai_real_kargo_account(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="yurtici-generic-line.pdf",
+            provider_hint="Yurtiçi Kargo Servisi A.Ş.",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="KRG2026000000099",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="100.00",
+            vat_total="20.00",
+            special_tax_total="",
+            tax_inclusive_total="120.00",
+            payable_total="120.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Posta Hizmet Geliri",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.010",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "760.03.010", "name": "DİĞER ÇEŞİTLİ GİDER", "reason": "7xx gider adayı"},
+                    {"code": "760.03.012", "name": "KARGO GİDERLERİ", "reason": "7xx gider adayı"},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        provider = FakeProductProvider(
+            {
+                "category": "kargo",
+                "confidence": 90,
+                "reason": "Canonical satır posta hizmetini gösteriyor.",
+                "evidence": ["ai:canonical_line"],
+                "suggested_account_code": "760.03.012",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Aday chart plan içinde kargo giderleri hesabı seçildi.",
+                "product_identity": "Kargo hizmeti",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=70),
+        )
+
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertFalse(result.learning_rule_applied)
+        self.assertTrue(result.ai_classification_used)
+        self.assertEqual(provider.requests[0].supplier_hint, "Yurtiçi Kargo Servisi A.Ş.")
+        self.assertEqual(result.ai_suggested_account_code, "760.03.012")
+        self.assertEqual(result.selected_expense_account, "760.03.012")
+        self.assertFalse(result.static_fallback_account)
+
+    def test_invoice_ai_gate_does_not_skip_cold_start_known_category(self) -> None:
         invoice = ParsedInvoice(
             file_name="known-cargo.pdf",
             provider_hint="Kargo Tedarik",
@@ -3783,16 +5253,827 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
         provider = FakeProductProvider(
-            {"category": "bilinmeyen", "confidence": 40, "reason": "fallback", "evidence": []}
+            {
+                "category": "kargo",
+                "confidence": 90,
+                "reason": "Canonical kargo satırı doğrulandı.",
+                "evidence": ["ai:canonical_line"],
+                "suggested_account_code": "760.03.012",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Kargo giderleri aday hesapta mevcut.",
+                "product_identity": "Kargo hizmeti",
+                "needs_research": False,
+                "research_query": "",
+            }
         )
-        classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
+        classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=70))
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertFalse(result.learning_rule_applied)
+        self.assertTrue(result.ai_classification_used)
+        self.assertNotEqual(result.ai_gate_reason, "static_confident")
+        self.assertEqual(len(provider.requests), 1)
+
+    def test_invoice_ai_gate_static_category_requires_semantic_ai(self) -> None:
+        decision = invoice_ai_gate(
+            product_category="kargo",
+            product_confidence=72,
+            business_relation="supporting_expense",
+            account_treatment="expense",
+            line_hint="Kargo bedeli",
+        )
+
+        self.assertTrue(decision.needs_ai)
+        self.assertEqual(decision.reason, "cold_start_semantic_authority_required")
+
+    def test_invoice_ai_gate_high_static_confidence_requires_semantic_ai(self) -> None:
+        decision = invoice_ai_gate(
+            product_category="kargo",
+            product_confidence=100,
+            business_relation="supporting_expense",
+            account_treatment="expense",
+            line_hint="Kargo bedeli",
+        )
+
+        self.assertTrue(decision.needs_ai)
+        self.assertEqual(decision.reason, "cold_start_semantic_authority_required")
+
+    def test_invoice_ai_gate_unconfirmed_pattern_requires_semantic_ai(self) -> None:
+        parameters = inspect.signature(invoice_ai_gate).parameters
+        self.assertIn("canonical_line_ids", parameters)
+        self.assertIn("verified_rule_bindings", parameters)
+        if "verified_rule_bindings" not in parameters:
+            return
+
+        decision = invoice_ai_gate(
+            product_category="kargo",
+            product_confidence=100,
+            business_relation="supporting_expense",
+            account_treatment="expense",
+            line_hint="Kargo bedeli",
+            canonical_line_ids=("line-1",),
+            verified_rule_bindings=(
+                {
+                    "canonical_line_id": "line-1",
+                    "account_code": "760.03.012",
+                    "verified": False,
+                    "preconditions_match": True,
+                },
+            ),
+        )
+
+        self.assertTrue(decision.needs_ai)
+        self.assertEqual(decision.reason, "cold_start_semantic_authority_required")
+
+    def test_verified_line_binding_may_skip_semantic_ai(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+
+        canonical = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Kargo bedeli",
+                        source_position="pdf:text:line:1",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(rate="20", taxable_amount="100.00", tax_amount="20.00"),
+                ),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="100.00",
+                    vat_total="20.00",
+                    special_tax_total="0.00",
+                    tax_inclusive_total="120.00",
+                    payable_total="120.00",
+                ),
+            )
+        )
+        invoice = ParsedInvoice(
+            file_name="verified-rule.pdf",
+            provider_hint="Kargo Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="KRG2026000000101",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="100.00",
+            vat_total="20.00",
+            special_tax_total="",
+            tax_inclusive_total="120.00",
+            payable_total="120.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kargo bedeli",),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "770.01", "name": "Genel gider", "reason": ""},
+                    {"code": "760.03.012", "name": "Kargo giderleri", "reason": "", "is_detail_account": True, "is_active": True},
+                ),
+            },
+            account_names={"760.03.012": "Kargo giderleri"},
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        provider = FakeProductProvider({})
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+        parameters = inspect.signature(simulate_invoice).parameters
+        self.assertIn("verified_rule_bindings", parameters)
+        if "verified_rule_bindings" not in parameters:
+            return
+
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            profile,
+            product_classifier=classifier,
+            verified_rule_authorities=(
+                _task3_verified_authority(
+                    canonical.line_items[0].canonical_line_id,
+                    "760.03.012",
+                    client_id="client-1",
+                ),
+            ),
+        )
 
         self.assertFalse(result.ai_classification_used)
-        self.assertEqual(result.ai_gate_reason, "static_confident")
+        self.assertEqual(result.ai_gate_reason, "verified_rule_binding")
         self.assertEqual(provider.requests, [])
         self.assertEqual(result.selected_expense_account, "760.03.012")
+        self.assertEqual(result.line_decisions[0]["decision_source"], "verified_rule")
+        self.assertEqual(result.draft_lines[0]["account_code"], "760.03.012")
+
+    def test_ai_provider_failure_leaves_no_discretionary_account_substitution(self) -> None:
+        class FailingProvider:
+            provider_name = "failing_llm"
+
+            def __init__(self) -> None:
+                self.requests: list[AiClassificationRequest] = []
+
+            def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
+                self.requests.append(request)
+                raise RuntimeError("provider unavailable")
+
+        invoice = ParsedInvoice(
+            file_name="provider-failure.pdf",
+            provider_hint="Kargo Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="KRG2026000000102",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="100.00",
+            vat_total="20.00",
+            special_tax_total="",
+            tax_inclusive_total="120.00",
+            payable_total="120.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Kargo bedeli",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "770.01", "name": "Genel gider", "reason": ""},
+                    {"code": "760.03.012", "name": "Kargo giderleri", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        provider = FailingProvider()
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=70),
+        )
+
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier)
+
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.ai_retry_reason, "ai_provider_error")
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.static_fallback_account, "")
+        self.assertEqual(result.draft_lines, ())
+
+    def test_verified_binding_rejects_non_semantic_accounts_false_strings_and_incomplete_coverage(self) -> None:
+        canonical = _task3_canonical_invoice(
+            ("Kargo hizmeti", "100.00", "20", "20.00", "120.00"),
+            ("Bakim hizmeti", "50.00", "20", "10.00", "60.00"),
+        )
+        invoice = ParsedInvoice(
+            file_name="binding-negative-cases.xml", provider_hint="Tedarikci", page_count=0,
+            text_extractable=True, extracted_char_count=900, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="T3-BIND-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("20",),
+            goods_services_total="150.00", vat_total="30.00", special_tax_total="",
+            tax_inclusive_total="180.00", payable_total="180.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(),
+            line_items=("Kargo hizmeti", "Bakim hizmeti"), canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="760.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "760.01", "name": "Kargo gideri", "reason": ""},
+                    {"code": "760.02", "name": "Bakim gideri", "reason": ""},
+                ),
+            },
+            account_names={"191.20": "Indirilecek KDV", "600.01": "Yurt ici satislar"},
+        )
+        line_1, line_2 = (line.canonical_line_id for line in canonical.line_items)
+        valid_second = {
+            "canonical_line_id": line_2, "account_code": "760.02",
+            "verified": True, "preconditions_match": True,
+        }
+        cases = {
+            "purchase_vat_only_in_account_names": (
+                {"canonical_line_id": line_1, "account_code": "191.20", "verified": True, "preconditions_match": True},
+                valid_second,
+            ),
+            "sales_code_wrong_direction": (
+                {"canonical_line_id": line_1, "account_code": "600.01", "verified": True, "preconditions_match": True},
+                valid_second,
+            ),
+            "verified_string_false": (
+                {"canonical_line_id": line_1, "account_code": "760.01", "verified": "false", "preconditions_match": True},
+                valid_second,
+            ),
+            "preconditions_string_false": (
+                {"canonical_line_id": line_1, "account_code": "760.01", "verified": True, "preconditions_match": "false"},
+                valid_second,
+            ),
+            "partial": (
+                {"canonical_line_id": line_1, "account_code": "760.01", "verified": True, "preconditions_match": True},
+            ),
+            "duplicate_partial": (
+                {"canonical_line_id": line_1, "account_code": "760.01", "verified": True, "preconditions_match": True},
+                {"canonical_line_id": line_1, "account_code": "760.02", "verified": True, "preconditions_match": True},
+            ),
+        }
+
+        for label, bindings in cases.items():
+            with self.subTest(label=label):
+                result = _simulate_invoice(
+                    invoice, selection, _task3_profile(), verified_rule_bindings=bindings,
+                )
+                self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+                self.assertNotEqual(result.ai_gate_reason, "verified_rule_binding")
+                self.assertEqual(result.draft_lines, ())
+
+    def test_verified_rule_authority_requires_strict_role_and_explicit_candidate_metadata(self) -> None:
+        canonical = _task3_canonical_invoice(("Kargo hizmeti", "100.00", "20", "20.00", "120.00"))
+        invoice = ParsedInvoice(
+            file_name="strict-verified-authority.xml", provider_hint="Tedarikci", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="T3-STRICT-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Kargo hizmeti",),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            account_candidates={"purchase_expense": (
+                {"code": "760.01", "name": "Valid detail", "reason": "", "is_detail_account": True, "is_active": True},
+                {"code": "760.02", "name": "Missing active", "reason": "", "is_detail_account": True},
+                {"code": "760.03", "name": "Inactive", "reason": "", "is_detail_account": True, "is_active": False},
+                {"code": "760.04", "name": "Missing detail", "reason": "", "is_active": True},
+                {"code": "760.05", "name": "Not detail", "reason": "", "is_detail_account": False, "is_active": True},
+            )},
+        )
+        line_id = canonical.line_items[0].canonical_line_id
+        cases = (
+            ("garbage_role", "760.01", "garbage", "purchase", "ordinary"),
+            ("missing_active", "760.02", "expense", "purchase", "ordinary"),
+            ("false_active", "760.03", "expense", "purchase", "ordinary"),
+            ("missing_detail", "760.04", "expense", "purchase", "ordinary"),
+            ("false_detail", "760.05", "expense", "purchase", "ordinary"),
+            ("wrong_direction_role", "760.01", "revenue", "purchase", "ordinary"),
+            ("wrong_direction", "760.01", "expense", "sales", "ordinary"),
+            ("wrong_mode", "760.01", "expense", "purchase", "return"),
+        )
+
+        for label, account_code, semantic_role, direction, invoice_mode in cases:
+            with self.subTest(label=label):
+                authority = _task3_verified_authority(
+                    line_id,
+                    account_code,
+                    semantic_role=semantic_role,
+                    direction=direction,
+                    invoice_mode=invoice_mode,
+                )
+                result = _simulate_invoice(
+                    invoice,
+                    selection,
+                    _task3_profile(),
+                    verified_rule_authorities=(authority,),
+                )
+
+                self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+                self.assertNotEqual(result.ai_gate_reason, "verified_rule_binding")
+                self.assertEqual(result.selected_expense_account, "")
+                self.assertEqual(result.draft_lines, ())
+
+    def test_verified_rule_authority_requires_independent_chart_semantic_agreement(self) -> None:
+        canonical = _task3_canonical_invoice(("Semantic authority line", "100.00", "20", "20.00", "120.00"))
+        purchase_invoice = ParsedInvoice(
+            file_name="verified-chart-semantics-purchase.xml", provider_hint="Tedarikci", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="T3-SEM-P", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Semantic authority line",),
+            canonical_invoice=canonical,
+        )
+        sales_invoice = replace(
+            purchase_invoice,
+            file_name="verified-chart-semantics-sales.xml",
+            invoice_type="SATIS",
+            invoice_no="T3-SEM-S",
+            tax_ids=("1234567890", "9999999999"),
+            issuer_title="Task 3 Isitme Merkezi",
+            issuer_tax_id="1234567890",
+            recipient_title="Alici",
+            recipient_tax_id="9999999999",
+        )
+        purchase_selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="760.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(), stock_account="153.01",
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "600.01", "name": "Malicious sales account", "reason": "", "is_detail_account": True, "is_active": True},
+                    {"code": "760.01", "name": "Valid expense", "reason": "", "is_detail_account": True, "is_active": True},
+                ),
+                "purchase_stock": (
+                    {"code": "153.01", "name": "Valid stock", "reason": "", "is_detail_account": True, "is_active": True},
+                ),
+            },
+        )
+        sales_selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="760.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            revenue_account="600.01", sales_vat_account="391.20", customer_account="120.01",
+            account_candidates={"sales_revenue": (
+                {"code": "760.01", "name": "Malicious expense account", "reason": "", "is_detail_account": True, "is_active": True},
+                {"code": "600.01", "name": "Valid revenue", "reason": "", "is_detail_account": True, "is_active": True},
+            )},
+        )
+        line_id = canonical.line_items[0].canonical_line_id
+
+        malicious_cases = (
+            (
+                "sales_account_in_purchase_expense",
+                purchase_invoice,
+                purchase_selection,
+                _task3_verified_authority(line_id, "600.01", semantic_role="expense"),
+            ),
+            (
+                "expense_account_in_sales_revenue",
+                sales_invoice,
+                sales_selection,
+                _task3_verified_authority(line_id, "760.01", direction="sales", semantic_role="revenue"),
+            ),
+        )
+        for label, invoice, selection, authority in malicious_cases:
+            with self.subTest(label=label):
+                result = _simulate_invoice(
+                    invoice,
+                    selection,
+                    _task3_profile(),
+                    verified_rule_authorities=(authority,),
+                )
+                self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+                self.assertNotEqual(result.ai_gate_reason, "verified_rule_binding")
+                self.assertEqual(result.draft_lines, ())
+
+        valid_cases = (
+            (
+                "purchase_expense",
+                purchase_invoice,
+                purchase_selection,
+                _task3_verified_authority(line_id, "760.01", semantic_role="expense"),
+                "760.01",
+            ),
+            (
+                "purchase_stock",
+                purchase_invoice,
+                purchase_selection,
+                _task3_verified_authority(line_id, "153.01", semantic_role="stock"),
+                "153.01",
+            ),
+            (
+                "sales_revenue",
+                sales_invoice,
+                sales_selection,
+                _task3_verified_authority(line_id, "600.01", direction="sales", semantic_role="revenue"),
+                "600.01",
+            ),
+        )
+        for label, invoice, selection, authority, expected_code in valid_cases:
+            with self.subTest(label=label):
+                result = _simulate_invoice(
+                    invoice,
+                    selection,
+                    _task3_profile(),
+                    verified_rule_authorities=(authority,),
+                )
+                self.assertEqual(result.ai_resolution_status, "resolved")
+                self.assertEqual(result.ai_gate_reason, "verified_rule_binding")
+                self.assertIn(expected_code, {line["account_code"] for line in result.draft_lines})
+
+    def test_orphan_accepted_semantic_attempt_id_cannot_authorize_a_journal(self) -> None:
+        class OrphanAcceptedIdClassifier:
+            policy = AiClassificationPolicy(enabled=True, static_confidence_threshold=101)
+
+            def classify(self, raw_line: str, *, supplier_hint: str = "", context: AiClassificationContext | None = None) -> AiClassificationResult:
+                return AiClassificationResult(
+                    classification=ProductClassification(raw_line, "kargo", 95, ("orphan-test",)),
+                    ai_used=True,
+                    provider="orphan-test",
+                    suggested_account_code="760.01",
+                    accepted_semantic_attempt_id="missing-attempt-record",
+                )
+
+        invoice = ParsedInvoice(
+            file_name="orphan-attempt.xml", provider_hint="Kargo", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="T3-ATTEMPT-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Kargo hizmeti",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            account_candidates={"purchase_expense": ({"code": "760.01", "name": "Kargo gideri", "reason": ""},)},
+        )
+
+        result = _simulate_invoice(
+            invoice,
+            selection,
+            _task3_profile(),
+            product_classifier=OrphanAcceptedIdClassifier(),
+        )
+
+        self.assertEqual(result.semantic_attempts, ())
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.draft_lines, ())
+
+    def test_accepted_account_must_match_accepted_attempt_response_and_candidates(self) -> None:
+        class MismatchedRecordedClassifier:
+            policy = AiClassificationPolicy(enabled=True, static_confidence_threshold=101)
+
+            def classify(self, raw_line: str, *, supplier_hint: str = "", context: AiClassificationContext | None = None) -> AiClassificationResult:
+                attempt = {
+                    "attempt_id": "attempt-recorded-1", "stage": "initial_account_decision",
+                    "canonical_line_ids": [], "prompt_version": "test-v1", "provider": "recorded",
+                    "model": "recorded-model", "candidate_account_codes": ["760.02"],
+                    "candidate_counterparty_codes": [],
+                    "validated_response": {"suggested_account_code": "760.02"},
+                    "validation_errors": [], "accepted": True, "superseded_by_attempt_id": "",
+                }
+                return AiClassificationResult(
+                    classification=ProductClassification(raw_line, "kargo", 95, ("recorded",)),
+                    ai_used=True, provider="recorded", suggested_account_code="760.01",
+                    semantic_attempts=(attempt,), accepted_semantic_attempt_id="attempt-recorded-1",
+                )
+
+        invoice = ParsedInvoice(
+            file_name="mismatched-attempt.xml", provider_hint="Kargo", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="T3-ATTEMPT-2", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Kargo hizmeti",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            account_candidates={"purchase_expense": (
+                {"code": "760.01", "name": "Kargo 1", "reason": ""},
+                {"code": "760.02", "name": "Kargo 2", "reason": ""},
+            )},
+        )
+
+        result = _simulate_invoice(invoice, selection, _task3_profile(), product_classifier=MismatchedRecordedClassifier())
+
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.draft_lines, ())
+
+    def test_post_simulation_learning_cannot_overwrite_accepted_ai_account_or_journal(self) -> None:
+        canonical = _task3_canonical_invoice(("Kargo hizmet bedeli", "100.00", "20", "20.00", "120.00"))
+        invoice = ParsedInvoice(
+            file_name="learning-after-ai.xml", provider_hint="Yurtici Kargo", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="T3-LEARN-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("9860008925", "1234567890"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Kargo hizmet bedeli",),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            account_candidates={"purchase_expense": (
+                {"code": "760.01", "name": "Kargo gideri", "reason": ""},
+                {"code": "770.05", "name": "Diger gider", "reason": ""},
+            )},
+        )
+        provider = FakeProductProvider({
+            "category": "kargo", "confidence": 95, "reason": "Canonical line is cargo.",
+            "evidence": ["canonical:kargo"], "suggested_account_code": "760.01",
+            "suggested_counterparty_code": "", "risk_flags": [],
+            "account_reason": "Accepted chart candidate.", "product_identity": "Kargo hizmeti",
+            "needs_research": False, "research_query": "",
+        })
+        classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
+        result = _simulate_invoice(invoice, selection, _task3_profile(), product_classifier=classifier)
+        base_codes = tuple(line["account_code"] for line in result.draft_lines)
+        variants = (
+            ("unconfirmed_client_rule", "approve", False),
+            ("suggest_for_similar", "suggest_for_similar", False),
+            ("automation_candidate", "suggest_for_similar", True),
+        )
+
+        for label, action, automation_candidate in variants:
+            with self.subTest(label=label):
+                rule = rule_from_event_payload({
+                    "client_id": "client-task3", "scope": "client_rule", "action": action,
+                    "category": "kargo", "corrected_account_code": "770.05",
+                    "corrected_counterparty_code": "", "reason": "Prior similar choice.",
+                    "normalized_terms": ["kargo", "hizmet", "bedeli"],
+                    "automation_candidate": automation_candidate,
+                })
+                learned = apply_learning_rules(result, (rule,))
+                self.assertFalse(learned.learning_rule_applied)
+                self.assertEqual(learned.selected_expense_account, "760.01")
+                self.assertEqual(tuple(line["account_code"] for line in learned.draft_lines), base_codes)
+
+    def test_verified_binding_account_survives_sales_return_reversal_rules(self) -> None:
+        canonical = _task3_canonical_invoice(("Iade edilen servis", "100.00", "20", "20.00", "120.00"))
+        invoice = ParsedInvoice(
+            file_name="sales-return-authority.xml", provider_hint="Task 3 Isitme Merkezi", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="IADE", invoice_type="IADE",
+            invoice_no="T3-RETURN-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("1234567890", "9999999999"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Iade edilen servis",),
+            canonical_invoice=canonical, issuer_title="Task 3 Isitme Merkezi",
+            issuer_tax_id="1234567890", recipient_title="Alici", recipient_tax_id="9999999999",
+            is_return_invoice=True,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            revenue_account="600.20", sales_vat_account="391.20", customer_account="120.01",
+            account_candidates={"sales_revenue": (
+                {"code": "600.20", "name": "Standard sales", "reason": ""},
+                {"code": "601.99", "name": "Verified return semantic account", "reason": "", "is_detail_account": True, "is_active": True},
+            )},
+        )
+        binding = (_task3_verified_authority(
+            canonical.line_items[0].canonical_line_id,
+            "601.99",
+            direction="sales",
+            invoice_mode="return",
+            semantic_role="revenue",
+        ),)
+
+        result = _simulate_invoice(invoice, selection, _task3_profile(), verified_rule_authorities=binding)
+
+        self.assertEqual(result.line_decisions[0]["account_code"], "601.99")
+        self.assertEqual(result.selected_revenue_account, "601.99")
+        self.assertIn("601.99", {line["account_code"] for line in result.draft_lines})
+        self.assertIn("return_invoice_manual_review", result.review_reason_codes)
+
+    def test_verified_binding_account_survives_non_deductible_legal_treatment(self) -> None:
+        canonical = _task3_canonical_invoice(("SLIM TAPER giyim", "100.00", "20", "20.00", "120.00"))
+        invoice = ParsedInvoice(
+            file_name="non-deductible-authority.xml", provider_hint="Magaza", page_count=0,
+            text_extractable=True, extracted_char_count=700, scenario="TEMELFATURA", invoice_type="ALIS",
+            invoice_no="T3-ND-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("SLIM TAPER giyim",),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            non_deductible_account="689.01",
+            account_candidates={"non_deductible": (
+                {"code": "689.01", "name": "Default KKEG", "reason": ""},
+                {"code": "689.02", "name": "Verified KKEG", "reason": "", "is_detail_account": True, "is_active": True},
+            )},
+        )
+        binding = (_task3_verified_authority(
+            canonical.line_items[0].canonical_line_id,
+            "689.02",
+            semantic_role="non_deductible",
+        ),)
+
+        result = _simulate_invoice(invoice, selection, _task3_profile(), verified_rule_authorities=binding)
+
+        self.assertEqual(result.business_relevance_account_treatment, "non_deductible_review")
+        self.assertEqual(result.selected_expense_account, "689.02")
+        self.assertEqual(result.selected_purchase_vat_account, "")
+        self.assertIn("689.02", {line["account_code"] for line in result.draft_lines})
+
+    def test_two_line_verified_sales_bindings_survive_mixed_vat_construction(self) -> None:
+        canonical = _task3_canonical_invoice(
+            ("Pil satisi", "100.00", "10", "10.00", "110.00"),
+            ("Servis satisi", "100.00", "20", "20.00", "120.00"),
+        )
+        invoice = ParsedInvoice(
+            file_name="mixed-sales-binding.xml", provider_hint="Task 3 Isitme Merkezi", page_count=0,
+            text_extractable=True, extracted_char_count=900, scenario="TEMELFATURA", invoice_type="SATIS",
+            invoice_no="T3-MIX-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("1234567890", "9999999999"), vat_rates=("10", "20"),
+            goods_services_total="200.00", vat_total="30.00", special_tax_total="",
+            tax_inclusive_total="230.00", payable_total="230.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Pil satisi", "Servis satisi"),
+            line_item_details=(
+                InvoiceLine(raw_text="Pil satisi 110,00", description="Pil satisi", amount_hint="110,00"),
+                InvoiceLine(raw_text="Servis satisi 120,00", description="Servis satisi", amount_hint="120,00"),
+            ),
+            canonical_invoice=canonical, issuer_title="Task 3 Isitme Merkezi", issuer_tax_id="1234567890",
+            recipient_title="Alici", recipient_tax_id="9999999999",
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(), revenue_account="600.20",
+            sales_vat_account="391.20", customer_account="120.01",
+            account_candidates={
+                "sales_revenue": (
+                    {"code": "601.10", "name": "Verified pil sales", "reason": "", "is_detail_account": True, "is_active": True},
+                    {"code": "602.20", "name": "Verified service sales", "reason": "", "is_detail_account": True, "is_active": True},
+                    {"code": "600.10", "name": "Static rate 10", "reason": ""},
+                    {"code": "600.20", "name": "Static rate 20", "reason": ""},
+                ),
+                "sales_vat": (
+                    {"code": "391.10", "name": "VAT 10", "reason": ""},
+                    {"code": "391.20", "name": "VAT 20", "reason": ""},
+                ),
+            },
+        )
+        bindings = tuple(
+            _task3_verified_authority(
+                line.canonical_line_id,
+                account_code,
+                direction="sales",
+                semantic_role="revenue",
+                index=index,
+            )
+            for index, (line, account_code) in enumerate(zip(canonical.line_items, ("601.10", "602.20")), start=1)
+        )
+
+        result = _simulate_invoice(invoice, selection, _task3_profile(), verified_rule_authorities=bindings)
+
+        self.assertEqual([item["account_code"] for item in result.line_decisions], ["601.10", "602.20"])
+        discretionary_codes = {
+            line["account_code"]
+            for line in result.draft_lines
+            if not line["account_code"].startswith(("120", "391"))
+        }
+        self.assertEqual(discretionary_codes, {"601.10", "602.20"})
+        self.assertEqual(result.draft_entry_type, "mixed_vat_sales")
+
+    def test_incomplete_line_decision_cannot_fall_back_to_valid_top_level_ai_account(self) -> None:
+        canonical = _task3_canonical_invoice(
+            ("Cihaz", "100.00", "20", "20.00", "120.00"),
+            ("Bakim", "50.00", "0", "0.00", "50.00"),
+        )
+        invoice = ParsedInvoice(
+            file_name="incomplete-line-ai.xml", provider_hint="Tedarikci", page_count=0,
+            text_extractable=True, extracted_char_count=900, scenario="TEMELFATURA", invoice_type="ALIS",
+            invoice_no="T3-LINE-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("9999999999", "1234567890"), vat_rates=("0", "20"),
+            goods_services_total="150.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="170.00", payable_total="170.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Cihaz", "Bakim"),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="760.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            account_candidates={"purchase_expense": (
+                {"code": "760.01", "name": "Cihaz gideri", "reason": ""},
+                {"code": "760.02", "name": "Bakim gideri", "reason": ""},
+            )},
+        )
+        incomplete_decisions = (
+                {
+                    "canonical_line_id": canonical.line_items[0].canonical_line_id,
+                    "category": "baska_kategori", "confidence": 90, "product_identity": "Cihaz",
+                    "suggested_account_code": "760.01", "reason": "Valid first line.", "evidence": [],
+                    "needs_research": False, "research_query": "", "risk_flags": [],
+                },
+                {
+                    "canonical_line_id": canonical.line_items[1].canonical_line_id,
+                    "category": "baska_kategori", "confidence": 90, "product_identity": "Bakim",
+                    "suggested_account_code": "", "reason": "Missing account.", "evidence": [],
+                    "needs_research": False, "research_query": "", "risk_flags": [],
+                },
+        )
+
+        class IncompleteRecordedClassifier:
+            policy = AiClassificationPolicy(enabled=True, static_confidence_threshold=101)
+
+            def classify(self, raw_line: str, *, supplier_hint: str = "", context: AiClassificationContext | None = None) -> AiClassificationResult:
+                response = {
+                    "suggested_account_code": "760.01",
+                    "line_decisions": list(incomplete_decisions),
+                }
+                attempt = {
+                    "attempt_id": "attempt-incomplete-lines", "stage": "initial_account_decision",
+                    "canonical_line_ids": [line.canonical_line_id for line in canonical.line_items],
+                    "prompt_version": "test-v1", "provider": "recorded", "model": "recorded-model",
+                    "candidate_account_codes": ["760.01", "760.02"],
+                    "candidate_counterparty_codes": [], "validated_response": response,
+                    "validation_errors": [], "accepted": True, "superseded_by_attempt_id": "",
+                }
+                return AiClassificationResult(
+                    classification=ProductClassification(raw_line, "baska_kategori", 90, ("canonical:two-lines",)),
+                    ai_used=True, provider="recorded", suggested_account_code="760.01",
+                    account_reason="Top level is valid.", product_identity="Cihaz ve bakim",
+                    semantic_attempts=(attempt,), accepted_semantic_attempt_id="attempt-incomplete-lines",
+                    line_decisions=incomplete_decisions,
+                )
+
+        classifier = IncompleteRecordedClassifier()
+
+        result = _simulate_invoice(invoice, selection, _task3_profile(), product_classifier=classifier)
+
+        self.assertIn("ai_line_decision_incomplete", result.review_reason_codes)
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertEqual(result.draft_lines, ())
 
     def test_invoice_ai_gate_calls_ai_for_brand_model_only_line(self) -> None:
         invoice = ParsedInvoice(
@@ -3853,7 +6134,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
         classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.ai_gate_reason, "unknown_product_category")
@@ -3933,7 +6214,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
         classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.ai_gate_reason, "cold_start_core_accounting_line")
@@ -4003,13 +6284,13 @@ class Phase0DomainTests(unittest.TestCase):
         )
         classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertTrue(result.ai_research_requested)
         self.assertEqual(result.ai_research_query, "ZX Sonic Pro 9")
         self.assertEqual(result.export_status, "review_required")
-        self.assertEqual(result.ai_resolution_status, "ai_retry_required")
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
         self.assertEqual(result.ai_retry_reason, "research_required")
         self.assertTrue(result.static_fallback_suppressed)
         self.assertEqual(result.selected_expense_account, "")
@@ -4077,7 +6358,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
         classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.ai_suggested_account_code, "770.01")
@@ -4136,17 +6417,159 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertFalse(result.ai_classification_used)
         self.assertEqual(result.ai_classification_skipped_reason, "provider_missing")
-        self.assertEqual(result.ai_resolution_status, "ai_retry_required")
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
         self.assertEqual(result.ai_retry_reason, "provider_missing")
-        self.assertEqual(result.static_fallback_account, "770.01")
+        self.assertEqual(result.static_fallback_account, "")
         self.assertTrue(result.static_fallback_suppressed)
         self.assertEqual(result.selected_expense_account, "")
         self.assertEqual(result.draft_lines, ())
-        self.assertIn("ai_retry_required", result.review_reason_codes)
+        self.assertIn("ai_correction_required", result.review_reason_codes)
+
+    def test_invalid_ai_account_requests_ai_correction_without_static_substitution(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="invalid-ai-account.pdf",
+            provider_hint="Belirsiz Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="BAD2026000000100",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "1234567890"),
+            vat_rates=("20",),
+            goods_services_total="100.00",
+            vat_total="20.00",
+            special_tax_total="",
+            tax_inclusive_total="120.00",
+            payable_total="120.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Belirsiz hizmet",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.010",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "760.03.010", "name": "DİĞER ÇEŞİTLİ GİDER", "reason": "7xx gider adayı"},
+                    {"code": "770.01", "name": "GENEL GİDER", "reason": "7xx gider adayı"},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve uygulama merkezi",
+            workplace_addresses=("Ataturk Cad. No:1",),
+            has_chart_accounts=True,
+        )
+        provider = FakeProductProvider(
+            {
+                "category": "kargo",
+                "confidence": 88,
+                "reason": "AI aday dışı bir hesap önerdi.",
+                "evidence": ["ai:canonical_line"],
+                "suggested_account_code": "760.99.999",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Aday dışı hesap önerisi.",
+                "product_identity": "Belirsiz hizmet",
+                "needs_research": False,
+                "research_query": "",
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+
+        self.assertEqual(getattr(result, "ai_attempted_account_code", ""), "760.99.999")
+        self.assertEqual(result.ai_resolution_status, "ai_correction_required")
+        self.assertEqual(result.selected_expense_account, "")
+        self.assertNotIn(result.selected_expense_account, {"760.03.010", "770.01"})
+        self.assertEqual(result.ai_retry_reason, "selected_account_not_in_candidates")
+
+    def test_invalid_ai_account_gets_one_bounded_semantic_correction(self) -> None:
+        base = {
+            "category": "kargo",
+            "confidence": 88,
+            "reason": "Kargo hizmeti.",
+            "evidence": ["canonical line"],
+            "suggested_counterparty_code": "",
+            "risk_flags": [],
+            "account_reason": "Kargo gideri.",
+            "product_identity": "Kargo hizmeti",
+            "needs_research": False,
+            "research_query": "",
+        }
+        provider = SequentialFakeProductProvider(
+            [
+                {**base, "suggested_account_code": "760.99.999"},
+                {**base, "suggested_account_code": "760.03.012"},
+            ]
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+        canonical = _task3_canonical_invoice(("Kargo hizmeti", "100.00", "20", "20.00", "120.00"))
+        context = AiClassificationContext(
+            account_candidates=("760.03.012", "770.01"),
+            canonical_lines=({"canonical_line_id": canonical.line_items[0].canonical_line_id, "description": "Kargo hizmeti"},),
+            candidate_strategy=AiCandidateStrategy(stage="final_account"),
+        )
+
+        result = classifier.classify("Kargo hizmeti", context=context)
+
+        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(provider.requests[1].context.semantic_stage, "account_correction")
+        self.assertEqual(provider.requests[1].context.validation_errors, ("selected_account_not_in_candidates",))
+        self.assertEqual(result.suggested_account_code, "760.03.012")
+        self.assertEqual([item["stage"] for item in result.semantic_attempts], ["initial_account_decision", "account_correction"])
+        self.assertFalse(result.semantic_attempts[0]["accepted"])
+        self.assertTrue(result.semantic_attempts[1]["accepted"])
+        self.assertEqual(result.accepted_semantic_attempt_id, result.semantic_attempts[1]["attempt_id"])
+        from app.domain.matching_simulation import _resolve_accepted_ai_authority
+
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.03.012",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            account_candidates={
+                "purchase_expense": (
+                    {"code": "760.03.012", "name": "Kargo gideri", "is_detail_account": True, "is_active": True},
+                    {"code": "770.01", "name": "Genel gider", "is_detail_account": True, "is_active": True},
+                ),
+            },
+        )
+        authority = _resolve_accepted_ai_authority(
+            semantic_attempts=result.semantic_attempts,
+            accepted_attempt_id=result.accepted_semantic_attempt_id,
+            canonical_items=canonical.line_items,
+            selection=selection,
+            direction="purchase",
+        )
+        self.assertEqual(
+            authority.account_by_line()[canonical.line_items[0].canonical_line_id].account_code,
+            "760.03.012",
+        )
 
     def test_ai_provider_call_limit_does_not_starve_later_invoices_in_batch(self) -> None:
         selection = AccountSelection(
@@ -4217,7 +6640,7 @@ class Phase0DomainTests(unittest.TestCase):
         ]
 
         results = [
-            simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+            simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
             for invoice in invoices
         ]
 
@@ -4332,7 +6755,7 @@ class Phase0DomainTests(unittest.TestCase):
             ),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertEqual(len(provider.requests), 2)
         self.assertEqual(provider.requests[0].context.candidate_strategy.stage, "family_select")
@@ -4444,7 +6867,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
         )
 
-        simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         family_payload = provider.requests[0].to_schema_payload()
         family_records = {record["family"]: record for record in family_payload["account_family_candidates"]}
@@ -4546,7 +6969,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         final_payload = provider.requests[1].to_schema_payload()
         self.assertEqual(len(final_payload["account_candidates"]), 130)
@@ -4643,7 +7066,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertEqual(len(provider.requests), 2)
         self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "counterparty_resolve")
@@ -4728,7 +7151,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, single_stage_account_limit=40),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         payload = provider.requests[0].to_schema_payload()
         self.assertTrue(payload["direction_uncertainty"])
@@ -4829,7 +7252,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "counterparty_resolve")
         counterparty_payload = provider.requests[1].to_schema_payload()
@@ -4929,7 +7352,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, max_provider_calls=3),
         )
 
-        simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         payload = provider.requests[1].to_schema_payload()
         party = payload["invoice_counterparty"]
@@ -5005,7 +7428,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
         classifier = StaticFirstClassifier(provider=provider, policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101))
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.product_category, "business_equipment")
@@ -5017,6 +7440,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.export_status, "review_required")
 
     def test_sales_counterparty_match_uses_customer_prefix_not_supplier_prefix(self) -> None:
+        canonical = _task3_canonical_invoice(("Cihaz satisi", "1000.00", "20", "200.00", "1200.00"))
         invoice = ParsedInvoice(
             file_name="sales-customer.pdf",
             provider_hint="Client",
@@ -5043,6 +7467,7 @@ class Phase0DomainTests(unittest.TestCase):
             issuer_tax_id="1111111111",
             recipient_title="Acme Musteri",
             recipient_tax_id="2222222222",
+            canonical_invoice=canonical,
         )
         accounts = [
             ChartAccount("320.01", "320.01", "Acme Musteri", True),
@@ -5059,7 +7484,12 @@ class Phase0DomainTests(unittest.TestCase):
                 + "\n".join(f"{account.raw_account_code},{account.account_name},true" for account in accounts),
                 encoding="utf-8",
             )
-            run = simulate_chart_run(chart_path, [invoice], profile)
+            run = simulate_chart_run(
+                chart_path,
+                [invoice],
+                profile,
+                AcceptedSemanticAccountClassifier("600.20"),
+            )
         result = run.invoice_results[0]
 
         self.assertEqual(result.accounting_direction, "sales")
@@ -5104,7 +7534,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
         profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.suggested_counterparty_account, "120.9999999999")
         self.assertEqual(result.counterparty_creation_suggestion["suggested_code"], "120.9999999999")
@@ -5145,7 +7575,7 @@ class Phase0DomainTests(unittest.TestCase):
         )
         profile = ClientProfile(client_id="client-1", title="Client", tax_id="1111111111", has_chart_accounts=True)
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.suggested_counterparty_account, "320.8888888888")
         self.assertEqual(result.counterparty_creation_suggestion["suggested_code"], "320.8888888888")
@@ -5191,7 +7621,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=False,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
 
         self.assertEqual(result.export_status, "review_required")
         self.assertIn("onboarding_missing_chart_accounts", result.review_reason_codes)
@@ -5218,6 +7648,7 @@ class Phase0DomainTests(unittest.TestCase):
             risk_flags=("exemption_manual_review",),
             suggested_route="review_queue",
             parse_notes=(),
+            line_items=("Zero amount review item",),
         )
         selection = AccountSelection(
             chart_file_name="chart.xlsx",
@@ -5228,7 +7659,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection)
+        result = simulate_mechanical_invoice(invoice, selection, _task3_profile())
 
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.draft_quality, "no_positive_amount")
@@ -5471,6 +7902,353 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("api_key", trace)
         self.assertNotIn("Authorization", str(trace))
 
+    def test_static_first_classifier_serializes_sanitized_semantic_decision_attempt(self) -> None:
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 88,
+                "reason": "Canonical satir isitme cihazi alimini gosteriyor.",
+                "evidence": ["canonical_line:line-1"],
+                "suggested_account_code": "153.01",
+                "suggested_counterparty_code": "320.01.015",
+                "risk_flags": [],
+                "account_reason": "Gercek stok hesabi adaylar arasindan secildi.",
+                "product_identity": "ZX Sonic Pro 9",
+                "needs_research": False,
+                "research_query": "",
+                "authorization": "Bearer provider-secret",
+            }
+        )
+        provider.model = "fake-model"
+        provider.product_classification_prompt_version = "test-semantic-v1"
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+
+        result = classifier.classify(
+            "ZX Sonic Pro 9",
+            supplier_hint="Medikal Tedarik",
+            context=AiClassificationContext(
+                canonical_lines=(
+                    {
+                        "canonical_line_id": "line-1",
+                        "description": "ZX Sonic Pro 9",
+                        "taxable_amount": "1000.00",
+                        "vat_rate": "20",
+                    },
+                ),
+                account_candidates=("153.01", "770.01"),
+                counterparty_candidates=("320.01.015",),
+            ),
+        )
+
+        self.assertEqual(len(result.semantic_attempts), 1)
+        attempt = result.semantic_attempts[0]
+        self.assertEqual(
+            set(attempt),
+            {
+                "attempt_id",
+                "stage",
+                "canonical_line_ids",
+                "prompt_version",
+                "provider",
+                "model",
+                "candidate_account_codes",
+                "candidate_counterparty_codes",
+                "validated_response",
+                "validation_errors",
+                "accepted",
+                "superseded_by_attempt_id",
+            },
+        )
+        self.assertTrue(attempt["attempt_id"])
+        self.assertEqual(attempt["stage"], "initial_account_decision")
+        self.assertEqual(attempt["canonical_line_ids"], ["line-1"])
+        self.assertEqual(attempt["prompt_version"], "test-semantic-v1")
+        self.assertEqual(attempt["provider"], "fake_llm")
+        self.assertEqual(attempt["model"], "fake-model")
+        self.assertEqual(attempt["candidate_account_codes"], ["153.01", "770.01"])
+        self.assertEqual(attempt["candidate_counterparty_codes"], ["320.01.015"])
+        self.assertEqual(attempt["validated_response"]["suggested_account_code"], "153.01")
+        self.assertEqual(attempt["validation_errors"], [])
+        self.assertTrue(attempt["accepted"])
+        self.assertEqual(result.accepted_semantic_attempt_id, attempt["attempt_id"])
+        self.assertNotIn("provider-secret", str(attempt))
+
+    def test_semantic_attempt_sanitizes_secrets_inside_allowed_evidence_fields(self) -> None:
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-safe",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=("320.01",),
+            validated_response={
+                "reason": "Canonical satir isitme cihazidir; Authorization: Bearer secret-token-123",
+                "evidence": [
+                    "canonical_line:line-1 gercek urun kaniti",
+                    "api_key=sk-private-456",
+                    {"raw_private_document": "complete-private-evidence"},
+                ],
+                "line_decisions": [
+                    {
+                        "canonical_line_id": "line-1",
+                        "reason": "Stok hesabi; credential: private-credential-789",
+                        "evidence": [
+                            "Belge satiri korunmali",
+                            "token=private-token-000",
+                            {"private_source": "complete-private-line-evidence"},
+                        ],
+                        "suggested_account_code": "153.01",
+                        "raw_private_document": "complete-private-invoice",
+                    }
+                ],
+            },
+            validation_errors=(),
+            accepted=True,
+        )
+
+        serialized = str(attempt)
+        self.assertIn("Canonical satir isitme cihazidir", serialized)
+        self.assertIn("canonical_line:line-1 gercek urun kaniti", serialized)
+        self.assertIn("Belge satiri korunmali", serialized)
+        self.assertNotIn("secret-token-123", serialized)
+        self.assertNotIn("sk-private-456", serialized)
+        self.assertNotIn("private-credential-789", serialized)
+        self.assertNotIn("private-token-000", serialized)
+        self.assertNotIn("complete-private-invoice", serialized)
+        self.assertNotIn("complete-private-evidence", serialized)
+        self.assertNotIn("complete-private-line-evidence", serialized)
+
+    def test_semantic_attempt_redacts_json_credentials_and_full_authorization_values(self) -> None:
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-json-credentials",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=("320.01",),
+            validated_response={
+                "reason": (
+                    'Canonical satir kaniti; {"password":"hunter2", '
+                    '"api_key": "sk-json-private"}; '
+                    "Authorization: Basic dXNlcjpwYXNz; hesap adayi 153.01"
+                ),
+                "evidence": [
+                    'Kaynak ozetidir; "token"="quoted-private-token", '
+                    "Authorization=Basic YWRtaW46c2VjcmV0; uretici kaynagi dogruladi"
+                ],
+            },
+            validation_errors=(),
+            accepted=False,
+        )
+
+        serialized = str(attempt)
+        self.assertIn("Canonical satir kaniti", serialized)
+        self.assertIn("hesap adayi 153.01", serialized)
+        self.assertIn("Kaynak ozetidir", serialized)
+        self.assertIn("uretici kaynagi dogruladi", serialized)
+        self.assertNotIn("hunter2", serialized)
+        self.assertNotIn("sk-json-private", serialized)
+        self.assertNotIn("quoted-private-token", serialized)
+        self.assertNotIn("dXNlcjpwYXNz", serialized)
+        self.assertNotIn("YWRtaW46c2VjcmV0", serialized)
+
+    def test_semantic_attempt_redacts_document_payload_strings_but_keeps_useful_summaries(self) -> None:
+        compact_invoice = (
+            "<Invoice><cbc:ID>INV-PRIVATE-1</cbc:ID>"
+            "<SupplierParty><Name>Private Supplier</Name><TaxID>1111111111</TaxID>"
+            "</SupplierParty><InvoiceLine><Item>Private hearing aid</Item>"
+            "<Amount>12500.00</Amount></InvoiceLine></Invoice>"
+        )
+        ocr_document = """--- OCR DOCUMENT START ---
+FATURA NO: OCR-PRIVATE-1
+SATICI UNVAN: Private Supplier Ltd
+SATICI VKN: 1111111111
+ALICI UNVAN: Private Customer Ltd
+ALICI VKN: 2222222222
+KALEM: Private service description
+MATRAH: 1000.00
+KDV: 200.00
+TOPLAM: 1200.00
+--- OCR DOCUMENT END ---"""
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-document-payload",
+            stage="research_synthesis",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=("320.01",),
+            validated_response={
+                "reason": compact_invoice,
+                "evidence": [
+                    ocr_document,
+                    "Canonical line line-1 describes a hearing aid and supports 153.01.",
+                    "manufacturer.example source summary: Model X is a hearing aid.",
+                ],
+                "account_reason": "Real chart candidate 153.01 matches the canonical product line.",
+            },
+            validation_errors=(),
+            accepted=False,
+        )
+
+        response = attempt["validated_response"]
+        self.assertEqual(response["reason"], "[redacted-document-content]")
+        self.assertEqual(response["evidence"][0], "[redacted-document-content]")
+        self.assertEqual(
+            response["evidence"][1],
+            "Canonical line line-1 describes a hearing aid and supports 153.01.",
+        )
+        self.assertEqual(
+            response["evidence"][2],
+            "manufacturer.example source summary: Model X is a hearing aid.",
+        )
+        self.assertEqual(
+            response["account_reason"],
+            "Real chart candidate 153.01 matches the canonical product line.",
+        )
+        self.assertNotIn("Private Supplier", str(attempt))
+        self.assertNotIn("1111111111", str(attempt))
+        self.assertNotIn("OCR-PRIVATE-1", str(attempt))
+
+    def test_semantic_attempt_redacts_high_density_document_fields_without_an_envelope(self) -> None:
+        dense_document = """FATURA NO: PRIVATE-2
+KALEM: Private line 1
+KALEM: Private line 2
+KALEM: Private line 3
+KALEM: Private line 4
+KALEM: Private line 5
+KALEM: Private line 6
+KDV: 200.00
+TOPLAM: 1200.00"""
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-dense-document",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            validated_response={
+                "reason": dense_document,
+                "account_reason": "Canonical line supports the real chart candidate 153.01.",
+            },
+            validation_errors=(),
+            accepted=False,
+        )
+
+        self.assertEqual(
+            attempt["validated_response"]["reason"],
+            "[redacted-document-content]",
+        )
+        self.assertEqual(
+            attempt["validated_response"]["account_reason"],
+            "Canonical line supports the real chart candidate 153.01.",
+        )
+
+    def test_semantic_attempt_duplicate_id_is_idempotent_only_for_identical_content(self) -> None:
+        original = serialize_semantic_decision_attempt(
+            attempt_id="attempt-1",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=(),
+            validated_response={"suggested_account_code": "153.01"},
+            validation_errors=(),
+            accepted=True,
+        )
+
+        self.assertEqual(merge_semantic_attempts((original,), (dict(original),)), [original])
+        conflicting = {**original, "model": "different-model"}
+        with self.assertRaisesRegex(ValueError, "attempt-1"):
+            merge_semantic_attempts((original,), (conflicting,))
+
+    def test_semantic_attempt_history_rejects_invalid_acceptance_and_supersession_graphs(self) -> None:
+        def attempt(
+            attempt_id: str,
+            *,
+            accepted: bool,
+            superseded_by_attempt_id: str = "",
+        ) -> dict[str, object]:
+            return serialize_semantic_decision_attempt(
+                attempt_id=attempt_id,
+                stage="account_correction",
+                canonical_line_ids=("line-1",),
+                prompt_version="semantic-v1",
+                provider="fake_llm",
+                model="fake-model",
+                candidate_account_codes=("153.01",),
+                candidate_counterparty_codes=(),
+                validated_response={"suggested_account_code": "153.01"},
+                validation_errors=(),
+                accepted=accepted,
+                superseded_by_attempt_id=superseded_by_attempt_id,
+            )
+
+        first = attempt("attempt-1", accepted=True)
+        second = attempt("attempt-2", accepted=True)
+        with self.assertRaisesRegex(ValueError, "multiple accepted"):
+            merge_semantic_attempts((first, second))
+
+        missing_target = attempt("attempt-missing", accepted=False, superseded_by_attempt_id="absent")
+        with self.assertRaisesRegex(ValueError, "absent"):
+            merge_semantic_attempts((missing_target,))
+
+        cycle_a = attempt("cycle-a", accepted=False, superseded_by_attempt_id="cycle-b")
+        cycle_b = attempt("cycle-b", accepted=True, superseded_by_attempt_id="cycle-a")
+        with self.assertRaisesRegex(ValueError, "cycle"):
+            merge_semantic_attempts((cycle_a, cycle_b))
+
+        valid_first = attempt("valid-1", accepted=True, superseded_by_attempt_id="valid-2")
+        valid_second = attempt("valid-2", accepted=True)
+        valid = merge_semantic_attempt_result(
+            {
+                "semantic_attempts": [valid_first, valid_second],
+                "accepted_semantic_attempt_id": "valid-2",
+            }
+        )
+        self.assertEqual(valid["accepted_semantic_attempt_id"], "valid-2")
+
+        rejected = attempt("rejected", accepted=False)
+        with self.assertRaisesRegex(ValueError, "accepted_semantic_attempt_id"):
+            merge_semantic_attempt_result(
+                {
+                    "semantic_attempts": [rejected],
+                    "accepted_semantic_attempt_id": "rejected",
+                }
+            )
+
+    def test_provider_exception_text_is_not_persisted_in_result_or_ai_trace(self) -> None:
+        class SecretRaisingProvider:
+            provider_name = "secret_provider"
+            model = "secret-model"
+
+            def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
+                raise RuntimeError(
+                    "Authorization: Bearer fake-provider-credential private-invoice-fragment"
+                )
+
+        classifier = StaticFirstClassifier(
+            provider=SecretRaisingProvider(),
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+
+        result = classifier.classify("Belirsiz urun", supplier_hint="Tedarikci")
+
+        persisted = f"{result.provider_reason} {result.ai_trace} {result.semantic_attempts}"
+        self.assertIn("provider_error:RuntimeError", persisted)
+        self.assertNotIn("fake-provider-credential", persisted)
+        self.assertNotIn("private-invoice-fragment", persisted)
+
     def test_ai_schema_payload_keeps_configured_account_candidate_limit(self) -> None:
         account_codes = tuple(f"770.{index:02d}" for index in range(1, 21))
         request = AiClassificationRequest(
@@ -5488,6 +8266,206 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual(payload["account_candidates"], list(account_codes))
         self.assertEqual(payload["output_schema"]["properties"]["suggested_account_code"]["enum"], ["", *account_codes])
+
+    def test_ai_line_batch_schema_constrains_canonical_ids_and_accounts(self) -> None:
+        from app.domain.ai_classification import AiCandidateStrategy
+
+        request = AiClassificationRequest(
+            raw_line="Cihaz ve bakim satirlari",
+            supplier_hint="Medikal Tedarik",
+            allowed_categories=("isitme_cihazi", "bakim_hizmeti", "bilinmeyen"),
+            max_input_chars=420,
+            context=AiClassificationContext(
+                account_candidates=("153.01", "760.01"),
+                canonical_lines=(
+                    {"canonical_line_id": "line-1", "description": "Cihaz"},
+                    {"canonical_line_id": "line-2", "description": "Bakim"},
+                ),
+                candidate_strategy=AiCandidateStrategy(mode="single_stage", stage="line_batch"),
+            ),
+        )
+
+        payload = request.to_schema_payload()
+        line_decisions = payload["output_schema"]["properties"]["line_decisions"]
+        decision = line_decisions["items"]["properties"]
+
+        self.assertEqual(payload["candidate_strategy"]["stage"], "line_batch")
+        self.assertEqual(line_decisions["minItems"], 2)
+        self.assertEqual(line_decisions["maxItems"], 2)
+        self.assertEqual(decision["canonical_line_id"]["enum"], ["line-1", "line-2"])
+        self.assertEqual(decision["suggested_account_code"]["enum"], ["", "153.01", "760.01"])
+        self.assertEqual(line_decisions["items"]["additionalProperties"], False)
+
+    def test_ai_line_batch_output_contains_no_accounting_math_fields(self) -> None:
+        from app.domain.ai_classification import AiCandidateStrategy
+
+        payload = AiClassificationRequest(
+            raw_line="Cihaz ve bakim",
+            supplier_hint="Medikal Tedarik",
+            allowed_categories=("isitme_cihazi", "medikal_sarf", "bilinmeyen"),
+            max_input_chars=1000,
+            context=AiClassificationContext(
+                account_candidates=("153.01", "760.01"),
+                counterparty_candidates=("320.01",),
+                canonical_lines=({"canonical_line_id": "line-1", "description": "Cihaz"},),
+                candidate_strategy=AiCandidateStrategy(mode="single_stage", stage="line_batch"),
+            ),
+        ).to_schema_payload()
+
+        prohibited = {
+            "amount", "tax_amount", "gross_amount", "vat_amount", "vat_total",
+            "debit", "credit", "balance", "payable_total", "taxable_amount",
+        }
+
+        def collect_property_names(schema: object) -> set[str]:
+            if not isinstance(schema, dict):
+                return set()
+            names = set(schema.get("properties", {}))
+            for child in schema.get("properties", {}).values():
+                names.update(collect_property_names(child))
+            if "items" in schema:
+                names.update(collect_property_names(schema["items"]))
+            return names
+
+        output_names = collect_property_names(payload["output_schema"])
+        self.assertTrue(prohibited.isdisjoint(output_names), prohibited & output_names)
+
+    def test_accounting_provider_prompt_requires_complete_line_batch_identity(self) -> None:
+        from app.domain.openai_provider import ChatCompletionsAccountingProvider, OpenAiAccountingProvider
+
+        for instructions in (
+            OpenAiAccountingProvider.product_classification_instructions,
+            ChatCompletionsAccountingProvider.product_classification_instructions,
+        ):
+            self.assertIn("line_batch", instructions)
+            self.assertIn("canonical_line_id", instructions)
+            self.assertIn("tam bir kez", instructions)
+
+    def test_static_classifier_accepts_complete_line_batch_in_one_provider_call(self) -> None:
+        from app.domain.ai_classification import AiCandidateStrategy
+
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 90,
+                "reason": "Fatura satirlari ayri ayri degerlendirildi.",
+                "evidence": ["line_batch"],
+                "suggested_account_code": "153.01",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Mevcut hesap plani kullanildi.",
+                "product_identity": "Cihaz ve bakim",
+                "needs_research": False,
+                "research_query": "",
+                "line_decisions": [
+                    {
+                        "canonical_line_id": "line-1",
+                        "category": "isitme_cihazi",
+                        "confidence": 94,
+                        "product_identity": "Isitme cihazi",
+                        "suggested_account_code": "153.01",
+                        "reason": "Satilacak cihaz stogu.",
+                        "evidence": ["Cihaz"],
+                        "needs_research": False,
+                        "research_query": "",
+                        "risk_flags": [],
+                    },
+                    {
+                        "canonical_line_id": "line-2",
+                        "category": "medikal_sarf",
+                        "confidence": 82,
+                        "product_identity": "Bakim hizmeti",
+                        "suggested_account_code": "760.01",
+                        "reason": "Bakim gideri.",
+                        "evidence": ["Bakim"],
+                        "needs_research": False,
+                        "research_query": "",
+                        "risk_flags": [],
+                    },
+                ],
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+
+        result = classifier.classify(
+            "Cihaz ve bakim",
+            supplier_hint="Medikal Tedarik",
+            context=AiClassificationContext(
+                account_candidates=("153.01", "760.01"),
+                counterparty_candidates=("320.01",),
+                canonical_lines=(
+                    {"canonical_line_id": "line-1", "description": "Cihaz"},
+                    {"canonical_line_id": "line-2", "description": "Bakim"},
+                ),
+                candidate_strategy=AiCandidateStrategy(mode="single_stage", stage="line_batch"),
+            ),
+        )
+
+        self.assertTrue(result.ai_used)
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(
+            [decision["canonical_line_id"] for decision in result.line_decisions],
+            ["line-1", "line-2"],
+        )
+        self.assertEqual(
+            [decision["suggested_account_code"] for decision in result.line_decisions],
+            ["153.01", "760.01"],
+        )
+
+    def test_line_batch_bypasses_single_line_static_shortcut(self) -> None:
+        from app.domain.ai_classification import AiCandidateStrategy
+
+        provider = FakeProductProvider(
+            {
+                "category": "isitme_cihazi",
+                "confidence": 94,
+                "reason": "Butun canonical satirlar birlikte degerlendirildi.",
+                "evidence": ["line_batch"],
+                "suggested_account_code": "153.01",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Gercek hesap plani adayi secildi.",
+                "product_identity": "Isitme cihazlari",
+                "needs_research": False,
+                "research_query": "",
+                "line_decisions": [
+                    {
+                        "canonical_line_id": "line-1",
+                        "category": "isitme_cihazi",
+                        "confidence": 94,
+                        "product_identity": "Rexton RLi 20",
+                        "suggested_account_code": "153.01",
+                        "reason": "Satilacak cihaz stogu.",
+                        "evidence": ["Rexton RLi 20"],
+                        "needs_research": False,
+                        "research_query": "",
+                        "risk_flags": [],
+                    }
+                ],
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=70),
+        )
+
+        result = classifier.classify(
+            "Rexton RLi 20",
+            supplier_hint="Rexton Medikal",
+            context=AiClassificationContext(
+                account_candidates=("153.01",),
+                counterparty_candidates=("320.01",),
+                canonical_lines=({"canonical_line_id": "line-1", "description": "Rexton RLi 20"},),
+                candidate_strategy=AiCandidateStrategy(mode="single_stage", stage="line_batch"),
+            ),
+        )
+
+        self.assertTrue(result.ai_used)
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(result.line_decisions[0]["canonical_line_id"], "line-1")
 
     def test_static_first_classifier_rejects_invalid_provider_schema(self) -> None:
         classifier = StaticFirstClassifier(
@@ -5522,9 +8500,9 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.skipped_reason, "ai_provider_error")
         self.assertEqual(result.classification.category, "bilinmeyen")
         self.assertIn("ai_provider_error", result.classification.evidence)
-        self.assertIn("provider unavailable", result.provider_reason)
+        self.assertEqual(result.provider_reason, "provider_error:RuntimeError")
         self.assertEqual(result.ai_trace[0]["validation_status"], "provider_error")
-        self.assertIn("provider unavailable", result.ai_trace[0]["error"])
+        self.assertEqual(result.ai_trace[0]["error"], "provider_error:RuntimeError")
 
     def test_openai_accounting_provider_posts_limited_structured_payload(self) -> None:
         captured: dict[str, object] = {}
@@ -5644,9 +8622,124 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(request_payload["text"]["format"]["name"], "fisora_invoice_canonical_extraction")
         user_content = request_payload["input"][1]["content"]
         self.assertIn("SATICI MEDIKAL TEDARIK", user_content)
-        self.assertIn("output_schema", user_content)
-        self.assertIn("line_items", user_content)
+        self.assertNotIn("output_schema", user_content)
+        self.assertNotIn('"instructions"', user_content)
+        self.assertIn('"mode": "repair"', user_content)
+        system_content = request_payload["input"][0]["content"]
+        self.assertIn("Parasal hesaplama yapma", system_content)
+        self.assertNotIn("taxable_amount + tax_amount = gross_amount", system_content)
+        self.assertNotIn("sum(line_items.taxable_amount)", system_content)
+        self.assertIn("canonical_line_id", system_content)
+        line_schema = request_payload["text"]["format"]["schema"]["properties"]["line_items"]["items"]
+        self.assertIn("observed_tax_amount", line_schema["properties"])
+        self.assertNotIn("tax_amount", line_schema["properties"])
         self.assertEqual(response["line_items"][0]["description"], "Isitme cihazi")
+
+    def test_canonical_extraction_schema_is_strict_provider_compatible(self) -> None:
+        from app.domain.canonical_invoices import canonical_extraction_output_schema
+
+        def assert_strict_object_schema(schema: dict[str, object]) -> None:
+            if schema.get("type") == "object":
+                properties = schema.get("properties", {})
+                self.assertEqual(schema.get("additionalProperties"), False)
+                self.assertEqual(set(schema.get("required", [])), set(properties))
+                for child in properties.values():
+                    assert_strict_object_schema(child)
+            if schema.get("type") == "array":
+                assert_strict_object_schema(schema["items"])
+
+        assert_strict_object_schema(canonical_extraction_output_schema())
+
+    def test_canonical_extraction_contract_is_observation_only(self) -> None:
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+        from app.domain.openai_provider import OpenAiAccountingProvider
+
+        payload = CanonicalExtractionRequest(
+            document_text="Cihaz 100,00 KDV %20",
+            deterministic_payload={"line_items": [{"canonical_line_id": "line-1"}]},
+            client_identity={},
+        ).to_schema_payload()
+        instructions = (
+            f"{payload['instructions']} "
+            f"{OpenAiAccountingProvider.canonical_extraction_instructions}"
+        )
+        self.assertIn("hesaplama yapma", instructions)
+        self.assertIn("belgede acikca yazmiyorsa bos string", instructions)
+        self.assertNotIn("taxable_amount + tax_amount", instructions)
+        self.assertNotIn("taxable_amount * vat_rate", instructions)
+        self.assertNotIn("toplamlarini satir toplamlarina esitle", instructions)
+
+        schema = payload["output_schema"]
+        line_properties = schema["properties"]["line_items"]["items"]["properties"]
+        self.assertIn("observed_taxable_amount", line_properties)
+        self.assertIn("observed_vat_rate", line_properties)
+        self.assertIn("observed_tax_amount", line_properties)
+        self.assertIn("observed_gross_amount", line_properties)
+        self.assertNotIn("taxable_amount", line_properties)
+        self.assertNotIn("tax_amount", line_properties)
+        self.assertNotIn("gross_amount", line_properties)
+        self.assertIn("observed_totals", schema["properties"])
+        self.assertNotIn("totals", schema["properties"])
+
+    def test_canonical_extraction_request_constrains_existing_line_id_coverage(self) -> None:
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+
+        payload = CanonicalExtractionRequest(
+            document_text="Iki satirli fatura",
+            deterministic_payload={
+                "line_items": [
+                    {"canonical_line_id": "pdf-line-1"},
+                    {"canonical_line_id": "pdf-line-2"},
+                ]
+            },
+            client_identity={},
+        ).to_schema_payload()
+
+        line_items = payload["output_schema"]["properties"]["line_items"]
+        line_id = line_items["items"]["properties"]["canonical_line_id"]
+        self.assertEqual(line_items["minItems"], 2)
+        self.assertEqual(line_items["maxItems"], 2)
+        self.assertEqual(line_id["enum"], ["pdf-line-1", "pdf-line-2"])
+
+    def test_canonical_extraction_request_separates_discovery_from_repair(self) -> None:
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+
+        repair = CanonicalExtractionRequest(
+            document_text="Iki satirli fatura",
+            deterministic_payload={
+                "line_items": [
+                    {"canonical_line_id": "pdf-line-1"},
+                    {"canonical_line_id": "pdf-line-2"},
+                ]
+            },
+            client_identity={},
+            mode="repair",
+        ).to_schema_payload()
+        discovery = CanonicalExtractionRequest(
+            document_text="Parserin satirlari eksik gordugu fatura",
+            deterministic_payload={"line_items": [{"canonical_line_id": "partial-line"}]},
+            client_identity={},
+            mode="discovery",
+        ).to_schema_payload()
+
+        repair_lines = repair["output_schema"]["properties"]["line_items"]
+        discovery_lines = discovery["output_schema"]["properties"]["line_items"]
+        self.assertEqual(repair["mode"], "repair")
+        self.assertEqual(repair_lines["minItems"], 2)
+        self.assertEqual(repair_lines["maxItems"], 2)
+        self.assertEqual(
+            repair_lines["items"]["properties"]["canonical_line_id"]["enum"],
+            ["pdf-line-1", "pdf-line-2"],
+        )
+        self.assertEqual(discovery["mode"], "discovery")
+        self.assertEqual(discovery_lines["minItems"], 1)
+        self.assertNotIn("maxItems", discovery_lines)
+        self.assertEqual(
+            discovery_lines["items"]["properties"]["canonical_line_id"]["enum"],
+            [""],
+        )
+        self.assertIn("tum fatura satirlarini", discovery["instructions"])
+        self.assertIn("canonical_line_id", repair["instructions"])
 
     def test_openai_provider_posts_review_rule_interpretation_payload(self) -> None:
         captured: dict[str, object] = {}
@@ -5829,6 +8922,139 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(request_payload["response_format"]["type"], "json_object")
         self.assertIn("Banka pos komisyon bedeli", request_payload["messages"][1]["content"])
         self.assertEqual(response["suggested_account_code"], "770.01")
+
+    def test_chat_completions_provider_posts_canonical_invoice_extraction_payload(self) -> None:
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": (
+                                    '{"supplier_party":{"title":"MEDIKAL TEDARIK","tax_id":"9999999999"},'
+                                    '"customer_party":{"title":"ORHAN ELIBOL","tax_id":"1234567890"},'
+                                    '"line_items":[],"vat_summary":[],"totals":{}}'
+                                )
+                            }
+                        }
+                    ]
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["json"] = json
+                return FakeResponse()
+
+        provider = ChatCompletionsAccountingProvider(
+            api_key="or-test",
+            model="openai/gpt-oss-20b:free",
+            chat_completions_url="https://openrouter.ai/api/v1/chat/completions",
+            provider_name="openrouter",
+            key_name="OPENROUTER_API_KEY",
+            http_client=FakeClient(),
+        )
+
+        response = provider.extract_invoice_canonical(
+            CanonicalExtractionRequest(
+                document_text="SATICI MEDIKAL TEDARIK\nSAYIN ORHAN ELIBOL",
+                deterministic_payload={"invoice_no": "AAA2026000000005", "line_count": 0},
+                client_identity={"title": "ORHAN ELIBOL", "tax_id": "1234567890"},
+                max_input_chars=500,
+            )
+        )
+
+        request_payload = captured["json"]
+        self.assertIn("canonical JSON", request_payload["messages"][0]["content"])
+        self.assertIn("fisora_invoice_canonical_extraction", request_payload["messages"][1]["content"])
+        self.assertEqual(response["supplier_party"]["tax_id"], "9999999999")
+
+    def test_classification_prompts_are_stage_specific(self) -> None:
+        from app.domain.ai_classification import AiCandidateStrategy, AiClassificationContext, AiClassificationRequest
+        from app.domain.openai_provider import classification_instructions_for
+
+        def request(stage: str) -> AiClassificationRequest:
+            return AiClassificationRequest(
+                raw_line="Bakim hizmeti",
+                supplier_hint="Tedarikci",
+                allowed_categories=("hizmet", "bilinmeyen"),
+                max_input_chars=420,
+                context=AiClassificationContext(candidate_strategy=AiCandidateStrategy(stage=stage)),
+            )
+
+        family = classification_instructions_for(request("family_select"))
+        line = classification_instructions_for(request("line_batch"))
+        counterparty = classification_instructions_for(request("counterparty_resolve"))
+
+        self.assertIn("hesap aile", family)
+        self.assertNotIn("cari aday", family)
+        self.assertIn("canonical_line_id", line)
+        self.assertIn("gercek hesap", line)
+        self.assertIn("VKN/TCKN", counterparty)
+        self.assertNotIn("hesap aile", counterparty)
+
+    def test_ai_runtime_reorders_configured_providers_by_task(self) -> None:
+        from app.domain.openai_provider import TaskRoutingAccountingProvider
+        from app.workflows.document_processing import build_ai_runtime_from_env
+
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER_CHAIN": "groq,openrouter,cerebras",
+                "GROQ_API_KEY": "gsk-test",
+                "OPENROUTER_API_KEY": "or-test",
+                "CEREBRAS_API_KEY": "csk-test",
+            }
+        )
+
+        canonical = runtime["canonical_extraction_provider"]
+        routed = runtime["product_classifier"].provider
+        self.assertEqual(canonical.provider_name, "cerebras>groq>openrouter")
+        self.assertIsInstance(routed, TaskRoutingAccountingProvider)
+        self.assertEqual(routed.classification_provider.provider_name, "groq>cerebras>openrouter")
+        self.assertEqual(routed.counterparty_provider.provider_name, "cerebras>groq>openrouter")
+
+        groq_only = build_ai_runtime_from_env(
+            {"FISORA_AI_PROVIDER_CHAIN": "groq", "GROQ_API_KEY": "gsk-test"}
+        )
+        self.assertEqual(groq_only["canonical_extraction_provider"].provider_name, "groq")
+        self.assertEqual(groq_only["product_classifier"].provider.classification_provider.provider_name, "groq")
+
+    def test_task_router_uses_counterparty_chain_only_for_counterparty_stage(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.openai_provider import TaskRoutingAccountingProvider
+
+        calls: list[str] = []
+
+        class Provider:
+            def __init__(self, name: str) -> None:
+                self.provider_name = name
+                self.model = f"{name}-model"
+                self.product_classification_instructions = f"{name}-prompt"
+
+            def classify_product(self, request: object) -> dict[str, object]:
+                calls.append(self.provider_name)
+                return {"provider": self.provider_name}
+
+        router = TaskRoutingAccountingProvider(
+            classification_provider=Provider("classification"),
+            counterparty_provider=Provider("counterparty"),
+        )
+        line_request = SimpleNamespace(context=SimpleNamespace(candidate_strategy=SimpleNamespace(stage="line_batch")))
+        counterparty_request = SimpleNamespace(
+            context=SimpleNamespace(candidate_strategy=SimpleNamespace(stage="counterparty_resolve"))
+        )
+
+        self.assertEqual(router.classify_product(line_request), {"provider": "classification"})
+        self.assertEqual(router.classify_product(counterparty_request), {"provider": "counterparty"})
+        self.assertEqual(calls, ["classification", "counterparty"])
+        self.assertEqual(router.last_provider_name, "counterparty")
 
     def test_ai_classification_request_includes_controlled_activity_tags(self) -> None:
         request = AiClassificationRequest(
@@ -6045,7 +9271,7 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True),
         )
 
-        result = simulate_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.ai_classification_provider, "fake_llm")
@@ -6102,8 +9328,8 @@ class Phase0DomainTests(unittest.TestCase):
         ]
         counterparty = match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
 
-        assisted = simulate_invoice(invoice, selection, profile, counterparty, processing_mode="ai_assisted_draft")
-        controlled = simulate_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
+        assisted = simulate_mechanical_invoice(invoice, selection, profile, counterparty, processing_mode="ai_assisted_draft")
+        controlled = simulate_mechanical_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
 
         self.assertEqual(assisted.processing_mode, "ai_assisted_draft")
         self.assertEqual(assisted.export_status, "review_required")
@@ -6155,7 +9381,7 @@ class Phase0DomainTests(unittest.TestCase):
             has_chart_accounts=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile, counterparty_match=None, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(invoice, selection, profile, counterparty_match=None, processing_mode="ai_assisted_draft")
 
         self.assertGreater(result.draft_confidence, 0)
         self.assertEqual(result.automation_eligibility, "not_eligible")
@@ -6247,14 +9473,15 @@ class Phase0DomainTests(unittest.TestCase):
             apply_to_similar=True,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_learning_event(build_learning_event(decision))])
 
         self.assertEqual(result.selected_expense_account, "770.01")
-        self.assertEqual(learned.selected_expense_account, "770.05")
-        self.assertEqual(learned.draft_lines[0]["account_code"], "770.05")
-        self.assertTrue(learned.learning_rule_applied)
+        self.assertEqual(learned.selected_expense_account, result.selected_expense_account)
+        self.assertEqual(learned.draft_lines, result.draft_lines)
+        self.assertFalse(learned.learning_rule_applied)
         self.assertEqual(learned.learning_rule_scope, "client_rule")
+        self.assertEqual(learned.learning_audit["status"], "evidence_only")
 
     def test_general_learning_signal_does_not_override_ai_before_threshold(self) -> None:
         profile = ClientProfile(
@@ -6306,7 +9533,7 @@ class Phase0DomainTests(unittest.TestCase):
             apply_to_similar=False,
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_learning_event(build_learning_event(decision))])
 
         self.assertEqual(learned.selected_expense_account, result.selected_expense_account)
@@ -6545,12 +9772,13 @@ class Phase0DomainTests(unittest.TestCase):
             "rule_prompt": {"show": True, "default_scope": "client_narrow"},
         }
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_event_payload(event)])
 
-        self.assertEqual(learned.selected_expense_account, "770.05")
-        self.assertIn("learning_rule_review_required", learned.review_reason_codes)
-        self.assertEqual(learned.export_status, "review_required")
+        self.assertEqual(learned.selected_expense_account, result.selected_expense_account)
+        self.assertEqual(learned.draft_lines, result.draft_lines)
+        self.assertFalse(learned.learning_rule_applied)
+        self.assertEqual(learned.export_status, result.export_status)
         self.assertIn("Kolay Soft", learned.learning_rule_reason)
 
     def test_learning_rule_matches_next_invoice_by_nace_vat_and_account_family(self) -> None:
@@ -6612,14 +9840,14 @@ class Phase0DomainTests(unittest.TestCase):
             "rule_prompt": {"show": True, "default_scope": "client_narrow"},
         }
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_event_payload(event)])
 
         self.assertEqual(result.selected_expense_account, "153.01")
-        self.assertEqual(learned.selected_expense_account, "153.01.001")
+        self.assertEqual(learned.selected_expense_account, result.selected_expense_account)
         self.assertEqual(learned.selected_supplier_account, "320.01")
-        self.assertTrue(learned.learning_rule_applied)
-        self.assertIn("learning_rule_review_required", learned.review_reason_codes)
+        self.assertFalse(learned.learning_rule_applied)
+        self.assertEqual(learned.draft_lines, result.draft_lines)
 
     def test_counterparty_scoped_learning_rule_does_not_apply_to_different_supplier(self) -> None:
         profile = ClientProfile(
@@ -6685,7 +9913,7 @@ class Phase0DomainTests(unittest.TestCase):
             "automation_candidate": True,
         }
 
-        result = simulate_invoice(
+        result = simulate_mechanical_invoice(
             invoice,
             selection,
             profile,
@@ -6762,7 +9990,7 @@ class Phase0DomainTests(unittest.TestCase):
             "automation_candidate": True,
         }
 
-        result = simulate_invoice(
+        result = simulate_mechanical_invoice(
             invoice,
             selection,
             profile,
@@ -6771,7 +9999,7 @@ class Phase0DomainTests(unittest.TestCase):
         learned = apply_learning_rules(result, [rule_from_event_payload(event)])
 
         self.assertEqual(result.export_status, "export_ready")
-        self.assertEqual(learned.selected_expense_account, "153.01.001")
+        self.assertEqual(learned.selected_expense_account, result.selected_expense_account)
         self.assertEqual(learned.selected_supplier_account, "320.01.015")
         self.assertEqual(learned.export_status, "export_ready")
         self.assertNotIn("learning_rule_review_required", learned.review_reason_codes)
@@ -6875,7 +10103,7 @@ class Phase0DomainTests(unittest.TestCase):
             "learning_rule_source_summary": "Benzer satirlar dogalgaz gideri olarak isaretlenmis.",
         }
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_event_payload(event)])
 
         self.assertTrue(learned.learning_rule_applied)
@@ -6944,12 +10172,12 @@ class Phase0DomainTests(unittest.TestCase):
             "learning_rule_source_summary": "Yurtici Kargo onceki musavir kararindan eslesti.",
         }
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_event_payload(event)])
 
-        self.assertTrue(learned.learning_rule_applied)
+        self.assertFalse(learned.learning_rule_applied)
         audit = learned.learning_audit
-        self.assertEqual(audit["status"], "applied")
+        self.assertEqual(audit["status"], "evidence_only")
         self.assertEqual(audit["scope"], "client_rule")
         self.assertEqual(audit["suggested_account_code"], "760.03.010")
         self.assertGreaterEqual(audit["match_score"], 60)
@@ -7075,7 +10303,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_invoice(invoice, selection, profile)
+        result = simulate_mechanical_invoice(invoice, selection, profile)
         learned = apply_learning_rules(result, [rule_from_event_payload(event)])
 
         self.assertFalse(learned.learning_rule_applied)

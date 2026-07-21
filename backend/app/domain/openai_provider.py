@@ -22,29 +22,82 @@ DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_GROQ_COMPARISON_MODEL = "openai/gpt-oss-120b"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
+PRODUCT_CLASSIFICATION_PROMPT_VERSION = "invoice-semantic-decision-v1"
+
+
+def _provider_user_payload(
+    payload: Mapping[str, Any],
+    *,
+    exclude_instructions: bool = False,
+) -> dict[str, Any]:
+    """Keep provider-channel metadata out of the document payload."""
+    excluded = {"output_schema"}
+    if exclude_instructions:
+        excluded.add("instructions")
+    return {key: value for key, value in payload.items() if key not in excluded}
+
+
+def classification_instructions_for(request: AiClassificationRequest) -> str:
+    semantic_stage = str(request.context.semantic_stage or "initial_account_decision").strip().lower()
+    if semantic_stage == "research_synthesis":
+        return (
+            "Canonical satir ve mevcut mukellef baglamini esas al. Arastirma sonuclarini yalniz kaynakli ek kanit "
+            "olarak degerlendir. Sayfa teslimat, menu veya reklam ifadelerini urun/hizmet kimligi sanma. Her "
+            "canonical_line_id icin yalniz verilen gercek hesap adaylarindan en uygun hesabi sec ve celisen kaniti acikla."
+        )
+    if semantic_stage == "account_correction":
+        return (
+            "Onceki semantik karar korunmustur ancak secilen hesap mekanik olarak kullanilamiyor. Verilen dogrulama "
+            "hatasini ve guncel gercek hesap adaylarini kullanarak ayni canonical_line_id icin yeni hesap sec. Genel "
+            "hesaba sirf kullanilabilir oldugu icin gecme; ekonomik anlami koru."
+        )
+    stage = str(request.context.candidate_strategy.stage or "").strip().lower()
+    if stage == "family_select":
+        return (
+            "Fatura satirinin ekonomik anlamini, belge yonunu ve mukellef faaliyetini degerlendir. "
+            "Yalniz verilen gercek hesap ailelerinden uygun olanlari sec. "
+            "Kaniti yetersiz ve hesap secimini degistirecek belirsizlikte research iste."
+        )
+    if stage == "counterparty_resolve":
+        return (
+            "Faturadaki karsi tarafi yalniz verilen gercek cari adaylariyla eslestir. "
+            "VKN/TCKN, unvan ve dogrulanmis baglari birlikte kullan. "
+            "Uygun cari yoksa yeni cari ihtiyacini belirt; cari kodu uydurma."
+        )
+    return (
+        "Her canonical fatura satiri icin mukellefin gercek hesap planindaki en uygun gercek hesabi sec. "
+        "Satir kaniti, belge yonu, faaliyet/NACE, dogrulanmis kurallar ve verilen adaylari birlikte degerlendir. "
+        "Verilmeyen hesap kodu uretme; her canonical_line_id icin tam karar ve kisa gerekce don. "
+        "Canonical tutar veya KDV degerlerini degistirme; gerekirse research iste."
+    )
+
+
+def canonical_extraction_instructions_for(request: CanonicalExtractionRequest) -> str:
+    if str(request.mode or "repair").strip().lower() == "discovery":
+        return (
+            "Yalniz verilen PDF belge iceriginde acikca gorulen fatura alanlarini ve tum fatura satirlarini gozlemle. "
+            "Belgede yazmayan degeri bos birak; parasal hesaplama veya muhasebe karari yapma. "
+            "Her satirin kesin source_position degerini ver; canonical_line_id ve external_line_id alanlarini bos birak. "
+            "Urun veya hizmet anlamini satici unvanindan turetme."
+        )
+    return (
+        "PDF belge kanitindan canonical JSON line_items alanlarini tamamla. "
+        "Her canonical_line_id icin tam bir sonuc don; satir ekleme, silme, birlestirme veya kimlik degistirme. "
+        "Bir deger belgede acikca yazmiyorsa bos string don. Parasal hesaplama yapma veya muhasebe karari verme. "
+        "Canonical tutar veya KDV degerlerini birbirine uydurma."
+    )
 
 
 class OpenAiAccountingProvider:
     """OpenAI Responses API adapter for schema-validated accounting suggestions."""
 
     provider_name = "openai"
+    product_classification_prompt_version = PRODUCT_CLASSIFICATION_PROMPT_VERSION
     product_classification_instructions = (
-        "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
-        "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
-        "Internet aramasi yapma veya kaynak biliyormus gibi davranma. "
-        "Egitiminden biliyorsan marka/modelin urun kategorisini soyle. "
-        "Emin degilsen needs_research=true ve kisa research_query don. "
-        "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
-        "Kanuni KDV ve hesap ailesi kurallarini ezme. "
-        "Export izni verme; bu cikti sadece mustavir review taslagidir."
+        "Gercek hesap plani adaylarindan kanitli bir muhasebe taslagi hazirla. "
+        "candidate_strategy.stage=line_batch ise her canonical_line_id icin tam bir kez line_decision don."
     )
-    canonical_extraction_instructions = (
-        "Fatura PDF metni veya tablo ciktisini UBL benzeri canonical JSON'a ceviren parser yardimcisisin. "
-        "Satici ve alici taraflari, fatura satirlarini, KDV ozetini ve toplam alanlarini yalniz verilen metinden cikar. "
-        "Urun/hizmet anlamini sirket adindan tahmin etme; line_items sadece fatura satirlarindan gelsin. "
-        "Hesap kodu, muhasebe onayi, export karari veya yeni cari kodu uretme. "
-        "Emin olmadigin alanlari bos string veya bos liste birak ve evidence alaninda metin/bolge ipucu ver."
-    )
+    canonical_extraction_instructions = "PDF belge alanlarini yalniz kaynak kanitindan gozlemle; hesaplama yapma."
     statement_suggestion_instructions = (
         "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
         "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
@@ -81,19 +134,22 @@ class OpenAiAccountingProvider:
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
+        instructions = classification_instructions_for(request)
+        self.last_product_classification_instructions = instructions
         return self._post_structured_json(
             schema_name="fisora_invoice_ai_draft",
-            instructions=self.product_classification_instructions,
-            user_payload=payload,
+            instructions=instructions,
+            user_payload=_provider_user_payload(payload),
             schema=payload["output_schema"],
         )
 
     def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
+        instructions = canonical_extraction_instructions_for(request)
         return self._post_structured_json(
             schema_name="fisora_invoice_canonical_extraction",
-            instructions=self.canonical_extraction_instructions,
-            user_payload=payload,
+            instructions=instructions,
+            user_payload=_provider_user_payload(payload, exclude_instructions=True),
             schema=payload["output_schema"],
         )
 
@@ -102,7 +158,7 @@ class OpenAiAccountingProvider:
         return self._post_structured_json(
             schema_name="fisora_statement_ai_suggestion",
             instructions=self.statement_suggestion_instructions,
-            user_payload=payload,
+            user_payload=_provider_user_payload(payload),
             schema=payload["output_schema"],
         )
 
@@ -111,7 +167,7 @@ class OpenAiAccountingProvider:
         return self._post_structured_json(
             schema_name="fisora_review_rule_interpretation",
             instructions=self.review_rule_interpretation_instructions,
-            user_payload=payload,
+            user_payload=_provider_user_payload(payload),
             schema=REVIEW_RULE_INTERPRETATION_SCHEMA,
         )
 
@@ -183,12 +239,9 @@ class ChatCompletionsAccountingProvider:
     """OpenAI-compatible chat-completions adapter for fallback providers."""
 
     provider_name = "chat_completions"
-    product_classification_instructions = (
-        "Muhasebe mustavirine yardim eden kontrollu bir taslak motorusun. "
-        "Yalnizca verilen sinirli fatura kalemi, faaliyet ve mevcut hesap/cari adaylarini kullan. "
-        "Yeni hesap kodu uydurma, emin degilsen bos string ve review risk flag'i don. "
-        "Export izni verme; bu cikti sadece mustavir review taslagidir."
-    )
+    product_classification_prompt_version = PRODUCT_CLASSIFICATION_PROMPT_VERSION
+    product_classification_instructions = OpenAiAccountingProvider.product_classification_instructions
+    canonical_extraction_instructions = OpenAiAccountingProvider.canonical_extraction_instructions
     statement_suggestion_instructions = (
         "Banka/POS ekstresi satiri icin muhasebe taslak onerisi uret. "
         "Sadece verilen satir bilgisi ve mevcut hesap kodu adayi uzerinden yorum yap. "
@@ -221,19 +274,22 @@ class ChatCompletionsAccountingProvider:
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
+        instructions = classification_instructions_for(request)
+        self.last_product_classification_instructions = instructions
         return self._post_structured_json(
             schema_name="fisora_invoice_ai_draft",
-            instructions=self.product_classification_instructions,
-            user_payload=payload,
+            instructions=instructions,
+            user_payload=_provider_user_payload(payload),
             schema=payload["output_schema"],
         )
 
     def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
+        instructions = canonical_extraction_instructions_for(request)
         return self._post_structured_json(
             schema_name="fisora_invoice_canonical_extraction",
-            instructions=self.canonical_extraction_instructions,
-            user_payload=payload,
+            instructions=instructions,
+            user_payload=_provider_user_payload(payload, exclude_instructions=True),
             schema=payload["output_schema"],
         )
 
@@ -242,7 +298,7 @@ class ChatCompletionsAccountingProvider:
         return self._post_structured_json(
             schema_name="fisora_statement_ai_suggestion",
             instructions=self.statement_suggestion_instructions,
-            user_payload=payload,
+            user_payload=_provider_user_payload(payload),
             schema=payload["output_schema"],
         )
 
@@ -251,7 +307,7 @@ class ChatCompletionsAccountingProvider:
         return self._post_structured_json(
             schema_name="fisora_review_rule_interpretation",
             instructions=self.review_rule_interpretation_instructions,
-            user_payload=payload,
+            user_payload=_provider_user_payload(payload),
             schema=REVIEW_RULE_INTERPRETATION_SCHEMA,
         )
 
@@ -312,6 +368,9 @@ class FallbackAccountingProvider:
         self.provider_name = ">".join(provider.provider_name for provider in providers)
         self.last_provider_name = ""
         self.last_capacity_snapshot: dict[str, object] = {}
+        self.model = ""
+        self.product_classification_instructions = ""
+        self.product_classification_prompt_version = PRODUCT_CLASSIFICATION_PROMPT_VERSION
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         return self._call("classify_product", request)
@@ -336,10 +395,65 @@ class FallbackAccountingProvider:
                 result = getattr(provider, method_name)(request)
                 self.last_provider_name = provider.provider_name
                 self.last_capacity_snapshot = dict(getattr(provider, "last_capacity_snapshot", {}) or {})
+                self.model = str(getattr(provider, "model", "") or "")
+                self.product_classification_instructions = str(
+                    getattr(provider, "last_product_classification_instructions", "")
+                    or getattr(provider, "product_classification_instructions", "")
+                    or ""
+                )
+                self.product_classification_prompt_version = str(
+                    getattr(provider, "product_classification_prompt_version", "")
+                    or PRODUCT_CLASSIFICATION_PROMPT_VERSION
+                )
                 return result
             except Exception as exc:  # noqa: BLE001 - fallback boundary keeps the pipeline alive
                 errors.append(f"{provider.provider_name}: {type(exc).__name__}: {str(exc)[:160]}")
         raise RuntimeError("; ".join(errors))
+
+
+class TaskRoutingAccountingProvider:
+    """Route semantic stages to independently ordered configured providers."""
+
+    def __init__(
+        self,
+        *,
+        classification_provider: object,
+        counterparty_provider: object,
+        configured_provider: object | None = None,
+    ) -> None:
+        self.classification_provider = classification_provider
+        self.counterparty_provider = counterparty_provider
+        compatibility_provider = configured_provider or classification_provider
+        self.provider_name = str(getattr(compatibility_provider, "provider_name", "") or "")
+        self.providers = tuple(
+            getattr(compatibility_provider, "providers", (compatibility_provider,))
+        )
+        self.last_provider_name = ""
+        self.last_capacity_snapshot: dict[str, object] = {}
+        self.model = ""
+        self.product_classification_instructions = ""
+        self.product_classification_prompt_version = PRODUCT_CLASSIFICATION_PROMPT_VERSION
+
+    def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
+        stage = str(request.context.candidate_strategy.stage or "").strip().lower()
+        provider = self.counterparty_provider if stage == "counterparty_resolve" else self.classification_provider
+        try:
+            return provider.classify_product(request)
+        finally:
+            self.last_provider_name = str(
+                getattr(provider, "last_provider_name", "") or getattr(provider, "provider_name", "") or ""
+            )
+            self.last_capacity_snapshot = dict(getattr(provider, "last_capacity_snapshot", {}) or {})
+            self.model = str(getattr(provider, "model", "") or "")
+            self.product_classification_instructions = str(
+                getattr(provider, "last_product_classification_instructions", "")
+                or getattr(provider, "product_classification_instructions", "")
+                or classification_instructions_for(request)
+            )
+            self.product_classification_prompt_version = str(
+                getattr(provider, "product_classification_prompt_version", "")
+                or PRODUCT_CLASSIFICATION_PROMPT_VERSION
+            )
 
 
 def _extract_json_response(payload: Mapping[str, Any]) -> dict[str, Any]:

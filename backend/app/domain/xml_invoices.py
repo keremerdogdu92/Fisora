@@ -265,6 +265,14 @@ def _invoice_line_hints(root: ET.Element, *, max_lines: int = 20) -> tuple[str, 
 def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple[CanonicalInvoiceLine, ...]:
     lines: list[CanonicalInvoiceLine] = []
     for index, line in enumerate((element for element in root.iter() if _local_name(element.tag) == "InvoiceLine"), start=1):
+        external_line_id = next(
+            (
+                (child.text or "").strip()
+                for child in list(line)
+                if _local_name(child.tag) == "ID" and (child.text or "").strip()
+            ),
+            "",
+        )
         description = _first_text_in_child(line, "Item", ("Name", "Description"))[:160]
         taxable_amount = _first_amount_in_child(line, "TaxTotal", ("TaxableAmount",)) or _first_amount_under(
             line,
@@ -273,18 +281,30 @@ def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple
         tax_amount = _first_amount_in_child(line, "TaxTotal", ("TaxAmount",))
         vat_rate = _first_text_under(line, ("Percent",))
         unit_price = _first_amount_in_child(line, "Price", ("PriceAmount",))
-        quantity = _first_text_under(line, ("InvoicedQuantity", "CreditedQuantity"))
+        quantity_element = next(
+            (
+                child
+                for child in line.iter()
+                if _local_name(child.tag) in {"InvoicedQuantity", "CreditedQuantity"}
+            ),
+            None,
+        )
+        quantity = (quantity_element.text or "").strip() if quantity_element is not None else ""
+        unit_code = str(quantity_element.attrib.get("unitCode") or "") if quantity_element is not None else ""
         if description:
             lines.append(
                 CanonicalInvoiceLine(
                     description=description,
+                    source_position=f"xml:InvoiceLine[{external_line_id or index}]",
+                    external_line_id=external_line_id,
                     quantity=quantity,
+                    unit_code=unit_code,
                     unit_price=unit_price,
                     taxable_amount=taxable_amount,
                     vat_rate=str(int(Decimal(vat_rate))) if vat_rate else "",
                     tax_amount=tax_amount,
                     gross_amount=_format_sum(taxable_amount, tax_amount),
-                    evidence=(f"xml:InvoiceLine[{index}]",),
+                    evidence=(f"xml:InvoiceLine[{external_line_id or index}]",),
                 )
             )
         if len(lines) >= max_lines:
@@ -319,6 +339,12 @@ def build_xml_canonical_invoice(root: ET.Element) -> CanonicalInvoice:
     legal_totals = _direct_child(root, "LegalMonetaryTotal")
     if legal_totals is None:
         legal_totals = root
+    billing_reference = _direct_child(root, "BillingReference")
+    original_reference = (
+        _direct_child(billing_reference, "InvoiceDocumentReference")
+        if billing_reference is not None
+        else None
+    )
     invoice = CanonicalInvoice(
         source="xml",
         supplier_party=CanonicalInvoiceParty(
@@ -341,6 +367,16 @@ def build_xml_canonical_invoice(root: ET.Element) -> CanonicalInvoice:
             ettn=_first_text(root, ("UUID",)),
             scenario=_first_text(root, ("ProfileID",)),
             invoice_type=_first_text(root, ("InvoiceTypeCode",)),
+            original_invoice_no=(
+                _first_text_under(original_reference, ("ID",))
+                if original_reference is not None
+                else ""
+            ),
+            original_invoice_date=(
+                _first_text_under(original_reference, ("IssueDate",))
+                if original_reference is not None
+                else ""
+            ),
             evidence=("xml:InvoiceHeader",),
         ),
         line_items=_canonical_invoice_lines(root),

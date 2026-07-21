@@ -240,6 +240,7 @@ class JournalLinePayload(BaseModel):
     description: str = ""
     debit: str = "0.00"
     credit: str = "0.00"
+    tax_rate: str = ""
     document_ref: str | None = None
 
 
@@ -262,6 +263,7 @@ class ReviewDecisionPayload(BaseModel):
     statement_line_no: int = 0
     draft_lines: list[JournalLinePayload] = Field(default_factory=list)
     vat_split_review: dict[str, object] = Field(default_factory=dict)
+    expected_revision: int = 0
 
     @property
     def normalized_decision_note(self) -> str:
@@ -426,6 +428,14 @@ class StoredSimulationPayload(SimulationPayload):
 class StoredReviewDecisionPayload(BaseModel):
     client_id: str
     decision: ReviewDecisionPayload
+
+
+class JournalReopenPayload(BaseModel):
+    client_id: str
+    document_ref: str
+    expected_revision: int
+    reviewer: str
+    reason: str
 
 
 class ReviewRulePreviewPayload(BaseModel):

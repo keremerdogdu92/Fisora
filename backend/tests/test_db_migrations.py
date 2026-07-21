@@ -15,7 +15,12 @@ SCRIPTS = BACKEND / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from apply_migrations import discover_migrations, plan_migrations, resolve_sql
+from apply_migrations import (
+    discover_migrations,
+    plan_migrations,
+    resolve_sql,
+    validate_applied_checksums,
+)
 
 
 class DbMigrationTests(unittest.TestCase):
@@ -44,6 +49,21 @@ class DbMigrationTests(unittest.TestCase):
         pending = plan_migrations(migrations, {migrations[0].version})
 
         self.assertEqual([migration.version for migration in pending], [migration.version for migration in migrations[1:]])
+
+    def test_applied_checksum_mismatch_fails_fast(self) -> None:
+        migrations = discover_migrations(ROOT / "backend" / "db" / "migrations")
+        immutable = next(migration for migration in migrations if migration.version == "003")
+
+        with self.assertRaisesRegex(ValueError, immutable.version):
+            validate_applied_checksums(
+                migrations,
+                {immutable.version: "stale-checksum"},
+            )
+
+    def test_legacy_mutable_initial_migration_is_explicitly_allowlisted(self) -> None:
+        migrations = discover_migrations(ROOT / "backend" / "db" / "migrations")
+
+        validate_applied_checksums(migrations, {"001": "production-legacy-checksum"})
 
 
 if __name__ == "__main__":

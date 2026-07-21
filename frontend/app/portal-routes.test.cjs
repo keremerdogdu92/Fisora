@@ -79,6 +79,19 @@ test("research knowledge hub and agent training center are visible to accountant
   );
 });
 
+test("research view reads legacy labels only from non-authoritative display", () => {
+  const researchView = require("node:fs").readFileSync(join(__dirname, "portal-research-view.tsx"), "utf8");
+
+  assert.match(researchView, /non_authoritative_display/);
+  assert.doesNotMatch(researchView, /profile\.product_category/);
+  assert.doesNotMatch(researchView, /profile\.account_treatment/);
+  assert.doesNotMatch(researchView, /selectedProfile\.account_treatment/);
+  assert.match(researchView, /profile\.profile_id/);
+  assert.match(researchView, /profile_id: selectedProfile\.profile_id/);
+  assert.match(researchView, /expected_revision: selectedProfile\.revision/);
+  assert.doesNotMatch(researchView, /selectedProfile\?\.key === profile\.key/);
+});
+
 test("website entry paths have Next app route files", () => {
   const rootPage = require("node:fs").readFileSync(join(__dirname, "page.tsx"), "utf8");
   assert.match(rootPage, /RoleGatewayLanding/);

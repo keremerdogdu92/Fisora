@@ -833,6 +833,7 @@ async function storeReviewDecision({
   suppressRulePromptKey = "",
   priorConsistentApprovalCount = 0,
   statementLineNo = 0,
+  expectedRevision = 0,
   draftLines = /** @type {Array<Record<string, unknown>> | null} */ (null),
   sessionToken = "",
   fetchImpl = fetch,
@@ -845,6 +846,9 @@ async function storeReviewDecision({
           description: String(line?.description || ""),
           debit: String(line?.debit || "0.00"),
           credit: String(line?.credit || "0.00"),
+          ...(line?.tax_rate || line?.taxRate
+            ? { tax_rate: String(line?.tax_rate || line?.taxRate || "") }
+            : {}),
         }))
         .filter((line) => line.account_code || line.description || line.debit !== "0.00" || line.credit !== "0.00")
     : [];
@@ -866,6 +870,9 @@ async function storeReviewDecision({
       statement_line_no: Number(statementLineNo || 0),
     },
   };
+  if (Number(expectedRevision || 0) > 0) {
+    payload.decision.expected_revision = Number(expectedRevision);
+  }
   if (normalizedDecisionNote) {
     payload.decision.decision_note = normalizedDecisionNote;
   }
@@ -977,6 +984,9 @@ async function previewReviewRule({
           description: String(line?.description || ""),
           debit: String(line?.debit || "0.00"),
           credit: String(line?.credit || "0.00"),
+          ...(line?.tax_rate || line?.taxRate
+            ? { tax_rate: String(line?.tax_rate || line?.taxRate || "") }
+            : {}),
         }))
         .filter((line) => line.account_code || line.description || line.debit !== "0.00" || line.credit !== "0.00")
     : [];

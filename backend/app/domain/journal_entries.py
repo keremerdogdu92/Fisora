@@ -14,6 +14,7 @@ class JournalLine:
     description: str
     debit: Decimal = Decimal("0.00")
     credit: Decimal = Decimal("0.00")
+    tax_rate: Decimal | None = None
     counterparty_tax_id: str | None = None
     document_ref: str | None = None
 
@@ -69,7 +70,13 @@ def build_purchase_entry(
         description=f"Alis faturasi {document_ref or ''}".strip(),
         lines=(
             JournalLine(expense_account, "Gider", debit=net, document_ref=document_ref),
-            JournalLine(vat_account, "Indirilecek KDV", debit=vat, document_ref=document_ref),
+            JournalLine(
+                vat_account,
+                "Indirilecek KDV",
+                debit=vat,
+                tax_rate=vat_rate * Decimal("100"),
+                document_ref=document_ref,
+            ),
             JournalLine(
                 supplier_account,
                 supplier_description,
@@ -105,7 +112,15 @@ def build_sales_entry(
             JournalLine(revenue_account, "Satis geliri", credit=net, document_ref=document_ref),
     ]
     if vat > Decimal("0.00"):
-        lines.append(JournalLine(vat_account, "Hesaplanan KDV", credit=vat, document_ref=document_ref))
+        lines.append(
+            JournalLine(
+                vat_account,
+                "Hesaplanan KDV",
+                credit=vat,
+                tax_rate=vat_rate * Decimal("100"),
+                document_ref=document_ref,
+            )
+        )
     return JournalEntry(
         entry_type="sales",
         entry_date=entry_date,
@@ -139,7 +154,13 @@ def build_purchase_return_entry(
                 document_ref=document_ref,
             ),
             JournalLine(expense_account, "Gider iade", credit=net, document_ref=document_ref),
-            JournalLine(vat_account, "Indirilecek KDV iade", credit=vat, document_ref=document_ref),
+            JournalLine(
+                vat_account,
+                "Indirilecek KDV iade",
+                credit=vat,
+                tax_rate=vat_rate * Decimal("100"),
+                document_ref=document_ref,
+            ),
         ),
         risk_flags=("return_invoice_accountant_review",),
     )
@@ -161,7 +182,15 @@ def build_sales_return_entry(
         JournalLine(revenue_account, "Satis geliri iade", debit=net, document_ref=document_ref),
     ]
     if vat > Decimal("0.00"):
-        lines.append(JournalLine(vat_account, "Hesaplanan KDV iade", debit=vat, document_ref=document_ref))
+        lines.append(
+            JournalLine(
+                vat_account,
+                "Hesaplanan KDV iade",
+                debit=vat,
+                tax_rate=vat_rate * Decimal("100"),
+                document_ref=document_ref,
+            )
+        )
     lines.append(
         JournalLine(
             customer_account,
@@ -277,7 +306,15 @@ def build_mixed_vat_purchase_entry(
         net, vat = split_vat(gross_amount, vat_rate)
         total += gross_amount
         lines.append(JournalLine(expense_account, f"Gider KDV {vat_rate:.2%}", debit=net, document_ref=document_ref))
-        lines.append(JournalLine(vat_account, f"Indirilecek KDV {vat_rate:.2%}", debit=vat, document_ref=document_ref))
+        lines.append(
+            JournalLine(
+                vat_account,
+                f"Indirilecek KDV {vat_rate:.2%}",
+                debit=vat,
+                tax_rate=vat_rate * Decimal("100"),
+                document_ref=document_ref,
+            )
+        )
     lines.append(
         JournalLine(
             supplier_account,
@@ -314,7 +351,15 @@ def build_mixed_vat_sales_entry(
         total += gross_amount
         revenue_and_vat_lines.append(JournalLine(revenue_account, f"Satis KDV {vat_rate:.2%}", credit=net, document_ref=document_ref))
         if vat > Decimal("0.00"):
-            revenue_and_vat_lines.append(JournalLine(vat_account, f"Hesaplanan KDV {vat_rate:.2%}", credit=vat, document_ref=document_ref))
+            revenue_and_vat_lines.append(
+                JournalLine(
+                    vat_account,
+                    f"Hesaplanan KDV {vat_rate:.2%}",
+                    credit=vat,
+                    tax_rate=vat_rate * Decimal("100"),
+                    document_ref=document_ref,
+                )
+            )
     return JournalEntry(
         entry_type="mixed_vat_sales",
         entry_date=entry_date,

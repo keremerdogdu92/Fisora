@@ -14,6 +14,7 @@ from app.api.phase0_context import (
 from app.api.rate_limit import enforce_rate_limit
 from app.api.phase0_schemas import (
     ExportPackagePayload,
+    JournalReopenPayload,
     ReviewDecisionPayload,
     ReviewRulePreviewPayload,
     StoredExportPackagePayload,
@@ -38,6 +39,19 @@ def store_review_decision(
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     return get_review_service().store_review_decision(
+        payload=payload,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+    )
+
+
+@router.post("/store/journal/reopen")
+def reopen_journal(
+    payload: JournalReopenPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_review_service().reopen_journal(
         payload=payload,
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
     )

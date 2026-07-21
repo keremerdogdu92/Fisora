@@ -9,11 +9,43 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 | Faz 1 | done | Dogru kimlik, yon tespiti ve musavir gerekcesi | TCKN/VKN ayrimi, fatura yonu, iade dislama, UI yon bazli panel |
 | Faz 2 | done | Hesap plani, KDV ve cari onerisi | 600/391, 153 veya 7xx/191, %0/3065, yeni 120/320 cari onerisi |
 | Faz 3 | done | Ortak bilgi havuzu ve operasyonel gorunurluk | AI research query, explicit AI research istegi, global cache ve Tavily siniri baglandi |
+
+## 2026-07-20 PDF Discovery ve Gorev Bazli AI Yurutme
+
+- UBL/XML canonical kaynak onceligi degismedi.
+- Metni okunabilen PDF'lerde AI canonical extraction ikiye ayrildi: bilinen
+  satirlari `repair`, eksik/tutarsiz satirlari kaynak konumuyla `discovery`.
+- Discovery sonucundaki satir kimligini provider belirlemez; benzersiz kaynak
+  konumu dogrulandiktan sonra Fisero deterministic olarak uretir.
+- AI parasal hesap, KDV mutabakati veya fis dengelemesi yapmaz; yalniz belgede
+  gordugu alanlari ve satir anlamini dondurur.
+- Provider sirasi goreve gore degisir, fakat yalniz base chain'de tanimli
+  provider'lar kullanilir. Gercek 50-fatura kalite/latency benchmark'i ve
+  image-only PDF OCR kabul kaniti halen aciktir.
 | Faz 4 | done | Research sonucu ile fis kararini yeniden kurma | Dusuk guven export'u acmaz, ama dengeli review taslagi korunur |
 | Faz 5 | done | Karisik KDV satir ayrimi | Cihaz %0/3065 kalir, aksesuar/pil satiri KDV'li kalabilir |
 | Faz 6 | revise | Dogal dil musavir kural adayi | UI'da tek `Karar notu`; backend eski alanlari geriye uyumluluk icin kabul eder |
 | Faz 7 | done | Portal karar zinciri gorunurlugu | Fis satirlari onde; urun kimligi, NACE/faaliyet, research ve cari aday izi alt akis oldu |
 | Faz 8 | next | Cok mukellefli gercek belge matrisi | Canli deneme ve private sample matrix ile genisletilecek |
+
+## 2026-07-20 Semantic Authority Repair
+
+- Hesap secimi icin authority sirasi `verified active rule -> accepted semantic
+  AI attempt` olarak daraltildi. Static kategori, research profili, legacy
+  learning projection veya deterministic default hesap journal authority'si
+  degildir.
+- Her material canonical satir exact bir semantic karar ve journal allocation
+  ile eslesmeden authoritative taslak olusmaz. Deterministic katman yalniz
+  tutar/KDV/yon/denge ve export guvenligini uygular.
+- Aday disi veya schema-invalid AI sonucu bir kez structured correction'a
+  gider; iki attempt de izlenebilir. Basarisiz correction generic hesapla
+  maskelenmez ve `ai_correction_required` olarak musavir kontrolune kalir.
+- Research sonucu kaynakli, canonical-line-scoped ek kanittir. Muhasebe
+  kategorisini veya hesabi dogrudan degistiremez; degisiklik ancak ayri
+  `research_synthesis` semantic attempt'i kabul edilirse gerceklesir.
+- Yerel structural proof set basarilidir. Gercek provider Yurtiçi/Muson kaniti
+  ile 35 alis + 15 satis musavir-referans corpus parity kapilari credentials ve
+  korumali referans corpus olmadan acik kalir.
 
 ## Kararlar
 

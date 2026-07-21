@@ -1101,6 +1101,25 @@ test("storeReviewDecision binds draft corrections to accountant note and rule in
   assert.deepEqual(decision.draft_lines.map((line) => line.account_code), ["153.01", "320.01"]);
 });
 
+test("storeReviewDecision sends the normalized expected revision when available", async () => {
+  let capturedBody;
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "accountant-1",
+    documentRef: "invoice-1",
+    action: "approve",
+    reviewer: "accountant-1",
+    expectedRevision: 4,
+    fetchImpl: async (_url, init) => {
+      capturedBody = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+
+  assert.equal(capturedBody.decision.expected_revision, 4);
+});
+
 test("storeReviewDecision maps decision note to accountant note and rule instruction", async () => {
   let request;
   const fetchImpl = async (url, init) => {

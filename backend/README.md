@@ -62,6 +62,32 @@ Varsayilan adapter JSON store'dur. Production icin `FISORA_STORE_BACKEND=postgre
 ve `DATABASE_URL` veya `FISORA_DATABASE_URL` verilirse ilk PostgreSQL adapter'i
 ayni workspace kontratini `workflow_records` tablosunda saklar.
 
+Phase 1 normalized invoice-to-journal dilimini gelistirme ortaminda acmak icin
+PostgreSQL store ile birlikte hedef store secilir:
+
+```powershell
+$env:FISORA_STORE_BACKEND="postgres"
+$env:FISORA_ACCOUNTING_STORE_TARGET="normalized"
+```
+
+Bu modda desteklenen alis faturalarinda kaynak/dedup, canonical fatura
+satirlari, processing attempt, journal revision, review/onay ve export
+uygunlugu normalized tablolardan sahiplenilir. Mevcut workspace JSON sekli
+Faturalar arayuzu icin uyumluluk projeksiyonu olarak korunur. Varsayilan deger
+`compatibility` oldugu icin migration ve vertical-slice kaniti tamamlanmadan
+canli store kendiliginden degismez.
+
+Normalized PostgreSQL davranis testleri gercek ve migration uygulanabilir bir
+test veritabani ister:
+
+```powershell
+$env:FISORA_TEST_POSTGRES_DSN="postgresql://postgres:test@localhost:55439/fisero_test"
+python -m unittest backend.tests.test_normalized_invoice_journal_postgres -v
+```
+
+DSN verilmezse normal unittest discovery bu entegrasyon paketini skip eder;
+testleri gecmis saymak icin ayrica yukaridaki gercek PostgreSQL kosusu gerekir.
+
 Schema artik versiyonlu migration runner ile uygulanir:
 
 ```powershell

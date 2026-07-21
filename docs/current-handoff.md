@@ -1,9 +1,195 @@
 # Current Handoff
 
+### 2026-07-20 AI semantic authority pipeline repair (yerel)
+
+- Cold-start muhasebe karari static kategori guveniyle atlanmiyor. Semantic
+  hesap yetkisi yalniz exact canonical satir kapsamli accepted AI attempt veya
+  provenance'i dogrulanmis typed rule authority'den gelebiliyor.
+- Deterministic katman hesap secmiyor; canonical net/KDV tutari, yon, denge,
+  hard-rule review/export kapilari ve revision guvenligini uyguluyor. Accepted
+  hesap kodu ordinary, mixed-VAT, return ve non-deductible akislarda korunuyor.
+- Gecersiz schema veya aday disi hesap bir kez `account_correction` asamasina
+  gidiyor. Ilk hata ve duzeltme attempt'i append-only saklaniyor; basarisizlikta
+  generic deterministic hesap substitution yapilmiyor.
+- Research evidence-only sinirinda: canonical satir scope'u, gercek claim,
+  kaynak domaini, expiry ve privacy sanitization zorunlu. Provider category,
+  treatment, confidence veya accountant override yetkisi uretemiyor.
+- Research profilleri opaque `profile_id`, client scope ve revision tasiyor.
+  JSON/PostgreSQL store lookup/list scope'u data-access katmaninda uyguluyor;
+  accountant override expected revision ile atomik guncelleniyor, provider
+  evidence korunuyor ve audit olayi yaziliyor.
+- Yerel private baseline butun `firma-*` klasorlerini raporladi: firma-1 icin
+  15, firma-2 icin 13 PDF bulundu; firma-3..7 dogrulanmis client profile eksigi
+  nedeniyle tahmin yapilmadan bloke edildi. Bu kosu AI/research credentials
+  olmadan yapildigi icin provider kalite kabul kaniti degildir.
+- Son yerel proof: backend `523 OK (skipped=12)`, frontend `147/147`, Next
+  production build ve `git diff --check` basarili. Skip edilen 12 test gercek
+  PostgreSQL DSN gerektirir.
+- Acik kabul kapilari: gercek provider credentials ile Yurtiçi 5/5 ve Muson
+  regression'i; ayrica versioned 35 alis + 15 satis corpusunun musavir referans
+  parity sonucu. Bunlar olmadan Phase 2 muhasebe kalitesi tamamlandi denmiyor.
+- Calisma local dirty `main` uzerindedir; commit, push veya deploy yapilmadi.
+
+### 2026-07-20 PDF discovery ve task-aware AI routing (yerel)
+
+- UBL/XML canonical kaynak onceligi korunarak text-readable PDF canonical AI
+  extraction `repair` ve `discovery` modlarina ayrildi.
+- Discovery yalniz missing/tutarsiz deterministic satir halinde calisir;
+  duplicate kaynak konumu reddedilir ve canonical line ID sunucuda uretilir.
+- Canonical, classification ve counterparty gorevleri base chain icindeki
+  provider'lari goreve gore siralar; statement zinciri base sirayi korur.
+- Hedefli PDF/routing testleri, Phase0 (191), normalized journal (17),
+  workflow-store/routing (52), tam backend (463; 9 skipped), frontend (145) ve
+  production build yerelde gecti.
+- Image-only/scanned PDF OCR ve gercek 50-fatura provider kalite/latency
+  benchmark'i bu yerel dilimin disinda, acik kabul maddesidir.
+
 Bu dosya, Fisora kapali server demo calismasina baska bilgisayardan veya baska
 oturumdan devam etmek icin son durumu ozetler.
 
 ## Son Durum
+
+### 2026-07-18 canonical Phase 1 normalized vertical slice (yerel)
+
+- Canonical `docs/product-plan/01-product-requirements-document.md`,
+  `02-system-architecture-document.md` ve `03-development-roadmap.md`
+  dogrultusunda Phase 1'in ilk complete alis-faturasi vertical slice'i
+  uygulandi. Bu calisma local `main` worktree'dedir; commit/push/deploy
+  yapilmadi.
+- `003_normalized_invoice_journal_slice.sql` ile immutable `source_files`,
+  `document_sources`, canonical invoice line alanlari, normalized
+  `processing_jobs`/`processing_attempts`, `ai_attempts`,
+  `journal_revisions`/`journal_revision_lines`, append-only
+  `workflow_events` ve approved revision'a bagli export item altyapisi eklendi.
+- PostgreSQL normalized repository su zinciri sahipleniyor:
+  kaynak hash'i ve dedup -> canonical fatura/satir -> dengeli journal draft
+  revision -> `expected_revision` kontrollu review/onay -> authoritative
+  approved revision export projection -> neden zorunlu reopen ile yeni
+  working revision. Reopen onceki approved snapshot'i degistirmiyor.
+- Worker queue claim'i `FOR UPDATE SKIP LOCKED` ile normalized
+  `processing_jobs` tablosundan yapiliyor; her claim icin durable attempt
+  aciliyor ve completion/error/metrics ayni normalized hatta kapaniyor.
+- Mevcut Faturalar sayfasi yeniden tasarlanmadi. Workspace JSON sekli
+  compatibility projection olarak korunuyor; frontend mevcut belge modelinde
+  normalized revision numarasini tasiyor ve review POST'unda
+  `expected_revision` gonderiyor. Eski sekme/yeni revision cakismasi backend'de
+  `409 journal_revision_conflict` donuyor.
+- Gelistirme cutover anahtari:
+  `FISORA_STORE_BACKEND=postgres` ve
+  `FISORA_ACCOUNTING_STORE_TARGET=normalized`. Varsayilan hedef bilincli olarak
+  `compatibility`; bu local dilim deploy edilip gercek PostgreSQL migration ve
+  kontrollu XML smoke'u yapilmadan production kendiliginden kesilmez.
+- Yeni regression:
+  `backend/tests/test_normalized_invoice_journal.py`. Tek alis faturasi icin
+  duplicate kaynagin ayni authoritative belge/job'a donmesi, revision
+  `1 draft -> 2 approved -> 3 reopened`, approved snapshot immutability,
+  stale revision reddi ve export'un normalized approved projection'dan gelmesi
+  kanitlandi.
+- 2026-07-18 yerel kanit:
+  backend `415/415`, frontend `145/145`, Next production build basarili,
+  migration dry-run `001/002/003`, `git diff --check` temiz.
+- Docker Desktop daemon'i yeniden dogrulandi. Izole `postgres:16` container'inda
+  migration `001/002/003` gercek veritabanina uygulandi; `source_files`,
+  `journal_revisions` ve `workflow_events` tablolarinin olustugu SQL ile
+  dogrulandi.
+- Ayni izole PostgreSQL'de gercek tek satirli, yuzde 20 KDV'li alis UBL'si
+  normal upload -> normalized queue claim/attempt -> worker -> review/onay ->
+  authoritative export -> reopen hattindan gecti. Worker sonucu `1 completed /
+  0 failed`, export entry sayisi `1`; relational sayim source/document/
+  canonical-line/attempt/revision/approved-revision/event icin
+  `1/1/1/1/3/1/4` dondu. Revision zinciri
+  `1 review_required -> 2 approved -> 3 working_draft`; revision 2 snapshot'i
+  reopen sonrasi korundu.
+- Ayni kaynak hash'iyle ikinci intake gercek PostgreSQL'de
+  `deduplicated=true` dondu; `source_files/documents/processing_jobs/
+  journal_entries` sayilari `1/1/1/1` kaldi. Izole smoke container'i kanit
+  alindiktan sonra temizlendi.
+- Kullaniciya ait `frontend/next-env.d.ts` degisikligi korundu.
+  `.codebase-memory/` generated untracked graph artefakti kapsama alinmadi.
+
+### 2026-07-18 canonical Phase 2 accounting-quality core (yerel)
+
+- Roadmap Phase 2'nin canonical satir ve muhasebe-quality cekirdegi Phase 1
+  normalized vertical slice uzerine uygulandi. Calisma local `main`
+  worktree'dedir; commit/push/deploy yapilmadi ve production cutover anahtari
+  `compatibility` olarak kalir.
+- XML satirlari UBL `InvoiceLine/ID`, PDF satirlari kaynak satir/tablo konumu
+  uzerinden deterministic `canonical_line_id` tasir. Parser sirasi degisse bile
+  kimlik ayni kalir. Canonical satir yeniden islenince silinmez; ayni fingerprint
+  reuse edilir, degisen extraction yeni version acar ve eski version
+  `superseded_at` ile tarihsel revision lineage'inda korunur.
+- AI veya deterministic line kararlarinda exact ID coverage zorunludur. Eksik,
+  duplicate veya unknown ID `canonical_line_decision_incomplete` olarak
+  review-only kalir. PDF AI extraction provider locator'ini authoritative kabul
+  etmez; server-generated ID ve locator'lar modele verilir ve exact echo coverage
+  dogrulanir. AI trace artik ilgili normalized processing attempt'e baglanir.
+- `journal_line_allocations` tablosu canonical satir net/KDV/brut tutarini
+  revision satirina ve hesaba relational olarak baglar. Allocation mutabakati
+  eksikse dolu ve dengeli taslak korunur fakat approval/export acilmaz. Net
+  allocation karar hesabina, KDV allocation canonical oranina birebir baglidir;
+  heterojen AI kararlarinda net tutarlar hesap bazinda gruplanarak dolu fiş
+  uretilir.
+- Normalized persistence purchase yaninda sales ve return direction'larini da
+  sahiplenir. UBL iade faturasi varsa `BillingReference /
+  InvoiceDocumentReference` belge no/tarih kanitini canonical header ve
+  normalized document uzerinde korur. Dogrulanmamis ozel vergi davranisi
+  otomatik politika uretmez; focused review sinirinda kalir.
+- Approval artik istemci header toplamlarina guvenmez: journal satirlarini
+  server-side yeniden toplar; negatif, iki tarafli veya bos satiri reddeder;
+  canonical validation, exact line coverage, allocation mutabakati ve ilgili
+  mukellefin aktif detay hesaplarini kontrol eder. Yeni `120/320` onerisi
+  gercek hesap planinda olusmadan export-ready sayilmaz.
+- Taxpayer UUID tenant kapsamli hale geldi. Review/reopen audit actor'u serbest
+  payload metni yerine authenticated user/session kimliginden gelir.
+- Normalized queue expired lease'i reclaim eder, her claim'i immutable attempt
+  ID ile fence eder ve explicit reprocess completed/failed job'i yeniden
+  `queued` durumuna alabilir. Eski worker yeni attempt'i kapatamaz veya stale
+  canonical/journal side-effect yazamaz.
+- Tarihsel ve daha once production'da uygulanmis mutable-include `001` dosyasi
+  degistirilmedi ve acik legacy allowlist ile upgrade uyumlulugu korundu. `003`
+  self-contained immutable schema snapshot oldu; migration runner yeni
+  migration'larda uygulanmis checksum drift'inde fail-fast davranir.
+- Yeni migration:
+  `004_phase2_canonical_line_allocations.sql`. Yeni regression'lar stable ID
+  reorder, missing/duplicate/unknown decision ID, mixed-VAT allocation,
+  tenant-scoped identity, iade original-reference ve migration constraint
+  kontratlarini kapsar.
+- 2026-07-18 yerel kanit: backend `429/429`, frontend `145/145`, Next production
+  build ve `git diff --check` basarili.
+- Ayni gun yapilan Superpowers-sonrasi kalite auditinde fake repository
+  regression'larinin gercek transaction davranisini kanitlamadigi goruldu.
+  Kalici `test_normalized_invoice_journal_postgres.py` paketi eklendi ve izole
+  `postgres:16` uzerinde `9/9` gecti. Paket purchase/sales normalized owner,
+  source/processing/review/reopen projection rollback atomikligi, reopen
+  allocation lineage, tenant izolasyonu, stale attempt fencing ve eksik
+  canonical line-decision approval guard'ini gercek SQL ile kapsar.
+- Audit sirasinda dort somut kusur RED ile yeniden uretildi ve duzeltildi:
+  source intake, processing sonucu, review ve reopen projection hatalarinda
+  normalized state'in once commit edilmesi; ayrica reopen working revision'inda
+  `journal_line_allocations` lineage'inin kaybolmasi. Normalized owner ile
+  compatibility projection artik ayni PostgreSQL transaction'inda yazilir;
+  reopen onceki approved allocation'lari yeni revision satirlarina audit
+  metadata'siyle kopyalar.
+- Duzeltme sonrasi normal backend discovery `439 OK (skipped=9)` dondu; skip
+  edilenlerin tamami DSN-gated gercek PostgreSQL paketidir ve ayri kosuda
+  `9/9` gecmistir. Frontend `145/145`, Next production build ve
+  `git diff --check` de basarilidir.
+- Izole gercek `postgres:16` smoke'unda migration `001/002/003/004` uygulandi.
+  Ayni `client_id` iki tenantta iki ayri taxpayer olarak kaldi; iki satirli
+  yuzde 20/yuzde 10 karma KDV alis faturasi chart import yolu ile relational
+  hesap planina baglandi; stale side-effect reddedildi, iki satirdan bir satira
+  valid re-extraction eski satiri supersede etti, TRY disi ve unresolved tevkifat
+  approval'i kapatti, exact revision ile temiz TRY taslak onaylandi. Fresh
+  migration runner `001/002/003/004` uyguladi ve checksum tamper'ini reddetti.
+  Ayrica production-upgrade simulasyonunda legacy checksum'lu uygulanmis
+  `001/002` uzerinden yeni runner `003/004` migration'larini basariyla uyguladi.
+  Test container'lari smoke sonrasinda temizlendi.
+- Phase 2 kod/SQL core tamamlandi fakat roadmap exit gate henuz kapanmadi:
+  workspace'te 35 alis + 15 satis gercek faturadan olusan protected corpus yok.
+  Bu nedenle `zero missing/duplicated/shifted line` ve muhasebe-quality
+  hedefleri sentetik/izole smoke disinda iddia edilmiyor. Siradaki zorunlu is,
+  pilot musavirin saglayacagi versioned 50-fatura corpusunu immutable kaynak ve
+  referans musavir sonucu ile kurup Phase 2 parity/quality run'ini yapmaktir.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`

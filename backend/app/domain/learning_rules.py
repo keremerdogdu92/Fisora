@@ -9,6 +9,7 @@ from app.domain.review_learning import LearningEvent
 
 
 LEARNING_APPLIED_EVIDENCE = "learning_rule_applied"
+LEARNING_EVIDENCE_ONLY = "learning_rule_evidence_only"
 
 
 @dataclass(frozen=True)
@@ -86,39 +87,19 @@ def apply_learning_rules(
             return replace(result, learning_audit=_blocked_learning_audit(result, rule_list)) if rule_list else result
         return _apply_semantic_rule_context(result, semantic_rule)
 
-    can_apply_counterparty = _can_apply_counterparty_code(result, rule)
-    effective_rule = rule if can_apply_counterparty else replace(rule, corrected_counterparty_code="")
-    trusted_export = _trusted_export_rule(result, rule)
-    draft_lines = tuple(_apply_rule_to_line(line, result, effective_rule) for line in result.draft_lines)
-    evidence = tuple(dict.fromkeys((*result.business_relevance_evidence, LEARNING_APPLIED_EVIDENCE)))
-    review_reasons = (
-        result.review_reason_codes
-        if trusted_export
-        else tuple(dict.fromkeys((*result.review_reason_codes, "learning_rule_review_required")))
-    )
+    evidence = tuple(dict.fromkeys((*result.business_relevance_evidence, LEARNING_EVIDENCE_ONLY)))
     reason = rule.source_summary or rule.reason
     return replace(
         result,
-        selected_expense_account=rule.corrected_account_code or result.selected_expense_account,
-        selected_supplier_account=effective_rule.corrected_counterparty_code or result.selected_supplier_account,
         business_relevance_evidence=evidence,
-        review_reason_codes=review_reasons,
-        learning_rule_applied=True,
+        learning_rule_applied=False,
         learning_rule_scope=rule.scope,
         learning_rule_reason=reason,
         learning_rule_source_summary=reason,
         accounting_intent=rule.accounting_intent,
         accounting_intent_confidence=rule.accounting_intent_confidence,
         rule_prompt=rule.rule_prompt or {},
-        learning_audit=_applied_learning_audit(result, rule, status="applied", semantic=False),
-        simulated_status=result.simulated_status if trusted_export else "review_required",
-        export_status=result.export_status if trusted_export else "review_required",
-        export_gate_reason=(
-            result.export_gate_reason
-            if trusted_export
-            else reason or "Onceki musavir karari benzerlik nedeniyle review gerektiriyor."
-        ),
-        draft_lines=draft_lines,
+        learning_audit=_applied_learning_audit(result, rule, status="evidence_only", semantic=False),
     )
 
 
@@ -334,32 +315,3 @@ def _counterparty_scope_matches(result: SimulatedInvoiceResult, rule: LearnedPos
     if rule.counterparty_title.strip() and result.counterparty_title.strip():
         return normalize_text(rule.counterparty_title) == normalize_text(result.counterparty_title)
     return False
-
-
-def _can_apply_counterparty_code(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> bool:
-    return bool(rule.corrected_counterparty_code and _has_counterparty_scope(rule) and _counterparty_scope_matches(result, rule))
-
-
-def _trusted_export_rule(result: SimulatedInvoiceResult, rule: LearnedPostingRule) -> bool:
-    if result.export_status != "export_ready":
-        return False
-    if not result.is_balanced:
-        return False
-    if not (rule.automation_candidate or rule.action == "suggest_for_similar"):
-        return False
-    if not (_has_counterparty_scope(rule) and _counterparty_scope_matches(result, rule)):
-        return False
-    return _rule_score(result, rule) >= 90
-
-
-def _apply_rule_to_line(
-    line: dict[str, str],
-    result: SimulatedInvoiceResult,
-    rule: LearnedPostingRule,
-) -> dict[str, str]:
-    updated = dict(line)
-    if rule.corrected_account_code and line["account_code"] == result.selected_expense_account:
-        updated["account_code"] = rule.corrected_account_code
-    if rule.corrected_counterparty_code and line["account_code"] == result.selected_supplier_account:
-        updated["account_code"] = rule.corrected_counterparty_code
-    return updated

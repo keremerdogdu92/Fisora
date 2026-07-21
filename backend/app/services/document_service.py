@@ -468,6 +468,7 @@ class DocumentService:
             document_type=document_type,
             parser_kind=parser_kind_for_document_type(document_type),
             intake_category=intake_category,
+            force_requeue=True,
         )
         self.store.record_document_pipeline_event(
             client_id=normalized_client_id,

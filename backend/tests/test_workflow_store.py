@@ -12,7 +12,7 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-from app.persistence.workflow_store import JsonWorkflowStore
+from app.persistence.workflow_store import JsonWorkflowStore, ResearchProfileConflict
 from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
@@ -834,6 +834,58 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(cached["common_product_categories"], ["kisisel_bakim_kozmetik"])
         self.assertEqual(calls, [])
 
+    def test_json_research_profile_lookup_enforces_client_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.save_brand_research_profile(
+                brand_name="ctxv2-client-1",
+                profile={"profile_id": "ctxv2-client-1", "owner_client_id": "client-1"},
+            )
+            store.save_brand_research_profile(
+                brand_name="ctxv2-client-2",
+                profile={"profile_id": "ctxv2-client-2", "owner_client_id": "client-2"},
+            )
+            store.save_brand_research_profile(
+                brand_name="ctxv2-office",
+                profile={"profile_id": "ctxv2-office", "scope_type": "office_public"},
+            )
+            store.save_brand_research_profile(
+                brand_name="legacy",
+                profile={"profile_id": "legacy", "scope_type": "legacy_unowned"},
+            )
+
+            visible = store.list_research_profiles(kind="brand", allowed_client_ids={"client-1"})
+            denied = store.get_research_profile(
+                kind="brand",
+                key="ctxv2-client-2",
+                allowed_client_ids={"client-1"},
+            )
+
+        self.assertEqual({item["profile_id"] for item in visible}, {"ctxv2-client-1", "ctxv2-office"})
+        self.assertIsNone(denied)
+
+    def test_json_research_profile_update_uses_expected_revision_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            first = store.save_brand_research_profile(
+                brand_name="ctxv2-one",
+                profile={"profile_id": "ctxv2-one", "evidence": [{"url": "https://example.test"}]},
+            )
+            updated = store.save_brand_research_profile(
+                brand_name="ctxv2-one",
+                profile={"summary_tr": "accountant note"},
+                expected_revision=first["revision"],
+            )
+            with self.assertRaises(ResearchProfileConflict):
+                store.save_brand_research_profile(
+                    brand_name="ctxv2-one",
+                    profile={"summary_tr": "stale note"},
+                    expected_revision=first["revision"],
+                )
+
+        self.assertEqual(updated["revision"], 2)
+        self.assertEqual(updated["evidence"], [{"url": "https://example.test"}])
+
     def test_postgres_store_exposes_generic_research_profile_lookup(self) -> None:
         class FakePostgresStore(PostgresWorkflowStore):
             def __init__(self) -> None:
@@ -850,6 +902,58 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(store.get_research_profile(kind="brand", key="Rexton")["kind"], "brand")
         self.assertEqual(store.get_research_profile(kind="nace", key="477401")["kind"], "nace")
         self.assertIsNone(store.get_research_profile(kind="other", key="x"))
+
+    def test_postgres_research_profile_update_locks_and_compares_revision(self) -> None:
+        executed_sql: list[str] = []
+
+        class FakeCursor:
+            def __enter__(self) -> "FakeCursor":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def execute(self, sql: str, params: object = None) -> None:
+                executed_sql.append(sql)
+
+            def fetchone(self) -> tuple[str, dict[str, object]]:
+                return (
+                    "client-1",
+                    {
+                        "profile_id": "ctxv2-one",
+                        "owner_client_id": "client-1",
+                        "revision": 3,
+                        "evidence": [{"url": "https://example.test"}],
+                    },
+                )
+
+        class FakeConnection:
+            def __enter__(self) -> "FakeConnection":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def cursor(self) -> FakeCursor:
+                return FakeCursor()
+
+        store = PostgresWorkflowStore("postgresql://example", connect=lambda: FakeConnection())
+        store._ensure_tenant = lambda: None  # type: ignore[method-assign]
+        updated = store.save_brand_research_profile(
+            brand_name="ctxv2-one",
+            profile={"summary_tr": "accountant note"},
+            expected_revision=3,
+        )
+        with self.assertRaises(ResearchProfileConflict):
+            store.save_brand_research_profile(
+                brand_name="ctxv2-one",
+                profile={"summary_tr": "stale note"},
+                expected_revision=2,
+            )
+
+        self.assertIn("for update", "\n".join(executed_sql).lower())
+        self.assertEqual(updated["revision"], 4)
+        self.assertEqual(updated["evidence"], [{"url": "https://example.test"}])
 
     def test_postgres_claim_next_processing_job_uses_atomic_update(self) -> None:
         executed_sql: list[str] = []
@@ -1473,33 +1577,20 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(result["payable_total"], "1200.00")
         self.assertEqual(result["product_category"], "isitme_cihazi")
         self.assertEqual(result["selected_supplier_account"], "320.01.015")
-        self.assertEqual(result["export_status"], "export_ready")
+        self.assertEqual(result["export_status"], "review_required")
         self.assertEqual(result["ai_quality_scorecard"]["static"]["category"], "isitme_cihazi")
         self.assertEqual(result["ai_quality_scorecard"]["ai"]["provider"], "static_rules")
-        self.assertEqual(result["ai_quality_scorecard"]["final"]["selected_account_code"], "153.01")
+        self.assertEqual(result["ai_quality_scorecard"]["final"]["selected_account_code"], "")
         self.assertEqual(result["ai_quality_scorecard"]["context"]["client_nace_code"], "")
         self.assertEqual(result["ai_quality_scorecard"]["context"]["account_candidate_count"], result["ai_account_candidate_count"])
-        self.assertTrue(result["draft_lines"])
+        self.assertEqual(result["draft_lines"], [])
         pipeline_steps = [event["step"] for event in workspace["document_pipeline_events"]]
-        self.assertEqual(
-            pipeline_steps,
-            [
-                "parse_started",
-                "parse_succeeded",
-                "canonical_extraction_completed",
-                "line_items_extracted",
-                "canonical_validation_failed",
-                "party_resolution_completed",
-                "direction_detected",
-                "vat_summary_parsed",
-                "accounting_explanation_ready",
-                "journal_draft_ready",
-                "export_ready",
-            ],
-        )
+        self.assertIn("ai_correction_required", pipeline_steps)
+        self.assertNotIn("journal_draft_ready", pipeline_steps)
+        self.assertNotIn("export_ready", pipeline_steps)
         self.assertEqual(workspace["document_pipeline_events"][1]["message_tr"], "Belge parse edildi.")
-        self.assertIn("Belge muhasebe", workspace["document_pipeline_events"][9]["message_tr"])
-        self.assertIn("doldu", workspace["document_pipeline_events"][9]["message_tr"])
+        correction = next(event for event in workspace["document_pipeline_events"] if event["step"] == "ai_correction_required")
+        self.assertIn("duzeltme", correction["message_tr"].lower())
 
     def test_processing_worker_records_learning_rule_applied_pipeline_event(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1600,11 +1691,10 @@ class WorkflowStoreTests(unittest.TestCase):
             result = workspace["documents"][0]["result"]
 
         self.assertEqual(summary["completed_count"], 1)
-        self.assertTrue(result["learning_rule_applied"])
-        self.assertEqual(result["learning_audit"]["status"], "applied")
-        learning_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "learning_rule_applied")
-        self.assertEqual(learning_event["details"]["suggested_account_code"], "760.03.010")
-        self.assertGreaterEqual(learning_event["details"]["match_score"], 60)
+        self.assertFalse(result["learning_rule_applied"])
+        self.assertEqual(result["learning_audit"]["status"], "evidence_only")
+        self.assertNotIn("learning_rule_applied", [event["step"] for event in workspace["document_pipeline_events"]])
+        self.assertEqual(result["selected_expense_account"], "")
 
     def test_processing_worker_records_ai_decision_events_and_turkish_explanation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1960,20 +2050,26 @@ class WorkflowStoreTests(unittest.TestCase):
             workspace = store.get_workspace("client-1")
             result = workspace["documents"][0]["result"]
             failed_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "ai_provider_failed")
-            retry_event = next(event for event in workspace["document_pipeline_events"] if event["step"] == "ai_retry_required")
+            correction_event = next(
+                event
+                for event in workspace["document_pipeline_events"]
+                if event["step"] == "ai_correction_required"
+            )
 
         self.assertEqual(failed_event["status"], "error")
         self.assertEqual(failed_event["details"]["provider"], "raising_llm")
         self.assertNotIn("fallback", failed_event["message_tr"].lower())
-        self.assertEqual(retry_event["status"], "warning")
-        self.assertEqual(result["ai_resolution_status"], "ai_retry_required")
+        self.assertEqual(correction_event["status"], "warning")
+        self.assertIn("ai_provider_error", str(correction_event["details"]))
+        self.assertEqual(result["ai_resolution_status"], "ai_correction_required")
         self.assertEqual(result["ai_retry_reason"], "ai_provider_error")
-        self.assertEqual(result["static_fallback_account"], "770.01")
+        self.assertEqual(result["static_fallback_account"], "")
         self.assertTrue(result["static_fallback_suppressed"])
         self.assertEqual(result["selected_expense_account"], "")
         self.assertEqual(result["draft_lines"], [])
-        self.assertEqual(result["draft_status"], "ai_retry_required")
-        self.assertIn("AI ajani", result["accountant_summary"])
+        self.assertEqual(result["draft_status"], "ai_correction_required")
+        self.assertIn("duzelt", result["accountant_summary"].lower())
+        self.assertIn("ai_correction_required", str(result["technical_details"]))
         self.assertIn("Provider raising_llm hata verdi", result["ai_explanation_tr"])
         self.assertIn("ai_provider_error", result["ai_explanation_tr"])
 

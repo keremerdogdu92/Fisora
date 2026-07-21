@@ -5,8 +5,9 @@ import json
 import re
 import unicodedata
 from dataclasses import asdict, dataclass, replace
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
+from typing import Mapping
 
 from app.domain.canonical_invoices import (
     CanonicalInvoice,
@@ -16,8 +17,10 @@ from app.domain.canonical_invoices import (
     CanonicalInvoiceLine,
     CanonicalInvoiceParty,
     CanonicalInvoiceTotals,
+    CanonicalInvoiceValidation,
     CanonicalVatSummaryLine,
     canonical_invoice_from_ai_payload,
+    validate_line_decision_coverage,
     with_validation,
 )
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
@@ -596,6 +599,7 @@ def build_route(risk_flags: tuple[str, ...], parsed: dict[str, str]) -> tuple[st
 def _canonical_line_from_invoice_line(line: InvoiceLine) -> CanonicalInvoiceLine:
     return CanonicalInvoiceLine(
         description=line.description,
+        source_position=line.source_position or line.source,
         taxable_amount=line.taxable_amount,
         vat_rate=line.vat_rate,
         tax_amount=line.tax_amount,
@@ -692,15 +696,304 @@ def _pdf_canonical_ai_payload(
         ],
         "line_items": [
             {
+                "canonical_line_id": line.canonical_line_id,
+                "source_position": line.source_position,
                 "description": line.description,
                 "vat_rate": line.vat_rate,
                 "taxable_amount": line.taxable_amount,
                 "tax_amount": line.tax_amount,
                 "gross_amount": line.gross_amount,
             }
-            for line in line_item_details
+            for line in canonical_invoice.line_items
         ],
     }
+
+
+def _bind_ai_payload_to_deterministic_lines(
+    payload: Mapping[str, object],
+    deterministic: CanonicalInvoice,
+) -> dict[str, object]:
+    def values_differ(field_name: str, trusted_value: object, observed_value: object) -> bool:
+        if field_name != "observed_unit_code":
+            trusted_decimal = _parse_resolved_total(str(trusted_value or ""))
+            observed_decimal = _parse_resolved_total(str(observed_value or ""))
+            if trusted_decimal is not None and observed_decimal is not None:
+                return abs(trusted_decimal - observed_decimal) > Decimal("0.001")
+        return " ".join(str(trusted_value or "").strip().split()).casefold() != " ".join(
+            str(observed_value or "").strip().split()
+        ).casefold()
+
+    trusted_by_id = {
+        line.canonical_line_id: line
+        for line in deterministic.line_items
+        if line.canonical_line_id
+    }
+    raw_items = payload.get("line_items")
+    if not isinstance(raw_items, (list, tuple)):
+        raise ValueError("canonical AI response must echo deterministic line identities")
+    received_ids = [
+        str(item.get("canonical_line_id") or "")
+        for item in raw_items
+        if isinstance(item, Mapping)
+    ]
+    if (
+        len(received_ids) != len(trusted_by_id)
+        or len(set(received_ids)) != len(received_ids)
+        or set(received_ids) != set(trusted_by_id)
+    ):
+        raise ValueError("canonical AI response line identity coverage is invalid")
+    bound_items: list[dict[str, object]] = []
+    extraction_notes = [str(note) for note in payload.get("extraction_notes") or () if str(note).strip()]
+    for item in raw_items:
+        if not isinstance(item, Mapping):
+            raise ValueError("canonical AI response contains a non-object line")
+        echoed_id = str(item.get("canonical_line_id") or "")
+        trusted = trusted_by_id[echoed_id]
+        observed_values = {
+            "observed_quantity": item.get("observed_quantity") or item.get("quantity") or "",
+            "observed_unit_code": item.get("observed_unit_code") or item.get("unit_code") or "",
+            "observed_unit_price": item.get("observed_unit_price") or item.get("unit_price") or "",
+            "observed_taxable_amount": item.get("observed_taxable_amount") or item.get("taxable_amount") or "",
+            "observed_vat_rate": item.get("observed_vat_rate") or item.get("vat_rate") or "",
+            "observed_tax_amount": item.get("observed_tax_amount") or item.get("tax_amount") or "",
+            "observed_gross_amount": item.get("observed_gross_amount") or item.get("gross_amount") or "",
+        }
+        trusted_values = {
+            "observed_quantity": trusted.quantity,
+            "observed_unit_code": trusted.unit_code,
+            "observed_unit_price": trusted.unit_price,
+            "observed_taxable_amount": trusted.taxable_amount,
+            "observed_vat_rate": trusted.vat_rate,
+            "observed_tax_amount": trusted.tax_amount,
+            "observed_gross_amount": trusted.gross_amount,
+        }
+        for field_name, trusted_value in trusted_values.items():
+            observed_value = str(observed_values[field_name] or "").strip()
+            if trusted_value and observed_value and values_differ(field_name, trusted_value, observed_value):
+                extraction_notes.append(f"{field_name}_conflict")
+            if trusted_value:
+                observed_values[field_name] = trusted_value
+        bound_items.append(
+            {
+                **dict(item),
+                **observed_values,
+                "canonical_line_id": echoed_id,
+                "source_position": trusted.source_position,
+                "external_line_id": "",
+                "description": trusted.description or str(item.get("description") or ""),
+                "evidence": list(
+                    dict.fromkeys(
+                        (
+                            *trusted.evidence,
+                            *tuple(str(value) for value in item.get("evidence") or () if str(value).strip()),
+                            trusted.source_position,
+                        )
+                    )
+                ),
+            }
+        )
+    return {
+        **dict(payload),
+        "line_items": bound_items,
+        "extraction_notes": list(dict.fromkeys(extraction_notes)),
+    }
+
+
+def _canonical_extraction_mode(deterministic: CanonicalInvoice) -> str:
+    discovery_reasons = {
+        "line_items_missing",
+        "line_total_mismatch",
+        "gross_total_mismatch",
+        "line_gross_total_mismatch",
+    }
+    return "discovery" if discovery_reasons.intersection(deterministic.validation.reason_codes) else "repair"
+
+
+def _bind_ai_discovery_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    raw_items = payload.get("line_items")
+    if not isinstance(raw_items, (list, tuple)) or not raw_items:
+        raise ValueError("canonical AI discovery requires at least one source line")
+    bound_items: list[dict[str, object]] = []
+    source_positions: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, Mapping):
+            raise ValueError("canonical AI discovery contains a non-object line")
+        source_position = " ".join(str(item.get("source_position") or "").strip().split())
+        description = " ".join(str(item.get("description") or "").strip().split())
+        if not source_position or not description:
+            raise ValueError("canonical AI discovery requires description and source_position")
+        source_positions.append(source_position.casefold())
+        bound_items.append(
+            {
+                **dict(item),
+                "canonical_line_id": "",
+                "external_line_id": "",
+                "source_position": source_position,
+                "description": description,
+                "evidence": list(
+                    dict.fromkeys(
+                        (
+                            *tuple(str(value) for value in item.get("evidence") or () if str(value).strip()),
+                            source_position,
+                        )
+                    )
+                ),
+            }
+        )
+    if len(set(source_positions)) != len(source_positions):
+        raise ValueError("canonical AI discovery source positions must be unique")
+    return {
+        **dict(payload),
+        "line_items": bound_items,
+        "extraction_notes": list(
+            dict.fromkeys(
+                (
+                    *tuple(str(note) for note in payload.get("extraction_notes") or () if str(note).strip()),
+                    "provider_line_identity_discarded",
+                )
+            )
+        ),
+    }
+
+
+def _apply_deterministic_canonical_arithmetic(
+    candidate: CanonicalInvoice,
+    deterministic: CanonicalInvoice,
+) -> CanonicalInvoice:
+    authoritative_total = _parse_resolved_total(
+        deterministic.totals.payable_total
+        or deterministic.totals.tax_inclusive_total
+        or candidate.totals.payable_total
+        or candidate.totals.tax_inclusive_total
+    )
+    if authoritative_total is None or authoritative_total <= 0 or not candidate.line_items:
+        return candidate
+
+    special_tax = _parse_resolved_total(
+        deterministic.totals.special_tax_total or candidate.totals.special_tax_total
+    ) or Decimal("0.00")
+    taxable_total = Decimal("0.00")
+    vat_total = Decimal("0.00")
+    vat_groups: dict[Decimal, tuple[Decimal, Decimal]] = {}
+    reconciled_lines: list[CanonicalInvoiceLine] = []
+    mismatch_notes: list[str] = []
+    for line in candidate.line_items:
+        taxable = _parse_resolved_total(line.taxable_amount)
+        rate = _parse_resolved_total(line.vat_rate)
+        if taxable is None or rate is None or taxable < 0 or rate < 0:
+            return candidate
+        tax = (taxable * rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        gross = (taxable + tax).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        observed_tax = _parse_resolved_total(line.tax_amount)
+        observed_gross = _parse_resolved_total(line.gross_amount)
+        if observed_tax is not None and abs(observed_tax - tax) > Decimal("0.05"):
+            mismatch_notes.append("observed_tax_amount_mismatch")
+        if observed_gross is not None and abs(observed_gross - gross) > Decimal("0.05"):
+            mismatch_notes.append("observed_gross_amount_mismatch")
+        taxable_total += taxable
+        vat_total += tax
+        group_taxable, group_tax = vat_groups.get(rate, (Decimal("0.00"), Decimal("0.00")))
+        vat_groups[rate] = (group_taxable + taxable, group_tax + tax)
+        reconciled_lines.append(
+            replace(
+                line,
+                taxable_amount=format_decimal(taxable),
+                vat_rate=f"{rate.normalize():f}",
+                tax_amount=format_decimal(tax),
+                gross_amount=format_decimal(gross),
+            )
+        )
+
+    taxable_total = taxable_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    vat_total = vat_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    derived_total = (taxable_total + vat_total + special_tax).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    observed_goods_total = _parse_resolved_total(candidate.totals.goods_services_total)
+    observed_vat_total = _parse_resolved_total(candidate.totals.vat_total)
+    observed_tax_inclusive_total = _parse_resolved_total(candidate.totals.tax_inclusive_total)
+    observed_payable_total = _parse_resolved_total(candidate.totals.payable_total)
+    if observed_goods_total is not None and abs(observed_goods_total - taxable_total) > Decimal("0.05"):
+        mismatch_notes.append("observed_goods_services_total_mismatch")
+    if observed_vat_total is not None and abs(observed_vat_total - vat_total) > Decimal("0.05"):
+        mismatch_notes.append("observed_vat_total_mismatch")
+    if (
+        observed_tax_inclusive_total is not None
+        and abs(observed_tax_inclusive_total - derived_total) > Decimal("0.05")
+    ):
+        mismatch_notes.append("observed_tax_inclusive_total_mismatch")
+    if observed_payable_total is not None and abs(observed_payable_total - authoritative_total) > Decimal("0.05"):
+        mismatch_notes.append("observed_payable_total_mismatch")
+    for observed_summary in candidate.vat_summary:
+        observed_rate = _parse_resolved_total(observed_summary.rate)
+        observed_summary_taxable = _parse_resolved_total(observed_summary.taxable_amount)
+        observed_summary_tax = _parse_resolved_total(observed_summary.tax_amount)
+        derived_group = vat_groups.get(observed_rate) if observed_rate is not None else None
+        if derived_group is None or (
+            observed_summary_taxable is not None
+            and abs(observed_summary_taxable - derived_group[0]) > Decimal("0.05")
+        ) or (
+            observed_summary_tax is not None
+            and abs(observed_summary_tax - derived_group[1]) > Decimal("0.05")
+        ):
+            mismatch_notes.append("observed_vat_summary_mismatch")
+            break
+    if abs(derived_total - authoritative_total) > Decimal("0.05"):
+        return replace(
+            candidate,
+            validation=CanonicalInvoiceValidation(
+                status="invalid",
+                reason_codes=tuple(
+                    dict.fromkeys((*candidate.validation.reason_codes, "deterministic_document_total_mismatch"))
+                ),
+                evidence=candidate.validation.evidence,
+            ),
+            extraction_notes=tuple(
+                dict.fromkeys(
+                    (
+                        *candidate.extraction_notes,
+                        *mismatch_notes,
+                        "deterministic_document_total_mismatch",
+                    )
+                )
+            ),
+        )
+
+    reconciled = replace(
+        candidate,
+        line_items=tuple(reconciled_lines),
+        vat_summary=tuple(
+            CanonicalVatSummaryLine(
+                rate=f"{rate.normalize():f}",
+                taxable_amount=format_decimal(group_taxable),
+                tax_amount=format_decimal(group_tax),
+                evidence=("deterministic_arithmetic_from_ai_lines",),
+            )
+            for rate, (group_taxable, group_tax) in sorted(vat_groups.items())
+        ),
+        totals=CanonicalInvoiceTotals(
+            goods_services_total=format_decimal(taxable_total),
+            vat_total=format_decimal(vat_total),
+            special_tax_total=format_decimal(special_tax),
+            tax_inclusive_total=format_decimal(derived_total),
+            payable_total=format_decimal(authoritative_total),
+            evidence=tuple(
+                dict.fromkeys(
+                    (*candidate.totals.evidence, "deterministic_arithmetic_from_document_total")
+                )
+            ),
+        ),
+        extraction_notes=tuple(
+            dict.fromkeys(
+                (
+                    *candidate.extraction_notes,
+                    *mismatch_notes,
+                    "canonical_deterministic_arithmetic_applied",
+                )
+            )
+        ),
+    )
+    return with_validation(reconciled)
 
 
 def _maybe_complete_canonical_with_ai(
@@ -726,6 +1019,7 @@ def _maybe_complete_canonical_with_ai(
     extractor = getattr(provider, "extract_invoice_canonical", None)
     if extractor is None:
         return deterministic
+    mode = _canonical_extraction_mode(deterministic)
     try:
         payload = extractor(
             CanonicalExtractionRequest(
@@ -739,19 +1033,71 @@ def _maybe_complete_canonical_with_ai(
                 ),
                 client_identity=client_identity or {},
                 max_input_chars=effective_policy.max_input_chars,
+                mode=mode,
             )
         )
-        candidate = canonical_invoice_from_ai_payload(payload)
+        bound_payload = (
+            _bind_ai_discovery_payload(payload)
+            if mode == "discovery"
+            else _bind_ai_payload_to_deterministic_lines(payload, deterministic)
+        )
+        candidate = canonical_invoice_from_ai_payload(bound_payload)
+        candidate = with_validation(
+            replace(
+                candidate,
+                source=deterministic.source,
+            )
+        )
     except Exception as exc:  # noqa: BLE001 - parser fallback must keep deterministic extraction
         return replace(
             deterministic,
-            extraction_notes=tuple(dict.fromkeys((*deterministic.extraction_notes, f"canonical_ai_error:{type(exc).__name__}"))),
+            extraction_notes=tuple(
+                dict.fromkeys(
+                    (
+                        *deterministic.extraction_notes,
+                        *(('canonical_ai_discovery_rejected',) if mode == "discovery" else ()),
+                        f"canonical_ai_error:{type(exc).__name__}",
+                    )
+                )
+            ),
         )
+    if mode == "repair":
+        line_coverage = validate_line_decision_coverage(
+            deterministic.line_items,
+            [
+                {"canonical_line_id": line.canonical_line_id}
+                for line in candidate.line_items
+            ],
+        )
+        if line_coverage.status != "valid":
+            return replace(
+                deterministic,
+                extraction_notes=tuple(
+                    dict.fromkeys(
+                        (
+                            *deterministic.extraction_notes,
+                            "canonical_ai_rejected",
+                            "canonical_line_coverage_invalid",
+                        )
+                    )
+                ),
+            )
+    candidate = _apply_deterministic_canonical_arithmetic(candidate, deterministic)
     if candidate.validation.status == "valid":
         return replace(
             candidate,
             header=deterministic.header,
-            extraction_notes=tuple(dict.fromkeys((*deterministic.extraction_notes, "canonical_ai_used"))),
+            ai_used=True,
+            extraction_notes=tuple(
+                dict.fromkeys(
+                    (
+                        *deterministic.extraction_notes,
+                        *candidate.extraction_notes,
+                        "canonical_ai_used",
+                        *(('canonical_ai_discovery_used',) if mode == "discovery" else ('canonical_ai_repair_used',)),
+                    )
+                )
+            ),
         )
     return replace(
         deterministic,
@@ -760,6 +1106,7 @@ def _maybe_complete_canonical_with_ai(
                 (
                     *deterministic.extraction_notes,
                     "canonical_ai_rejected",
+                    *(('canonical_ai_discovery_rejected',) if mode == "discovery" else ()),
                     *candidate.validation.reason_codes,
                 )
             )
@@ -890,9 +1237,23 @@ def parse_pdf_invoice(
     )
 
 
-def parse_invoice_folder(input_dir: Path) -> list[ParsedInvoice]:
+def parse_invoice_folder(
+    input_dir: Path,
+    *,
+    canonical_extraction_provider: object | None = None,
+    canonical_extraction_policy: CanonicalExtractionPolicy | None = None,
+    client_identity: dict[str, object] | None = None,
+) -> list[ParsedInvoice]:
     files = sorted(input_dir.rglob("*.pdf"), key=lambda item: item.name.lower())
-    return [parse_pdf_invoice(path) for path in files]
+    return [
+        parse_pdf_invoice(
+            path,
+            canonical_extraction_provider=canonical_extraction_provider,
+            canonical_extraction_policy=canonical_extraction_policy,
+            client_identity=client_identity,
+        )
+        for path in files
+    ]
 
 
 def write_invoice_analysis_csv(invoices: list[ParsedInvoice], output_path: Path) -> Path:

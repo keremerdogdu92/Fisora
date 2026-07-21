@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
-from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
+from app.domain.ai_classification import AiClassificationPolicy, AiClassificationRequest, StaticFirstClassifier
 from app.domain.business_relevance import ClientProfile, check_client_onboarding
+from app.domain.canonical_invoices import (
+    CanonicalInvoice,
+    CanonicalInvoiceLine,
+    CanonicalInvoiceTotals,
+    CanonicalVatSummaryLine,
+    with_validation,
+)
 from app.domain.chart_accounts import ChartAccount
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.export_packages import ExportCandidate, build_export_package
@@ -68,6 +76,43 @@ def synthetic_invoices() -> list[ParsedInvoice]:
     ]
 
 
+class _SyntheticPilotSemanticProvider:
+    provider_name = "synthetic_pilot_semantic_fixture"
+
+    def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
+        raw = request.raw_line.lower()
+        category = "isitme_cihazi" if "rexton" in raw else "kisisel_bakim_kozmetik" if "urban care" in raw else "internet"
+        line_decisions = [
+            {
+                "canonical_line_id": str(line.get("canonical_line_id") or ""),
+                "category": category,
+                "confidence": 90,
+                "product_identity": str(line.get("description") or ""),
+                "suggested_account_code": "770.01",
+                "reason": "Synthetic pilot fixture selected an explicit real chart candidate.",
+                "evidence": ["synthetic_fixture:canonical_line"],
+                "needs_research": False,
+                "research_query": "",
+                "risk_flags": [],
+            }
+            for line in request.context.canonical_lines
+        ]
+        return {
+            "category": category,
+            "confidence": 90,
+            "reason": "Synthetic pilot fixture used canonical line evidence and the real candidate set.",
+            "evidence": ["synthetic_fixture:canonical_line"],
+            "suggested_account_code": "770.01",
+            "suggested_counterparty_code": "",
+            "risk_flags": [],
+            "account_reason": "Explicit synthetic semantic decision.",
+            "product_identity": request.raw_line,
+            "needs_research": False,
+            "research_query": "",
+            "line_decisions": line_decisions,
+        }
+
+
 def run_synthetic_pilot(
     store_path: Path | str = "exports/synthetic_pilot_store.json",
     export_csv_path: Path | str | None = None,
@@ -76,7 +121,10 @@ def run_synthetic_pilot(
     accounts = synthetic_chart_accounts()
     invoices = synthetic_invoices()
     selection = select_accounts("synthetic_pilot_chart", accounts)
-    classifier = StaticFirstClassifier(policy=AiClassificationPolicy(enabled=False))
+    classifier = StaticFirstClassifier(
+        provider=_SyntheticPilotSemanticProvider(),
+        policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+    )
     store = JsonWorkflowStore(store_path)
 
     onboarding = check_client_onboarding(profile)
@@ -149,6 +197,41 @@ def _invoice(
     payable_total: str,
     line_item: str,
 ) -> ParsedInvoice:
+    gross = Decimal(payable_total)
+    taxable = (gross / Decimal("1.20")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    tax = (gross - taxable).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    canonical_invoice = with_validation(
+        CanonicalInvoice(
+            source="synthetic_pilot",
+            line_items=(
+                CanonicalInvoiceLine(
+                    description=line_item,
+                    source_position="line:1",
+                    quantity="1",
+                    taxable_amount=f"{taxable:.2f}",
+                    vat_rate="20",
+                    tax_amount=f"{tax:.2f}",
+                    gross_amount=f"{gross:.2f}",
+                    evidence=("synthetic_fixture:canonical_line",),
+                ),
+            ),
+            vat_summary=(
+                CanonicalVatSummaryLine(
+                    rate="20",
+                    taxable_amount=f"{taxable:.2f}",
+                    tax_amount=f"{tax:.2f}",
+                    evidence=("synthetic_fixture:vat_summary",),
+                ),
+            ),
+            totals=CanonicalInvoiceTotals(
+                goods_services_total=f"{taxable:.2f}",
+                vat_total=f"{tax:.2f}",
+                tax_inclusive_total=f"{gross:.2f}",
+                payable_total=f"{gross:.2f}",
+                evidence=("synthetic_fixture:totals",),
+            ),
+        )
+    )
     return ParsedInvoice(
         file_name=file_name,
         provider_hint=provider_hint,
@@ -171,6 +254,7 @@ def _invoice(
         suggested_route="journal_candidate",
         parse_notes=(),
         line_items=(line_item,),
+        canonical_invoice=canonical_invoice,
     )
 
 

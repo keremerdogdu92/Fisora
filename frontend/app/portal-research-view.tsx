@@ -16,6 +16,9 @@ import {
 type ResearchPayload = {
   kind: string;
   key: string;
+  profile_id?: string;
+  expected_revision?: number;
+  client_id?: string;
   query?: string;
   supplier_hint?: string;
   activity_context?: string;
@@ -26,6 +29,17 @@ type ResearchPayload = {
   force?: boolean;
 };
 
+type ResearchDisplayProfile = ResearchProfileView & {
+  non_authoritative_display?: {
+    product_category?: string;
+    account_treatment?: string;
+  };
+};
+
+function nonAuthoritativeDisplay(profile?: ResearchProfileView) {
+  return (profile as ResearchDisplayProfile | undefined)?.non_authoritative_display || {};
+}
+
 function sourceSummary(profile: ResearchProfileView) {
   const sources = Array.isArray(profile.sources) ? profile.sources : Array.isArray(profile.evidence) ? profile.evidence : [];
   if (!sources.length) return "Kaynak yok";
@@ -35,11 +49,12 @@ function sourceSummary(profile: ResearchProfileView) {
 
 function categorySummary(profile?: ResearchProfileView) {
   if (!profile) return "";
-  if (profile.product_category) return profile.product_category;
+  const display = nonAuthoritativeDisplay(profile);
+  if (display.product_category) return display.product_category;
   if (Array.isArray(profile.common_product_categories) && profile.common_product_categories.length) {
     return profile.common_product_categories.join(", ");
   }
-  return profile.account_treatment || "";
+  return display.account_treatment || "";
 }
 
 function formatConfidence(value?: number) {
@@ -68,10 +83,11 @@ function reviewReason(profile?: ResearchProfileView) {
   if (sourceSummary(profile) === "Kaynak yok") return "Kaynak yok";
   if (researchConfidence < 70) return "Kaynak guveni dusuk";
   if (impactConfidence < 70) return "Muhasebe etkisi belirsiz";
-  if (profile.account_treatment === "fixed_asset_review") return "Demirbas kontrolu";
-  if (profile.account_treatment === "non_deductible_review") return "KKEG kontrolu";
-  if (profile.account_treatment === "manual_review") return "Manuel etki";
-  return "Otomatik kullanilabilir";
+  const treatment = nonAuthoritativeDisplay(profile).account_treatment;
+  if (treatment === "fixed_asset_review") return "Demirbas kontrolu";
+  if (treatment === "non_deductible_review") return "KKEG kontrolu";
+  if (treatment === "manual_review") return "Manuel etki";
+  return "Kaynakli kanit hazir";
 }
 
 function benchmarkRunTime(run: ResearchBenchmarkRunView) {
@@ -112,7 +128,7 @@ export function ResearchKnowledgeView({
     sessionToken: session?.sessionToken || "",
     userId: session?.userId || loginUserId || "mali-musavir",
   };
-  const selectedProfile = profiles.find((profile) => profile.key === selectedKey) ?? profiles[0];
+  const selectedProfile = profiles.find((profile) => profile.profile_id === selectedKey) ?? profiles[0];
 
   async function loadResearchData() {
     const [profilePayload, runPayload] = await Promise.all([
@@ -122,7 +138,7 @@ export function ResearchKnowledgeView({
     const nextProfiles = Array.isArray(profilePayload?.profiles) ? profilePayload.profiles : [];
     setProfiles(nextProfiles);
     setBenchmarkRuns(Array.isArray(runPayload?.runs) ? runPayload.runs : []);
-    setSelectedKey((current) => current || nextProfiles[0]?.key || "");
+    setSelectedKey((current) => current || nextProfiles[0]?.profile_id || "");
   }
 
   useEffect(() => {
@@ -160,12 +176,14 @@ export function ResearchKnowledgeView({
         payload: {
           kind: selectedProfile.kind || "brand",
           key: selectedProfile.key,
+          profile_id: selectedProfile.profile_id,
+          expected_revision: selectedProfile.revision,
           summary_tr: overrideSummary || selectedProfile.summary_tr || selectedProfile.summary || "",
           category_tags: (overrideCategory || categorySummary(selectedProfile))
             .split(",")
             .map((item) => item.trim())
             .filter(Boolean),
-          account_treatment: selectedProfile.account_treatment || "",
+          account_treatment: nonAuthoritativeDisplay(selectedProfile).account_treatment || "",
           confidence: 100,
         },
         ...auth,
@@ -213,13 +231,13 @@ export function ResearchKnowledgeView({
         <div className="basket-list">
           {profiles.length ? profiles.map((profile) => (
             <button
-              className={`basket-row ${selectedProfile?.key === profile.key ? "active-action" : ""}`}
-              key={`${profile.kind}-${profile.key}`}
-              onClick={() => setSelectedKey(profile.key)}
+              className={`basket-row ${selectedProfile?.profile_id === profile.profile_id ? "active-action" : ""}`}
+              key={`${profile.kind}-${profile.profile_id}`}
+              onClick={() => setSelectedKey(profile.profile_id || "")}
               type="button"
             >
               <div>
-                <strong>{profile.key}</strong>
+                <strong>{profile.display_key || profile.key}</strong>
                 <span>{turkishResearchSummary(profile)}</span>
               </div>
               <span className="status export_ready">{formatConfidence(profileResearchConfidence(profile))}</span>
@@ -251,6 +269,8 @@ export function ResearchKnowledgeView({
             void submitRefresh({
               kind: selectedProfile.kind || "brand",
               key: selectedProfile.key,
+              profile_id: selectedProfile.profile_id,
+              client_id: selectedProfile.client_id,
               query: refreshQuery || selectedProfile.key,
               force: true,
             })
@@ -262,7 +282,7 @@ export function ResearchKnowledgeView({
       </div>
 
       <div className="panel">
-        <h2>Ofis geneli override</h2>
+        <h2>Musavir kanit notu</h2>
         <input
           aria-label="Override kategori"
           onChange={(event) => setOverrideCategory(event.target.value)}

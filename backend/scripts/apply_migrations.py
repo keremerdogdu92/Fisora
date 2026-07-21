@@ -13,6 +13,7 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MIGRATIONS_DIR = ROOT / "backend" / "db" / "migrations"
 INCLUDE_PATTERN = re.compile(r"^\s*--\s*fisora:include\s+(.+?)\s*$")
+LEGACY_MUTABLE_MIGRATION_VERSIONS = {"001"}
 
 
 @dataclass(frozen=True)
@@ -85,10 +86,28 @@ def _ensure_schema_migrations(cursor: object) -> None:
     )
 
 
-def _applied_versions(cursor: object) -> set[str]:
+def _applied_migrations(cursor: object) -> dict[str, str]:
     _ensure_schema_migrations(cursor)
-    cursor.execute("select version from schema_migrations")
-    return {str(row[0]) for row in cursor.fetchall()}
+    cursor.execute("select version, checksum from schema_migrations")
+    return {str(row[0]): str(row[1]) for row in cursor.fetchall()}
+
+
+def validate_applied_checksums(
+    migrations: list[Migration],
+    applied: dict[str, str],
+) -> None:
+    current = {migration.version: migration for migration in migrations}
+    mismatches = [
+        version
+        for version, checksum in applied.items()
+        if version in current
+        and version not in LEGACY_MUTABLE_MIGRATION_VERSIONS
+        and current[version].checksum != checksum
+    ]
+    if mismatches:
+        raise ValueError(
+            "Applied migration checksum mismatch: " + ", ".join(sorted(mismatches))
+        )
 
 
 def apply_migrations(database_url: str, migrations: list[Migration]) -> list[Migration]:
@@ -99,7 +118,9 @@ def apply_migrations(database_url: str, migrations: list[Migration]) -> list[Mig
     applied: list[Migration] = []
     with psycopg.connect(database_url) as connection:
         with connection.cursor() as cursor:
-            pending = plan_migrations(migrations, _applied_versions(cursor))
+            applied_migrations = _applied_migrations(cursor)
+            validate_applied_checksums(migrations, applied_migrations)
+            pending = plan_migrations(migrations, set(applied_migrations))
             for migration in pending:
                 cursor.execute(migration.sql)
                 cursor.execute(

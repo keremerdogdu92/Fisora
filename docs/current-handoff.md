@@ -193,11 +193,11 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime kod release'i: `9770e70`; kod release scripti
-  `before_commit=3602c7c`, `after_commit=9770e70`, `smoke=ok`, `/health`
+- Son dogrulanan runtime kod release'i: `39f1b39`; kod release scripti
+  `before_commit=240a0f9`, `after_commit=39f1b39`, `smoke=ok`, `/health`
   200, readiness 200, root route 200, `ready=true`, `pilot_sellable=true`
   dondu.
-- Son deploy smoke: 2026-07-03, `/health` 200, readiness `ready=true`,
+- Son deploy smoke: 2026-07-21, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root route 200.
 - KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,
   `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`

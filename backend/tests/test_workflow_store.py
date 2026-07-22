@@ -179,6 +179,34 @@ class WorkflowStoreTests(unittest.TestCase):
             "gpt-oss-120b",
         ])
 
+    def test_ai_runtime_from_env_builds_nvidia_first_provider_chain(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER": "nvidia",
+                "FISORA_AI_PROVIDER_CHAIN": "nvidia,groq,openrouter,cerebras",
+                "NVIDIA_API_KEY": "nvapi-test-secret",
+                "GROQ_API_KEY": "gsk-test",
+                "OPENROUTER_API_KEY": "or-test",
+                "CEREBRAS_API_KEY": "csk-test",
+                "FISORA_NVIDIA_MODEL": "openai/gpt-oss-120b",
+                "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                "FISORA_OPENROUTER_MODEL": "openai/gpt-oss-20b:free",
+                "FISORA_CEREBRAS_MODEL": "gpt-oss-120b",
+            }
+        )
+
+        provider = runtime["statement_ai_provider"]
+
+        self.assertEqual(provider.provider_name, "nvidia>groq>openrouter>cerebras")
+        self.assertEqual(provider.providers[0].provider_name, "nvidia")
+        self.assertEqual(provider.providers[0].model, "openai/gpt-oss-120b")
+        self.assertEqual(getattr(provider.providers[0], "max_tokens", None), 1024)
+        self.assertEqual(provider.providers[0].timeout_seconds, 60.0)
+        self.assertEqual(
+            provider.providers[0].chat_completions_url,
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+        )
+
     def test_json_store_persists_client_documents_reviews_and_export_packages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store_path = Path(temp_dir) / "phase0_store.json"
@@ -496,7 +524,11 @@ class WorkflowStoreTests(unittest.TestCase):
             )
             store.save_export_package(client_id="client-1", package={"output_filename": export_file.name})
 
-            summary = store.reset_test_data(document_storage_path=document_dir, export_path=export_dir)
+            summary = store.reset_test_data(
+                document_storage_path=document_dir,
+                export_path=export_dir,
+                protected_storage_path=Path(temp_dir) / "protected",
+            )
             reloaded = JsonWorkflowStore(base / "phase0_store.json")
             self.assertEqual(summary["preserved_portal_user_count"], 1)
             self.assertEqual(summary["deleted_client_count"], 1)

@@ -65,6 +65,19 @@ class DbMigrationTests(unittest.TestCase):
 
         validate_applied_checksums(migrations, {"001": "production-legacy-checksum"})
 
+    def test_protected_corpus_migration_is_immutable_and_complete(self) -> None:
+        migration = next(
+            item
+            for item in discover_migrations(ROOT / "backend" / "db" / "migrations")
+            if item.version == "005"
+        )
+
+        self.assertIn("create table protected_corpora", migration.sql.lower())
+        self.assertIn("create table protected_corpus_items", migration.sql.lower())
+        self.assertIn("create table reference_outcome_versions", migration.sql.lower())
+        self.assertIn("create table protected_rule_versions", migration.sql.lower())
+        self.assertIn("unique (corpus_id, source_sha256)", migration.sql.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

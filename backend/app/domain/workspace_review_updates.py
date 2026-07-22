@@ -74,28 +74,54 @@ def apply_review_decision_to_document(
             reviewed_at=reviewed_at,
         )
     else:
+        accounting_direction = str(result.get("accounting_direction") or "").strip()
         old_expense_account = str(result.get("selected_expense_account") or "").strip()
+        old_revenue_account = str(result.get("selected_revenue_account") or "").strip()
+        old_semantic_account = old_revenue_account if accounting_direction == "sales" else old_expense_account
         old_supplier_account = str(result.get("selected_supplier_account") or "").strip()
+        old_customer_account = str(result.get("selected_customer_account") or "").strip()
         old_counterparty_account = str(result.get("counterparty_match_code") or "").strip()
 
         if corrected_account:
             result["draft_lines"] = _replace_line_accounts(
                 list(result.get("draft_lines") or []),
-                old_codes={old_expense_account},
+                old_codes={old_semantic_account},
                 new_code=corrected_account,
             )
-            _replace_statement_entry_accounts(result, {old_expense_account}, corrected_account)
-            result["selected_expense_account"] = corrected_account
+            _replace_statement_entry_accounts(result, {old_semantic_account}, corrected_account)
+            if isinstance(result.get("line_decisions"), list):
+                result["line_decisions"] = [
+                    {
+                        **line_decision,
+                        "account_code": corrected_account,
+                        "decision_source": "accountant",
+                        "decision_actor": reviewer,
+                    }
+                    if isinstance(line_decision, dict)
+                    and str(line_decision.get("account_code") or "").strip() == old_semantic_account
+                    else line_decision
+                    for line_decision in result["line_decisions"]
+                ]
+            if accounting_direction == "sales":
+                result["selected_revenue_account"] = corrected_account
+            else:
+                result["selected_expense_account"] = corrected_account
 
         if corrected_counterparty:
-            supplier_targets = {old_supplier_account, old_counterparty_account}
+            supplier_targets = {
+                old_customer_account if accounting_direction == "sales" else old_supplier_account,
+                old_counterparty_account,
+            }
             result["draft_lines"] = _replace_line_accounts(
                 list(result.get("draft_lines") or []),
                 old_codes=supplier_targets,
                 new_code=corrected_counterparty,
             )
             _replace_statement_entry_accounts(result, supplier_targets, corrected_counterparty)
-            result["selected_supplier_account"] = corrected_counterparty
+            if accounting_direction == "sales":
+                result["selected_customer_account"] = corrected_counterparty
+            else:
+                result["selected_supplier_account"] = corrected_counterparty
             result["counterparty_match_code"] = corrected_counterparty
             result["counterparty_match_confidence"] = 100
             result["counterparty_match_reason"] = "accountant_corrected"
@@ -179,6 +205,11 @@ def _decision_snapshot(result: dict[str, Any]) -> dict[str, object]:
         selected_counterparty = str(
             result.get("selected_supplier_account") or result.get("counterparty_match_code") or result.get("selected_customer_account") or ""
         ).strip()
+    canonical_invoice = result.get("canonical_invoice") or {}
+    canonical_lines = canonical_invoice.get("line_items") if isinstance(canonical_invoice, dict) else []
+    line_coverage = result.get("line_decision_coverage") or {}
+    expected_ids = line_coverage.get("expected_ids") if isinstance(line_coverage, dict) else []
+    canonical_line_count = len(expected_ids) if isinstance(expected_ids, list) and expected_ids else len(canonical_lines or [])
     return {
         "selected_account_code": selected_account,
         "selected_vat_account": str(result.get("selected_vat_account") or result.get("selected_purchase_vat_account") or result.get("selected_sales_vat_account") or "").strip(),
@@ -187,6 +218,8 @@ def _decision_snapshot(result: dict[str, Any]) -> dict[str, object]:
         "export_status": str(result.get("export_status") or ""),
         "draft_line_count": len(result.get("draft_lines") or []),
         "is_balanced": bool(result.get("is_balanced")),
+        "canonical_line_count": canonical_line_count,
+        "canonical_validation_status": str(result.get("canonical_validation_status") or ""),
     }
 
 

@@ -400,6 +400,23 @@ class TestDataResetPayload(BaseModel):
     delete_files: bool = True
 
 
+class ProtectedCorpusCreatePayload(BaseModel):
+    corpus_key: str = "pilot-accountant-reference"
+    version: int = 1
+    target_purchase_count: int = 35
+    target_sales_count: int = 15
+
+
+class ProtectedCorpusEnrollPayload(BaseModel):
+    client_id: str
+    document_ref: str
+    direction: Literal["purchase", "sale"]
+
+
+class ProtectedCorpusFreezePayload(BaseModel):
+    confirmation: str
+
+
 class DocumentRetentionRunPayload(BaseModel):
     delete_files: bool = True
 

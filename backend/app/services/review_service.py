@@ -35,11 +35,13 @@ class ReviewService:
         record_operation_event: OperationRecorder,
         require_client_access: AccessChecker,
         rule_interpreter: Any | None = None,
+        protected_corpus_service: Any | None = None,
     ) -> None:
         self.store = store
         self.record_operation_event = record_operation_event
         self.require_client_access = require_client_access
         self.rule_interpreter = rule_interpreter
+        self.protected_corpus_service = protected_corpus_service
 
     def review_learning_event(self, payload: ReviewDecisionPayload) -> dict[str, object]:
         decision = ReviewDecision(
@@ -152,6 +154,27 @@ class ReviewService:
             ) from exc
         except NormalizedAccountingError as exc:
             raise HTTPException(status_code=409, detail={"code": "normalized_journal_error", "message": str(exc)}) from exc
+        if self.protected_corpus_service is not None:
+            try:
+                self.protected_corpus_service.capture_reference_if_enrolled(
+                    client_id=payload.client_id,
+                    document_ref=decision.document_ref,
+                    saved_review=saved,
+                    learning_event=event,
+                    actor=decision.reviewer,
+                )
+            except Exception as exc:
+                self.record_operation_event(
+                    store=self.store,
+                    client_id=payload.client_id,
+                    event_type="protected_reference_capture_failed",
+                    status="error",
+                    message="Korumali musavir referansi kaydedilemedi; ana review kaydi korundu.",
+                    metadata={
+                        "document_ref": decision.document_ref,
+                        "error": str(exc),
+                    },
+                )
         self._record_learning_pipeline_events(
             client_id=payload.client_id,
             document_ref=decision.document_ref,

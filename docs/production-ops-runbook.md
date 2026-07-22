@@ -154,13 +154,18 @@ Backup container su dosyalari uretir:
 ```text
 postgres-YYYYMMDDTHHMMSSZ.sql
 documents-YYYYMMDDTHHMMSSZ.manifest.tsv
+protected-corpus-YYYYMMDDTHHMMSSZ.tar.gz
+protected-corpus-YYYYMMDDTHHMMSSZ.sha256
+fisora-protected-backup-YYYYMMDDTHHMMSSZ.tar.gz.age (off-host hedefte)
 ```
 
 Kontrol listesi:
 
 - SQL dump dosyasi olustu.
 - Belge manifest dosyasi olustu.
-- `FISORA_BACKUP_COPY_DIR` tanimliysa ayni dosyalar makine disi hedefte de var.
+- Host tarafindaki `FISORA_BACKUP_COPY_DIR` ayri disk/remote mount'a bakiyor ve
+  public `FISORA_BACKUP_AGE_RECIPIENT` tanimli; bu hedefte yalniz sifreli paket var.
+- Age private identity backup containerinda veya repoda degil.
 - Backup klasoru ve belge klasoru disk kullaniminda beklenmeyen artis yok.
 
 Restore komutu sadece acil durum icindir:
@@ -171,6 +176,24 @@ sh deploy/scripts/fisora-prod.sh restore-postgres /path/to/postgres-YYYYMMDDTHHM
 
 Restore mevcut database icerigini degistirir. Once yeni backup alinmadan
 calistirilmaz.
+
+Korumali corpus restore kaniti production projesinde calismaz. Once ayri bir
+PostgreSQL hedefi restore edilir, sonra sifreli paket ve kaynak hashleri birlikte
+dogrulanir:
+
+```bash
+FISORA_COMPOSE_PROJECT=fisora-restore-check \
+  sh deploy/scripts/fisora-prod.sh restore-protected-check \
+  /offhost/fisora-protected-backup-...tar.gz.age \
+  /secure/age-identity.txt \
+  /tmp/fisora-protected-restore \
+  postgresql://...@host.docker.internal:5432/fisora_restore
+```
+
+Gercek `TEMIZLE` isleminden once `GET /api/phase0/store/admin/test-reset/preview`
+ile silinecek operasyonel kayitlar ve korunacak corpus/reference/rule sayilari
+karsilastirilir. Korumali kaynak volume'u normal belge/export volume'larindan
+ayridir ve reset tarafindan temizlenmez.
 
 ## Belge Saklama Operasyonu
 

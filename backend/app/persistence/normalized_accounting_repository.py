@@ -240,6 +240,20 @@ def _allocation_plan(
     return plan, coverage
 
 
+def build_line_allocation_plan(
+    *,
+    canonical_lines: list[dict[str, Any]],
+    draft_lines: list[dict[str, Any]],
+    line_decisions: object,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Shared deterministic coverage proof for normalized and compatibility review snapshots."""
+    return _allocation_plan(
+        canonical_lines=canonical_lines,
+        draft_lines=draft_lines,
+        line_decisions=line_decisions,
+    )
+
+
 class NormalizedAccountingRepository:
     """Relational owner for the Phase 1 purchase-invoice vertical slice.
 

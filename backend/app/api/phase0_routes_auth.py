@@ -9,6 +9,7 @@ from app.api.phase0_context import (
     clear_portal_session_cookie,
     default_document_storage_path,
     default_export_path,
+    default_protected_corpus_path,
     get_workflow_store,
     password_bootstrap_enabled,
     require_client_access,
@@ -394,5 +395,25 @@ def store_admin_test_reset(
     return store.reset_test_data(
         document_storage_path=default_document_storage_path(),
         export_path=default_export_path(),
+        protected_storage_path=default_protected_corpus_path(),
         delete_files=payload.delete_files,
     )
+
+
+@router.get("/store/admin/test-reset/preview")
+def store_admin_test_reset_preview(
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    store = get_workflow_store()
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"allowed": False, "reason": "user_required"})
+    portal_user = store.get_portal_user(user_id) if hasattr(store, "get_portal_user") else None
+    role = str((portal_user or {}).get("role") or "").strip().lower()
+    if role not in {"accountant", "admin"}:
+        raise HTTPException(status_code=403, detail={"allowed": False, "reason": "accountant_required"})
+    if not hasattr(store, "preview_test_data_reset"):
+        raise HTTPException(status_code=501, detail={"allowed": False, "reason": "reset_preview_not_supported"})
+    return store.preview_test_data_reset()

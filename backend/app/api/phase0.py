@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api import (
     phase0_routes_ai,
     phase0_routes_auth,
+    phase0_routes_corpus,
     phase0_routes_operations,
     phase0_routes_outgoing_invoices,
     phase0_routes_qnb,
@@ -18,6 +19,7 @@ from app.api.phase0_context import (
     DEFAULT_BACKUP_PATH,
     DEFAULT_DOCUMENT_STORAGE_PATH,
     DEFAULT_EXPORT_PATH,
+    DEFAULT_PROTECTED_CORPUS_PATH,
     DEFAULT_STORE_PATH,
     SESSION_COOKIE_NAME,
     get_workflow_store,
@@ -86,6 +88,7 @@ from app.domain.tax_certificates import parse_tax_certificate_file
 
 router = APIRouter()
 router.include_router(phase0_routes_auth.router)
+router.include_router(phase0_routes_corpus.router)
 router.include_router(phase0_routes_operations.router)
 router.include_router(phase0_routes_outgoing_invoices.router)
 router.include_router(phase0_routes_qnb.router)

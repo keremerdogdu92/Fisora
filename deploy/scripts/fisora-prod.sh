@@ -44,6 +44,33 @@ case "$cmd" in
     require_env_file
     compose run --rm -e FISORA_BACKUP_RUN_ONCE=1 backup
     ;;
+  restore-protected-check)
+    require_env_file
+    encrypted_backup="${2:-}"
+    age_identity="${3:-}"
+    restore_dir="${4:-}"
+    restored_dsn="${5:-}"
+    if [ "$PROJECT_NAME" = "fisora" ] || [ "$PROJECT_NAME" = "production" ]; then
+      echo "restore-protected-check refuses the production compose project" >&2
+      exit 2
+    fi
+    if [ ! -f "$encrypted_backup" ] || [ ! -f "$age_identity" ] || [ -z "$restore_dir" ] || [ -z "$restored_dsn" ]; then
+      echo "Usage: FISORA_COMPOSE_PROJECT=isolated $0 restore-protected-check <backup.age> <identity> <restore-dir> <restored-dsn>" >&2
+      exit 2
+    fi
+    mkdir -p "$restore_dir"
+    backup_dir="$(CDPATH= cd -- "$(dirname -- "$encrypted_backup")" && pwd)"
+    identity_dir="$(CDPATH= cd -- "$(dirname -- "$age_identity")" && pwd)"
+    restore_abs="$(CDPATH= cd -- "$restore_dir" && pwd)"
+    docker run --rm --entrypoint /bin/sh \
+      -v "$backup_dir:/proof/backup:ro" -v "$identity_dir:/proof/identity:ro" -v "$restore_abs:/proof/restore" \
+      fisero-backup /usr/local/bin/fisora-verify-restore.sh \
+      "/proof/backup/$(basename -- "$encrypted_backup")" "/proof/identity/$(basename -- "$age_identity")" /proof/restore
+    docker run --rm --entrypoint python3 --add-host host.docker.internal:host-gateway \
+      -e DATABASE_URL="$restored_dsn" \
+      -v "$restore_abs:/proof/restore:ro" fisero-backup \
+      /usr/local/bin/fisora-verify-corpus.py /proof/restore
+    ;;
   logs)
     require_env_file
     service="${2:-backend}"
@@ -79,6 +106,7 @@ Commands:
   migrate            Run database migrations once.
   smoke              Run Postgres-backed workflow smoke test.
   backup-once        Run one database/document manifest backup.
+  restore-protected-check  Verify encrypted protected backup against an isolated restored DB.
   logs [service]     Show logs for backend, worker, frontend, nginx, postgres, backup.
   ps                 Show compose service status.
   down               Stop stack without deleting volumes.

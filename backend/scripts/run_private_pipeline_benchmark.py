@@ -150,6 +150,66 @@ def _quality_gates(records: list[dict[str, object]]) -> dict[str, object]:
     }
 
 
+def _snapshot_digest(value: object) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def build_frozen_corpus_benchmark_input(
+    store: object,
+    corpus_id: str,
+    *,
+    include_private_material: bool = False,
+) -> dict[str, object]:
+    corpus = store.get_protected_corpus(corpus_id)
+    if not corpus:
+        raise ValueError("corpus_not_found")
+    if corpus.get("status") != "frozen":
+        raise ValueError("corpus_not_frozen")
+    items: list[dict[str, object]] = []
+    for item in sorted(store.list_protected_items(corpus_id), key=lambda row: str(row.get("source_sha256") or "")):
+        item_id = str(item.get("corpus_item_id") or item.get("item_id") or "")
+        references = store.list_reference_outcomes(item_id)
+        rules = store.list_protected_rules(item_id)
+        benchmark_item: dict[str, object] = {
+                "corpus_item_id": item_id,
+                "source_sha256": str(item.get("source_sha256") or ""),
+                "direction": str(item.get("direction") or ""),
+                "canonical_snapshot_digest": _snapshot_digest(item.get("canonical_snapshot") or {}),
+                "chart_snapshot_digest": _snapshot_digest(item.get("chart_snapshot") or {}),
+                "rule_snapshot_digest": _snapshot_digest(
+                    [rule.get("rule_snapshot") or {} for rule in rules]
+                ),
+                "reference_version": max(
+                    (int(reference.get("version") or 0) for reference in references),
+                    default=0,
+                ),
+                "reference_digest": _snapshot_digest(references),
+        }
+        if include_private_material:
+            benchmark_item.update(
+                {
+                    "source_path": str(item.get("protected_storage_path") or ""),
+                    "canonical_snapshot": item.get("canonical_snapshot") or {},
+                    "chart_snapshot": item.get("chart_snapshot") or {},
+                    "protected_rules": rules,
+                    "reference_outcomes": references,
+                }
+            )
+        items.append(benchmark_item)
+    return {
+        "corpus_id": str(corpus["corpus_id"]),
+        "corpus_key": str(corpus["corpus_key"]),
+        "corpus_version": int(corpus["version"]),
+        "status": "frozen",
+        "schema_version": "protected-corpus-v1",
+        "prompt_version": os.environ.get("FISORA_ACCOUNTING_PROMPT_VERSION", "runtime-default"),
+        "provider": os.environ.get("FISORA_AI_PROVIDER", "disabled"),
+        "model": os.environ.get("FISORA_AI_MODEL", ""),
+        "items": items,
+    }
+
+
 def _run_one(
     *,
     root: Path,
@@ -211,7 +271,24 @@ def main() -> None:
     parser.add_argument("--firm", action="append", default=[])
     parser.add_argument("--output-root", default="")
     parser.add_argument("--include-ai", action="store_true", help="Run AI tie-breaker pass using current process env.")
+    parser.add_argument("--corpus-id", default="", help="Build read-only benchmark input from a frozen protected corpus.")
     args = parser.parse_args()
+
+    if args.corpus_id:
+        from app.api.phase0_context import get_workflow_store
+
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        output_root = Path(args.output_root) if args.output_root else ROOT / "exports" / "protected-benchmarks" / stamp
+        output_root.mkdir(parents=True, exist_ok=True)
+        benchmark_input = build_frozen_corpus_benchmark_input(
+            get_workflow_store(),
+            args.corpus_id,
+            include_private_material=True,
+        )
+        output_path = output_root / "frozen-corpus-input.json"
+        output_path.write_text(json.dumps(benchmark_input, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(json.dumps({"status": "ok", "output_path": str(output_path), **benchmark_input}, ensure_ascii=False))
+        return
 
     root = Path(args.root)
     firms = args.firm or _discover_firms(root)

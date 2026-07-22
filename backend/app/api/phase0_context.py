@@ -25,6 +25,7 @@ from app.workflows.document_processing import _provider_chain_from_env
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
+from app.services.protected_corpus_service import ProtectedCorpusService
 from app.services.workspace_service import WorkspaceService
 
 
@@ -32,6 +33,9 @@ DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_st
 DEFAULT_DOCUMENT_STORAGE_PATH = Path(os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "exports/documents"))
 DEFAULT_EXPORT_PATH = Path(os.environ.get("FISORA_EXPORT_PATH", "exports/generated"))
 DEFAULT_BACKUP_PATH = Path(os.environ.get("FISORA_BACKUP_PATH", os.environ.get("FISORA_BACKUP_DIR", "exports/backups")))
+DEFAULT_PROTECTED_CORPUS_PATH = Path(
+    os.environ.get("FISORA_PROTECTED_CORPUS_PATH", "exports/protected-corpus")
+)
 SESSION_COOKIE_NAME = "fisora_session"
 
 
@@ -54,6 +58,10 @@ def default_export_path() -> Path:
 
 def default_backup_path() -> Path:
     return _phase0_value("DEFAULT_BACKUP_PATH", DEFAULT_BACKUP_PATH)
+
+
+def default_protected_corpus_path() -> Path:
+    return _phase0_value("DEFAULT_PROTECTED_CORPUS_PATH", DEFAULT_PROTECTED_CORPUS_PATH)
 
 
 def get_workflow_store():
@@ -98,11 +106,27 @@ def get_document_service() -> DocumentService:
 
 
 def get_review_service() -> ReviewService:
+    store = get_workflow_store()
     return ReviewService(
-        store=get_workflow_store(),
+        store=store,
         record_operation_event=record_operation_event,
         require_client_access=require_client_access,
         rule_interpreter=_provider_chain_from_env(os.environ),
+        protected_corpus_service=ProtectedCorpusService(
+            store=store,
+            protected_root=default_protected_corpus_path(),
+            document_root=default_document_storage_path(),
+            export_root=default_export_path(),
+        ),
+    )
+
+
+def get_protected_corpus_service() -> ProtectedCorpusService:
+    return ProtectedCorpusService(
+        store=get_workflow_store(),
+        protected_root=default_protected_corpus_path(),
+        document_root=default_document_storage_path(),
+        export_root=default_export_path(),
     )
 
 

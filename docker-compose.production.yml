@@ -57,6 +57,7 @@ services:
       FISORA_RATE_LIMIT_EXPORT_MAX_REQUESTS: ${FISORA_RATE_LIMIT_EXPORT_MAX_REQUESTS:-60}
       FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
+      FISORA_PROTECTED_CORPUS_PATH: /opt/fisora/protected-corpus
       FISORA_EXPORT_PATH: /opt/fisora/data/exports
       FISORA_BACKUP_PATH: /opt/fisora/data/backups
       FISORA_QNB_ADAPTER: ${FISORA_QNB_ADAPTER:-fake}
@@ -66,6 +67,10 @@ services:
       FISORA_AI_PROVIDER_CHAIN: ${FISORA_AI_PROVIDER_CHAIN:-}
       FISORA_AI_MODEL: ${FISORA_AI_MODEL:-}
       FISORA_GROQ_MODEL: ${FISORA_GROQ_MODEL:-}
+      FISORA_NVIDIA_MODEL: ${FISORA_NVIDIA_MODEL:-}
+      FISORA_NVIDIA_CHAT_COMPLETIONS_URL: ${FISORA_NVIDIA_CHAT_COMPLETIONS_URL:-}
+      FISORA_NVIDIA_MAX_TOKENS: ${FISORA_NVIDIA_MAX_TOKENS:-1024}
+      FISORA_NVIDIA_TIMEOUT_SECONDS: ${FISORA_NVIDIA_TIMEOUT_SECONDS:-60}
       FISORA_OPENAI_MODEL: ${FISORA_OPENAI_MODEL:-}
       FISORA_OPENROUTER_MODEL: ${FISORA_OPENROUTER_MODEL:-}
       FISORA_OPENROUTER_CHAT_COMPLETIONS_URL: ${FISORA_OPENROUTER_CHAT_COMPLETIONS_URL:-}
@@ -81,6 +86,7 @@ services:
       FISORA_RESEARCH_MAX_PER_DOCUMENT: ${FISORA_RESEARCH_MAX_PER_DOCUMENT:-1}
       FISORA_RESEARCH_CONFIDENCE_THRESHOLD: ${FISORA_RESEARCH_CONFIDENCE_THRESHOLD:-70}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
@@ -89,6 +95,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     volumes:
       - fisora_documents:/opt/fisora/data/documents
+      - fisora_protected:/opt/fisora/protected-corpus
       - fisora_exports:/opt/fisora/data/exports
       - fisora_backups:/opt/fisora/data/backups:ro
     depends_on:
@@ -122,6 +129,7 @@ services:
       FISORA_RATE_LIMIT_EXPORT_MAX_REQUESTS: ${FISORA_RATE_LIMIT_EXPORT_MAX_REQUESTS:-60}
       FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
+      FISORA_PROTECTED_CORPUS_PATH: /opt/fisora/protected-corpus
       FISORA_WORKER_RETENTION_INTERVAL_SECONDS: ${FISORA_WORKER_RETENTION_INTERVAL_SECONDS:-86400}
       FISORA_WORKER_PROCESSING_INTERVAL_SECONDS: ${FISORA_WORKER_PROCESSING_INTERVAL_SECONDS:-30}
       FISORA_WORKER_CONCURRENCY: ${FISORA_WORKER_CONCURRENCY:-3}
@@ -133,6 +141,10 @@ services:
       FISORA_AI_PROVIDER_CHAIN: ${FISORA_AI_PROVIDER_CHAIN:-}
       FISORA_AI_MODEL: ${FISORA_AI_MODEL:-}
       FISORA_GROQ_MODEL: ${FISORA_GROQ_MODEL:-}
+      FISORA_NVIDIA_MODEL: ${FISORA_NVIDIA_MODEL:-}
+      FISORA_NVIDIA_CHAT_COMPLETIONS_URL: ${FISORA_NVIDIA_CHAT_COMPLETIONS_URL:-}
+      FISORA_NVIDIA_MAX_TOKENS: ${FISORA_NVIDIA_MAX_TOKENS:-1024}
+      FISORA_NVIDIA_TIMEOUT_SECONDS: ${FISORA_NVIDIA_TIMEOUT_SECONDS:-60}
       FISORA_OPENAI_MODEL: ${FISORA_OPENAI_MODEL:-}
       FISORA_OPENROUTER_MODEL: ${FISORA_OPENROUTER_MODEL:-}
       FISORA_OPENROUTER_CHAT_COMPLETIONS_URL: ${FISORA_OPENROUTER_CHAT_COMPLETIONS_URL:-}
@@ -148,6 +160,7 @@ services:
       FISORA_RESEARCH_MAX_PER_DOCUMENT: ${FISORA_RESEARCH_MAX_PER_DOCUMENT:-1}
       FISORA_RESEARCH_CONFIDENCE_THRESHOLD: ${FISORA_RESEARCH_CONFIDENCE_THRESHOLD:-70}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
@@ -156,6 +169,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     volumes:
       - fisora_documents:/opt/fisora/data/documents
+      - fisora_protected:/opt/fisora/protected-corpus
       - fisora_exports:/opt/fisora/data/exports
     depends_on:
       backend:
@@ -194,18 +208,26 @@ services:
         restart: true
 
   backup:
-    image: postgres:16-alpine
+    image: fisero-backup
+    build:
+      context: .
+      dockerfile: deploy/backup/Dockerfile
     restart: unless-stopped
     command: ["/bin/sh", "/usr/local/bin/fisora-backup.sh"]
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
+      FISORA_PROTECTED_CORPUS_PATH: /opt/fisora/protected-corpus
       FISORA_BACKUP_DIR: /opt/fisora/data/backups
       FISORA_BACKUP_INTERVAL_SECONDS: ${FISORA_BACKUP_INTERVAL_SECONDS:-86400}
+      FISORA_BACKUP_COPY_DIR: /mnt/fisora-backups
+      FISORA_BACKUP_AGE_RECIPIENT: ${FISORA_BACKUP_AGE_RECIPIENT:-}
     volumes:
       - ./deploy/backup/backup.sh:/usr/local/bin/fisora-backup.sh:ro
       - fisora_documents:/opt/fisora/data/documents:ro
+      - fisora_protected:/opt/fisora/protected-corpus:ro
       - fisora_backups:/opt/fisora/data/backups
+      - ${FISORA_BACKUP_COPY_DIR:-./backups/offhost}:/mnt/fisora-backups
     depends_on:
       postgres:
         condition: service_healthy
@@ -214,5 +236,6 @@ volumes:
   fisora_postgres:
   fisora_redis:
   fisora_documents:
+  fisora_protected:
   fisora_exports:
   fisora_backups:

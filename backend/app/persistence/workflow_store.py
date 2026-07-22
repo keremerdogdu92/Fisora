@@ -123,6 +123,10 @@ def empty_store() -> dict[str, Any]:
         "nace_research_profiles": {},
         "brand_research_profiles": {},
         "research_benchmark_runs": [],
+        "protected_corpora": {},
+        "protected_corpus_items": {},
+        "reference_outcome_versions": {},
+        "protected_rule_versions": {},
     }
 
 
@@ -468,8 +472,15 @@ class JsonWorkflowStore:
         *,
         document_storage_path: Path | str,
         export_path: Path | str,
+        protected_storage_path: Path | str,
         delete_files: bool = True,
     ) -> dict[str, Any]:
+        if delete_files:
+            _validate_reset_roots(
+                document_storage_path=document_storage_path,
+                export_path=export_path,
+                protected_storage_path=protected_storage_path,
+            )
         data = self._read()
         preserved_users = {
             user_id: user
@@ -542,6 +553,27 @@ class JsonWorkflowStore:
             "deleted_file_count": deleted_file_count,
             "preserved_portal_user_count": len(preserved_users),
             "preserved_user_ids": sorted(preserved_users),
+            **self._protected_reset_counts(data),
+        }
+
+    def preview_test_data_reset(self) -> dict[str, Any]:
+        data = self._read()
+        return {
+            "reset": False,
+            "preview": True,
+            "deleted_client_count": len(data["clients"]),
+            "deleted_uploaded_document_count": len(data["uploaded_documents"]),
+            "deleted_review_decision_count": len(data["review_decisions"]),
+            **self._protected_reset_counts(data),
+        }
+
+    @staticmethod
+    def _protected_reset_counts(data: dict[str, Any]) -> dict[str, int]:
+        return {
+            "preserved_protected_corpus_count": len(data["protected_corpora"]),
+            "preserved_protected_item_count": len(data["protected_corpus_items"]),
+            "preserved_reference_outcome_count": len(data["reference_outcome_versions"]),
+            "preserved_protected_rule_count": len(data["protected_rule_versions"]),
         }
 
     def record_operation_event(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:
@@ -930,6 +962,195 @@ class JsonWorkflowStore:
     def list_research_benchmark_runs(self, *, limit: int = 20) -> list[dict[str, Any]]:
         data = self._read()
         return deepcopy(data["research_benchmark_runs"][-max(limit, 1):])
+
+    def create_protected_corpus(
+        self,
+        *,
+        corpus_key: str,
+        version: int,
+        target_purchase_count: int,
+        target_sales_count: int,
+        created_by: str,
+    ) -> dict[str, Any]:
+        data = self._read()
+        duplicate = next(
+            (
+                corpus
+                for corpus in data["protected_corpora"].values()
+                if corpus.get("corpus_key") == corpus_key and int(corpus.get("version") or 0) == version
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise ValueError("duplicate_corpus_version")
+        corpus_id = str(uuid4())
+        timestamp = utc_now()
+        record = {
+            "corpus_id": corpus_id,
+            "corpus_key": corpus_key,
+            "version": version,
+            "status": "draft",
+            "target_purchase_count": target_purchase_count,
+            "target_sales_count": target_sales_count,
+            "created_by": created_by,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "frozen_at": "",
+        }
+        data["protected_corpora"][corpus_id] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def get_protected_corpus(self, corpus_id: str) -> dict[str, Any] | None:
+        data = self._read()
+        record = data["protected_corpora"].get(corpus_id)
+        return deepcopy(record) if record else None
+
+    def add_protected_corpus_item(self, *, item: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        corpus_id = str(item.get("corpus_id") or "")
+        corpus = data["protected_corpora"].get(corpus_id)
+        if not corpus:
+            raise ValueError("corpus_not_found")
+        if corpus.get("status") != "draft":
+            raise ValueError("corpus_frozen")
+        source_sha256 = str(item.get("source_sha256") or "")
+        if any(
+            existing.get("corpus_id") == corpus_id and existing.get("source_sha256") == source_sha256
+            for existing in data["protected_corpus_items"].values()
+        ):
+            raise ValueError("duplicate_corpus_source")
+        item_id = str(item.get("item_id") or uuid4())
+        timestamp = utc_now()
+        record = {
+            **item,
+            "item_id": item_id,
+            "corpus_item_id": item_id,
+            "status": str(item.get("status") or "candidate"),
+            "current_reference_version": int(item.get("current_reference_version") or 0),
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        data["protected_corpus_items"][item_id] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def list_protected_items(self, corpus_id: str) -> list[dict[str, Any]]:
+        data = self._read()
+        return [
+            deepcopy(item)
+            for item in data["protected_corpus_items"].values()
+            if item.get("corpus_id") == corpus_id
+        ]
+
+    def protected_item_for_document(self, *, client_id: str, document_ref: str) -> dict[str, Any] | None:
+        data = self._read()
+        candidates = [
+            item
+            for item in data["protected_corpus_items"].values()
+            if item.get("client_id") == client_id
+            and item.get("document_ref") == document_ref
+            and (data["protected_corpora"].get(str(item.get("corpus_id") or "")) or {}).get("status") != "archived"
+        ]
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda item: int(
+                (data["protected_corpora"].get(str(item.get("corpus_id") or "")) or {}).get("version") or 0
+            ),
+            reverse=True,
+        )
+        return deepcopy(candidates[0])
+
+    def append_reference_outcome(self, *, corpus_item_id: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        item = data["protected_corpus_items"].get(corpus_item_id)
+        if not item:
+            raise ValueError("corpus_item_not_found")
+        corpus = data["protected_corpora"].get(str(item.get("corpus_id") or ""))
+        if not corpus or corpus.get("status") != "draft":
+            raise ValueError("corpus_frozen")
+        version = int(item.get("current_reference_version") or 0) + 1
+        record_id = str(uuid4())
+        record = {
+            **deepcopy(outcome),
+            "reference_id": record_id,
+            "corpus_item_id": corpus_item_id,
+            "version": version,
+            "created_at": utc_now(),
+        }
+        data["reference_outcome_versions"][record_id] = record
+        item["current_reference_version"] = version
+        if bool(record.get("is_authoritative")):
+            item["status"] = "reference_ready"
+        item["updated_at"] = record["created_at"]
+        self._write(data)
+        return deepcopy(record)
+
+    def list_reference_outcomes(self, corpus_item_id: str) -> list[dict[str, Any]]:
+        data = self._read()
+        records = [
+            deepcopy(record)
+            for record in data["reference_outcome_versions"].values()
+            if record.get("corpus_item_id") == corpus_item_id
+        ]
+        return sorted(records, key=lambda record: int(record.get("version") or 0))
+
+    def append_protected_rule(self, *, corpus_item_id: str, rule: dict[str, Any]) -> dict[str, Any]:
+        data = self._read()
+        item = data["protected_corpus_items"].get(corpus_item_id)
+        if not item:
+            raise ValueError("corpus_item_not_found")
+        corpus = data["protected_corpora"].get(str(item.get("corpus_id") or ""))
+        if not corpus or corpus.get("status") != "draft":
+            raise ValueError("corpus_frozen")
+        reference_version = int(rule.get("reference_version") or 0)
+        if not any(
+            record.get("corpus_item_id") == corpus_item_id
+            and int(record.get("version") or 0) == reference_version
+            for record in data["reference_outcome_versions"].values()
+        ):
+            raise ValueError("reference_version_not_found")
+        rule_key = str(rule.get("rule_key") or "").strip()
+        version = 1 + max(
+            (
+                int(existing.get("version") or 0)
+                for existing in data["protected_rule_versions"].values()
+                if existing.get("rule_key") == rule_key
+            ),
+            default=0,
+        )
+        record_id = str(uuid4())
+        record = {
+            **deepcopy(rule),
+            "protected_rule_id": record_id,
+            "corpus_item_id": corpus_item_id,
+            "version": version,
+            "created_at": utc_now(),
+        }
+        data["protected_rule_versions"][record_id] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def list_protected_rules(self, corpus_item_id: str) -> list[dict[str, Any]]:
+        data = self._read()
+        return [
+            deepcopy(record)
+            for record in data["protected_rule_versions"].values()
+            if record.get("corpus_item_id") == corpus_item_id
+        ]
+
+    def freeze_protected_corpus(self, corpus_id: str) -> dict[str, Any]:
+        data = self._read()
+        corpus = data["protected_corpora"].get(corpus_id)
+        if not corpus:
+            raise ValueError("corpus_not_found")
+        timestamp = utc_now()
+        corpus["status"] = "frozen"
+        corpus["frozen_at"] = timestamp
+        corpus["updated_at"] = timestamp
+        self._write(data)
+        return deepcopy(corpus)
 
     def save_uploaded_document(self, *, client_id: str, document: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -1410,3 +1631,31 @@ def _clear_directory_contents(path: Path) -> int:
             child.unlink()
             deleted_count += 1
     return deleted_count
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def _validate_reset_roots(
+    *,
+    document_storage_path: Path | str,
+    export_path: Path | str,
+    protected_storage_path: Path | str,
+) -> None:
+    documents = Path(document_storage_path).resolve()
+    exports = Path(export_path).resolve()
+    protected = Path(protected_storage_path).resolve()
+    for ordinary in (documents, exports):
+        if _path_is_within(protected, ordinary) or _path_is_within(ordinary, protected):
+            raise ValueError("protected_reset_path_overlap")
+        if not ordinary.exists():
+            continue
+        for child in ordinary.rglob("*"):
+            resolved = child.resolve()
+            if not _path_is_within(resolved, ordinary) or _path_is_within(resolved, protected):
+                raise ValueError("unsafe_reset_path")

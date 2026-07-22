@@ -26,12 +26,17 @@ from app.persistence.workflow_store import (
     ProcessingAttemptConflict as ProcessingAttemptConflict,
     ResearchProfileConflict,
     _clear_directory_contents,
+    _validate_reset_roots,
     matching_processing_attempt,
     processing_attempt_marker,
     research_profile_is_visible,
     simulation_input_digest,
 )
 from app.persistence.normalized_accounting_repository import NormalizedAccountingRepository
+from app.persistence.protected_corpus_repository import (
+    ProtectedCorpusConflict,
+    ProtectedCorpusRepository,
+)
 
 
 ConnectFactory = Callable[[], Any]
@@ -79,6 +84,7 @@ class PostgresWorkflowStore:
         connect: ConnectFactory | None = None,
         accounting_store_target: str | None = None,
         normalized_repository: Any | None = None,
+        protected_corpus_repository: Any | None = None,
     ) -> None:
         if not dsn.strip():
             raise ValueError("PostgreSQL workflow store requires a database dsn")
@@ -99,6 +105,63 @@ class PostgresWorkflowStore:
                 tenant_id=self.tenant_id,
                 json_value=self._json,
             )
+        self.protected_corpus_repository = protected_corpus_repository or ProtectedCorpusRepository(
+            connect=self._connect,
+            tenant_id=self.tenant_id,
+            json_value=self._json,
+        )
+
+    def create_protected_corpus(self, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return self.protected_corpus_repository.create_corpus(**kwargs)
+        except ProtectedCorpusConflict as exc:
+            raise ValueError(str(exc)) from exc
+
+    def get_protected_corpus(self, corpus_id: str) -> dict[str, Any] | None:
+        return self.protected_corpus_repository.get_corpus(corpus_id)
+
+    def add_protected_corpus_item(self, *, item: dict[str, Any]) -> dict[str, Any]:
+        enriched = {**item, "taxpayer_id": taxpayer_uuid(self.tenant_id, str(item["client_id"]))}
+        try:
+            return self.protected_corpus_repository.enroll_item(item=enriched)
+        except ProtectedCorpusConflict as exc:
+            raise ValueError(str(exc)) from exc
+
+    def list_protected_items(self, corpus_id: str) -> list[dict[str, Any]]:
+        return self.protected_corpus_repository.list_items(corpus_id)
+
+    def protected_item_for_document(self, *, client_id: str, document_ref: str) -> dict[str, Any] | None:
+        return self.protected_corpus_repository.item_for_document(
+            client_id=client_id,
+            document_ref=document_ref,
+        )
+
+    def append_reference_outcome(self, *, corpus_item_id: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self.protected_corpus_repository.append_reference(
+                corpus_item_id=corpus_item_id,
+                outcome=outcome,
+            )
+        except ProtectedCorpusConflict as exc:
+            raise ValueError(str(exc)) from exc
+
+    def list_reference_outcomes(self, corpus_item_id: str) -> list[dict[str, Any]]:
+        return self.protected_corpus_repository.list_references(corpus_item_id)
+
+    def append_protected_rule(self, *, corpus_item_id: str, rule: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return self.protected_corpus_repository.append_rule(corpus_item_id=corpus_item_id, rule=rule)
+        except ProtectedCorpusConflict as exc:
+            raise ValueError(str(exc)) from exc
+
+    def list_protected_rules(self, corpus_item_id: str) -> list[dict[str, Any]]:
+        return self.protected_corpus_repository.list_rules(corpus_item_id)
+
+    def freeze_protected_corpus(self, corpus_id: str) -> dict[str, Any]:
+        try:
+            return self.protected_corpus_repository.freeze_corpus(corpus_id)
+        except ProtectedCorpusConflict as exc:
+            raise ValueError(str(exc)) from exc
 
     @property
     def normalized_accounting_enabled(self) -> bool:
@@ -438,9 +501,17 @@ class PostgresWorkflowStore:
         *,
         document_storage_path: Path | str,
         export_path: Path | str,
+        protected_storage_path: Path | str,
         delete_files: bool = True,
     ) -> dict[str, Any]:
+        if delete_files:
+            _validate_reset_roots(
+                document_storage_path=document_storage_path,
+                export_path=export_path,
+                protected_storage_path=protected_storage_path,
+            )
         self._ensure_tenant()
+        protected_counts = self.protected_corpus_repository.reset_preservation_counts()
         deleted_record_count = 0
         deleted_portal_user_count = 0
         deleted_client_count = 0
@@ -557,6 +628,31 @@ class PostgresWorkflowStore:
             "deleted_file_count": deleted_file_count,
             "preserved_portal_user_count": len(preserved_user_ids),
             "preserved_user_ids": preserved_user_ids,
+            **protected_counts,
+        }
+
+    def preview_test_data_reset(self) -> dict[str, Any]:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select
+                      count(*) filter (where record_type = 'client'),
+                      count(*) filter (where record_type = 'uploaded_document'),
+                      count(*) filter (where record_type = 'review_decision')
+                    from workflow_records where tenant_id = %s
+                    """,
+                    (self.tenant_id,),
+                )
+                row = cursor.fetchone()
+        return {
+            "reset": False,
+            "preview": True,
+            "deleted_client_count": int(row[0] or 0),
+            "deleted_uploaded_document_count": int(row[1] or 0),
+            "deleted_review_decision_count": int(row[2] or 0),
+            **self.protected_corpus_repository.reset_preservation_counts(),
         }
 
     def record_operation_event(self, *, client_id: str, event: dict[str, Any]) -> dict[str, Any]:

@@ -1,5 +1,47 @@
 # Current Handoff
 
+### 2026-07-21 protected accountant-reference corpus (yerel)
+
+- Migration `005_protected_accountant_reference_corpus.sql` ile tenant-scope
+  `protected_corpora`, hash-unique `protected_corpus_items`, append-only
+  `reference_outcome_versions` ve yalniz acik musavir onayindan dogan
+  `protected_rule_versions` eklendi. Repository hem compatibility hem normalized
+  PostgreSQL modunda baglidir; JSON store yalniz local/API contract parity'sidir.
+- Corpus'a alinan kaynak dosya normal document/export root'larindan ayri
+  `FISORA_PROTECTED_CORPUS_PATH` volume'una atomik kopyalanir ve SHA-256 ile
+  dogrulanir. Normal `TEMIZLE` operasyonel musteri, belge, review ve learning
+  state'ini silerken korumali corpus/item/reference/rule tablolari ile bu
+  source byte'larini korur. Accountant/admin reset preview endpoint'i silinecek
+  ve korunacak sayilari islemden once gosterir.
+- Mevcut review kayit akisi degismedi: yalniz corpus'a onceden alinmis belge
+  review edilince proposal/final/journal/allocation/provenance snapshot'i yeni
+  reference version olarak eklenir. Onceki version degismez. Kural ancak mevcut
+  `learning_confirmation=save_rule` ve `source=accountant_confirmed` sozlesmesi
+  birlikte saglanirsa korunur.
+- Freeze kapisi tam alis/satis hedef sayisini, authoritative referansi, dengeli
+  journal'i, canonical line allocation coverage'ini ve protected byte hash'ini
+  zorunlu tutar. Frozen corpus yeni item/reference/rule kabul etmez. Private
+  benchmark `--corpus-id` ile yalniz frozen snapshot digestlerini read-only
+  girdi olarak cikartabilir.
+- Production compose'da korumali byte'lar ayri volume'dadir. Backup image'i
+  PostgreSQL dump + gercek protected source archive + SHA manifest uretir;
+  off-host hedefe yalniz public age recipient ile sifrelenmis paket kopyalar.
+  Izole restore verifier source hash, monoton reference versionlari, dengeli
+  authoritative journal, rule-reference bagi ve tenant bagini kontrol eder.
+- Yerel gercek PostgreSQL 16 kaniti: temiz `001-005` migration, tekrar kosuda
+  `No pending migrations`, ayri DB'de `001-004 -> 005` upgrade, iki reference +
+  bir confirmed rule ve reset-sonrasi preservation basarili. Encrypted paket
+  ayri DB/root'a restore edildi; verifier sekiz kontrolun tamaminda `true` dondu.
+- Son tam local proof: backend `541 OK (skipped=13; 13 test DSN-gated)`,
+  frontend `147/147`, Next production build, compose config, backup shell syntax
+  ve `git diff --check` basarili. DSN-gated protected-corpus testi ayrica gercek
+  PostgreSQL 16 uzerinde `1/1` gecti; genisletilmis restore verifier sekiz
+  kontrolun tamaminda `true` dondu.
+- Gercek 35 alis + 15 satis UBL corpus'u henuz yuklenmedi ve musavir reference
+  parity sonucu yoktur; Phase 2 quality exit gate aciktir. Bu degisiklikler
+  local dirty `main` uzerindedir; commit, push, deploy, production reset veya
+  gercek fatura upload'i yapilmadi.
+
 ### 2026-07-20 AI semantic authority pipeline repair (yerel)
 
 - Cold-start muhasebe karari static kategori guveniyle atlanmiyor. Semantic

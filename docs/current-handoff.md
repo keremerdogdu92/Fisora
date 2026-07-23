@@ -1,5 +1,31 @@
 # Current Handoff
 
+### 2026-07-23 NVIDIA, Cloudflare ve SambaNova provider release'i (canli)
+
+- `main` runtime release commit'i `9159152` olarak canliya alindi.
+  Release wrapper `before_commit=384ebac`, `after_commit=9159152`,
+  `smoke=ok`, `/health` 200, readiness 200, root route 200,
+  `ready=true` ve `pilot_sellable=true` dondu.
+- Canli muhasebe provider sirasi
+  `nvidia,groq,cerebras,cloudflare,sambanova,openrouter` olarak
+  yapilandirildi. NVIDIA sirasi ve davranisi degistirilmedi; yeni benchmark
+  release kapisi eklenmedi.
+- NVIDIA, Cloudflare ve SambaNova anahtarlari yalniz ignored
+  `/opt/fisora/app/deploy/production.env` dosyasina aktarildi. Dosya modu
+  `600` olarak korundu ve degisiklikten once
+  `production.env.before-ai-providers-20260723T101322Z` yedegi alindi.
+- Canli zincir smoke'unda NVIDIA yaklasik 60 saniyede timeout olduktan sonra
+  Groq devraldi; sentetik bilgisayar satirini `computer_equipment`, guven `95`
+  olarak dondurdu. Tek cagrilik dogrudan smoke'larda Cloudflare 8.45 saniyede
+  guven `90`, SambaNova 1.62 saniyede guven `95` ile ayni kategoriyi dondurdu.
+- Release oncesi backend `550` test ile basarili (`13` skip), frontend
+  `147/147` basarili, Next.js production build, Compose config ve
+  `git diff --check` basariliydi.
+- Server checkout'unda bu release'ten once bulunan
+  `deploy/nginx/default.conf` degisikligi ile
+  `deploy/nginx/default.conf.before-ui-prototype-20260714` dosyasi korundu;
+  provider release'i bu nginx kapsamına dokunmadi.
+
 ### 2026-07-21 protected accountant-reference corpus (yerel)
 
 - Migration `005_protected_accountant_reference_corpus.sql` ile tenant-scope
@@ -235,11 +261,11 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime kod release'i: `39f1b39`; kod release scripti
-  `before_commit=240a0f9`, `after_commit=39f1b39`, `smoke=ok`, `/health`
+- Son dogrulanan runtime kod release'i: `9159152`; kod release scripti
+  `before_commit=384ebac`, `after_commit=9159152`, `smoke=ok`, `/health`
   200, readiness 200, root route 200, `ready=true`, `pilot_sellable=true`
   dondu.
-- Son deploy smoke: 2026-07-21, `/health` 200, readiness `ready=true`,
+- Son deploy smoke: 2026-07-23, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root route 200.
 - KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,
   `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`
@@ -300,10 +326,10 @@ oturumdan devam etmek icin son durumu ozetler.
   sol menu daraltilabilir; canli `/portal/belgeler` rotasinda dogrulandi.
 - Server repo dizini: `/opt/fisora/app`
 - Server runtime: Docker Compose production stack
-- Demo provider: Groq
-- AI fallback kodu: `FISORA_AI_PROVIDER_CHAIN=groq,openrouter,cerebras`
-  destekli. Keyler sadece serverdaki ignored `deploy/production.env` dosyasinda
-  tutulur.
+- Aktif birincil provider: NVIDIA
+- AI fallback sirasi:
+  `FISORA_AI_PROVIDER_CHAIN=nvidia,groq,cerebras,cloudflare,sambanova,openrouter`.
+  Keyler sadece serverdaki ignored `deploy/production.env` dosyasinda tutulur.
 - Faz 3 Tavily Bilgi Havuzu pilot akisi hazirlandi. Otomatik research sadece
   belirsiz faturalarda calisir; OpenAI web research sonraki iterasyon icin
   kodda korunur. Tavily icin `FISORA_RESEARCH_ENABLED=true`,
@@ -668,10 +694,16 @@ POSTGRES_PASSWORD=<strong-password>
 FISORA_HTTP_PORT=80
 FISORA_AUTH_MODE=mock_header_required
 FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED=false
-FISORA_AI_PROVIDER=groq
-FISORA_AI_PROVIDER_CHAIN=groq,openrouter,cerebras
+FISORA_AI_PROVIDER=nvidia
+FISORA_AI_PROVIDER_CHAIN=nvidia,groq,cerebras,cloudflare,sambanova,openrouter
 FISORA_AI_MODEL=openai/gpt-oss-20b
+FISORA_NVIDIA_MODEL=openai/gpt-oss-120b
+FISORA_NVIDIA_MAX_TOKENS=1024
+FISORA_NVIDIA_TIMEOUT_SECONDS=60
 FISORA_GROQ_MODEL=openai/gpt-oss-20b
+FISORA_CLOUDFLARE_MODEL=@cf/openai/gpt-oss-120b
+FISORA_CLOUDFLARE_MAX_TOKENS=1024
+FISORA_SAMBANOVA_MODEL=gpt-oss-120b
 FISORA_OPENROUTER_MODEL=openai/gpt-oss-20b:free
 FISORA_OPENROUTER_SITE_URL=http://185.184.208.188
 FISORA_OPENROUTER_APP_TITLE=Fisora Operasyon Portal
@@ -684,6 +716,10 @@ FISORA_RESEARCH_MODEL=gpt-5.4-mini
 FISORA_RESEARCH_MAX_PER_DOCUMENT=1
 FISORA_RESEARCH_CONFIDENCE_THRESHOLD=70
 GROQ_API_KEY=<groq-key>
+NVIDIA_API_KEY=<nvidia-key>
+CLOUDFLARE_API_TOKEN=<cloudflare-token>
+CLOUDFLARE_ACCOUNT_ID=<cloudflare-account-id>
+SAMBANOVA_API_KEY=<sambanova-key>
 OPENROUTER_API_KEY=<rotated-openrouter-key>
 CEREBRAS_API_KEY=<cerebras-key>
 OPENAI_API_KEY=
@@ -693,8 +729,12 @@ TAVILY_API_KEY=<tavily-key>
 Key'i gostermeden kontrol:
 
 ```bash
-grep -E 'FISORA_AUTH_MODE|FISORA_AI_PROVIDER|FISORA_AI_PROVIDER_CHAIN|FISORA_AI_MODEL|FISORA_(GROQ|OPENROUTER|CEREBRAS)_MODEL|FISORA_AI_COMPARISON_MODEL' deploy/production.env
+grep -E 'FISORA_AUTH_MODE|FISORA_AI_PROVIDER|FISORA_AI_PROVIDER_CHAIN|FISORA_AI_MODEL|FISORA_(NVIDIA|GROQ|CLOUDFLARE|SAMBANOVA|OPENROUTER|CEREBRAS)_MODEL|FISORA_AI_COMPARISON_MODEL' deploy/production.env
+grep -q '^NVIDIA_API_KEY=.' deploy/production.env && echo "NVIDIA key var" || echo "NVIDIA key eksik"
 grep -q '^GROQ_API_KEY=.' deploy/production.env && echo "GROQ key var" || echo "GROQ key eksik"
+grep -q '^CLOUDFLARE_API_TOKEN=.' deploy/production.env && echo "Cloudflare token var" || echo "Cloudflare token eksik"
+grep -q '^CLOUDFLARE_ACCOUNT_ID=.' deploy/production.env && echo "Cloudflare account ID var" || echo "Cloudflare account ID eksik"
+grep -q '^SAMBANOVA_API_KEY=.' deploy/production.env && echo "SambaNova key var" || echo "SambaNova key eksik"
 grep -q '^OPENROUTER_API_KEY=.' deploy/production.env && echo "OpenRouter key var" || echo "OpenRouter key eksik"
 grep -q '^CEREBRAS_API_KEY=.' deploy/production.env && echo "Cerebras key var" || echo "Cerebras key eksik"
 ```
@@ -717,9 +757,9 @@ auth_mode: mock_header_required
 ready: true
 pilot_sellable: true
 production_ready: false
-ai_provider: groq
-ai_model: openai/gpt-oss-20b
-ai_groq_key_present: true
+ai_provider: nvidia
+ai_model: openai/gpt-oss-120b
+ai_nvidia_key_present: true
 zirve_mapping_adapter_available: true
 rate_limit_configured: true
 ```
@@ -756,12 +796,10 @@ docker compose --env-file deploy/production.env -f docker-compose.production.yml
 
 ## Kaldigimiz Pratik Sira
 
-1. Serverda `git checkout main && git pull --ff-only origin main` ile son commit'i cek.
-2. `sh deploy/scripts/fisora-prod.sh check && sh deploy/scripts/fisora-prod.sh deploy && sh deploy/scripts/fisora-prod.sh smoke` calistir.
-3. Auth status `mock_header_required` donuyor mu kontrol et.
-4. Readiness icinde `pilot_sellable=true`, `production_ready=false`,
-   `zirve_mapping_adapter_available=true`, `rate_limit_configured=true`,
-   `ai_groq_key_present=true` ve `ai_provider_configured=true` mi kontrol et.
-5. Tarayicida `http://<SERVER_IP>/` ac.
-6. Fatura ve banka upload akisini Groq AI acik halde dene.
-7. Smoke failed kalirsa yukaridaki SQL komutuyla job error detayini al.
+1. Tarayicida `http://<SERVER_IP>/` ac.
+2. Bir sentetik olmayan pilot fatura yukleyip provider zincirinin mevcut
+   muhasebe akisinda olusturdugu taslak, canonical evidence ve aciklamayi kontrol et.
+3. Sonucu `workflow_records` uzerinden provider attempt/fallback iziyle
+   karsilastir.
+4. Muhasebe sonucu yanlissa benchmark kapisi eklemek yerine ilgili belge
+   kaniti, provider attempt'i ve taslak journal birlikte incelensin.

@@ -207,6 +207,39 @@ class WorkflowStoreTests(unittest.TestCase):
             "https://integrate.api.nvidia.com/v1/chat/completions",
         )
 
+    def test_ai_runtime_from_env_builds_cloudflare_and_sambanova_providers(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER_CHAIN": "groq,cloudflare,sambanova",
+                "GROQ_API_KEY": "gsk-test",
+                "CLOUDFLARE_API_TOKEN": "cloudflare-test-token",
+                "CLOUDFLARE_ACCOUNT_ID": "account-test-123",
+                "SAMBANOVA_API_KEY": "samba-test-token",
+                "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                "FISORA_CLOUDFLARE_MODEL": "@cf/openai/gpt-oss-120b",
+                "FISORA_SAMBANOVA_MODEL": "gpt-oss-120b",
+            }
+        )
+
+        provider = runtime["statement_ai_provider"]
+
+        self.assertEqual(provider.provider_name, "groq>cloudflare>sambanova")
+        self.assertEqual(
+            [item.provider_name for item in provider.providers],
+            ["groq", "cloudflare", "sambanova"],
+        )
+        self.assertEqual(
+            provider.providers[1].chat_completions_url,
+            "https://api.cloudflare.com/client/v4/accounts/account-test-123/ai/v1/chat/completions",
+        )
+        self.assertEqual(provider.providers[1].model, "@cf/openai/gpt-oss-120b")
+        self.assertEqual(provider.providers[1].max_tokens, 1024)
+        self.assertEqual(
+            provider.providers[2].chat_completions_url,
+            "https://api.sambanova.ai/v1/chat/completions",
+        )
+        self.assertEqual(provider.providers[2].model, "gpt-oss-120b")
+
     def test_json_store_persists_client_documents_reviews_and_export_packages(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store_path = Path(temp_dir) / "phase0_store.json"

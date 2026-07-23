@@ -560,7 +560,7 @@ SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     '''
 )
 BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
-API_KEY_VALUE_PATTERN = re.compile(r"(?i)\b(?:sk|gsk|csk|tvly|or-v1)-[A-Za-z0-9._-]{6,}")
+API_KEY_VALUE_PATTERN = re.compile(r"(?i)\b(?:sk|gsk|csk|tvly|or-v1|nvapi|cfai|snapi)-[A-Za-z0-9._-]{6,}")
 XML_INVOICE_DOCUMENT_PATTERN = re.compile(
     r"(?is)<(?:[A-Za-z0-9_.-]+:)?Invoice\b[^>]*>.*?</(?:[A-Za-z0-9_.-]+:)?Invoice\s*>"
 )

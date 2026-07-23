@@ -8,9 +8,12 @@ from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
 from app.domain.openai_provider import (
     DEFAULT_CEREBRAS_MODEL,
+    DEFAULT_CLOUDFLARE_MODEL,
     DEFAULT_GROQ_MODEL,
+    DEFAULT_NVIDIA_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_SAMBANOVA_MODEL,
 )
 from app.domain.rate_limits import rate_limit_config
 from app.domain.storage_adapters import storage_readiness
@@ -37,6 +40,8 @@ def _ai_provider_chain(source: Mapping[str, str]) -> list[str]:
 
 def _ai_provider_model(provider_name: str, source: Mapping[str, str]) -> str:
     configured_ai_model = source.get("FISORA_AI_MODEL", "").strip()
+    if provider_name == "nvidia":
+        return source.get("FISORA_NVIDIA_MODEL", "").strip() or DEFAULT_NVIDIA_MODEL
     if provider_name == "openai":
         return source.get("FISORA_OPENAI_MODEL", "").strip() or configured_ai_model or DEFAULT_OPENAI_MODEL
     if provider_name == "groq":
@@ -45,6 +50,10 @@ def _ai_provider_model(provider_name: str, source: Mapping[str, str]) -> str:
         return source.get("FISORA_OPENROUTER_MODEL", "").strip() or DEFAULT_OPENROUTER_MODEL
     if provider_name == "cerebras":
         return source.get("FISORA_CEREBRAS_MODEL", "").strip() or DEFAULT_CEREBRAS_MODEL
+    if provider_name == "cloudflare":
+        return source.get("FISORA_CLOUDFLARE_MODEL", "").strip() or DEFAULT_CLOUDFLARE_MODEL
+    if provider_name == "sambanova":
+        return source.get("FISORA_SAMBANOVA_MODEL", "").strip() or DEFAULT_SAMBANOVA_MODEL
     return configured_ai_model
 
 
@@ -54,6 +63,9 @@ def _ai_provider_key_present(provider_name: str, source: Mapping[str, str]) -> b
         "groq": "GROQ_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
+        "nvidia": "NVIDIA_API_KEY",
+        "cloudflare": "CLOUDFLARE_API_TOKEN",
+        "sambanova": "SAMBANOVA_API_KEY",
     }
     key_name = key_names.get(provider_name, "")
     return bool(key_name and source.get(key_name, "").strip())
@@ -67,7 +79,15 @@ def production_readiness_payload(
     env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     source = env if env is not None else os.environ
-    supported_ai_providers = {"openai", "groq", "openrouter", "cerebras"}
+    supported_ai_providers = {
+        "openai",
+        "groq",
+        "openrouter",
+        "cerebras",
+        "nvidia",
+        "cloudflare",
+        "sambanova",
+    }
     ai_provider_chain = _ai_provider_chain(source)
     ai_provider = ">".join(ai_provider_chain) if ai_provider_chain else "disabled"
     ai_models = [_ai_provider_model(provider_name, source) for provider_name in ai_provider_chain]
@@ -76,6 +96,10 @@ def production_readiness_payload(
     groq_key_present = bool(source.get("GROQ_API_KEY", "").strip())
     openrouter_key_present = bool(source.get("OPENROUTER_API_KEY", "").strip())
     cerebras_key_present = bool(source.get("CEREBRAS_API_KEY", "").strip())
+    nvidia_key_present = bool(source.get("NVIDIA_API_KEY", "").strip())
+    cloudflare_key_present = bool(source.get("CLOUDFLARE_API_TOKEN", "").strip())
+    cloudflare_account_id_present = bool(source.get("CLOUDFLARE_ACCOUNT_ID", "").strip())
+    sambanova_key_present = bool(source.get("SAMBANOVA_API_KEY", "").strip())
     if not ai_provider_chain:
         ai_provider_configured = True
     else:
@@ -83,6 +107,7 @@ def production_readiness_payload(
             provider_name in supported_ai_providers
             and _ai_provider_key_present(provider_name, source)
             and _ai_provider_model(provider_name, source)
+            and (provider_name != "cloudflare" or cloudflare_account_id_present)
             for provider_name in ai_provider_chain
         )
     auth = auth_status_payload(build_auth_config(source))
@@ -180,6 +205,8 @@ def production_readiness_payload(
             continue
         if not _ai_provider_key_present(provider_name, source):
             warnings.append(f"ai_{provider_name}_key_missing")
+        if provider_name == "cloudflare" and not cloudflare_account_id_present:
+            warnings.append("ai_cloudflare_account_id_missing")
         if not _ai_provider_model(provider_name, source):
             warnings.append("ai_model_missing")
     if not backup["ok"]:
@@ -282,6 +309,10 @@ def production_readiness_payload(
         "ai_groq_key_present": groq_key_present,
         "ai_openrouter_key_present": openrouter_key_present,
         "ai_cerebras_key_present": cerebras_key_present,
+        "ai_nvidia_key_present": nvidia_key_present,
+        "ai_cloudflare_key_present": cloudflare_key_present,
+        "ai_cloudflare_account_id_present": cloudflare_account_id_present,
+        "ai_sambanova_key_present": sambanova_key_present,
         "rate_limit": {
             "enabled": rate_limit.enabled,
             "window_seconds": rate_limit.window_seconds,

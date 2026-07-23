@@ -16,12 +16,20 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 GROQ_RESPONSES_URL = "https://api.groq.com/openai/v1/responses"
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
 CEREBRAS_CHAT_COMPLETIONS_URL = "https://api.cerebras.ai/v1/chat/completions"
+NVIDIA_CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
+CLOUDFLARE_CHAT_COMPLETIONS_URL_TEMPLATE = (
+    "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions"
+)
+SAMBANOVA_CHAT_COMPLETIONS_URL = "https://api.sambanova.ai/v1/chat/completions"
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
 DEFAULT_COMPARISON_MODEL = "gpt-5.4-nano"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_GROQ_COMPARISON_MODEL = "openai/gpt-oss-120b"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
 DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
+DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
+DEFAULT_CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-120b"
+DEFAULT_SAMBANOVA_MODEL = "gpt-oss-120b"
 PRODUCT_CLASSIFICATION_PROMPT_VERSION = "invoice-semantic-decision-v1"
 
 
@@ -260,6 +268,7 @@ class ChatCompletionsAccountingProvider:
         extra_headers: Mapping[str, str] | None = None,
         http_client: Any | None = None,
         timeout_seconds: float = 30.0,
+        max_tokens: int | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError(f"{key_name} is required when FISORA_AI_PROVIDER={provider_name}")
@@ -270,6 +279,7 @@ class ChatCompletionsAccountingProvider:
         self.extra_headers = {key: value for key, value in (extra_headers or {}).items() if value.strip()}
         self.http_client = http_client or httpx.Client()
         self.timeout_seconds = timeout_seconds
+        self.max_tokens = max_tokens
         self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
@@ -319,6 +329,27 @@ class ChatCompletionsAccountingProvider:
         user_payload: Mapping[str, object],
         schema: Mapping[str, object],
     ) -> dict[str, Any]:
+        request_payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {
+                    "role": "user",
+                    "content": (
+                        "Yalnizca gecerli JSON obje don. "
+                        f"Schema adi: {schema_name}. "
+                        f"JSON schema: {json.dumps(schema, ensure_ascii=False)}. "
+                        f"Girdi: {json.dumps(user_payload, ensure_ascii=False)}"
+                    ),
+                },
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.2,
+            "top_p": 1,
+            "stream": False,
+        }
+        if self.max_tokens is not None:
+            request_payload["max_tokens"] = self.max_tokens
         response = self.http_client.post(
             self.chat_completions_url,
             headers={
@@ -326,25 +357,7 @@ class ChatCompletionsAccountingProvider:
                 "Content-Type": "application/json",
                 **self.extra_headers,
             },
-            json={
-                "model": self.model,
-                "messages": [
-                    {"role": "system", "content": instructions},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Yalnizca gecerli JSON obje don. "
-                            f"Schema adi: {schema_name}. "
-                            f"JSON schema: {json.dumps(schema, ensure_ascii=False)}. "
-                            f"Girdi: {json.dumps(user_payload, ensure_ascii=False)}"
-                        ),
-                    },
-                ],
-                "response_format": {"type": "json_object"},
-                "temperature": 0.2,
-                "top_p": 1,
-                "stream": False,
-            },
+            json=request_payload,
             timeout=self.timeout_seconds,
         )
         self._capture_capacity_snapshot(response)

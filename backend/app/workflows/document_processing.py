@@ -27,11 +27,17 @@ from app.domain.matching_simulation import AccountSelection, select_accounts, si
 from app.domain.nace_research import resolve_nace_research_profile
 from app.domain.openai_provider import (
     CEREBRAS_CHAT_COMPLETIONS_URL,
+    CLOUDFLARE_CHAT_COMPLETIONS_URL_TEMPLATE,
     DEFAULT_CEREBRAS_MODEL,
+    DEFAULT_CLOUDFLARE_MODEL,
     DEFAULT_GROQ_MODEL,
+    DEFAULT_NVIDIA_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_SAMBANOVA_MODEL,
+    NVIDIA_CHAT_COMPLETIONS_URL,
     OPENROUTER_CHAT_COMPLETIONS_URL,
+    SAMBANOVA_CHAT_COMPLETIONS_URL,
     ChatCompletionsAccountingProvider,
     FallbackAccountingProvider,
     GroqAccountingProvider,
@@ -286,6 +292,19 @@ def _serializable_simulation(
 
 
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
+    if provider_name == "nvidia":
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("NVIDIA_API_KEY", ""),
+            model=source.get("FISORA_NVIDIA_MODEL", DEFAULT_NVIDIA_MODEL),
+            chat_completions_url=source.get(
+                "FISORA_NVIDIA_CHAT_COMPLETIONS_URL",
+                NVIDIA_CHAT_COMPLETIONS_URL,
+            ),
+            provider_name="nvidia",
+            key_name="NVIDIA_API_KEY",
+            timeout_seconds=float(source.get("FISORA_NVIDIA_TIMEOUT_SECONDS", "60")),
+            max_tokens=int(source.get("FISORA_NVIDIA_MAX_TOKENS", "1024")),
+        )
     if provider_name == "groq":
         return GroqAccountingProvider(
             api_key=source.get("GROQ_API_KEY", ""),
@@ -311,13 +330,45 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
             provider_name="cerebras",
             key_name="CEREBRAS_API_KEY",
         )
+    if provider_name == "cloudflare":
+        account_id = source.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+        if not account_id:
+            raise ValueError("CLOUDFLARE_ACCOUNT_ID is required when FISORA_AI_PROVIDER=cloudflare")
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("CLOUDFLARE_API_TOKEN", ""),
+            model=source.get("FISORA_CLOUDFLARE_MODEL", DEFAULT_CLOUDFLARE_MODEL),
+            chat_completions_url=source.get("FISORA_CLOUDFLARE_CHAT_COMPLETIONS_URL", "")
+            or CLOUDFLARE_CHAT_COMPLETIONS_URL_TEMPLATE.format(account_id=account_id),
+            provider_name="cloudflare",
+            key_name="CLOUDFLARE_API_TOKEN",
+            max_tokens=int(source.get("FISORA_CLOUDFLARE_MAX_TOKENS", "1024")),
+        )
+    if provider_name == "sambanova":
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("SAMBANOVA_API_KEY", ""),
+            model=source.get("FISORA_SAMBANOVA_MODEL", DEFAULT_SAMBANOVA_MODEL),
+            chat_completions_url=source.get(
+                "FISORA_SAMBANOVA_CHAT_COMPLETIONS_URL",
+                SAMBANOVA_CHAT_COMPLETIONS_URL,
+            ),
+            provider_name="sambanova",
+            key_name="SAMBANOVA_API_KEY",
+        )
     return OpenAiAccountingProvider(
         api_key=source.get("OPENAI_API_KEY", ""),
         model=source.get("FISORA_OPENAI_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL)),
     )
 
 
-SUPPORTED_ACCOUNTING_PROVIDERS = {"openai", "groq", "openrouter", "cerebras"}
+SUPPORTED_ACCOUNTING_PROVIDERS = {
+    "openai",
+    "groq",
+    "openrouter",
+    "cerebras",
+    "nvidia",
+    "cloudflare",
+    "sambanova",
+}
 
 
 def _configured_provider_names(source: dict[str, str] | Any) -> tuple[str, ...]:
@@ -386,7 +437,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_CANONICAL_PROVIDER_CHAIN",
-            preferred_order=("cerebras", "groq", "openrouter", "openai"),
+            preferred_order=("nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
     )
@@ -394,7 +445,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_CLASSIFICATION_PROVIDER_CHAIN",
-            preferred_order=("groq", "cerebras", "openrouter", "openai"),
+            preferred_order=("nvidia", "groq", "cerebras", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
     )
@@ -402,7 +453,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_COUNTERPARTY_PROVIDER_CHAIN",
-            preferred_order=("cerebras", "groq", "openrouter", "openai"),
+            preferred_order=("nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
     )

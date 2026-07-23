@@ -619,6 +619,41 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("free", public_text)
         self.assertNotIn("ücretsiz", public_text)
 
+    def test_ai_capacity_reports_nvidia_without_secret(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_AI_PROVIDER_CHAIN": "nvidia,groq",
+                "FISORA_NVIDIA_MODEL": "openai/gpt-oss-120b",
+                "NVIDIA_API_KEY": "nvapi-test-secret",
+                "GROQ_API_KEY": "gsk-test",
+            }
+        )
+
+        self.assertTrue(payload["agents"][0]["configured"])
+        self.assertEqual(payload["agents"][0]["model"], "openai/gpt-oss-120b")
+        self.assertNotIn("nvapi-test-secret", str(payload))
+
+    def test_ai_capacity_reports_cloudflare_and_sambanova_without_secrets(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_AI_PROVIDER_CHAIN": "cloudflare,sambanova",
+                "FISORA_CLOUDFLARE_MODEL": "@cf/openai/gpt-oss-120b",
+                "FISORA_SAMBANOVA_MODEL": "gpt-oss-120b",
+                "CLOUDFLARE_API_TOKEN": "cfai-private-123456",
+                "CLOUDFLARE_ACCOUNT_ID": "account-private-123456",
+                "SAMBANOVA_API_KEY": "snapi-private-123456",
+            }
+        )
+
+        document_agents = [agent for agent in payload["agents"] if agent["kind"] == "document"]
+        self.assertEqual(len(document_agents), 2)
+        self.assertTrue(all(agent["configured"] for agent in document_agents))
+        self.assertEqual(document_agents[0]["model"], "@cf/openai/gpt-oss-120b")
+        self.assertEqual(document_agents[1]["model"], "gpt-oss-120b")
+        self.assertNotIn("cfai-private-123456", str(payload))
+        self.assertNotIn("account-private-123456", str(payload))
+        self.assertNotIn("snapi-private-123456", str(payload))
+
     def test_ai_capacity_reserves_retry_budget_for_documents(self) -> None:
         payload = ai_capacity_payload(
             env={
@@ -820,6 +855,87 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(payload["ai_cerebras_key_present"])
         self.assertNotIn("ai_openrouter_key_missing", payload["warnings"])
         self.assertNotIn("ai_cerebras_key_missing", payload["warnings"])
+
+    def test_production_readiness_accepts_nvidia_first_ai_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER": "nvidia",
+                    "FISORA_AI_PROVIDER_CHAIN": "nvidia,groq,openrouter,cerebras",
+                    "FISORA_NVIDIA_MODEL": "openai/gpt-oss-120b",
+                    "FISORA_GROQ_MODEL": "openai/gpt-oss-20b",
+                    "FISORA_OPENROUTER_MODEL": "openai/gpt-oss-20b:free",
+                    "FISORA_CEREBRAS_MODEL": "gpt-oss-120b",
+                    "NVIDIA_API_KEY": "nvapi-test-secret",
+                    "GROQ_API_KEY": "gsk-test",
+                    "OPENROUTER_API_KEY": "or-test",
+                    "CEREBRAS_API_KEY": "csk-test",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["ai_provider_configured"])
+        self.assertEqual(payload["ai_provider"], "nvidia>groq>openrouter>cerebras")
+        self.assertEqual(payload["ai_provider_chain"][0], "nvidia")
+        self.assertTrue(payload["ai_nvidia_key_present"])
+        self.assertNotIn("ai_nvidia_key_missing", payload["warnings"])
+
+    def test_production_readiness_accepts_cloudflare_and_sambanova_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER_CHAIN": "cloudflare,sambanova",
+                    "FISORA_CLOUDFLARE_MODEL": "@cf/openai/gpt-oss-120b",
+                    "FISORA_SAMBANOVA_MODEL": "gpt-oss-120b",
+                    "CLOUDFLARE_API_TOKEN": "cfai-test-token",
+                    "CLOUDFLARE_ACCOUNT_ID": "account-test-123",
+                    "SAMBANOVA_API_KEY": "snapi-test-token",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["ai_provider_configured"])
+        self.assertEqual(payload["ai_provider"], "cloudflare>sambanova")
+        self.assertTrue(payload["ai_cloudflare_key_present"])
+        self.assertTrue(payload["ai_cloudflare_account_id_present"])
+        self.assertTrue(payload["ai_sambanova_key_present"])
+
+    def test_production_readiness_requires_cloudflare_account_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER_CHAIN": "cloudflare",
+                    "CLOUDFLARE_API_TOKEN": "cfai-test-token",
+                },
+            )
+
+        self.assertFalse(payload["checks"]["ai_provider_configured"])
+        self.assertIn("ai_cloudflare_account_id_missing", payload["warnings"])
 
     def test_production_readiness_warns_when_chain_provider_key_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8059,6 +8175,49 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("dXNlcjpwYXNz", serialized)
         self.assertNotIn("YWRtaW46c2VjcmV0", serialized)
 
+    def test_semantic_attempt_redacts_nvidia_api_key_value(self) -> None:
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-nvidia-credential",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="nvidia",
+            model="openai/gpt-oss-120b",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=("320.01",),
+            validated_response={
+                "reason": "Provider note nvapi-private-123456 supports candidate 153.01",
+            },
+            validation_errors=(),
+            accepted=False,
+        )
+
+        serialized = str(attempt)
+        self.assertIn("supports candidate 153.01", serialized)
+        self.assertNotIn("nvapi-private-123456", serialized)
+
+    def test_semantic_attempt_redacts_cloudflare_and_sambanova_key_values(self) -> None:
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-provider-credentials",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="cloudflare>sambanova",
+            model="gpt-oss-120b",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=("320.01",),
+            validated_response={
+                "reason": "Tokens cfai-private-123456 and snapi-private-123456 support candidate 153.01",
+            },
+            validation_errors=(),
+            accepted=False,
+        )
+
+        serialized = str(attempt)
+        self.assertIn("support candidate 153.01", serialized)
+        self.assertNotIn("cfai-private-123456", serialized)
+        self.assertNotIn("snapi-private-123456", serialized)
+
     def test_semantic_attempt_redacts_document_payload_strings_but_keeps_useful_summaries(self) -> None:
         compact_invoice = (
             "<Invoice><cbc:ID>INV-PRIVATE-1</cbc:ID>"
@@ -8902,6 +9061,7 @@ TOPLAM: 1200.00"""
             key_name="OPENROUTER_API_KEY",
             extra_headers={"HTTP-Referer": "http://185.184.208.188", "X-Title": "Fisora Operasyon Portal"},
             http_client=FakeClient(),
+            max_tokens=512,
         )
         response = provider.classify_product(
             AiClassificationRequest(
@@ -8919,6 +9079,7 @@ TOPLAM: 1200.00"""
         self.assertEqual(captured["headers"]["X-Title"], "Fisora Operasyon Portal")
         self.assertEqual(request_payload["model"], "openai/gpt-oss-20b:free")
         self.assertFalse(request_payload["stream"])
+        self.assertEqual(request_payload.get("max_tokens"), 512)
         self.assertEqual(request_payload["response_format"]["type"], "json_object")
         self.assertIn("Banka pos komisyon bedeli", request_payload["messages"][1]["content"])
         self.assertEqual(response["suggested_account_code"], "770.01")

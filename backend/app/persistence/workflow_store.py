@@ -108,12 +108,18 @@ def empty_store() -> dict[str, Any]:
         "auth_tokens": {},
         "qnb_connections": {},
         "qnb_sync_runs": {},
+        "qnb_sync_requests": {},
         "qnb_sync_policies": {},
         "qnb_sync_cursors": {},
         "qnb_document_identities": {},
+        "document_identities": {},
         "qnb_outgoing_invoices": {},
         "qnb_outgoing_status_snapshots": {},
         "qnb_incoming_status_snapshots": {},
+        "provider_document_links": {},
+        "external_status_events": {},
+        "document_safety_holds": {},
+        "qnb_correction_reviews": {},
         "outgoing_invoices": {},
         "outgoing_invoice_send_keys": {},
         "outgoing_invoice_send_attempts": {},
@@ -638,6 +644,101 @@ class JsonWorkflowStore:
         rows = [deepcopy(row) for row in self._read().get("qnb_sync_runs", {}).values() if row.get("client_id") == client_id]
         return sorted(rows, key=lambda row: str(row.get("updated_at") or ""), reverse=True)[:max(limit, 1)]
 
+    def enqueue_qnb_sync_request(
+        self,
+        *,
+        client_id: str,
+        start_date: str = "",
+        end_date: str = "",
+        requested_by: str = "",
+    ) -> dict[str, Any]:
+        with self._lock:
+            data = self._read()
+            request_id = str(uuid4())
+            timestamp = utc_now()
+            record = {
+                "request_id": request_id,
+                "client_id": client_id,
+                "start_date": start_date,
+                "end_date": end_date,
+                "requested_by": requested_by,
+                "status": "queued",
+                "created_at": timestamp,
+                "updated_at": timestamp,
+            }
+            data["qnb_sync_requests"][f"{client_id}:{request_id}"] = record
+            self._write(data)
+        return deepcopy(record)
+
+    def claim_next_qnb_sync_request(
+        self,
+        *,
+        worker_id: str,
+        now: str,
+        lease_expires_at: str,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            data = self._read()
+            requests = sorted(
+                data["qnb_sync_requests"].values(),
+                key=lambda row: str(row.get("created_at") or ""),
+            )
+            for request in requests:
+                status = str(request.get("status") or "")
+                lease_expired = (
+                    status == "processing"
+                    and str(request.get("lease_expires_at") or "") <= now
+                )
+                if status != "queued" and not lease_expired:
+                    continue
+                request.update(
+                    {
+                        "status": "processing",
+                        "lease_owner": worker_id,
+                        "lease_token": str(uuid4()),
+                        "lease_expires_at": lease_expires_at,
+                        "updated_at": utc_now(),
+                    }
+                )
+                self._write(data)
+                return deepcopy(request)
+        return None
+
+    def complete_qnb_sync_request(
+        self,
+        *,
+        client_id: str,
+        request_id: str,
+        worker_id: str,
+        lease_token: str,
+        status: str,
+        result: dict[str, Any],
+    ) -> bool:
+        with self._lock:
+            data = self._read()
+            request = data["qnb_sync_requests"].get(
+                f"{client_id}:{request_id}"
+            )
+            if (
+                not request
+                or request.get("lease_owner") != worker_id
+                or request.get("lease_token") != lease_token
+            ):
+                return False
+            request.update(
+                {
+                    "status": status,
+                    "result": deepcopy(result),
+                    "lease_owner": "",
+                    "lease_token": "",
+                    "lease_expires_at": "",
+                    "completed_at": utc_now(),
+                    "updated_at": utc_now(),
+                }
+            )
+            self._write(data)
+        return True
+
     def save_qnb_sync_policy(self, *, client_id: str, policy: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             data = self._read()
@@ -663,10 +764,68 @@ class JsonWorkflowStore:
                     continue
                 if str(policy.get("lease_expires_at") or "") > now:
                     continue
-                policy.update({"lease_owner": worker_id, "lease_expires_at": lease_expires_at, "last_attempt_at": now})
+                policy.update(
+                    {
+                        "lease_owner": worker_id,
+                        "lease_token": str(uuid4()),
+                        "lease_expires_at": lease_expires_at,
+                        "last_attempt_at": now,
+                    }
+                )
                 self._write(data)
                 return deepcopy(policy)
         return None
+
+    def renew_qnb_sync_policy_lease(
+        self,
+        *,
+        client_id: str,
+        worker_id: str,
+        lease_token: str,
+        lease_expires_at: str,
+    ) -> bool:
+        with self._lock:
+            data = self._read()
+            policy = data.setdefault("qnb_sync_policies", {}).get(client_id)
+            if (
+                not policy
+                or policy.get("lease_owner") != worker_id
+                or policy.get("lease_token") != lease_token
+            ):
+                return False
+            policy["lease_expires_at"] = lease_expires_at
+            policy["lease_renewed_at"] = utc_now()
+            self._write(data)
+        return True
+
+    def complete_qnb_sync_policy(
+        self,
+        *,
+        client_id: str,
+        worker_id: str,
+        lease_token: str,
+        updates: dict[str, Any],
+    ) -> bool:
+        with self._lock:
+            data = self._read()
+            policy = data.setdefault("qnb_sync_policies", {}).get(client_id)
+            if (
+                not policy
+                or policy.get("lease_owner") != worker_id
+                or policy.get("lease_token") != lease_token
+            ):
+                return False
+            policy.update(updates)
+            policy.update(
+                {
+                    "lease_owner": "",
+                    "lease_token": "",
+                    "lease_expires_at": "",
+                    "updated_at": utc_now(),
+                }
+            )
+            self._write(data)
+        return True
 
     def get_qnb_sync_cursor(self, *, client_id: str) -> str:
         data = self._read()
@@ -1395,6 +1554,279 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def record_qnb_incoming_status(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        ettn: str,
+        event_key: str,
+        normalized_status: str,
+        response_code: str,
+        response_detail: str,
+        cancelled_at: str,
+        checked_at: str,
+    ) -> dict[str, Any]:
+        blocking_statuses = {"rejected", "cancelled", "unknown"}
+        with self._lock:
+            data = self._read()
+            document_key = self._document_key(client_id, document_ref)
+            document = data["uploaded_documents"].get(document_key)
+            if not document:
+                raise ValueError("document_not_found")
+            provider_link_key = f"{client_id}:qnb_esolutions:{ettn}"
+            provider_link = data["provider_document_links"].setdefault(
+                provider_link_key,
+                {
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "provider": "qnb_esolutions",
+                    "external_identity": ettn,
+                    "created_at": checked_at,
+                },
+            )
+            status_event_key = f"{client_id}:{event_key}"
+            event = data["external_status_events"].get(status_event_key)
+            if event is None:
+                event = {
+                    "event_key": event_key,
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "provider": "qnb_esolutions",
+                    "external_identity": ettn,
+                    "normalized_status": normalized_status,
+                    "response_code": response_code,
+                    "response_detail": response_detail,
+                    "cancelled_at": cancelled_at,
+                    "checked_at": checked_at,
+                    "created_at": utc_now(),
+                }
+                data["external_status_events"][status_event_key] = event
+            provider_link.update(
+                {
+                    "document_ref": document_ref,
+                    "current_status": normalized_status,
+                    "current_status_event_key": event_key,
+                    "updated_at": checked_at,
+                }
+            )
+            snapshot = {
+                "snapshot_id": event_key,
+                "document_ref": document_ref,
+                "ettn": ettn,
+                "response_code": response_code,
+                "normalized_status": normalized_status,
+                "response_detail": response_detail,
+                "cancelled_at": cancelled_at,
+                "checked_at": checked_at,
+                "source": "qnb_incoming_status_query",
+                "review_required": normalized_status in blocking_statuses,
+            }
+            data["qnb_incoming_status_snapshots"][status_event_key] = snapshot
+            hold_key = f"{client_id}:{document_ref}"
+            hold = data["document_safety_holds"].get(hold_key)
+            if normalized_status in blocking_statuses and hold is None:
+                hold = {
+                    "id": str(uuid4()),
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "hold_code": f"qnb_status_{normalized_status}",
+                    "trigger_event_key": event_key,
+                    "created_at": checked_at,
+                    "resolved_at": "",
+                }
+                data["document_safety_holds"][hold_key] = hold
+            automation_hold = bool(hold and not hold.get("resolved_at"))
+            delivered_packages = [
+                record
+                for record in data["export_packages"]
+                if record.get("client_id") == client_id
+                and (record.get("package") or {}).get("downloaded_at")
+                and any(
+                    str(entry.get("document_ref") or "").split("#", 1)[0]
+                    == document_ref
+                    for entry in (record.get("package") or {}).get("entries", [])
+                    if isinstance(entry, dict)
+                )
+            ]
+            if normalized_status in {"rejected", "cancelled"} and delivered_packages:
+                correction_key = f"{client_id}:{document_ref}"
+                data["qnb_correction_reviews"].setdefault(
+                    correction_key,
+                    {
+                        "id": str(uuid4()),
+                        "client_id": client_id,
+                        "document_ref": document_ref,
+                        "status": "review_required",
+                        "reason": f"qnb_status_{normalized_status}_after_delivery",
+                        "trigger_event_key": event_key,
+                        "delivered_export_package_ids": [
+                            str(record.get("id") or "")
+                            for record in delivered_packages
+                        ],
+                        "automatic_reversal_created": False,
+                        "created_at": checked_at,
+                    },
+                )
+            previous_status = str(document.get("source_qnb_normalized_status") or "")
+            document.update(
+                {
+                    "source_qnb_status": response_code,
+                    "source_qnb_normalized_status": normalized_status,
+                    "source_qnb_status_detail": response_detail,
+                    "source_qnb_status_checked_at": checked_at,
+                    "source_qnb_status_changed": bool(previous_status)
+                    and previous_status != normalized_status,
+                    "qnb_review_required": automation_hold,
+                    "automation_hold": automation_hold,
+                    "automation_hold_reason": (
+                        str(hold.get("hold_code") or "") if automation_hold else ""
+                    ),
+                    "updated_at": utc_now(),
+                }
+            )
+            self._write(data)
+        return {
+            **deepcopy(snapshot),
+            "automation_hold": automation_hold,
+            "automation_hold_reason": (
+                str(hold.get("hold_code") or "") if automation_hold else ""
+            ),
+        }
+
+    def active_document_safety_holds(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        requested = set(document_refs or [])
+        return [
+            deepcopy(hold)
+            for hold in self._read()["document_safety_holds"].values()
+            if hold.get("client_id") == client_id
+            and not hold.get("resolved_at")
+            and (not requested or str(hold.get("document_ref") or "") in requested)
+        ]
+
+    def accept_document_source(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+        source_channel: str,
+        identities: list[dict[str, str]],
+        parser_kind: str,
+        intake_category: str = "",
+    ) -> dict[str, Any]:
+        normalized_identities = [
+            {
+                "kind": str(identity.get("kind") or "").strip().lower(),
+                "value": str(identity.get("value") or "").strip(),
+            }
+            for identity in identities
+            if str(identity.get("kind") or "").strip()
+            and str(identity.get("value") or "").strip()
+        ]
+        requested_ref = str(
+            document.get("document_id")
+            or document.get("original_file_name")
+            or uuid4()
+        )
+        with self._lock:
+            data = self._read()
+            identity_records = data.setdefault("document_identities", {})
+            existing_refs = {
+                str(identity_records[key]["document_ref"])
+                for identity in normalized_identities
+                if (key := f"{client_id}:{identity['kind']}:{identity['value']}") in identity_records
+            }
+            if len(existing_refs) > 1:
+                raise ValueError("document_identity_conflict")
+            document_ref = next(iter(existing_refs), requested_ref)
+            document_key = self._document_key(client_id, document_ref)
+            existing = data["uploaded_documents"].get(document_key)
+            timestamp = utc_now()
+            source = {
+                "source_ref": requested_ref,
+                "source_channel": str(source_channel or "").strip(),
+                "sha256": str(document.get("sha256") or ""),
+                "original_file_name": str(document.get("original_file_name") or requested_ref),
+                "storage_path": str(document.get("storage_path") or ""),
+                "attached_at": timestamp,
+            }
+            if existing:
+                record = deepcopy(existing)
+                attachments = record.setdefault("document_sources", [])
+                if not any(
+                    str(item.get("source_ref") or "") == requested_ref
+                    or (
+                        source["sha256"]
+                        and str(item.get("sha256") or "") == source["sha256"]
+                    )
+                    for item in attachments
+                ):
+                    attachments.append(source)
+                record["updated_at"] = timestamp
+            else:
+                record = {
+                    **document,
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "document_sources": [source],
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                }
+            data["uploaded_documents"][document_key] = record
+            for identity in normalized_identities:
+                key = f"{client_id}:{identity['kind']}:{identity['value']}"
+                owner = identity_records.get(key)
+                if owner and str(owner.get("document_ref") or "") != document_ref:
+                    raise ValueError("document_identity_conflict")
+                identity_records[key] = {
+                    **identity,
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "source_channel": str(source_channel or "").strip(),
+                    "claimed_at": str(owner.get("claimed_at") or timestamp) if owner else timestamp,
+                    "committed_at": timestamp,
+                    "state": "committed",
+                }
+            existing_job = next(
+                (
+                    job
+                    for job in data["processing_jobs"]
+                    if str(job.get("client_id") or "") == client_id
+                    and str(job.get("document_ref") or "") == document_ref
+                    and str(job.get("status") or "") in {"queued", "processing", "completed"}
+                ),
+                None,
+            )
+            processing_job_created = existing_job is None
+            if existing_job is None:
+                existing_job = {
+                    "id": str(uuid4()),
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "document_type": str(document.get("document_type") or "invoice"),
+                    "intake_category": intake_category,
+                    "parser_kind": parser_kind,
+                    "status": "queued",
+                    "attempt_count": 0,
+                    "error_message": "",
+                    "created_at": timestamp,
+                    "updated_at": timestamp,
+                }
+                data["processing_jobs"].append(existing_job)
+            self._write(data)
+        return {
+            **deepcopy(record),
+            "deduplicated": document_ref != requested_ref,
+            "requested_document_ref": requested_ref,
+            "processing_job": deepcopy(existing_job),
+            "processing_job_created": processing_job_created,
+        }
+
     def save_onboarding_attachment(self, *, client_id: str, attachment: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
         attachment_ref = str(attachment.get("attachment_ref") or attachment.get("document_id") or uuid4())
@@ -1808,6 +2240,21 @@ class JsonWorkflowStore:
                 deepcopy(event)
                 for event in data["document_pipeline_events"]
                 if event.get("client_id") == client_id
+            ],
+            "qnb_incoming_status_snapshots": [
+                deepcopy(snapshot)
+                for key, snapshot in data["qnb_incoming_status_snapshots"].items()
+                if key.startswith(document_prefix)
+            ],
+            "document_safety_holds": [
+                deepcopy(hold)
+                for hold in data["document_safety_holds"].values()
+                if hold.get("client_id") == client_id
+            ],
+            "qnb_correction_reviews": [
+                deepcopy(review)
+                for review in data["qnb_correction_reviews"].values()
+                if review.get("client_id") == client_id
             ],
         }
 

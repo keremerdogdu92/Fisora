@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from threading import Event, Thread
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -55,21 +56,66 @@ def due_qnb_status_ettns(workspace: dict[str, Any], *, now: datetime, limit: int
 
 
 class QnbScheduler:
-    def __init__(self, *, store: Any, service_factory: Callable[[], Any], worker_id: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        store: Any,
+        service_factory: Callable[[], Any],
+        worker_id: str = "",
+        lease_seconds: float = 600,
+        heartbeat_seconds: float = 60,
+    ) -> None:
         self.store = store
         self.service_factory = service_factory
         self.worker_id = worker_id or f"qnb-worker-{uuid4()}"
+        self.lease_seconds = max(float(lease_seconds), 1)
+        self.heartbeat_seconds = max(
+            min(float(heartbeat_seconds), self.lease_seconds / 2),
+            0.005,
+        )
 
     def run_due_once(self, *, now: datetime | None = None) -> dict[str, Any] | None:
         current = now or datetime.now(UTC)
         policy = self.store.claim_due_qnb_sync_policy(
             worker_id=self.worker_id,
             now=_iso(current),
-            lease_expires_at=_iso(current + timedelta(minutes=10)),
+            lease_expires_at=_iso(
+                current + timedelta(seconds=self.lease_seconds)
+            ),
         )
         if not policy:
             return None
         client_id = str(policy["client_id"])
+        lease_token = str(policy.get("lease_token") or "")
+        stop_heartbeat = Event()
+        lease_lost = Event()
+
+        def renew_lease() -> None:
+            while not stop_heartbeat.wait(self.heartbeat_seconds):
+                renewed = self.store.renew_qnb_sync_policy_lease(
+                    client_id=client_id,
+                    worker_id=self.worker_id,
+                    lease_token=lease_token,
+                    lease_expires_at=_iso(
+                        datetime.now(UTC)
+                        + timedelta(seconds=self.lease_seconds)
+                    ),
+                )
+                if not renewed:
+                    lease_lost.set()
+                    return
+
+        heartbeat = None
+        if lease_token and hasattr(
+            self.store,
+            "renew_qnb_sync_policy_lease",
+        ):
+            heartbeat = Thread(
+                target=renew_lease,
+                name=f"qnb-lease-{client_id}",
+                daemon=True,
+            )
+            heartbeat.start()
         service = self.service_factory()
         try:
             request_budget = int(policy.get("provider_request_budget") or 150)
@@ -84,32 +130,83 @@ class QnbScheduler:
             failed = sync.get("status") not in {"completed", "partial_completed", "backfill_truncated"} or status.get("status") == "partial_failed"
             failures = int(policy.get("consecutive_failure_count") or 0) + 1 if failed else 0
             delay = min(int(policy.get("frequency_minutes") or 60) * (2 ** failures), 1440)
-            saved = self.store.save_qnb_sync_policy(
-                client_id=client_id,
-                policy={
-                    **policy,
-                    "lease_owner": "",
-                    "lease_expires_at": "",
-                    "last_success_at": str(policy.get("last_success_at") or "") if failed else _iso(current),
-                    "consecutive_failure_count": failures,
-                    "next_run_at": _iso(current + timedelta(minutes=delay)),
-                    "last_run_status": "partial_failed" if failed else "completed",
-                },
+            if lease_lost.is_set():
+                return {
+                    "client_id": client_id,
+                    "error_code": "qnb_scheduler_lease_lost",
+                    "stale_completion_rejected": True,
+                }
+            updates = {
+                "last_success_at": (
+                    str(policy.get("last_success_at") or "")
+                    if failed
+                    else _iso(current)
+                ),
+                "consecutive_failure_count": failures,
+                "next_run_at": _iso(current + timedelta(minutes=delay)),
+                "last_run_status": "partial_failed" if failed else "completed",
+            }
+            completed = (
+                self.store.complete_qnb_sync_policy(
+                    client_id=client_id,
+                    worker_id=self.worker_id,
+                    lease_token=lease_token,
+                    updates=updates,
+                )
+                if lease_token
+                and hasattr(self.store, "complete_qnb_sync_policy")
+                else False
             )
+            if lease_token and not completed:
+                return {
+                    "client_id": client_id,
+                    "error_code": "qnb_scheduler_stale_completion",
+                    "stale_completion_rejected": True,
+                }
+            if completed:
+                saved = self.store.get_qnb_sync_policy(client_id=client_id)
+            else:
+                saved = self.store.save_qnb_sync_policy(
+                    client_id=client_id,
+                    policy={**policy, **updates, "lease_owner": "", "lease_expires_at": ""},
+                )
             return {"client_id": client_id, "sync": sync, "status_reconciliation": status, "policy": saved}
         except Exception as exc:
             failures = int(policy.get("consecutive_failure_count") or 0) + 1
             delay = min(int(policy.get("frequency_minutes") or 60) * (2 ** failures), 1440)
-            saved = self.store.save_qnb_sync_policy(
-                client_id=client_id,
-                policy={
-                    **policy,
-                    "lease_owner": "",
-                    "lease_expires_at": "",
-                    "consecutive_failure_count": failures,
-                    "next_run_at": _iso(current + timedelta(minutes=delay)),
-                    "last_run_status": "failed",
-                    "last_error_code": type(exc).__name__,
-                },
+            updates = {
+                "consecutive_failure_count": failures,
+                "next_run_at": _iso(current + timedelta(minutes=delay)),
+                "last_run_status": "failed",
+                "last_error_code": type(exc).__name__,
+            }
+            completed = (
+                self.store.complete_qnb_sync_policy(
+                    client_id=client_id,
+                    worker_id=self.worker_id,
+                    lease_token=lease_token,
+                    updates=updates,
+                )
+                if lease_token
+                and hasattr(self.store, "complete_qnb_sync_policy")
+                and not lease_lost.is_set()
+                else False
             )
+            if completed:
+                saved = self.store.get_qnb_sync_policy(client_id=client_id)
+            elif lease_token:
+                return {
+                    "client_id": client_id,
+                    "error_code": "qnb_scheduler_stale_completion",
+                    "stale_completion_rejected": True,
+                }
+            else:
+                saved = self.store.save_qnb_sync_policy(
+                    client_id=client_id,
+                    policy={**policy, **updates, "lease_owner": "", "lease_expires_at": ""},
+                )
             return {"client_id": client_id, "error_code": type(exc).__name__, "policy": saved}
+        finally:
+            stop_heartbeat.set()
+            if heartbeat is not None:
+                heartbeat.join(timeout=max(self.heartbeat_seconds * 2, 0.1))

@@ -67,6 +67,8 @@ services:
       FISORA_QNB_ADAPTER: ${FISORA_QNB_ADAPTER:-fake}
       FISORA_QNB_ERP_CODE: ${FISORA_QNB_ERP_CODE:-FSR31422}
       FISORA_QNB_CREDENTIAL_KEY: ${FISORA_QNB_CREDENTIAL_KEY:-}
+      FISORA_QNB_SCHEDULER_ENABLED: ${FISORA_QNB_SCHEDULER_ENABLED:-false}
+      FISORA_QNB_OPERATION_OWNER: ${FISORA_QNB_OPERATION_OWNER:-}
       FISORA_AI_PROVIDER: ${FISORA_AI_PROVIDER:-disabled}
       FISORA_AI_PROVIDER_CHAIN: ${FISORA_AI_PROVIDER_CHAIN:-}
       FISORA_AI_MODEL: ${FISORA_AI_MODEL:-}
@@ -146,9 +148,6 @@ services:
       FISORA_WORKER_PROCESSING_INTERVAL_SECONDS: ${FISORA_WORKER_PROCESSING_INTERVAL_SECONDS:-30}
       FISORA_WORKER_CONCURRENCY: ${FISORA_WORKER_CONCURRENCY:-3}
       FISORA_WORKER_MAX_JOBS_PER_TICK: ${FISORA_WORKER_MAX_JOBS_PER_TICK:-10}
-      FISORA_QNB_ADAPTER: ${FISORA_QNB_ADAPTER:-fake}
-      FISORA_QNB_ERP_CODE: ${FISORA_QNB_ERP_CODE:-FSR31422}
-      FISORA_QNB_CREDENTIAL_KEY: ${FISORA_QNB_CREDENTIAL_KEY:-}
       FISORA_AI_PROVIDER: ${FISORA_AI_PROVIDER:-disabled}
       FISORA_AI_PROVIDER_CHAIN: ${FISORA_AI_PROVIDER_CHAIN:-}
       FISORA_AI_MODEL: ${FISORA_AI_MODEL:-}
@@ -195,6 +194,41 @@ services:
       backend:
         condition: service_healthy
 
+  qnb-scheduler:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "app.qnb_worker"]
+    environment:
+      FISORA_ENV: production
+      FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
+      FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
+      FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
+      FISORA_QNB_SCHEDULER_ENABLED: ${FISORA_QNB_SCHEDULER_ENABLED:-false}
+      FISORA_QNB_SCHEDULER_INTERVAL_SECONDS: ${FISORA_QNB_SCHEDULER_INTERVAL_SECONDS:-30}
+      FISORA_QNB_ADAPTER: ${FISORA_QNB_ADAPTER:-fake}
+      FISORA_QNB_ERP_CODE: ${FISORA_QNB_ERP_CODE:-FSR31422}
+      FISORA_QNB_CREDENTIAL_KEY: ${FISORA_QNB_CREDENTIAL_KEY:-}
+      FISORA_QNB_OPERATION_OWNER: ${FISORA_QNB_OPERATION_OWNER:-}
+      FISORA_REAL_DATA_ACCESS_MODE: ${FISORA_REAL_DATA_ACCESS_MODE:-disabled}
+      FISORA_REAL_DATA_PILOT_ENABLED: ${FISORA_REAL_DATA_PILOT_ENABLED:-false}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fisora}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-fisora}
+    volumes:
+      - fisora_documents:/opt/fisora/data/documents
+      - fisora_exports:/opt/fisora/data/exports
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; import time; p=Path('/tmp/fisora-qnb-scheduler-heartbeat'); raise SystemExit(0 if p.exists() and time.time()-p.stat().st_mtime < 120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 4
+      start_period: 20s
+
   frontend:
     build:
       context: .
@@ -217,8 +251,10 @@ services:
     restart: unless-stopped
     ports:
       - "${FISORA_HTTP_PORT:-80}:80"
+      - "${FISORA_HTTPS_PORT:-443}:443"
     volumes:
-      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${FISORA_NGINX_CONFIG:-./deploy/nginx/default.tls.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${FISORA_TLS_CERT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
     depends_on:
       frontend:
         condition: service_healthy

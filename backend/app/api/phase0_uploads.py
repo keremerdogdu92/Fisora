@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.domain.document_uploads import store_document_content
+from app.services.document_identity import extract_source_identities
 from app.workflows.document_processing import parser_kind_for_document_type
 
 
@@ -69,17 +70,28 @@ def save_uploaded_document_with_job(
     document_payload = asdict(document)
     document_payload["uploaded_by_user_id"] = effective_user_id
     document_payload["portal_access_reason"] = access.get("reason", "")
-    saved = store.save_uploaded_document(
-        client_id=client_id,
-        document=document_payload,
-    )
-    job = store.create_processing_job(
-        client_id=client_id,
-        document_ref=str(saved["document_ref"]),
-        document_type=document_type,
-        parser_kind=parser_kind_for_document_type(document_type),
-        intake_category=str(saved.get("intake_category") or ""),
-    )
+    if hasattr(store, "accept_document_source"):
+        saved = store.accept_document_source(
+            client_id=client_id,
+            document=document_payload,
+            source_channel="manual_upload",
+            identities=extract_source_identities(content=content, file_name=file_name),
+            parser_kind=parser_kind_for_document_type(document_type),
+            intake_category=str(document_payload.get("intake_category") or ""),
+        )
+        job = dict(saved.get("processing_job") or {})
+    else:
+        saved = store.save_uploaded_document(
+            client_id=client_id,
+            document=document_payload,
+        )
+        job = store.create_processing_job(
+            client_id=client_id,
+            document_ref=str(saved["document_ref"]),
+            document_type=document_type,
+            parser_kind=parser_kind_for_document_type(document_type),
+            intake_category=str(saved.get("intake_category") or ""),
+        )
     record_operation_event(
         store=store,
         client_id=client_id,

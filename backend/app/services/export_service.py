@@ -9,7 +9,10 @@ from fastapi import HTTPException
 from app.api.phase0_review_export import entry_payload, export_package_payload, safe_export_file_name, write_export_manifest
 from app.api.phase0_schemas import ExportPackagePayload, StoredExportPackagePayload, WorkspaceExportPackagePayload
 from app.domain.export_adapters import get_export_adapter, write_export_file
-from app.domain.workspace_exports import build_workspace_export_package
+from app.domain.workspace_exports import (
+    apply_document_safety_holds,
+    build_workspace_export_package,
+)
 
 
 OperationRecorder = Callable[..., dict[str, object]]
@@ -37,6 +40,14 @@ class ExportService:
         if not payload.client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required for persistence")
         package = self.export_package(payload.package)
+        self._assert_documents_not_held(
+            client_id=payload.client_id,
+            document_refs=[
+                str(entry.get("document_ref") or "")
+                for entry in package.get("entries", [])
+                if isinstance(entry, dict)
+            ],
+        )
         saved = self.store.save_export_package(client_id=payload.client_id, package=package)
         self.record_operation_event(
             store=self.store,
@@ -72,6 +83,12 @@ class ExportService:
             if callable(workspace_reader)
             else self.store.get_workspace(payload.client_id)
         )
+        holds_reader = getattr(self.store, "active_document_safety_holds", None)
+        if callable(holds_reader):
+            workspace = apply_document_safety_holds(
+                workspace,
+                holds=holds_reader(client_id=payload.client_id),
+            )
         try:
             adapter = get_export_adapter(payload.export_type)
         except ValueError as exc:
@@ -133,10 +150,60 @@ class ExportService:
     def export_download_path(self, *, client_id: str, file_name: str, user_id: str | None) -> Path:
         self.require_client_access(client_id=client_id, user_id=user_id)
         safe_name = Path(file_name).name
+        workspace = self.store.get_workspace(client_id)
+        for record in reversed(workspace.get("export_packages", [])):
+            package = record.get("package") or {}
+            if safe_name not in {
+                str(package.get("output_filename") or ""),
+                str(package.get("manifest_filename") or ""),
+            }:
+                continue
+            self._assert_documents_not_held(
+                client_id=client_id,
+                document_refs=[
+                    str(entry.get("document_ref") or "")
+                    for entry in package.get("entries", [])
+                    if isinstance(entry, dict)
+                ],
+            )
+            break
         path = self.export_path / client_id / safe_name
         if not path.exists() or not path.is_file():
             raise HTTPException(status_code=404, detail="export file not found")
         return path
+
+    def _assert_documents_not_held(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str],
+    ) -> None:
+        holds_reader = getattr(self.store, "active_document_safety_holds", None)
+        requested = [item for item in document_refs if item]
+        if not callable(holds_reader) or not requested:
+            return
+        holds = holds_reader(client_id=client_id, document_refs=requested)
+        if holds:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "reason": "qnb_external_status_hold",
+                    "document_refs": sorted(
+                        {
+                            str(hold.get("document_ref") or "")
+                            for hold in holds
+                            if str(hold.get("document_ref") or "")
+                        }
+                    ),
+                    "hold_codes": sorted(
+                        {
+                            str(hold.get("hold_code") or "")
+                            for hold in holds
+                            if str(hold.get("hold_code") or "")
+                        }
+                    ),
+                },
+            )
 
     def mark_export_package_downloaded(self, *, client_id: str, output_filename: str) -> None:
         self.store.mark_export_package_downloaded(client_id=client_id, output_filename=output_filename)

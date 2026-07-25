@@ -389,6 +389,299 @@ class NormalizedAccountingRepository:
             "requested_document_ref": requested_ref,
         }
 
+    def accept_source_document(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+        source_channel: str,
+        identities: list[dict[str, str]],
+        parser_kind: str,
+        intake_category: str,
+    ) -> dict[str, Any]:
+        taxpayer_id = _uuid_for("taxpayer", f"{self.tenant_id}:{client_id}")
+        requested_ref = str(document.get("document_id") or uuid4())
+        source_sha256 = str(document.get("sha256") or f"unhashed:{requested_ref}")
+        source_id = _uuid_for(
+            "source",
+            f"{self.tenant_id}:{client_id}:{source_sha256}",
+        )
+        normalized_identities = [
+            {
+                "kind": str(identity.get("kind") or "").strip().lower(),
+                "value": str(identity.get("value") or "").strip(),
+            }
+            for identity in identities
+            if str(identity.get("kind") or "").strip()
+            and str(identity.get("value") or "").strip()
+        ]
+        lock_identity = (
+            f"{normalized_identities[0]['kind']}:{normalized_identities[0]['value']}"
+            if normalized_identities
+            else f"sha256:{source_sha256}"
+        )
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "select pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"{self.tenant_id}:{taxpayer_id}:{lock_identity}",),
+                )
+                cursor.execute(
+                    """
+                    insert into source_files (
+                        id, tenant_id, taxpayer_id, source_ref, original_filename,
+                        stored_filename, storage_path, storage_backend, size_bytes,
+                        sha256, status, retention_policy_days,
+                        download_available_until, expires_at, deleted_at
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (tenant_id, taxpayer_id, sha256) do update
+                    set source_ref = source_files.source_ref
+                    returning id, source_ref
+                    """,
+                    (
+                        source_id,
+                        self.tenant_id,
+                        taxpayer_id,
+                        requested_ref,
+                        str(document.get("original_file_name") or requested_ref),
+                        str(document.get("stored_file_name") or ""),
+                        str(document.get("storage_path") or ""),
+                        str(document.get("storage_backend") or "local"),
+                        int(document.get("size_bytes") or 0),
+                        source_sha256,
+                        str(document.get("storage_status") or document.get("status") or "stored"),
+                        int(document.get("retention_policy_days") or 90),
+                        document.get("download_available_until") or None,
+                        document.get("expires_at") or None,
+                        document.get("deleted_at") or None,
+                    ),
+                )
+                stored_source_id, authoritative_source_ref = cursor.fetchone()
+
+                document_id = None
+                for identity in normalized_identities:
+                    cursor.execute(
+                        """
+                        select document_id
+                        from document_identities
+                        where tenant_id = %s and taxpayer_id = %s
+                          and identity_kind = %s and identity_value = %s
+                        """,
+                        (
+                            self.tenant_id,
+                            taxpayer_id,
+                            identity["kind"],
+                            identity["value"],
+                        ),
+                    )
+                    row = cursor.fetchone()
+                    if row and document_id is not None and row[0] != document_id:
+                        raise NormalizedAccountingError("document_identity_conflict")
+                    if row:
+                        document_id = row[0]
+
+                created_document = document_id is None
+                if document_id is None:
+                    document_id = _uuid_for(
+                        "document",
+                        f"{self.tenant_id}:{client_id}:{authoritative_source_ref}",
+                    )
+                    cursor.execute(
+                        """
+                        insert into documents (
+                            id, tenant_id, taxpayer_id, source_ref, source_filename,
+                            stored_filename, storage_path, size_bytes, sha256,
+                            document_type, status, storage_status,
+                            retention_policy_days, download_available_until, expires_at,
+                            ettn, invoice_number, invoice_date, supplier_tax_id, gross_total
+                        )
+                        values (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                        )
+                        returning id
+                        """,
+                        (
+                            document_id,
+                            self.tenant_id,
+                            taxpayer_id,
+                            authoritative_source_ref,
+                            str(document.get("original_file_name") or authoritative_source_ref),
+                            str(document.get("stored_file_name") or ""),
+                            str(document.get("storage_path") or ""),
+                            int(document.get("size_bytes") or 0),
+                            source_sha256,
+                            str(document.get("document_type") or "invoice"),
+                            str(document.get("status") or "stored"),
+                            str(document.get("storage_status") or "stored"),
+                            int(document.get("retention_policy_days") or 90),
+                            document.get("download_available_until") or None,
+                            document.get("expires_at") or None,
+                            next(
+                                (
+                                    identity["value"]
+                                    for identity in normalized_identities
+                                    if identity["kind"] == "ettn"
+                                ),
+                                None,
+                            ),
+                            str(document.get("source_invoice_no") or "") or None,
+                            _date_or_none(document.get("source_issue_date")),
+                            str(document.get("source_supplier_tax_id") or "") or None,
+                            str(document.get("source_payable_total") or "") or None,
+                        ),
+                    )
+                    cursor.fetchone()
+
+                cursor.execute(
+                    """
+                    select source_ref
+                    from documents
+                    where id = %s and tenant_id = %s and taxpayer_id = %s
+                    """,
+                    (document_id, self.tenant_id, taxpayer_id),
+                )
+                document_ref = str(cursor.fetchone()[0])
+                cursor.execute(
+                    """
+                    insert into document_sources (
+                        id, tenant_id, taxpayer_id, document_id, source_file_id,
+                        relationship_type, is_canonical
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s)
+                    on conflict (document_id, source_file_id) do nothing
+                    """,
+                    (
+                        uuid4(),
+                        self.tenant_id,
+                        taxpayer_id,
+                        document_id,
+                        stored_source_id,
+                        "canonical" if created_document else "supporting",
+                        created_document,
+                    ),
+                )
+                for identity in normalized_identities:
+                    cursor.execute(
+                        """
+                        insert into document_identities (
+                            id, tenant_id, taxpayer_id, document_id,
+                            identity_kind, identity_value, source_channel,
+                            state, committed_at
+                        )
+                        values (%s, %s, %s, %s, %s, %s, %s, 'committed', now())
+                        on conflict (tenant_id, taxpayer_id, identity_kind, identity_value)
+                        do update set committed_at = coalesce(
+                            document_identities.committed_at, excluded.committed_at
+                        )
+                        returning document_id
+                        """,
+                        (
+                            uuid4(),
+                            self.tenant_id,
+                            taxpayer_id,
+                            document_id,
+                            identity["kind"],
+                            identity["value"],
+                            source_channel,
+                        ),
+                    )
+                    owner_document_id = cursor.fetchone()[0]
+                    if owner_document_id != document_id:
+                        raise NormalizedAccountingError("document_identity_conflict")
+
+                external_identity = next(
+                    (
+                        identity["value"]
+                        for identity in normalized_identities
+                        if identity["kind"] == "ettn"
+                    ),
+                    "",
+                )
+                if source_channel == "qnb_esolutions" and external_identity:
+                    cursor.execute(
+                        """
+                        insert into provider_document_links (
+                            id, tenant_id, taxpayer_id, document_id, provider,
+                            external_identity, current_status
+                        )
+                        values (%s, %s, %s, %s, %s, %s, %s)
+                        on conflict (tenant_id, taxpayer_id, provider, external_identity)
+                        do update set document_id = excluded.document_id, updated_at = now()
+                        """,
+                        (
+                            uuid4(),
+                            self.tenant_id,
+                            taxpayer_id,
+                            document_id,
+                            source_channel,
+                            external_identity,
+                            str(document.get("source_qnb_status") or "unknown"),
+                        ),
+                    )
+
+                job_id = _uuid_for(
+                    "processing-job",
+                    f"{self.tenant_id}:{client_id}:{document_ref}",
+                )
+                cursor.execute(
+                    """
+                    insert into processing_jobs (
+                        id, tenant_id, taxpayer_id, document_id, document_ref,
+                        document_type, parser_kind, intake_category, status
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, 'queued')
+                    on conflict (tenant_id, taxpayer_id, document_ref)
+                    do update set updated_at = processing_jobs.updated_at
+                    returning id, status, attempt_count, created_at, updated_at, (xmax = 0)
+                    """,
+                    (
+                        job_id,
+                        self.tenant_id,
+                        taxpayer_id,
+                        document_id,
+                        document_ref,
+                        str(document.get("document_type") or "invoice"),
+                        parser_kind,
+                        intake_category,
+                    ),
+                )
+                job_row = cursor.fetchone()
+                self._append_event(
+                    cursor,
+                    taxpayer_id=taxpayer_id,
+                    document_id=document_id,
+                    event_type="source_attached" if not created_document else "source_accepted",
+                    status="ok",
+                    actor=str(document.get("uploaded_by_user_id") or document.get("uploaded_by") or source_channel),
+                    details={
+                        "source_ref": str(authoritative_source_ref),
+                        "sha256": source_sha256,
+                        "source_channel": source_channel,
+                    },
+                )
+        return {
+            "document_ref": document_ref,
+            "normalized_document_id": str(document_id),
+            "normalized_source_file_id": str(stored_source_id),
+            "deduplicated": not created_document,
+            "requested_document_ref": requested_ref,
+            "processing_job_created": bool(job_row[5]),
+            "processing_job": {
+                "id": str(job_row[0]),
+                "client_id": client_id,
+                "document_ref": document_ref,
+                "document_type": str(document.get("document_type") or "invoice"),
+                "parser_kind": parser_kind,
+                "intake_category": intake_category,
+                "status": str(job_row[1]),
+                "attempt_count": int(job_row[2] or 0),
+                "created_at": str(job_row[3]),
+                "updated_at": str(job_row[4]),
+            },
+        }
+
     def create_processing_job(
         self,
         *,

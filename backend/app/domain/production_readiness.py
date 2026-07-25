@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
@@ -16,6 +16,7 @@ from app.domain.openai_provider import (
     DEFAULT_SAMBANOVA_MODEL,
 )
 from app.domain.rate_limits import rate_limit_config
+from app.domain.qnb_readiness import qnb_readiness_payload
 from app.domain.storage_adapters import storage_readiness
 from app.domain.system_health import backup_health, storage_usage_health
 
@@ -77,6 +78,7 @@ def production_readiness_payload(
     export_path: Path | str,
     backup_path: Path | str,
     env: Mapping[str, str] | None = None,
+    store: Any | None = None,
 ) -> dict[str, object]:
     source = env if env is not None else os.environ
     supported_ai_providers = {
@@ -162,7 +164,10 @@ def production_readiness_payload(
         "soap_adapter_active": qnb_adapter == "soap",
         "credential_key_present": bool(source.get("FISORA_QNB_CREDENTIAL_KEY", "").strip()),
         "erp_code_present": bool(source.get("FISORA_QNB_ERP_CODE", "").strip()),
-        "scheduler_enabled": True,
+        "scheduler_enabled": _env_bool(
+            source.get("FISORA_QNB_SCHEDULER_ENABLED", ""),
+            default=False,
+        ),
     }
     qnb_runtime["incoming_ready"] = all(
         qnb_runtime[key] for key in ("soap_adapter_active", "credential_key_present", "erp_code_present", "scheduler_enabled")
@@ -278,20 +283,64 @@ def production_readiness_payload(
         "blocking": real_data_pilot_blocking,
         "checks": real_data_pilot_checks,
     }
-    qnb_pilot_checks = {
+    qnb_platform_checks = {
         "incoming_runtime_ready": bool(qnb_runtime["incoming_ready"]),
         "postgres_store_active": bool(pilot_checks["postgres_store_active"]),
         "scheduled_backup_mode": backup_mode == "scheduled",
         "recoverable_backup": bool(backup["ok"]) and backup_mode == "scheduled",
         "restricted_live_access": restricted_live_access,
     }
-    qnb_pilot_blocking = [key for key, passed in qnb_pilot_checks.items() if not passed]
-    qnb_pilot = {
-        "ready": not qnb_pilot_blocking,
-        "blocking": qnb_pilot_blocking,
-        "checks": qnb_pilot_checks,
-        "runtime": qnb_runtime,
-    }
+    if store is not None:
+        qnb_readiness = qnb_readiness_payload(store=store, env=source)
+        combined_qnb_pilot_checks = {
+            **qnb_platform_checks,
+            **qnb_readiness["pilot"]["checks"],
+        }
+        qnb_pilot = {
+            **qnb_readiness["pilot"],
+            "ready": all(combined_qnb_pilot_checks.values()),
+            "blocking": [
+                key
+                for key, passed in combined_qnb_pilot_checks.items()
+                if not passed
+            ],
+            "checks": combined_qnb_pilot_checks,
+            "runtime": qnb_runtime,
+        }
+    else:
+        qnb_readiness = {
+            "incoming": {
+                "ready": False,
+                "blocking": ["outcome_evidence_unavailable"],
+                "checks": {"outcome_evidence_available": False},
+            },
+            "pilot": {
+                "ready": False,
+                "blocking": ["outcome_evidence_unavailable"],
+                "checks": {"outcome_evidence_available": False},
+            },
+            "production": {
+                "ready": False,
+                "blocking": ["outcome_evidence_unavailable"],
+                "checks": {"outcome_evidence_available": False},
+            },
+            "evidence": {},
+        }
+        combined_qnb_pilot_checks = {
+            **qnb_platform_checks,
+            **qnb_readiness["pilot"]["checks"],
+        }
+        qnb_pilot = {
+            **qnb_readiness["pilot"],
+            "ready": False,
+            "blocking": [
+                key
+                for key, passed in combined_qnb_pilot_checks.items()
+                if not passed
+            ],
+            "checks": combined_qnb_pilot_checks,
+            "runtime": qnb_runtime,
+        }
     return {
         "ready": not blocking,
         "pilot_sellable": pilot_sellable,
@@ -304,6 +353,7 @@ def production_readiness_payload(
         "commercial_readiness": commercial_readiness,
         "real_data_pilot": real_data_pilot,
         "qnb_pilot": qnb_pilot,
+        "qnb_readiness": qnb_readiness,
         "auth": auth,
         "document_storage": document_storage,
         "export_storage": export_storage,

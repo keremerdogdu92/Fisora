@@ -702,6 +702,129 @@ class PostgresWorkflowStore:
         rows = self._payloads(client_id, "qnb_sync_run")
         return sorted(rows, key=lambda row: str(row.get("updated_at") or ""), reverse=True)[:max(limit, 1)]
 
+    def enqueue_qnb_sync_request(
+        self,
+        *,
+        client_id: str,
+        start_date: str = "",
+        end_date: str = "",
+        requested_by: str = "",
+    ) -> dict[str, Any]:
+        timestamp = utc_now()
+        request_id = str(uuid4())
+        record = {
+            "request_id": request_id,
+            "client_id": client_id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "requested_by": requested_by,
+            "status": "queued",
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+        return self._upsert_record(
+            client_id,
+            "qnb_sync_request",
+            request_id,
+            record,
+        )
+
+    def claim_next_qnb_sync_request(
+        self,
+        *,
+        worker_id: str,
+        now: str,
+        lease_expires_at: str,
+    ) -> dict[str, Any] | None:
+        self._ensure_tenant()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, payload
+                    from workflow_records
+                    where tenant_id = %s and record_type = 'qnb_sync_request'
+                      and (
+                        payload->>'status' = 'queued'
+                        or (
+                          payload->>'status' = 'processing'
+                          and coalesce(payload->>'lease_expires_at', '') <= %s
+                        )
+                      )
+                    order by created_at asc
+                    for update skip locked
+                    limit 1
+                    """,
+                    (self.tenant_id, now),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                request = dict(row[1] or {})
+                request.update(
+                    {
+                        "status": "processing",
+                        "lease_owner": worker_id,
+                        "lease_token": str(uuid4()),
+                        "lease_expires_at": lease_expires_at,
+                        "updated_at": utc_now(),
+                    }
+                )
+                cursor.execute(
+                    "update workflow_records set payload = %s, updated_at = now() where id = %s",
+                    (self._json(request), row[0]),
+                )
+                return request
+
+    def complete_qnb_sync_request(
+        self,
+        *,
+        client_id: str,
+        request_id: str,
+        worker_id: str,
+        lease_token: str,
+        status: str,
+        result: dict[str, Any],
+    ) -> bool:
+        self._ensure_tenant()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'qnb_sync_request' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, request_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                request = dict(row[1] or {})
+                if (
+                    request.get("lease_owner") != worker_id
+                    or request.get("lease_token") != lease_token
+                ):
+                    return False
+                request.update(
+                    {
+                        "status": status,
+                        "result": result,
+                        "lease_owner": "",
+                        "lease_token": "",
+                        "lease_expires_at": "",
+                        "completed_at": utc_now(),
+                        "updated_at": utc_now(),
+                    }
+                )
+                cursor.execute(
+                    "update workflow_records set payload = %s, updated_at = now() where id = %s",
+                    (self._json(request), row[0]),
+                )
+                return True
+
     def save_qnb_sync_policy(self, *, client_id: str, policy: dict[str, Any]) -> dict[str, Any]:
         existing = self._get_record(client_id, "qnb_sync_policy", client_id) or {}
         timestamp = utc_now()
@@ -732,9 +855,98 @@ class PostgresWorkflowStore:
                 if not row:
                     return None
                 record = dict(row[1] or {})
-                record.update({"lease_owner": worker_id, "lease_expires_at": lease_expires_at, "last_attempt_at": now})
+                record.update(
+                    {
+                        "lease_owner": worker_id,
+                        "lease_token": str(uuid4()),
+                        "lease_expires_at": lease_expires_at,
+                        "last_attempt_at": now,
+                    }
+                )
                 cursor.execute("update workflow_records set payload = %s, updated_at = now() where id = %s", (self._json(record), row[0]))
                 return record
+
+    def renew_qnb_sync_policy_lease(
+        self,
+        *,
+        client_id: str,
+        worker_id: str,
+        lease_token: str,
+        lease_expires_at: str,
+    ) -> bool:
+        self._ensure_tenant()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'qnb_sync_policy' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, client_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                policy = dict(row[1] or {})
+                if (
+                    policy.get("lease_owner") != worker_id
+                    or policy.get("lease_token") != lease_token
+                ):
+                    return False
+                policy["lease_expires_at"] = lease_expires_at
+                policy["lease_renewed_at"] = utc_now()
+                cursor.execute(
+                    "update workflow_records set payload = %s, updated_at = now() where id = %s",
+                    (self._json(policy), row[0]),
+                )
+                return True
+
+    def complete_qnb_sync_policy(
+        self,
+        *,
+        client_id: str,
+        worker_id: str,
+        lease_token: str,
+        updates: dict[str, Any],
+    ) -> bool:
+        self._ensure_tenant()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'qnb_sync_policy' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, client_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                policy = dict(row[1] or {})
+                if (
+                    policy.get("lease_owner") != worker_id
+                    or policy.get("lease_token") != lease_token
+                ):
+                    return False
+                policy.update(updates)
+                policy.update(
+                    {
+                        "lease_owner": "",
+                        "lease_token": "",
+                        "lease_expires_at": "",
+                    }
+                )
+                cursor.execute(
+                    "update workflow_records set payload = %s, updated_at = now() where id = %s",
+                    (self._json(policy), row[0]),
+                )
+                return True
 
     def get_qnb_sync_cursor(self, *, client_id: str) -> str:
         record = self._get_record(client_id, "qnb_sync_cursor", client_id) or {}
@@ -813,6 +1025,321 @@ class PostgresWorkflowStore:
         return self._upsert_record(
             client_id, "qnb_incoming_status_snapshot", str(snapshot["snapshot_id"]), {**snapshot, "client_id": client_id}
         )
+
+    def record_qnb_incoming_status(
+        self,
+        *,
+        client_id: str,
+        document_ref: str,
+        ettn: str,
+        event_key: str,
+        normalized_status: str,
+        response_code: str,
+        response_detail: str,
+        cancelled_at: str,
+        checked_at: str,
+    ) -> dict[str, Any]:
+        blocking_statuses = {"rejected", "cancelled", "unknown"}
+        client = self._get_record(client_id, "client", client_id) or {}
+        profile = client.get("profile") if isinstance(client.get("profile"), dict) else {}
+        self._ensure_taxpayer(
+            client_id=client_id,
+            profile=profile or {"client_id": client_id},
+        )
+        taxpayer_id = taxpayer_uuid(self.tenant_id, client_id)
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id
+                    from documents
+                    where tenant_id = %s and taxpayer_id = %s and source_ref = %s
+                    for update
+                    """,
+                    (self.tenant_id, taxpayer_id, document_ref),
+                )
+                document_row = cursor.fetchone()
+                if not document_row:
+                    raise ValueError("document_not_found")
+                document_id = document_row[0]
+                cursor.execute(
+                    """
+                    insert into provider_document_links (
+                        id, tenant_id, taxpayer_id, document_id, provider,
+                        external_identity, current_status
+                    )
+                    values (%s, %s, %s, %s, 'qnb_esolutions', %s, %s)
+                    on conflict (tenant_id, taxpayer_id, provider, external_identity)
+                    do update set document_id = excluded.document_id, updated_at = now()
+                    returning id
+                    """,
+                    (
+                        uuid4(),
+                        self.tenant_id,
+                        taxpayer_id,
+                        document_id,
+                        ettn,
+                        normalized_status,
+                    ),
+                )
+                provider_link_id = cursor.fetchone()[0]
+                status_event_id = uuid4()
+                cursor.execute(
+                    """
+                    insert into external_status_events (
+                        id, tenant_id, taxpayer_id, document_id, provider_link_id,
+                        event_key, external_status, observed_at, provider_payload
+                    )
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (tenant_id, taxpayer_id, provider_link_id, event_key)
+                    do update set event_key = excluded.event_key
+                    returning id
+                    """,
+                    (
+                        status_event_id,
+                        self.tenant_id,
+                        taxpayer_id,
+                        document_id,
+                        provider_link_id,
+                        event_key,
+                        normalized_status,
+                        checked_at,
+                        self._json(
+                            {
+                                "response_code": response_code,
+                                "response_detail": response_detail,
+                                "cancelled_at": cancelled_at,
+                            }
+                        ),
+                    ),
+                )
+                status_event_id = cursor.fetchone()[0]
+                cursor.execute(
+                    """
+                    update provider_document_links
+                    set current_status = %s, current_status_event_id = %s, updated_at = now()
+                    where id = %s
+                    """,
+                    (normalized_status, status_event_id, provider_link_id),
+                )
+                cursor.execute(
+                    """
+                    select id, hold_code, created_at, trigger_event_id
+                    from document_safety_holds
+                    where tenant_id = %s and taxpayer_id = %s and document_id = %s
+                      and resolved_at is null
+                    order by created_at asc
+                    limit 1
+                    for update
+                    """,
+                    (self.tenant_id, taxpayer_id, document_id),
+                )
+                hold_row = cursor.fetchone()
+                if normalized_status in blocking_statuses and hold_row is None:
+                    hold_id = uuid4()
+                    hold_code = f"qnb_status_{normalized_status}"
+                    cursor.execute(
+                        """
+                        insert into document_safety_holds (
+                            id, tenant_id, taxpayer_id, document_id,
+                            hold_code, trigger_event_id
+                        )
+                        values (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            hold_id,
+                            self.tenant_id,
+                            taxpayer_id,
+                            document_id,
+                            hold_code,
+                            status_event_id,
+                        ),
+                    )
+                    hold_row = (
+                        hold_id,
+                        hold_code,
+                        checked_at,
+                        status_event_id,
+                    )
+                automation_hold = hold_row is not None
+                hold_code = str(hold_row[1]) if hold_row else ""
+                if hold_row:
+                    self._upsert_record_with_cursor(
+                        cursor,
+                        client_id,
+                        "document_safety_hold",
+                        document_ref,
+                        {
+                            "id": str(hold_row[0]),
+                            "client_id": client_id,
+                            "document_ref": document_ref,
+                            "hold_code": hold_code,
+                            "trigger_event_id": str(hold_row[3]),
+                            "created_at": str(hold_row[2]),
+                            "resolved_at": "",
+                        },
+                    )
+                cursor.execute(
+                    """
+                    select record_key, payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'export_package'
+                    for update
+                    """,
+                    (self.tenant_id, client_id),
+                )
+                delivered_package_ids = []
+                for package_key, package_record in cursor.fetchall():
+                    package = package_record.get("package") or {}
+                    if not package.get("downloaded_at"):
+                        continue
+                    if any(
+                        str(entry.get("document_ref") or "").split("#", 1)[0]
+                        == document_ref
+                        for entry in package.get("entries", [])
+                        if isinstance(entry, dict)
+                    ):
+                        delivered_package_ids.append(str(package_key))
+                if (
+                    normalized_status in {"rejected", "cancelled"}
+                    and delivered_package_ids
+                ):
+                    cursor.execute(
+                        """
+                        select payload
+                        from workflow_records
+                        where tenant_id = %s and client_id = %s
+                          and record_type = 'qnb_correction_review'
+                          and record_key = %s
+                        for update
+                        """,
+                        (self.tenant_id, client_id, document_ref),
+                    )
+                    correction_row = cursor.fetchone()
+                    existing_correction = (
+                        deepcopy(correction_row[0]) if correction_row else None
+                    )
+                    correction = existing_correction or {
+                        "id": str(uuid4()),
+                        "client_id": client_id,
+                        "document_ref": document_ref,
+                        "status": "review_required",
+                        "reason": (
+                            f"qnb_status_{normalized_status}_after_delivery"
+                        ),
+                        "trigger_event_key": event_key,
+                        "delivered_export_package_ids": delivered_package_ids,
+                        "automatic_reversal_created": False,
+                        "created_at": checked_at,
+                    }
+                    self._upsert_record_with_cursor(
+                        cursor,
+                        client_id,
+                        "qnb_correction_review",
+                        document_ref,
+                        correction,
+                    )
+                cursor.execute(
+                    """
+                    select payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'uploaded_document' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, document_ref),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("uploaded_document_not_found")
+                document = deepcopy(row[0])
+                previous_status = str(
+                    document.get("source_qnb_normalized_status") or ""
+                )
+                document.update(
+                    {
+                        "source_qnb_status": response_code,
+                        "source_qnb_normalized_status": normalized_status,
+                        "source_qnb_status_detail": response_detail,
+                        "source_qnb_status_checked_at": checked_at,
+                        "source_qnb_status_changed": bool(previous_status)
+                        and previous_status != normalized_status,
+                        "qnb_review_required": automation_hold,
+                        "automation_hold": automation_hold,
+                        "automation_hold_reason": hold_code,
+                        "updated_at": utc_now(),
+                    }
+                )
+                self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    "uploaded_document",
+                    document_ref,
+                    document,
+                )
+                snapshot = {
+                    "snapshot_id": event_key,
+                    "document_ref": document_ref,
+                    "ettn": ettn,
+                    "response_code": response_code,
+                    "normalized_status": normalized_status,
+                    "response_detail": response_detail,
+                    "cancelled_at": cancelled_at,
+                    "checked_at": checked_at,
+                    "source": "qnb_incoming_status_query",
+                    "review_required": automation_hold,
+                }
+                self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    "qnb_incoming_status_snapshot",
+                    event_key,
+                    {**snapshot, "client_id": client_id},
+                )
+        return {
+            **snapshot,
+            "automation_hold": automation_hold,
+            "automation_hold_reason": hold_code,
+        }
+
+    def active_document_safety_holds(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        self._ensure_tenant()
+        taxpayer_id = taxpayer_uuid(self.tenant_id, client_id)
+        requested = [str(item) for item in (document_refs or []) if str(item)]
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select h.id, d.source_ref, h.hold_code, h.trigger_event_id,
+                           h.created_at
+                    from document_safety_holds h
+                    join documents d on d.id = h.document_id
+                    where h.tenant_id = %s and h.taxpayer_id = %s
+                      and h.resolved_at is null
+                      and (%s = '{}'::text[] or d.source_ref = any(%s))
+                    order by h.created_at asc
+                    """,
+                    (self.tenant_id, taxpayer_id, requested, requested),
+                )
+                rows = cursor.fetchall()
+        return [
+            {
+                "id": str(row[0]),
+                "client_id": client_id,
+                "document_ref": str(row[1]),
+                "hold_code": str(row[2]),
+                "trigger_event_id": str(row[3]),
+                "created_at": str(row[4]),
+                "resolved_at": "",
+            }
+            for row in rows
+        ]
 
     def save_outgoing_invoice(self, *, client_id: str, invoice: dict[str, Any]) -> dict[str, Any]:
         invoice_id = str(invoice.get("invoice_id") or "")
@@ -1592,6 +2119,113 @@ class PostgresWorkflowStore:
         record["created_at"] = existing.get("created_at", timestamp) if existing else timestamp
         return self._upsert_record(client_id, "uploaded_document", document_ref, record)
 
+    def accept_document_source(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+        source_channel: str,
+        identities: list[dict[str, str]],
+        parser_kind: str,
+        intake_category: str = "",
+    ) -> dict[str, Any]:
+        client = self._get_record(client_id, "client", client_id) or {}
+        profile = client.get("profile") if isinstance(client.get("profile"), dict) else {}
+        self._ensure_taxpayer(
+            client_id=client_id,
+            profile=profile or {"client_id": client_id},
+        )
+        repository = (
+            self.normalized_repository
+            if isinstance(self.normalized_repository, NormalizedAccountingRepository)
+            else NormalizedAccountingRepository(
+                connect=self._connect,
+                tenant_id=self.tenant_id,
+                json_value=self._json,
+            )
+        )
+        timestamp = utc_now()
+        with self._connect() as connection:
+            normalized = repository.with_connection(connection).accept_source_document(
+                client_id=client_id,
+                document=document,
+                source_channel=source_channel,
+                identities=identities,
+                parser_kind=parser_kind,
+                intake_category=intake_category,
+            )
+            document_ref = str(normalized["document_ref"])
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'uploaded_document' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, document_ref),
+                )
+                row = cursor.fetchone()
+                existing = deepcopy(row[0]) if row else {}
+                requested_ref = str(
+                    normalized.get("requested_document_ref")
+                    or document.get("document_id")
+                    or ""
+                )
+                source = {
+                    "source_ref": requested_ref,
+                    "source_channel": str(source_channel or "").strip(),
+                    "sha256": str(document.get("sha256") or ""),
+                    "original_file_name": str(
+                        document.get("original_file_name") or requested_ref
+                    ),
+                    "storage_path": str(document.get("storage_path") or ""),
+                    "attached_at": timestamp,
+                }
+                attachments = deepcopy(existing.get("document_sources") or [])
+                if not any(
+                    str(item.get("source_ref") or "") == requested_ref
+                    or (
+                        source["sha256"]
+                        and str(item.get("sha256") or "") == source["sha256"]
+                    )
+                    for item in attachments
+                ):
+                    attachments.append(source)
+                record = {
+                    **document,
+                    **existing,
+                    **normalized,
+                    "client_id": client_id,
+                    "document_ref": document_ref,
+                    "document_sources": attachments,
+                    "updated_at": timestamp,
+                }
+                record.setdefault("created_at", timestamp)
+                persisted = self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    "uploaded_document",
+                    document_ref,
+                    record,
+                )
+                job = dict(normalized["processing_job"])
+                self._upsert_record_with_cursor(
+                    cursor,
+                    client_id,
+                    "processing_job",
+                    str(job["id"]),
+                    job,
+                )
+        return {
+            **persisted,
+            "processing_job": job,
+            "processing_job_created": bool(normalized["processing_job_created"]),
+            "deduplicated": bool(normalized["deduplicated"]),
+            "requested_document_ref": str(normalized["requested_document_ref"]),
+        }
+
     def save_onboarding_attachment(self, *, client_id: str, attachment: dict[str, Any]) -> dict[str, Any]:
         attachment_ref = str(attachment.get("attachment_ref") or attachment.get("document_id") or uuid4())
         timestamp = utc_now()
@@ -2268,6 +2902,18 @@ class PostgresWorkflowStore:
             ],
             "operation_events": self.list_operation_events(client_id=client_id),
             "document_pipeline_events": self._payloads(client_id, "document_pipeline_event"),
+            "qnb_incoming_status_snapshots": self._payloads(
+                client_id,
+                "qnb_incoming_status_snapshot",
+            ),
+            "document_safety_holds": self._payloads(
+                client_id,
+                "document_safety_hold",
+            ),
+            "qnb_correction_reviews": self._payloads(
+                client_id,
+                "qnb_correction_review",
+            ),
         }
         if self.normalized_accounting_enabled:
             projections = {

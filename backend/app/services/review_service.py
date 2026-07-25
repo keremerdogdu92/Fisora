@@ -125,6 +125,39 @@ class ReviewService:
             user_id=user_id,
             allowed_roles=("accountant", "admin"),
         )
+        if payload.decision.action in {
+            "approve",
+            "approve_with_changes",
+            "suggest_for_similar",
+        }:
+            holds_reader = getattr(
+                self.store,
+                "active_document_safety_holds",
+                None,
+            )
+            holds = (
+                holds_reader(
+                    client_id=payload.client_id,
+                    document_refs=[payload.decision.document_ref],
+                )
+                if callable(holds_reader)
+                else []
+            )
+            if holds:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "reason": "qnb_external_status_hold",
+                        "document_ref": payload.decision.document_ref,
+                        "hold_codes": sorted(
+                            {
+                                str(hold.get("hold_code") or "")
+                                for hold in holds
+                                if str(hold.get("hold_code") or "")
+                            }
+                        ),
+                    },
+                )
         workspace = self.store.get_workspace(payload.client_id)
         document = workspace_document(workspace, payload.decision.document_ref)
         decision = self._validated_review_decision(payload.decision, workspace=workspace, document=document)

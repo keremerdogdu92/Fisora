@@ -903,19 +903,6 @@ class QnbSyncService:
                     result["skipped_duplicate_count"] += 1
                     self._record_operation(client_id, "qnb_duplicate_skipped", sync_run_id, {"ettn": invoice.ettn})
                     continue
-                identity_key = _qnb_identity_key(invoice)
-                claimed = True
-                if identity_key and hasattr(self.store, "claim_qnb_document_identity"):
-                    claimed = bool(
-                        self.store.claim_qnb_document_identity(
-                            client_id=client_id,
-                            identity_key=identity_key,
-                            metadata={"ettn": invoice.ettn, "invoice_no": invoice.invoice_no},
-                        )
-                    )
-                if not claimed:
-                    result["skipped_duplicate_count"] += 1
-                    continue
                 try:
                     downloaded = self.adapter.download_incoming_invoice_ubl(credentials, invoice)
                     saved = self._store_downloaded_document(
@@ -924,9 +911,9 @@ class QnbSyncService:
                         downloaded=downloaded,
                         sync_run_id=sync_run_id,
                     )
-                    self._queue_processing_job(client_id=client_id, document=saved)
                     result["downloaded_count"] += 1
-                    result["queued_processing_count"] += 1
+                    if bool(saved.get("processing_job_created", True)):
+                        result["queued_processing_count"] += 1
                 except Exception as exc:  # pragma: no cover - covered through public failed_count behavior later
                     page_failed = True
                     result["failed_count"] += 1
@@ -937,8 +924,6 @@ class QnbSyncService:
                             "message": _redacted_error_message(exc),
                         }
                     )
-                    if identity_key and hasattr(self.store, "release_qnb_document_identity"):
-                        self.store.release_qnb_document_identity(client_id=client_id, identity_key=identity_key)
             if result.get("limit_reached"):
                 break
             if page_failed:
@@ -1048,7 +1033,28 @@ class QnbSyncService:
                 "source_pulled_at": datetime.now(UTC).isoformat(timespec="seconds"),
             }
         )
-        saved = self.store.save_uploaded_document(client_id=client_id, document=payload)
+        if hasattr(self.store, "accept_document_source"):
+            identities = []
+            if str(invoice.ettn or "").strip():
+                identities.append({"kind": "ettn", "value": str(invoice.ettn).strip()})
+            fallback_identity = _fallback_identity_key(invoice)
+            if fallback_identity:
+                identities.append({"kind": "issuer_invoice", "value": fallback_identity})
+            saved = self.store.accept_document_source(
+                client_id=client_id,
+                document=payload,
+                source_channel=SOURCE_PROVIDER,
+                identities=identities,
+                parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
+            )
+        else:
+            saved = self.store.save_uploaded_document(client_id=client_id, document=payload)
+            saved["processing_job"] = self._queue_processing_job(
+                client_id=client_id,
+                document=saved,
+            )
+            saved["processing_job_created"] = True
         self.store.record_document_pipeline_event(
             client_id=client_id,
             document_ref=str(saved["document_ref"]),
@@ -1061,6 +1067,9 @@ class QnbSyncService:
                 "source_external_uuid": invoice.ettn,
                 "source_sync_run_id": sync_run_id,
                 "source_content_sha256": content_sha256,
+                "processing_job_id": str(
+                    (saved.get("processing_job") or {}).get("id") or ""
+                ),
             },
         )
         return saved
@@ -1234,8 +1243,9 @@ class QnbConnectionService:
         previous = self.store.get_qnb_outgoing_invoice(client_id=client_id, document_oid=oid) or {}
         try:
             status = self.adapter.get_outgoing_invoice_status(credentials, document_oid=oid)
+            event_key = str(uuid4())
             snapshot = {
-                "snapshot_id": str(uuid4()),
+                "snapshot_id": event_key,
                 "document_oid": oid,
                 "invoice_no": str(invoice_no or previous.get("invoice_no") or ""),
                 "ettn": status.ettn,
@@ -1318,8 +1328,9 @@ class QnbConnectionService:
             checked_at = datetime.now(UTC).isoformat(timespec="seconds")
             changed = bool(previous_status) and previous_status != status.normalized_status
             needs_review = status.normalized_status in {"rejected", "cancelled", "unknown"}
+            event_key = str(uuid4())
             snapshot = {
-                "snapshot_id": str(uuid4()),
+                "snapshot_id": event_key,
                 "document_ref": str(document.get("document_ref") or document.get("document_id") or ""),
                 "ettn": normalized_ettn,
                 "response_code": status.response_code,
@@ -1332,21 +1343,53 @@ class QnbConnectionService:
                 "previous_status": previous_status,
                 "review_required": needs_review,
             }
-            self.store.append_qnb_incoming_status_snapshot(client_id=client_id, snapshot=snapshot)
-            updated = self.store.save_uploaded_document(
-                client_id=client_id,
-                document={
-                    **document,
-                    "source_qnb_status": status.response_code,
-                    "source_qnb_normalized_status": status.normalized_status,
-                    "source_qnb_status_detail": status.response_detail,
-                    "source_qnb_status_checked_at": checked_at,
-                    "source_qnb_status_changed": changed,
-                    "qnb_review_required": needs_review,
-                    "automation_hold": needs_review,
-                    "automation_hold_reason": "qnb_status_review_required" if needs_review else "",
-                },
-            )
+            if hasattr(self.store, "record_qnb_incoming_status"):
+                persisted_status = self.store.record_qnb_incoming_status(
+                    client_id=client_id,
+                    document_ref=str(snapshot["document_ref"]),
+                    ettn=normalized_ettn,
+                    event_key=event_key,
+                    normalized_status=status.normalized_status,
+                    response_code=status.response_code,
+                    response_detail=status.response_detail,
+                    cancelled_at=status.cancelled_at,
+                    checked_at=checked_at,
+                )
+                snapshot.update(persisted_status)
+                updated = next(
+                    (
+                        item
+                        for item in self.store.get_workspace(client_id).get(
+                            "uploaded_documents", []
+                        )
+                        if str(item.get("document_ref") or "")
+                        == str(snapshot["document_ref"])
+                    ),
+                    document,
+                )
+            else:
+                self.store.append_qnb_incoming_status_snapshot(
+                    client_id=client_id,
+                    snapshot=snapshot,
+                )
+                updated = self.store.save_uploaded_document(
+                    client_id=client_id,
+                    document={
+                        **document,
+                        "source_qnb_status": status.response_code,
+                        "source_qnb_normalized_status": status.normalized_status,
+                        "source_qnb_status_detail": status.response_detail,
+                        "source_qnb_status_checked_at": checked_at,
+                        "source_qnb_status_changed": changed,
+                        "qnb_review_required": needs_review,
+                        "automation_hold": needs_review,
+                        "automation_hold_reason": (
+                            f"qnb_status_{status.normalized_status}"
+                            if needs_review
+                            else ""
+                        ),
+                    },
+                )
             self.store.record_document_pipeline_event(
                 client_id=client_id,
                 document_ref=str(updated.get("document_ref") or snapshot["document_ref"]),

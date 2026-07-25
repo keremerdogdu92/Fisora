@@ -38,6 +38,7 @@ def store_system_readiness() -> dict[str, object]:
         document_storage_path=default_document_storage_path(),
         export_path=default_export_path(),
         backup_path=default_backup_path(),
+        store=get_workflow_store(),
     )
 
 

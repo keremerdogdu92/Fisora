@@ -5,6 +5,7 @@ from fastapi import APIRouter, Cookie, Header, HTTPException
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
     get_qnb_connection_service,
+    get_workflow_store,
     request_user_id,
     require_client_access,
 )
@@ -93,14 +94,18 @@ def sync_qnb_incoming_invoices(
 ) -> dict[str, object]:
     user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
     _require_qnb_admin_access(client_id, user_id)
-    try:
-        return get_qnb_connection_service().sync_incoming_invoices(
-            client_id=client_id,
-            start_date=payload.start_date,
-            end_date=payload.end_date,
+    connection = get_workflow_store().get_qnb_connection(client_id=client_id)
+    if not connection or connection.get("status") != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="active QNB connection is required",
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return get_workflow_store().enqueue_qnb_sync_request(
+        client_id=client_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        requested_by=user_id or "",
+    )
 
 
 @router.get("/qnb/connections/{client_id}/sync-policy")

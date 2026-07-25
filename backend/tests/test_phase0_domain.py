@@ -1286,9 +1286,13 @@ class Phase0DomainTests(unittest.TestCase):
             _write_recoverable_backup_receipts(backup_path)
             payload = production_readiness_payload(
                 document_storage_path=base / "documents", export_path=base / "exports", backup_path=backup_path,
-                env={"FISORA_STORE_BACKEND": "postgres", "DATABASE_URL": "postgresql://test", "FISORA_REAL_DATA_ACCESS_MODE": "vpn", "FISORA_QNB_ADAPTER": "soap", "FISORA_QNB_CREDENTIAL_KEY": "secret", "FISORA_QNB_ERP_CODE": "ERP", "FISORA_BACKUP_MODE": "scheduled", "FISORA_BACKUP_OFFHOST_ATTESTED": "true"},
+                env={"FISORA_STORE_BACKEND": "postgres", "DATABASE_URL": "postgresql://test", "FISORA_REAL_DATA_ACCESS_MODE": "vpn", "FISORA_QNB_ADAPTER": "soap", "FISORA_QNB_CREDENTIAL_KEY": "secret", "FISORA_QNB_ERP_CODE": "ERP", "FISORA_QNB_SCHEDULER_ENABLED": "true", "FISORA_BACKUP_MODE": "scheduled", "FISORA_BACKUP_OFFHOST_ATTESTED": "true"},
             )
-        self.assertTrue(payload["qnb_pilot"]["ready"])
+        self.assertFalse(payload["qnb_pilot"]["ready"])
+        self.assertIn(
+            "outcome_evidence_available",
+            payload["qnb_pilot"]["blocking"],
+        )
         self.assertTrue(payload["qnb_pilot"]["runtime"]["incoming_ready"])
         self.assertNotIn("secret", str(payload["qnb_pilot"]))
 

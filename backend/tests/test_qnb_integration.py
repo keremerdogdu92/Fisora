@@ -274,12 +274,17 @@ class QnbIntegrationTests(unittest.TestCase):
             ).reconcile_incoming_invoice(client_id="client-1", ettn=ettn)
             document = store.get_workspace("client-1")["uploaded_documents"][0]
             snapshots = store._read()["qnb_incoming_status_snapshots"]
+            holds = store.active_document_safety_holds(
+                client_id="client-1",
+                document_refs=[document["document_ref"]],
+            )
 
         self.assertEqual(result["normalized_status"], "rejected")
         self.assertTrue(result["review_required"])
         self.assertTrue(document["automation_hold"])
-        self.assertEqual(document["automation_hold_reason"], "qnb_status_review_required")
+        self.assertEqual(document["automation_hold_reason"], "qnb_status_rejected")
         self.assertEqual(len(snapshots), 1)
+        self.assertEqual(len(holds), 1)
 
     def test_outgoing_status_reconciliation_keeps_append_only_evidence_and_detects_change(self) -> None:
         oid = "OID-123"
@@ -1040,8 +1045,12 @@ class QnbIntegrationTests(unittest.TestCase):
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.json()["username"], "5********1")
         self.assertEqual(sync_response.status_code, 200)
-        self.assertEqual(sync_response.json()["listed_count"], 0)
-        self.assertEqual(sync_response.json()["downloaded_count"], 0)
+        self.assertEqual(sync_response.json()["status"], "queued")
+        self.assertEqual(sync_response.json()["client_id"], "client-1")
+        self.assertEqual(
+            sync_response.json()["start_date"],
+            "2026-07-01",
+        )
 
     def test_qnb_sync_api_requires_active_connection(self) -> None:
         if TestClient is None or phase0 is None or app is None:

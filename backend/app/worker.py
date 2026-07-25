@@ -7,8 +7,6 @@ from typing import Mapping
 
 from app.persistence.store_factory import build_workflow_store
 from app.workflows.document_processing import process_queued_documents
-from app.domain.qnb_efatura import QnbConnectionService, build_qnb_adapter_from_env
-from app.domain.qnb_scheduler import QnbScheduler
 
 
 RETENTION_INTERVAL_SECONDS = int(os.environ.get("FISORA_WORKER_RETENTION_INTERVAL_SECONDS", "86400"))
@@ -34,16 +32,6 @@ def run_retention_once() -> dict[str, object]:
 def run_processing_once() -> dict[str, object]:
     store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
     return process_queued_documents(store, max_jobs=MAX_JOBS_PER_TICK)
-
-
-def run_qnb_scheduler_once() -> dict[str, object] | None:
-    store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
-    service = lambda: QnbConnectionService(
-        store=store,
-        document_storage_path=os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "/opt/fisora/data/documents"),
-        adapter=build_qnb_adapter_from_env(os.environ),
-    )
-    return QnbScheduler(store=store, service_factory=service, worker_id=f"worker-{os.getpid()}").run_due_once()
 
 
 def _merge_processing_summaries(summaries: list[dict[str, object]]) -> dict[str, object]:
@@ -92,9 +80,6 @@ def main() -> None:
     while True:
         processing_summary = run_processing_tick(concurrency=concurrency)
         print(f"document_processing {processing_summary}", flush=True)
-        qnb_summary = run_qnb_scheduler_once()
-        if qnb_summary:
-            print(f"qnb_scheduler {qnb_summary}", flush=True)
         if retention_tick == 0:
             retention_summary = run_retention_once()
             print(f"document_retention {retention_summary}", flush=True)

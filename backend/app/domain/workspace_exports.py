@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,42 @@ STATEMENT_APPROVAL_GATE_FLAGS = {
     "statement_review_required",
     "statement_accountant_approval_required",
 }
+
+
+def apply_document_safety_holds(
+    workspace: dict[str, Any],
+    *,
+    holds: list[dict[str, Any]],
+) -> dict[str, Any]:
+    guarded = deepcopy(workspace)
+    hold_codes_by_document: dict[str, list[str]] = {}
+    for hold in holds:
+        document_ref = str(hold.get("document_ref") or "")
+        hold_code = str(hold.get("hold_code") or "")
+        if document_ref and hold_code:
+            hold_codes_by_document.setdefault(document_ref, []).append(hold_code)
+    for document in guarded.get("documents", []):
+        document_ref = str(document.get("document_ref") or document.get("id") or "")
+        hold_codes = hold_codes_by_document.get(document_ref, [])
+        if not hold_codes:
+            continue
+        document["export_status"] = "review_required"
+        result = document.get("result")
+        if not isinstance(result, dict):
+            result = {}
+            document["result"] = result
+        result["export_status"] = "review_required"
+        review_reasons = [
+            str(reason)
+            for reason in result.get("review_reason_codes") or []
+            if str(reason)
+        ]
+        for hold_code in hold_codes:
+            if hold_code not in review_reasons:
+                review_reasons.append(hold_code)
+        result["review_reason_codes"] = review_reasons
+        result["accountant_export_override"] = False
+    return guarded
 
 
 def _statement_entry_risk_flags(entry: JournalEntry, *, accountant_approved: bool) -> tuple[str, ...]:

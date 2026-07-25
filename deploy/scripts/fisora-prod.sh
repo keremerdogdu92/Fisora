@@ -30,16 +30,89 @@ read_backup_mode() {
   esac
 }
 
+env_value() {
+  key="$1"
+  sed -n "s/^${key}=//p" "$ENV_FILE" | tail -n 1
+}
+
+production_preflight() {
+  duplicate_keys="$(sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' "$ENV_FILE" | sort | uniq -d)"
+  if [ -n "$duplicate_keys" ]; then
+    echo "duplicate environment keys are not allowed" >&2
+    echo "$duplicate_keys" >&2
+    exit 2
+  fi
+
+  postgres_password="$(env_value POSTGRES_PASSWORD)"
+  if [ -z "$postgres_password" ] || [ "$postgres_password" = "change-me" ]; then
+    echo "POSTGRES_PASSWORD must not be empty or change-me" >&2
+    exit 2
+  fi
+
+  qnb_scheduler="$(env_value FISORA_QNB_SCHEDULER_ENABLED)"
+  real_data_enabled="$(env_value FISORA_REAL_DATA_PILOT_ENABLED)"
+  if [ "$qnb_scheduler" = "true" ] || [ "$real_data_enabled" = "true" ]; then
+    portal_base="$(env_value FISORA_PORTAL_BASE_URL)"
+    nginx_config="$(env_value FISORA_NGINX_CONFIG)"
+    tls_cert_dir="$(env_value FISORA_TLS_CERT_DIR)"
+    credential_key="$(env_value FISORA_QNB_CREDENTIAL_KEY)"
+    operation_owner="$(env_value FISORA_QNB_OPERATION_OWNER)"
+    access_mode="$(env_value FISORA_REAL_DATA_ACCESS_MODE)"
+    case "$portal_base" in
+      https://*) ;;
+      *)
+        echo "QNB live mode requires HTTPS FISORA_PORTAL_BASE_URL" >&2
+        exit 2
+        ;;
+    esac
+    case "$nginx_config" in
+      *default.tls.conf) ;;
+      *)
+        echo "QNB live mode requires HTTPS nginx configuration" >&2
+        exit 2
+        ;;
+    esac
+    if [ ! -f "$tls_cert_dir/live/fisora/fullchain.pem" ] || [ ! -f "$tls_cert_dir/live/fisora/privkey.pem" ]; then
+      echo "QNB live mode requires fullchain.pem and privkey.pem under FISORA_TLS_CERT_DIR/live/fisora" >&2
+      exit 2
+    fi
+    if [ -z "$credential_key" ]; then
+      echo "QNB live mode requires FISORA_QNB_CREDENTIAL_KEY" >&2
+      exit 2
+    fi
+    if [ -z "$operation_owner" ]; then
+      echo "QNB live mode requires FISORA_QNB_OPERATION_OWNER" >&2
+      exit 2
+    fi
+    case "$access_mode" in
+      tls|restricted_network|vpn|ip_allowlist) ;;
+      *)
+        echo "QNB live mode requires restricted real-data access" >&2
+        exit 2
+        ;;
+    esac
+  fi
+}
+
 cmd="${1:-help}"
 case "$cmd" in
   check)
     require_env_file
+    production_preflight
     compose --profile backup config --quiet
     echo "compose config ok"
     ;;
   deploy)
     require_env_file
+    production_preflight
     read_backup_mode
+    before_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    migration_version="$(find "$ROOT_DIR/backend/db/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' 2>/dev/null | sort | tail -n 1)"
+    config_fingerprint="$(
+      for key in FISORA_ENV FISORA_STORE_BACKEND FISORA_AUTH_MODE FISORA_QNB_ADAPTER FISORA_QNB_SCHEDULER_ENABLED FISORA_REAL_DATA_PILOT_ENABLED FISORA_REAL_DATA_ACCESS_MODE FISORA_BACKUP_MODE; do
+        printf '%s=%s\n' "$key" "$(env_value "$key")"
+      done | sha256sum | awk '{print $1}'
+    )"
     compose --profile backup pull --ignore-pull-failures
     compose --profile backup build
     if [ "$backup_mode" = "scheduled" ]; then
@@ -49,6 +122,25 @@ case "$cmd" in
       compose stop backup >/dev/null 2>&1 || true
     fi
     compose --profile backup ps
+    after_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    printf 'FISORA_RELEASE_RECEIPT {"before_sha":"%s","after_sha":"%s","migration_version":"%s","config_fingerprint":"%s"}\n' \
+      "$before_sha" "$after_sha" "$migration_version" "$config_fingerprint"
+    ;;
+  rollback-code)
+    require_env_file
+    production_preflight
+    target_sha="${2:-}"
+    if [ -z "$target_sha" ]; then
+      echo "Usage: $0 rollback-code <known-good-sha>" >&2
+      exit 2
+    fi
+    git -C "$ROOT_DIR" cat-file -e "$target_sha^{commit}"
+    rollback_from="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+    git -C "$ROOT_DIR" switch --detach "$target_sha"
+    compose --profile backup build backend worker qnb-scheduler frontend
+    compose up -d backend worker qnb-scheduler frontend nginx
+    printf 'FISORA_RELEASE_RECEIPT {"rollback_from":"%s","rollback_to":"%s","database_migration":"forward_compatible_not_reverted"}\n' \
+      "$rollback_from" "$target_sha"
     ;;
   migrate)
     require_env_file
@@ -182,6 +274,7 @@ Usage: $0 <command>
 Commands:
   check              Validate production compose config.
   deploy             Pull/build/start production stack.
+  rollback-code <sha>  Roll back application code without reverting database migrations.
   migrate            Run database migrations once.
   smoke              Run Postgres-backed workflow smoke test.
   backup-once        Run one checkpoint or scheduled backup generation.

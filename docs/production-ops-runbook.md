@@ -143,57 +143,102 @@ powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-health.ps1 `
 
 ## Backup ve Restore
 
-Deploy veya buyuk veri islemi oncesi tek seferlik backup al:
+Backup her ortamda sürekli çalışan bir servis değildir. Yetkili yaşam döngüsü
+ayarı:
+
+```text
+FISORA_BACKUP_MODE=disabled|checkpoint|scheduled
+```
+
+### Pilot öncesi: `disabled`
+
+Henüz gerçek pilot verisi yokken varsayılan mod `disabled` olur. Normal deploy
+backup profile'ını başlatmaz; PostgreSQL dump veya belge archive üretilmez.
+Readiness bu durumu `backup.status=not_required` olarak raporlar.
+
+Bu mod test verilerinin sık temizlendiği mevcut hazırlık aşamasıdır. Backup
+container'ının bulunmaması hata değildir.
+
+### Protected corpus sonrası: `checkpoint`
+
+35 alış + 15 satış protected corpus freeze kapısını geçtikten sonra env geçici
+olarak:
+
+```text
+FISORA_BACKUP_MODE=checkpoint
+FISORA_BACKUP_COPY_DIR=<sunucu dışı hedef>
+FISORA_BACKUP_AGE_RECIPIENT=<public age recipient>
+FISORA_BACKUP_OFFHOST_ATTESTED=true
+```
+
+olarak ayarlanır ve tek generation alınır:
 
 ```bash
 sh deploy/scripts/fisora-prod.sh backup-once
 ```
 
-Backup container su dosyalari uretir:
+Checkpoint paketi PostgreSQL dump, gerçek protected-corpus byte'ları,
+`SHA256SUMS` ve metadata içerir. Geçici normal test PDF/XML dosyalarını içermez.
+Şifreli `.age` paketi sunucu dışındaki operatör bilgisayarına indirilir.
 
-```text
-postgres-YYYYMMDDTHHMMSSZ.sql
-documents-YYYYMMDDTHHMMSSZ.manifest.tsv
-protected-corpus-YYYYMMDDTHHMMSSZ.tar.gz
-protected-corpus-YYYYMMDDTHHMMSSZ.sha256
-fisora-protected-backup-YYYYMMDDTHHMMSSZ.tar.gz.age (off-host hedefte)
-```
-
-Kontrol listesi:
-
-- SQL dump dosyasi olustu.
-- Belge manifest dosyasi olustu.
-- Host tarafindaki `FISORA_BACKUP_COPY_DIR` ayri disk/remote mount'a bakiyor ve
-  public `FISORA_BACKUP_AGE_RECIPIENT` tanimli; bu hedefte yalniz sifreli paket var.
-- Age private identity backup containerinda veya repoda degil.
-- Backup klasoru ve belge klasoru disk kullaniminda beklenmeyen artis yok.
-
-Restore komutu sadece acil durum icindir:
-
-```bash
-sh deploy/scripts/fisora-prod.sh restore-postgres /path/to/postgres-YYYYMMDDTHHMMSSZ.sql
-```
-
-Restore mevcut database icerigini degistirir. Once yeni backup alinmadan
-calistirilmaz.
-
-Korumali corpus restore kaniti production projesinde calismaz. Once ayri bir
-PostgreSQL hedefi restore edilir, sonra sifreli paket ve kaynak hashleri birlikte
-dogrulanir:
+İzole restore kanıtı:
 
 ```bash
 FISORA_COMPOSE_PROJECT=fisora-restore-check \
   sh deploy/scripts/fisora-prod.sh restore-protected-check \
-  /offhost/fisora-protected-backup-...tar.gz.age \
+  /offhost/fisora-backup-...tar.gz.age \
   /secure/age-identity.txt \
   /tmp/fisora-protected-restore \
   postgresql://...@host.docker.internal:5432/fisora_restore
 ```
 
-Gercek `TEMIZLE` isleminden once `GET /api/phase0/store/admin/test-reset/preview`
-ile silinecek operasyonel kayitlar ve korunacak corpus/reference/rule sayilari
-karsilastirilir. Korumali kaynak volume'u normal belge/export volume'larindan
-ayridir ve reset tarafindan temizlenmez.
+Komut paketin hash'lerini doğrular, PostgreSQL dump'ı ayrı database'e yükler,
+protected byte'ları ayrı root'a açar ve uygulama-seviyesi corpus verifier'ı
+çalıştırır. Başarılı verifier receipt'i readiness volume'una ayrıca kaydedilir:
+
+```bash
+sh deploy/scripts/fisora-prod.sh record-restore-verification \
+  /tmp/fisora-protected-restore/restore-verification-....json
+```
+
+Checkpoint doğrulandıktan sonra schedule kapalı kalır.
+
+### Gerçek pilot: `scheduled`
+
+İlk gerçek pilot faturası kabul edilmeden önce:
+
+```text
+FISORA_BACKUP_MODE=scheduled
+FISORA_BACKUP_OFFHOST_ATTESTED=true
+```
+
+Bu mod günlük şifreli generation içine PostgreSQL, protected corpus ve 90 günlük
+aktif normal PDF/XML byte'larını alır. Yerel generation'lar 14 gün, gerçek
+off-host generation'lar 30 gün saklanır. Son başarılı generation 26 saatten,
+restore kanıtı 30 günden eskiyse readiness gerçek pilotu bloklar.
+
+Kontrol listesi:
+
+- `FISORA_BACKUP_COPY_DIR` farklı bir failure domain'e bağlıdır; aynı
+  sunucudaki `backups/offhost` dizini yeterli değildir.
+- `FISORA_BACKUP_OFFHOST_ATTESTED=true` yalnızca hedefin gerçekten ayrı failure
+  domain'de olduğu operatör tarafından doğrulandıktan sonra verilir; aksi halde
+  readiness, kopya receipt'i bulunsa bile gerçek pilotu bloklar.
+- Hedefte yalnız şifreli `.age` generation bulunur.
+- Private age identity backup container'ında, env'de veya repository'de değildir.
+- Success receipt ancak encryption ve off-host copy tamamlandıktan sonra oluşur.
+- Restore receipt güncel generation filename ve digest'iyle eşleşir.
+- Backup ve belge storage disk kullanımı beklenmeyen artış göstermiyordur.
+
+Mevcut restart-loop dump'larının silinmesi deploy'un parçası değildir. Kesin
+volume, file count, date range ve toplam size gösterildikten sonra ayrı canlı
+cleanup onayı gerektirir.
+
+Gerçek `TEMIZLE` işleminden önce
+`GET /api/phase0/store/admin/test-reset/preview` ile silinecek operasyonel
+kayıtlar ve korunacak corpus/reference/rule sayıları karşılaştırılır. Korumalı
+kaynak volume'u normal belge/export volume'larından ayrıdır ve reset tarafından
+temizlenmez.
 
 ## Belge Saklama Operasyonu
 

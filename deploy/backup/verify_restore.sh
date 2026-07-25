@@ -19,12 +19,11 @@ if find "$restore_dir" -mindepth 1 -print -quit | grep -q .; then
 fi
 age -d -i "$identity_file" -o "$work_dir/bundle.tar.gz" "$encrypted_bundle"
 tar -xzf "$work_dir/bundle.tar.gz" -C "$work_dir"
-protected_archive="$(find "$work_dir" -maxdepth 1 -name 'protected-corpus-*.tar.gz' -print -quit)"
-protected_manifest="$(find "$work_dir" -maxdepth 1 -name 'protected-corpus-*.sha256' -print -quit)"
-if [ -z "$protected_archive" ] || [ -z "$protected_manifest" ]; then
-  echo "protected corpus archive or manifest missing" >&2
+if [ ! -f "$work_dir/postgres.sql" ] || [ ! -f "$work_dir/protected-corpus.tar" ] || [ ! -f "$work_dir/SHA256SUMS" ]; then
+  echo "postgres.sql, protected-corpus.tar, or SHA256SUMS missing" >&2
   exit 1
 fi
-tar -xzf "$protected_archive" -C "$restore_dir"
-(cd "$restore_dir" && sha256sum -c "$protected_manifest")
-echo "protected corpus restore verified"
+(cd "$work_dir" && sha256sum -c SHA256SUMS)
+cp "$work_dir/postgres.sql" "$restore_dir/postgres.sql"
+tar -xf "$work_dir/protected-corpus.tar" -C "$restore_dir"
+echo "backup package hashes and protected corpus restore verified"

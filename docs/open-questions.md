@@ -27,11 +27,15 @@ Durumlar:
      katmani kurulursa tekrar degerlendirilir.
    - Free-tier mail servisi secilecek ve davet/sifre sifirlama akisi baglanacak.
 
-3. **Manuel backup plani** (`kapandi`)
+3. **Backup yaşam döngüsü** (`mekanizma_hazır / operasyon_kapıları_açık`)
    - Alinan ilk sunucu: 4 Core 2.70 GHz, 4 GB DDR4 RAM, 100 GB NVMe SSD.
-   - DB dump, export dosyalari, belge metadata manifesti ve gerekli dosya
-     yedekleri icin manuel/yari otomatik backup plani runbook'a yazildi.
-   - Backup hedefi `FISORA_BACKUP_COPY_DIR` ile ayni makine disina alinacak.
+   - Pilot öncesi gerçek veri yokken `FISORA_BACKUP_MODE=disabled`; periyodik
+     backup bilinçli olarak çalışmaz.
+   - Protected corpus freeze sonrasında tek encrypted checkpoint alınacak,
+     workstation'a indirilecek ve izole restore ile doğrulanacak.
+   - Gerçek pilot öncesinde `scheduled` moda geçilecek; PostgreSQL, protected
+     corpus ve aktif 90 günlük PDF/XML byte'ları off-host korunacak.
+   - Mevcut restart-loop artefact cleanup'ı ayrı canlı operasyon onayıdır.
    - Uygulama: `deploy/backup/backup.sh`, `deploy/production.env.example`,
      `docs/production-ops-runbook.md`.
 
@@ -282,13 +286,21 @@ tasimak.
 
 Amac: 4 GB RAM / 100 GB diskli sunucuda veri kaybi ve disk sismesini onlemek.
 
-1. Tamamlandi: DB dump + belge metadata manifesti backup scriptinde korunuyor;
-   ops runbook'a deploy oncesi backup kontrolu eklendi.
-2. Tamamlandi: Ayni makine disi kopya hedefi `FISORA_BACKUP_COPY_DIR` olarak
-   env'e eklendi.
-3. Tamamlandi: 90 gun sonunda sessiz silme yerine retention preview + secili
+1. Tamamlandı: `disabled`, `checkpoint`, `scheduled` lifecycle contract'ı ve
+   mode-aware readiness yerel olarak uygulandı.
+2. Tamamlandı: Checkpoint PostgreSQL + protected byte'ları; scheduled generation
+   ayrıca aktif normal PDF/XML byte'larını encrypt ederek paketliyor.
+3. Tamamlandı: Backup servisi Compose profile arkasına alındı; pre-pilot normal
+   deploy backup servisini başlatmıyor.
+4. Bekliyor: Corpus freeze sonrası ilk encrypted checkpoint'in workstation'a
+   indirilmesi ve izole restore receipt'i.
+5. Bekliyor: Gerçek pilot öncesi farklı failure domain'de off-host hedef ve
+   `scheduled` aktivasyonu.
+6. Ayrı onay: Canlı restart-loop dump artefact'larının envanter sonrası
+   temizlenmesi.
+7. Tamamlandi: 90 gun sonunda sessiz silme yerine retention preview + secili
    `delete` veya `extend_90_days` aksiyonu eklendi.
-4. Kismen tamamlandi: Operasyon ekranina belge saklama paneli baglandi; disk
+8. Kismen tamamlandi: Operasyon ekranina belge saklama paneli baglandi; disk
    kullanim ve backup sonuc loglari readiness tarafinda izlenmeye devam ediyor.
 
 ### Plan 4 - Zirve Saha Testi

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import inspect
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -497,6 +499,38 @@ class FakeStatementSuggestionProvider:
         return self.responses.pop(0)
 
 
+def _write_recoverable_backup_receipts(backup_path: Path) -> str:
+    backup_path.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC).replace(microsecond=0)
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+    generation_name = f"fisora-backup-{stamp}.tar.gz.age"
+    (backup_path / generation_name).write_bytes(b"encrypted")
+    (backup_path / f"backup-success-{stamp}.json").write_text(
+        json.dumps(
+            {
+                "latest_attempt_at": now.isoformat(),
+                "latest_success_at": now.isoformat(),
+                "generation_file": generation_name,
+                "generation_digest": "abc123",
+                "offhost_copy_status": "complete",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (backup_path / f"restore-verified-{stamp}.json").write_text(
+        json.dumps(
+            {
+                "verified_at": now.isoformat(),
+                "status": "verified",
+                "generation_file": generation_name,
+                "generation_digest": "abc123",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return generation_name
+
+
 class Phase0DomainTests(unittest.TestCase):
     def test_ai_usage_summary_tracks_ten_dollar_cap(self) -> None:
         events = [
@@ -756,12 +790,180 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(payload["estimate"]["confidence"], "not_available")
         self.assertNotIn("tvly-secret", str(payload))
 
-    def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:
+    def test_backup_disabled_is_not_required_before_real_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=base / "backups",
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://test",
+                    "FISORA_BACKUP_MODE": "disabled",
+                },
+            )
+
+        self.assertEqual(payload["backup"]["status"], "not_required")
+        self.assertFalse(payload["backup"]["required"])
+        self.assertNotIn("backup_missing", payload["warnings"])
+        self.assertNotIn("backup_available", payload["pilot_checks"])
+
+    def test_real_data_pilot_requires_scheduled_backup_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=base / "backups",
+                env={
+                    "FISORA_AUTH_MODE": "session_required",
+                    "FISORA_SESSION_COOKIE_SECURE": "true",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://test",
+                    "FISORA_REAL_DATA_PILOT_ENABLED": "true",
+                    "FISORA_REAL_DATA_ACCESS_MODE": "restricted_network",
+                    "FISORA_BACKUP_MODE": "disabled",
+                },
+            )
+
+        self.assertFalse(payload["real_data_pilot"]["allowed"])
+        self.assertIn("scheduled_backup_mode", payload["real_data_pilot"]["blocking"])
+
+    def test_scheduled_backup_requires_fresh_receipt_and_restore_proof(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             backup_path = base / "backups"
             backup_path.mkdir()
-            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "session_required",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://test",
+                    "FISORA_BACKUP_MODE": "scheduled",
+                },
+            )
+
+        self.assertEqual(payload["backup"]["status"], "missing")
+        self.assertIn("backup_generation_missing", payload["backup"]["blocking"])
+        self.assertIn("restore_verification_missing", payload["backup"]["blocking"])
+
+    def test_scheduled_backup_is_recoverable_with_fresh_generation_and_restore_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            generation_name = _write_recoverable_backup_receipts(backup_path)
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "session_required",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://test",
+                    "FISORA_BACKUP_MODE": "scheduled",
+                    "FISORA_BACKUP_OFFHOST_ATTESTED": "true",
+                },
+            )
+
+        self.assertTrue(payload["backup"]["ok"])
+        self.assertEqual(payload["backup"]["status"], "recoverable")
+        self.assertEqual(payload["backup"]["latest_encrypted_generation"], generation_name)
+        self.assertTrue(payload["qnb_pilot"]["checks"]["recoverable_backup"])
+
+    def test_scheduled_backup_requires_offhost_failure_domain_attestation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            _write_recoverable_backup_receipts(backup_path)
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={"FISORA_BACKUP_MODE": "scheduled"},
+            )
+
+        self.assertFalse(payload["backup"]["ok"])
+        self.assertIn("offhost_target_unattested", payload["backup"]["blocking"])
+
+    def test_scheduled_backup_rejects_stale_generation_and_restore_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            stale = datetime.now(UTC).replace(microsecond=0) - timedelta(days=31)
+            generation_name = "fisora-backup-20260601T100000Z.tar.gz.age"
+            (backup_path / generation_name).write_bytes(b"encrypted")
+            (backup_path / "backup-success-20260601T100000Z.json").write_text(
+                json.dumps(
+                    {
+                        "latest_attempt_at": stale.isoformat(),
+                        "latest_success_at": stale.isoformat(),
+                        "generation_file": generation_name,
+                        "generation_digest": "abc123",
+                        "offhost_copy_status": "complete",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (backup_path / "restore-verified-20260601T100000Z.json").write_text(
+                json.dumps({"verified_at": stale.isoformat(), "status": "verified"}),
+                encoding="utf-8",
+            )
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={"FISORA_BACKUP_MODE": "scheduled"},
+            )
+
+        self.assertFalse(payload["backup"]["ok"])
+        self.assertIn("backup_generation_stale", payload["backup"]["blocking"])
+        self.assertIn("restore_verification_stale", payload["backup"]["blocking"])
+
+    def test_scheduled_backup_rejects_restore_receipt_for_another_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            _write_recoverable_backup_receipts(backup_path)
+            restore_receipt = next(backup_path.glob("restore-verified-*.json"))
+            receipt = json.loads(restore_receipt.read_text(encoding="utf-8"))
+            receipt["generation_digest"] = "different"
+            restore_receipt.write_text(json.dumps(receipt), encoding="utf-8")
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={"FISORA_BACKUP_MODE": "scheduled"},
+            )
+
+        self.assertFalse(payload["backup"]["ok"])
+        self.assertIn("restore_generation_mismatch", payload["backup"]["blocking"])
+
+    def test_unknown_backup_mode_is_a_configuration_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=base / "backups",
+                env={"FISORA_BACKUP_MODE": "sometimes"},
+            )
+
+        self.assertEqual(payload["backup"]["status"], "failing")
+        self.assertEqual(payload["backup"]["service_state"], "configuration_error")
+        self.assertIn("backup_mode_invalid", payload["backup"]["blocking"])
+        self.assertIn("backup_mode_invalid", payload["warnings"])
+
+    def test_production_readiness_requires_openai_key_when_openai_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            _write_recoverable_backup_receipts(backup_path)
 
             payload = production_readiness_payload(
                 document_storage_path=base / "documents",
@@ -1010,6 +1212,8 @@ class Phase0DomainTests(unittest.TestCase):
                     "GROQ_API_KEY": "gsk-test",
                     "FISORA_REAL_DATA_PILOT_ENABLED": "true",
                     "FISORA_REAL_DATA_ACCESS_MODE": "restricted_network",
+                    "FISORA_BACKUP_MODE": "scheduled",
+                    "FISORA_BACKUP_OFFHOST_ATTESTED": "true",
                 },
             )
 
@@ -1021,8 +1225,7 @@ class Phase0DomainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             backup_path = base / "backups"
-            backup_path.mkdir()
-            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+            _write_recoverable_backup_receipts(backup_path)
 
             payload = production_readiness_payload(
                 document_storage_path=base / "documents",
@@ -1037,6 +1240,8 @@ class Phase0DomainTests(unittest.TestCase):
                     "GROQ_API_KEY": "gsk-test",
                     "FISORA_REAL_DATA_PILOT_ENABLED": "true",
                     "FISORA_REAL_DATA_ACCESS_MODE": "restricted_network",
+                    "FISORA_BACKUP_MODE": "scheduled",
+                    "FISORA_BACKUP_OFFHOST_ATTESTED": "true",
                 },
             )
 
@@ -1078,11 +1283,10 @@ class Phase0DomainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             backup_path = base / "backups"
-            backup_path.mkdir()
-            (backup_path / "postgres-20260711T100000Z.sql").write_text("backup", encoding="utf-8")
+            _write_recoverable_backup_receipts(backup_path)
             payload = production_readiness_payload(
                 document_storage_path=base / "documents", export_path=base / "exports", backup_path=backup_path,
-                env={"FISORA_STORE_BACKEND": "postgres", "DATABASE_URL": "postgresql://test", "FISORA_REAL_DATA_ACCESS_MODE": "vpn", "FISORA_QNB_ADAPTER": "soap", "FISORA_QNB_CREDENTIAL_KEY": "secret", "FISORA_QNB_ERP_CODE": "ERP"},
+                env={"FISORA_STORE_BACKEND": "postgres", "DATABASE_URL": "postgresql://test", "FISORA_REAL_DATA_ACCESS_MODE": "vpn", "FISORA_QNB_ADAPTER": "soap", "FISORA_QNB_CREDENTIAL_KEY": "secret", "FISORA_QNB_ERP_CODE": "ERP", "FISORA_BACKUP_MODE": "scheduled", "FISORA_BACKUP_OFFHOST_ATTESTED": "true"},
             )
         self.assertTrue(payload["qnb_pilot"]["ready"])
         self.assertTrue(payload["qnb_pilot"]["runtime"]["incoming_ready"])

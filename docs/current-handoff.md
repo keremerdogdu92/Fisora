@@ -1,5 +1,37 @@
 # Current Handoff
 
+### 2026-07-23 yedekleme yaşam döngüsü (yerel)
+
+- Pilot öncesinde `FISORA_BACKUP_MODE=disabled` varsayılandır. Backup Compose
+  profile'ı başlamaz, yeni dump üretmez ve readiness bu aşamayı
+  `not_required` sayar. Protected corpus freeze sonrasında tek seferlik
+  `checkpoint`; ilk gerçek pilot faturası öncesinde ise günlük `scheduled`
+  moda geçilir.
+- Checkpoint paketi PostgreSQL, protected-corpus byte'ları, metadata ve
+  `SHA256SUMS` içerir; geçici normal PDF/XML belgelerini içermez. Scheduled
+  paket bunlara ek olarak aktif belge root'undaki normal PDF/XML byte'larını da
+  taşır. Generation public `age` recipient ile şifrelenir; success receipt
+  yalnızca atomik off-host copy tamamlandıktan sonra oluşur.
+- Readiness artık yerel bir SQL dosyasını başarı saymaz. Güncel şifreli
+  generation, digest, tamamlanmış off-host copy ve aynı generation/digest için
+  güncel izole restore receipt'i gerekir. Ayrıca kod bind mount'un fiziksel
+  yerini kanıtlayamadığı için `FISORA_BACKUP_OFFHOST_ATTESTED=true` operatör
+  teyidi yoksa aynı-sunucu false-positive'i `offhost_target_unattested` ile
+  bloklar.
+- Sentetik Docker kanıtında checkpoint paketi normal belgeleri dışarıda bıraktı;
+  scheduled paket PDF/XML byte'larını içerdi. Paket decrypt/hash/protected-byte
+  açılımı ve PostgreSQL dump'ın izole DB'ye restore'u geçti. Geçersiz recipient
+  koşusunda success receipt veya partial `.tmp` kalmadı. Gerçek PostgreSQL 16
+  üzerinde DSN-gated protected-corpus testi ayrıca `1/1` geçti.
+- Son tam yerel kanıt: backend `566 OK (skipped=20)`, frontend `147/147`,
+  Next.js production build, Compose default/profile service listesi, Compose
+  config, iki shell syntax kontrolü ve `git diff --check` başarılıdır.
+- Çalışma `codex/backup-lifecycle` branch'inde
+  `C:\Users\kerem\Documents\Fisero\.worktrees\backup-lifecycle` worktree'inde
+  tutuluyor. Commit, push, deploy ve canlı cleanup yapılmadı. Canlı checkout
+  halen `935a1fa`; backup restart döngüsü ile mevcut 1321 yerel dump, release
+  ve ayrıca kapsamı gösterilmiş cleanup onayı verilene kadar değişmeden duruyor.
+
 ### 2026-07-23 NVIDIA, Cloudflare ve SambaNova provider release'i (canli)
 
 - `main` runtime release commit'i `9159152` olarak canliya alindi.

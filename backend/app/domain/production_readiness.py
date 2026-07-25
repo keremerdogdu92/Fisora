@@ -120,7 +120,12 @@ def production_readiness_payload(
         base_dir=export_path,
         backend="local",
     )
-    backup = backup_health(backup_path=backup_path)
+    backup_mode = source.get("FISORA_BACKUP_MODE", "disabled").strip().lower() or "disabled"
+    backup = backup_health(
+        backup_path=backup_path,
+        mode=backup_mode,
+        offhost_attested=_env_bool(source.get("FISORA_BACKUP_OFFHOST_ATTESTED", "")),
+    )
     storage_usage = storage_usage_health(
         document_path=document_storage_path,
         export_path=export_path,
@@ -209,8 +214,10 @@ def production_readiness_payload(
             warnings.append("ai_cloudflare_account_id_missing")
         if not _ai_provider_model(provider_name, source):
             warnings.append("ai_model_missing")
-    if not backup["ok"]:
+    if backup["required"] and not backup["ok"]:
         warnings.append("backup_missing")
+    if "backup_mode_invalid" in backup["blocking"]:
+        warnings.append("backup_mode_invalid")
     if storage_usage["disk_warning"]:
         warnings.append("disk_usage_high")
     controlled_export_available = {
@@ -225,7 +232,6 @@ def production_readiness_payload(
         "postgres_store_active": store_backend == "postgres" and database_configured,
         "document_storage_writable": bool(document_storage["ok"]),
         "export_storage_writable": bool(export_storage["ok"]),
-        "backup_available": bool(backup["ok"]),
         "ai_provider_configured": ai_provider_configured,
         "controlled_export_available": controlled_export_available,
     }
@@ -241,7 +247,8 @@ def production_readiness_payload(
         "postgres_store_active": bool(pilot_checks["postgres_store_active"]),
         "document_storage_writable": bool(document_storage["ok"]),
         "export_storage_writable": bool(export_storage["ok"]),
-        "backup_available": bool(backup["ok"]),
+        "scheduled_backup_mode": backup_mode == "scheduled",
+        "recoverable_backup": bool(backup["ok"]) and backup_mode == "scheduled",
         "ai_provider_configured": ai_provider_configured,
         "controlled_export_available": controlled_export_available,
     }
@@ -274,7 +281,8 @@ def production_readiness_payload(
     qnb_pilot_checks = {
         "incoming_runtime_ready": bool(qnb_runtime["incoming_ready"]),
         "postgres_store_active": bool(pilot_checks["postgres_store_active"]),
-        "backup_available": bool(backup["ok"]),
+        "scheduled_backup_mode": backup_mode == "scheduled",
+        "recoverable_backup": bool(backup["ok"]) and backup_mode == "scheduled",
         "restricted_live_access": restricted_live_access,
     }
     qnb_pilot_blocking = [key for key, passed in qnb_pilot_checks.items() if not passed]

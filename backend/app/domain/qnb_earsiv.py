@@ -69,6 +69,13 @@ class QnbSoapEarsivAdapter:
             return QnbEarsivConnectionTestResult(False, "connection_failed", message)
         return QnbEarsivConnectionTestResult(True, "active")
 
+    def prepare_outgoing_send(self, credentials: QnbEarsivCredentials) -> None:
+        if not is_qnb_earsiv_test_endpoint(credentials.user_service_url) or not is_qnb_earsiv_test_endpoint(
+            credentials.service_url
+        ):
+            raise ValueError("QNB e-Arsiv send requires test endpoints")
+        self._login(credentials)
+
     def create_invoice_ubl(
         self,
         credentials: QnbEarsivCredentials,
@@ -90,6 +97,10 @@ class QnbSoapEarsivAdapter:
             raise ValueError("QNB e-Arsiv invoice must be UBL XML")
         if returned_document_format not in {0, 2, 3, 9}:
             raise ValueError("QNB e-Arsiv returned document format must be 0, 2, 3 or 9")
+        if not is_qnb_earsiv_test_endpoint(credentials.user_service_url) or not is_qnb_earsiv_test_endpoint(
+            credentials.service_url
+        ):
+            raise ValueError("QNB e-Arsiv send requires test endpoints")
 
         self._login(credentials)
         input_payload: dict[str, object] = {
@@ -119,8 +130,47 @@ class QnbSoapEarsivAdapter:
         response_xml = self._post_soap(
             _earsiv_service_url(credentials.service_url),
             _soap_operation("faturaOlusturExt", inner_xml, namespace=QNB_EARSIV_NAMESPACE),
+            mutating=True,
         )
-        return _parse_created_invoice(response_xml, transaction_id=normalized_transaction_id)
+        result = _parse_created_invoice(response_xml, transaction_id=normalized_transaction_id)
+        if not result.ok:
+            detail = _safe_error_message(ValueError(" ".join(result.result_text.split())))
+            suffix = f": {detail}" if detail else ""
+            raise ValueError(f"QNB e-Arsiv create rejected with resultCode {result.result_code}{suffix}")
+        return result
+
+    def query_invoice(
+        self,
+        credentials: QnbEarsivCredentials,
+        *,
+        invoice_no: str = "",
+        invoice_uuid: str = "",
+    ) -> QnbEarsivCreatedInvoice:
+        normalized_invoice_no = str(invoice_no or "").strip()
+        normalized_invoice_uuid = str(invoice_uuid or "").strip()
+        if not normalized_invoice_no and not normalized_invoice_uuid:
+            raise ValueError("QNB e-Arsiv invoice number or UUID is required")
+        if not is_qnb_earsiv_test_endpoint(credentials.user_service_url) or not is_qnb_earsiv_test_endpoint(
+            credentials.service_url
+        ):
+            raise ValueError("QNB e-Arsiv query requires test endpoints")
+        self._login(credentials)
+        input_payload = {"vkn": credentials.vkn, "erpKodu": credentials.erp_code}
+        if normalized_invoice_uuid:
+            input_payload["faturaUuid"] = normalized_invoice_uuid
+        else:
+            input_payload["faturaNo"] = normalized_invoice_no
+        response_xml = self._post_soap(
+            _earsiv_service_url(credentials.service_url),
+            _soap_operation(
+                "faturaSorgulaExt",
+                f"<input>{escape(json.dumps(input_payload, ensure_ascii=False, separators=(',', ':')))}</input>",
+                namespace=QNB_EARSIV_NAMESPACE,
+            ),
+        )
+        return _parse_created_invoice(
+            response_xml, transaction_id=normalized_invoice_uuid or normalized_invoice_no
+        )
 
     def close_session(self, credentials: QnbEarsivCredentials) -> None:
         if not self._logged_in_key:
@@ -152,7 +202,7 @@ class QnbSoapEarsivAdapter:
         )
         self._logged_in_key = login_key
 
-    def _post_soap(self, url: str, operation_xml: str) -> str:
+    def _post_soap(self, url: str, operation_xml: str, *, mutating: bool = False) -> str:
         envelope = (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
@@ -165,9 +215,11 @@ class QnbSoapEarsivAdapter:
             headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": ""},
             timeout=self.timeout,
         )
+        if mutating and hasattr(response, "raise_for_status"):
+            response.raise_for_status()
         text = str(getattr(response, "text", "") or "")
         _raise_for_soap_fault(text)
-        if hasattr(response, "raise_for_status"):
+        if not mutating and hasattr(response, "raise_for_status"):
             response.raise_for_status()
         return text
 

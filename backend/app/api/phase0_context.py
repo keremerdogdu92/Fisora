@@ -21,6 +21,7 @@ from app.persistence.store_factory import build_workflow_store
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
 from app.domain.qnb_efatura import QnbConnectionService, build_qnb_adapter_from_env
 from app.domain.outgoing_invoices import OutgoingInvoiceService
+from app.domain.qnb_outgoing import build_outgoing_invoice_provider
 from app.workflows.document_processing import _provider_chain_from_env
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
@@ -89,8 +90,12 @@ def build_nace_researcher(store):
 
 
 def get_document_service() -> DocumentService:
+    return _build_document_service(get_workflow_store())
+
+
+def _build_document_service(store) -> DocumentService:
     return DocumentService(
-        store=get_workflow_store(),
+        store=store,
         document_storage_path=default_document_storage_path(),
         record_operation_event=record_operation_event,
         require_client_access=require_client_access,
@@ -124,9 +129,12 @@ def get_qnb_connection_service() -> QnbConnectionService:
 
 
 def get_outgoing_invoice_service() -> OutgoingInvoiceService:
-    # Provider dispatch deliberately stays local/fake until a provider connection
-    # has passed its own test-environment readiness gate.
-    return OutgoingInvoiceService(store=get_workflow_store())
+    store = get_workflow_store()
+    return OutgoingInvoiceService(
+        store=store,
+        provider=build_outgoing_invoice_provider(os.environ, store),
+        document_service=_build_document_service(store),
+    )
 
 
 def request_user_id(

@@ -56,6 +56,85 @@ class RaisingProductProvider:
 
 
 class WorkflowStoreTests(unittest.TestCase):
+    def test_outgoing_attempt_claim_is_idempotent_and_events_are_append_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.save_outgoing_invoice(
+                client_id="client-a",
+                invoice={
+                    "invoice_id": "invoice-1",
+                    "status": "approved",
+                    "document_type": "earsiv",
+                    "ubl_sha256": "a" * 64,
+                },
+            )
+
+            claimed, invoice, attempt = store.claim_outgoing_invoice_attempt(
+                client_id="client-a",
+                invoice_id="invoice-1",
+                idempotency_key="send-1",
+                ubl_sha256="a" * 64,
+                provider="qnb_sandbox",
+                provider_operation="faturaOlusturExt",
+            )
+            repeated_claim, repeated_invoice, repeated_attempt = store.claim_outgoing_invoice_attempt(
+                client_id="client-a",
+                invoice_id="invoice-1",
+                idempotency_key="send-1",
+                ubl_sha256="a" * 64,
+                provider="qnb_sandbox",
+                provider_operation="faturaOlusturExt",
+            )
+            updated = store.append_outgoing_invoice_attempt_event(
+                client_id="client-a",
+                attempt_id=attempt["attempt_id"],
+                event="request_started",
+                state="request_started",
+                details={"endpoint_class": "qnb_test"},
+            )
+            stored_attempt = store.get_outgoing_invoice_attempt(
+                client_id="client-a", attempt_id=attempt["attempt_id"]
+            )
+
+        self.assertTrue(claimed)
+        self.assertFalse(repeated_claim)
+        self.assertEqual(invoice["status"], "sending")
+        self.assertEqual(repeated_invoice["status"], "sending")
+        self.assertEqual(repeated_attempt["attempt_id"], attempt["attempt_id"])
+        self.assertEqual([row["event"] for row in updated["events"]], ["claimed", "request_started"])
+        self.assertEqual(stored_attempt["state"], "request_started")
+
+    def test_outgoing_attempt_key_cannot_be_reused_for_another_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.save_outgoing_invoice(
+                client_id="client-a",
+                invoice={
+                    "invoice_id": "invoice-1",
+                    "status": "approved",
+                    "document_type": "efatura",
+                    "ubl_sha256": "a" * 64,
+                },
+            )
+            store.claim_outgoing_invoice_attempt(
+                client_id="client-a",
+                invoice_id="invoice-1",
+                idempotency_key="send-1",
+                ubl_sha256="a" * 64,
+                provider="qnb_sandbox",
+                provider_operation="belgeGonderExt",
+            )
+
+            with self.assertRaisesRegex(ValueError, "hash"):
+                store.claim_outgoing_invoice_attempt(
+                    client_id="client-a",
+                    invoice_id="invoice-1",
+                    idempotency_key="send-1",
+                    ubl_sha256="b" * 64,
+                    provider="qnb_sandbox",
+                    provider_operation="belgeGonderExt",
+                )
+
     def test_document_file_returns_rendered_invoice_preview_for_xml(self) -> None:
         xml = """<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
@@ -997,6 +1076,68 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("for update skip locked", claim_sql)
         self.assertIn("update workflow_records", claim_sql)
         self.assertIn("returning records.client_id, records.record_key, records.payload", claim_sql)
+
+    def test_postgres_outgoing_attempt_claim_writes_attempt_and_sending_in_one_connection(self) -> None:
+        executed_sql: list[str] = []
+        fetches: list[object] = [
+            None,
+            (
+                {
+                    "invoice_id": "invoice-1",
+                    "client_id": "client-a",
+                    "status": "approved",
+                    "document_type": "earsiv",
+                    "ubl_sha256": "a" * 64,
+                },
+            ),
+            None,
+            ({"inserted": True},),
+        ]
+
+        class FakeCursor:
+            def __enter__(self) -> "FakeCursor":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def execute(self, sql: str, params: object = None) -> None:
+                executed_sql.append(sql)
+
+            def fetchone(self) -> object:
+                return fetches.pop(0)
+
+        class FakeConnection:
+            def __enter__(self) -> "FakeConnection":
+                return self
+
+            def __exit__(self, *_: object) -> None:
+                return None
+
+            def cursor(self) -> FakeCursor:
+                return FakeCursor()
+
+        connection = FakeConnection()
+        store = PostgresWorkflowStore("postgresql://example", connect=lambda: connection)
+        store._ensure_tenant = lambda: None  # type: ignore[method-assign]
+
+        claimed, invoice, attempt = store.claim_outgoing_invoice_attempt(
+            client_id="client-a",
+            invoice_id="invoice-1",
+            idempotency_key="send-1",
+            ubl_sha256="a" * 64,
+            provider="qnb_sandbox",
+            provider_operation="faturaOlusturExt",
+        )
+
+        sql = "\n".join(executed_sql).lower()
+        self.assertTrue(claimed)
+        self.assertEqual(invoice["status"], "sending")
+        self.assertEqual(attempt["state"], "claimed")
+        self.assertIn("for update", sql)
+        self.assertIn("outgoing_invoice_send_key", sql)
+        self.assertIn("outgoing_invoice_send_attempt", sql)
+        self.assertIn("update workflow_records", sql)
 
     def test_postgres_store_lists_research_profiles_and_benchmark_runs(self) -> None:
         class FakePostgresStore(PostgresWorkflowStore):

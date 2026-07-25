@@ -508,6 +508,74 @@ class QnbIntegrationTests(unittest.TestCase):
         self.assertEqual(sleeps, [0.5])
         self.assertEqual(len(http_client.requests), 3)
 
+    def test_qnb_soap_adapter_does_not_retry_mutating_outgoing_send(self) -> None:
+        sleeps: list[float] = []
+        http_client = FakeSoapHttpClient(
+            [
+                soap_body("<ns2:wsLoginResponse xmlns:ns2=\"http://service.csap.cs.com.tr/\" />"),
+                (soap_body("<soap:Fault xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\" />"), 500),
+            ]
+        )
+        adapter = QnbSoapEfaturaAdapter(http_client=http_client, sleep=sleeps.append, max_attempts=3)
+
+        with self.assertRaises(RuntimeError):
+            adapter.send_outgoing_invoice_ubl(
+                QnbConnectionCredentials(
+                    base_url="https://erpefaturatest2.qnbesolutions.com.tr/efatura/ws",
+                    username="5910611341",
+                    password="secret-password",
+                    vkn="5910611341",
+                    erp_code="FSR31422",
+                ),
+                invoice_no="FSR2026000000001",
+                content=UBL_XML,
+            )
+
+        self.assertEqual(len(http_client.requests), 2)
+        self.assertEqual(sleeps, [])
+
+    def test_qnb_outgoing_send_rejects_production_endpoint_before_network(self) -> None:
+        http_client = FakeSoapHttpClient([])
+        adapter = QnbSoapEfaturaAdapter(http_client=http_client)
+
+        with self.assertRaisesRegex(ValueError, "test endpoint"):
+            adapter.send_outgoing_invoice_ubl(
+                QnbConnectionCredentials(
+                    base_url="https://erpefatura.qnbesolutions.com.tr/efatura/ws",
+                    username="5910611341",
+                    password="secret-password",
+                    vkn="5910611341",
+                    erp_code="FSR31422",
+                ),
+                invoice_no="FSR2026000000001",
+                content=UBL_XML,
+            )
+
+        self.assertEqual(http_client.requests, [])
+
+    def test_qnb_outgoing_send_requires_document_oid(self) -> None:
+        http_client = FakeSoapHttpClient(
+            [
+                soap_body("<ns2:wsLoginResponse xmlns:ns2=\"http://service.csap.cs.com.tr/\" />"),
+                soap_body(
+                    '<ns2:belgeGonderExtResponse xmlns:ns2="http://service.connector.uut.cs.com.tr/" />'
+                ),
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "belgeOid"):
+            QnbSoapEfaturaAdapter(http_client=http_client).send_outgoing_invoice_ubl(
+                QnbConnectionCredentials(
+                    base_url="https://erpefaturatest2.qnbesolutions.com.tr/efatura/ws",
+                    username="5910611341",
+                    password="secret-password",
+                    vkn="5910611341",
+                    erp_code="FSR31422",
+                ),
+                invoice_no="FSR2026000000001",
+                content=UBL_XML,
+            )
+
     def test_qnb_sync_closes_real_soap_session_after_page_run(self) -> None:
         http_client = FakeSoapHttpClient(
             [
@@ -743,6 +811,37 @@ class QnbIntegrationTests(unittest.TestCase):
         request = str(http_client.requests[1]["content"])
         self.assertIn("<belgeNo>oid-123</belgeNo>", request)
         self.assertIn("<belgeNoTipi>OID</belgeNoTipi>", request)
+
+    def test_qnb_soap_adapter_reads_outgoing_status_by_local_invoice_no(self) -> None:
+        http_client = FakeSoapHttpClient(
+            [
+                soap_body("<ns2:wsLoginResponse xmlns:ns2=\"http://service.csap.cs.com.tr/\" />"),
+                soap_body(
+                    """
+<ns2:gidenBelgeDurumSorgulaExtResponse xmlns:ns2="http://service.connector.uut.cs.com.tr/">
+  <return><belgeOid>oid-local</belgeOid><durum>3</durum><gonderimDurumu>ISLENDI</gonderimDurumu><ettn>11111111-2222-3333-4444-555555555555</ettn></return>
+</ns2:gidenBelgeDurumSorgulaExtResponse>
+"""
+                ),
+            ]
+        )
+        adapter = QnbSoapEfaturaAdapter(http_client=http_client)
+        status = adapter.get_outgoing_invoice_status_by_local_invoice_no(
+            QnbConnectionCredentials(
+                base_url="https://erpefaturatest2.qnbesolutions.com.tr/efatura/ws",
+                username="5910611341",
+                password="secret-password",
+                vkn="5910611341",
+                erp_code="FSR31422",
+            ),
+            invoice_no="FSR2026000000001",
+        )
+
+        self.assertEqual(status.document_oid, "oid-local")
+        self.assertEqual(status.processing_state, "processed")
+        request = str(http_client.requests[1]["content"])
+        self.assertIn("<belgeNo>FSR2026000000001</belgeNo>", request)
+        self.assertIn("<belgeNoTipi>YEREL_BELGE_NO</belgeNoTipi>", request)
 
     def test_build_qnb_sandbox_invoice_ubl_has_required_parties_and_totals(self) -> None:
         from datetime import date, time

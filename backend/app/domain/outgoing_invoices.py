@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from datetime import UTC, datetime
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Protocol
 from uuid import uuid4
@@ -16,6 +18,22 @@ ALLOWED_PROFILES = {
     "efatura": {"TEMELFATURA", "TICARIFATURA"},
     "earsiv": {"EARSIVFATURA"},
 }
+
+
+@dataclass(frozen=True)
+class OutgoingProviderReceipt:
+    provider: str
+    provider_operation: str
+    provider_document_id: str = ""
+    provider_transaction_id: str = ""
+    provider_invoice_no: str = ""
+    provider_status: str = ""
+    response_received: bool = True
+    evidence: dict[str, object] = field(default_factory=dict)
+
+
+class OutgoingProviderOutcomeUnknown(RuntimeError):
+    """The provider may have accepted the request, but no terminal response is available."""
 
 
 def utc_now() -> str:
@@ -167,24 +185,49 @@ def build_invoice_ubl(invoice: dict[str, Any]) -> bytes:
 
 
 class OutgoingInvoiceProvider(Protocol):
-    def send(self, *, invoice: dict[str, Any], ubl_content: bytes) -> dict[str, Any]: ...
+    provider_name: str
+    provider_operation: str
+
+    def send(self, *, invoice: dict[str, Any], ubl_content: bytes) -> OutgoingProviderReceipt: ...
+
+    def reconcile(self, *, invoice: dict[str, Any], attempt: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class FakeOutgoingInvoiceProvider:
-    def send(self, *, invoice: dict[str, Any], ubl_content: bytes) -> dict[str, Any]:
+    provider_name = "fake"
+    provider_operation = "local_fake"
+
+    def send(self, *, invoice: dict[str, Any], ubl_content: bytes) -> OutgoingProviderReceipt:
         digest = hashlib.sha256(ubl_content).hexdigest()
-        return {
-            "provider": "fake",
-            "provider_document_id": f"FAKE-{digest[:16].upper()}",
-            "provider_status": "accepted",
-            "receipt": {"ubl_sha256": digest, "mode": "local_fake"},
-        }
+        return OutgoingProviderReceipt(
+            provider="fake",
+            provider_operation="local_fake",
+            provider_document_id=f"FAKE-{digest[:16].upper()}",
+            provider_status="accepted",
+            evidence={"ubl_sha256": digest, "mode": "local_fake"},
+        )
+
+    def reconcile(self, *, invoice: dict[str, Any], attempt: dict[str, Any]) -> dict[str, Any]:
+        return {"status": str(invoice.get("status") or "")}
 
 
 class OutgoingInvoiceService:
-    def __init__(self, *, store: Any, provider: OutgoingInvoiceProvider | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        store: Any,
+        provider: OutgoingInvoiceProvider | None = None,
+        document_service: Any | None = None,
+        claim_wait_seconds: float = 35.0,
+        reconciliation_stale_seconds: float = 120.0,
+        reconciliation_lease_seconds: float = 60.0,
+    ) -> None:
         self.store = store
         self.provider = provider or FakeOutgoingInvoiceProvider()
+        self.document_service = document_service
+        self.claim_wait_seconds = max(float(claim_wait_seconds), 0.0)
+        self.reconciliation_stale_seconds = max(float(reconciliation_stale_seconds), 0.0)
+        self.reconciliation_lease_seconds = max(float(reconciliation_lease_seconds), 1.0)
 
     def create_draft(self, *, client_id: str, payload: dict[str, Any], actor_user_id: str) -> dict[str, Any]:
         document_type = str(payload.get("document_type") or "").lower()
@@ -243,32 +286,315 @@ class OutgoingInvoiceService:
         idempotency_key = idempotency_key.strip()
         if not idempotency_key:
             raise ValueError("Idempotency key is required")
-        claimed, invoice = self.store.claim_outgoing_invoice_send(
-            client_id=client_id, invoice_id=invoice_id, idempotency_key=idempotency_key
-        )
-        if not invoice:
-            raise ValueError("Outgoing invoice not found")
-        if not claimed:
-            return invoice
+        candidate = self._get(client_id, invoice_id)
+        if candidate.get("status") == "draft":
+            raise ValueError("Only an approved invoice can be sent")
         try:
-            ubl_content = base64.b64decode(invoice.get("ubl_base64") or "", validate=True)
-            result = self.provider.send(invoice=invoice, ubl_content=ubl_content)
+            ubl_content = base64.b64decode(candidate.get("ubl_base64") or "", validate=True)
+        except Exception as exc:
+            raise ValueError("Frozen UBL payload is invalid") from exc
+        frozen_hash = str(candidate.get("ubl_sha256") or "")
+        if hashlib.sha256(ubl_content).hexdigest() != frozen_hash:
+            raise ValueError("Frozen UBL hash mismatch")
+        provider_name = str(getattr(self.provider, "provider_name", self.provider.__class__.__name__))
+        if getattr(self.provider, "dispatch_enabled", True) is False:
+            raise ValueError("Outgoing invoice provider is disabled")
+        provider_preflight = getattr(self.provider, "preflight", None)
+        if candidate.get("status") == "approved" and callable(provider_preflight):
+            provider_preflight(candidate, ubl_content=ubl_content)
+        operation_for = getattr(self.provider, "operation_for", None)
+        provider_operation = str(
+            operation_for(candidate) if callable(operation_for) else getattr(self.provider, "provider_operation", "send")
+        )
+        claimed, invoice, attempt = self.store.claim_outgoing_invoice_attempt(
+            client_id=client_id,
+            invoice_id=invoice_id,
+            idempotency_key=idempotency_key,
+            ubl_sha256=str(candidate.get("ubl_sha256") or ""),
+            provider=provider_name,
+            provider_operation=provider_operation,
+        )
+        if not claimed:
+            return self._wait_for_attempt_result(client_id=client_id, invoice=invoice)
+        attempt_id = str(attempt["attempt_id"])
+        try:
+            self.store.append_outgoing_invoice_attempt_event(
+                client_id=client_id,
+                attempt_id=attempt_id,
+                event="preflight_passed",
+                state="preflight_passed",
+                details={"ubl_sha256": frozen_hash},
+            )
+            self.store.append_outgoing_invoice_attempt_event(
+                client_id=client_id,
+                attempt_id=attempt_id,
+                event="request_started",
+                state="request_started",
+                details={"provider_operation": provider_operation},
+            )
+            receipt = self.provider.send(invoice=invoice, ubl_content=ubl_content)
+            result = asdict(receipt)
+            result["receipt"] = result.pop("evidence")
             now = utc_now()
             invoice.update({**result, "status": "sent", "sent_at": now, "sent_by": actor_user_id, "updated_at": now})
             invoice.setdefault("history", []).append({"status": "sent", "actor_user_id": actor_user_id, "at": now})
+            finalized, saved_invoice, _ = self.store.finalize_outgoing_invoice_attempt_and_invoice(
+                client_id=client_id,
+                attempt_id=attempt_id,
+                expected_state="request_started",
+                event="response_received",
+                state="sent",
+                invoice=invoice,
+                details={
+                    "provider_document_id": result.get("provider_document_id") or "",
+                    "provider_transaction_id": result.get("provider_transaction_id") or "",
+                    "provider_status": result.get("provider_status") or "",
+                },
+            )
+            if not finalized:
+                return self._get(client_id, invoice_id)
+        except OutgoingProviderOutcomeUnknown as exc:
+            now = utc_now()
+            invoice.update(
+                {"status": "reconciliation_required", "last_error": str(exc), "updated_at": now}
+            )
+            invoice.setdefault("history", []).append(
+                {"status": "reconciliation_required", "actor_user_id": actor_user_id, "at": now}
+            )
+            finalized, saved_invoice, _ = self.store.finalize_outgoing_invoice_attempt_and_invoice(
+                client_id=client_id,
+                attempt_id=attempt_id,
+                expected_state="request_started",
+                event="outcome_unknown",
+                state="reconciliation_required",
+                invoice=invoice,
+                details={"error_type": exc.__class__.__name__},
+            )
+            if not finalized:
+                return self._get(client_id, invoice_id)
+            return saved_invoice
         except Exception as exc:
             now = utc_now()
             invoice.update({"status": "failed", "last_error": str(exc), "updated_at": now})
             invoice.setdefault("history", []).append({"status": "failed", "actor_user_id": actor_user_id, "at": now})
-            self.store.save_outgoing_invoice(client_id=client_id, invoice=invoice)
+            finalized, _, _ = self.store.finalize_outgoing_invoice_attempt_and_invoice(
+                client_id=client_id,
+                attempt_id=attempt_id,
+                expected_state="request_started",
+                event="send_failed",
+                state="failed",
+                invoice=invoice,
+                details={"error_type": exc.__class__.__name__},
+            )
+            if not finalized:
+                return self._get(client_id, invoice_id)
             raise
-        return self.store.save_outgoing_invoice(client_id=client_id, invoice=invoice)
+        return self._link_confirmed_sales_source(
+            client_id=client_id,
+            invoice=saved_invoice,
+            attempt_id=attempt_id,
+            actor_user_id=actor_user_id,
+            ubl_content=ubl_content,
+        )
 
     def get(self, *, client_id: str, invoice_id: str) -> dict[str, Any]:
         return self._get(client_id, invoice_id)
 
+    def reconcile(self, *, client_id: str, invoice_id: str, actor_user_id: str) -> dict[str, Any]:
+        invoice = self._get(client_id, invoice_id)
+        if invoice.get("status") not in {"reconciliation_required", "sending"}:
+            raise ValueError("Only a submitted invoice requiring reconciliation can be reconciled")
+        attempt_id = str(invoice.get("current_attempt_id") or "")
+        attempt = self.store.get_outgoing_invoice_attempt(client_id=client_id, attempt_id=attempt_id)
+        if not attempt:
+            raise ValueError("Outgoing invoice reconciliation attempt was not found")
+        events = [str(item.get("event") or "") for item in attempt.get("events") or []]
+        if "request_started" not in events:
+            raise ValueError("Outgoing invoice mutating request was not started")
+        now_dt = datetime.now(UTC)
+        owner_id = f"{actor_user_id}:{uuid4()}"
+        claimed, attempt = self.store.claim_outgoing_invoice_reconciliation(
+            client_id=client_id,
+            attempt_id=attempt_id,
+            owner_id=owner_id,
+            stale_before=(now_dt - timedelta(seconds=self.reconciliation_stale_seconds)).isoformat(
+                timespec="seconds"
+            ),
+            lease_expires_at=(now_dt + timedelta(seconds=self.reconciliation_lease_seconds)).isoformat(
+                timespec="seconds"
+            ),
+        )
+        if not claimed:
+            raise ValueError("Outgoing invoice reconciliation is already active or the send attempt is not stale")
+        if invoice.get("status") == "sending":
+            invoice.update({"status": "reconciliation_required", "updated_at": utc_now()})
+            invoice = self.store.save_outgoing_invoice(client_id=client_id, invoice=invoice)
+        try:
+            result = self.provider.reconcile(invoice=invoice, attempt=attempt)
+        except Exception as exc:
+            self.store.finalize_outgoing_invoice_attempt(
+                client_id=client_id,
+                attempt_id=attempt_id,
+                expected_state="reconciling",
+                event="reconciliation_error",
+                state="reconciliation_required",
+                details={"error_type": exc.__class__.__name__},
+                reconciliation_owner=owner_id,
+            )
+            raise
+        outcome = str(result.get("status") or "reconciliation_required")
+        if (
+            outcome == "sent"
+            and str(attempt.get("provider") or "") == "qnb_sandbox"
+            and not str(result.get("provider_document_id") or "").strip()
+        ):
+            outcome = "reconciliation_required"
+        evidence = result.get("evidence") if isinstance(result.get("evidence"), dict) else {}
+        now = utc_now()
+        if outcome == "sent":
+            invoice.update(
+                {
+                    "status": "sent",
+                    "provider_document_id": str(result.get("provider_document_id") or ""),
+                    "provider_transaction_id": str(result.get("provider_transaction_id") or ""),
+                    "provider_invoice_no": str(result.get("provider_invoice_no") or ""),
+                    "provider_status": str(result.get("provider_status") or ""),
+                    "reconciliation_receipt": evidence,
+                    "reconciled_at": now,
+                    "reconciled_by": actor_user_id,
+                    "updated_at": now,
+                }
+            )
+            invoice.setdefault("history", []).append(
+                {"status": "sent", "source": "reconciliation", "actor_user_id": actor_user_id, "at": now}
+            )
+            event = "reconciliation_confirmed_sent"
+        elif outcome == "failed":
+            invoice.update(
+                {
+                    "status": "failed",
+                    "provider_status": str(result.get("provider_status") or ""),
+                    "reconciliation_receipt": evidence,
+                    "reconciled_at": now,
+                    "reconciled_by": actor_user_id,
+                    "updated_at": now,
+                }
+            )
+            invoice.setdefault("history", []).append(
+                {"status": "failed", "source": "reconciliation", "actor_user_id": actor_user_id, "at": now}
+            )
+            event = "reconciliation_confirmed_failed"
+        else:
+            invoice.update(
+                {"status": "reconciliation_required", "reconciliation_receipt": evidence, "updated_at": now}
+            )
+            event = "reconciliation_inconclusive"
+            outcome = "reconciliation_required"
+        finalized, saved_invoice, _ = self.store.finalize_outgoing_invoice_attempt_and_invoice(
+            client_id=client_id,
+            attempt_id=attempt_id,
+            expected_state="reconciling",
+            event=event,
+            state=outcome,
+            invoice=invoice,
+            details={
+                "provider_document_id": str(result.get("provider_document_id") or ""),
+                "provider_status": str(result.get("provider_status") or ""),
+            },
+            reconciliation_owner=owner_id,
+        )
+        if not finalized:
+            return self._get(client_id, invoice_id)
+        if outcome != "sent":
+            return saved_invoice
+        try:
+            ubl_content = base64.b64decode(saved_invoice.get("ubl_base64") or "", validate=True)
+        except Exception:
+            return saved_invoice
+        return self._link_confirmed_sales_source(
+            client_id=client_id,
+            invoice=saved_invoice,
+            attempt_id=attempt_id,
+            actor_user_id=actor_user_id,
+            ubl_content=ubl_content,
+        )
+
     def list(self, *, client_id: str) -> list[dict[str, Any]]:
         return self.store.list_outgoing_invoices(client_id=client_id)
+
+    def _link_confirmed_sales_source(
+        self,
+        *,
+        client_id: str,
+        invoice: dict[str, Any],
+        attempt_id: str,
+        actor_user_id: str,
+        ubl_content: bytes,
+    ) -> dict[str, Any]:
+        if self.document_service is None or str(invoice.get("provider") or "") != "qnb_sandbox":
+            return invoice
+        if invoice.get("canonical_document_ref"):
+            return invoice
+        try:
+            uploaded = self.document_service.store_document_upload(
+                client_id=client_id,
+                document_type="einvoice_xml",
+                intake_category="sales_invoice",
+                period=str(invoice.get("issue_date") or "")[:7],
+                file_name=f"outgoing-{invoice['invoice_id']}.xml",
+                uploaded_by="qnb_outgoing_confirmed",
+                uploaded_by_user_id=actor_user_id,
+                request_user_id=actor_user_id,
+                content=ubl_content,
+                size_bytes=len(ubl_content),
+                sha256=str(invoice.get("ubl_sha256") or ""),
+            )
+            document = {key: value for key, value in uploaded.items() if key != "processing_job"}
+            document.update(
+                {
+                    "source_provider": "qnb_esolutions",
+                    "source_direction": "sales_invoice",
+                    "source_outgoing_invoice_id": str(invoice.get("invoice_id") or ""),
+                    "source_outgoing_attempt_id": attempt_id,
+                    "source_provider_document_id": str(invoice.get("provider_document_id") or ""),
+                    "source_ubl_sha256": str(invoice.get("ubl_sha256") or ""),
+                }
+            )
+            self.store.save_uploaded_document(client_id=client_id, document=document)
+            job = uploaded.get("processing_job") if isinstance(uploaded.get("processing_job"), dict) else {}
+            invoice.update(
+                {
+                    "canonical_document_ref": str(uploaded.get("document_ref") or ""),
+                    "canonical_processing_job_id": str(job.get("id") or ""),
+                    "accounting_link_status": str(job.get("status") or "queued"),
+                    "updated_at": utc_now(),
+                }
+            )
+        except Exception as exc:
+            invoice.update(
+                {
+                    "accounting_link_status": "failed",
+                    "accounting_link_error_type": exc.__class__.__name__,
+                    "updated_at": utc_now(),
+                }
+            )
+        return self.store.save_outgoing_invoice(client_id=client_id, invoice=invoice)
+
+    def _wait_for_attempt_result(self, *, client_id: str, invoice: dict[str, Any]) -> dict[str, Any]:
+        if str(invoice.get("status") or "") != "sending" or self.claim_wait_seconds <= 0:
+            return invoice
+        deadline = time.monotonic() + self.claim_wait_seconds
+        current = invoice
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            refreshed = self.store.get_outgoing_invoice(
+                client_id=client_id, invoice_id=str(invoice.get("invoice_id") or "")
+            )
+            if refreshed:
+                current = refreshed
+            if str(current.get("status") or "") != "sending":
+                return current
+        return current
 
     def _get(self, client_id: str, invoice_id: str) -> dict[str, Any]:
         invoice = self.store.get_outgoing_invoice(client_id=client_id, invoice_id=invoice_id)

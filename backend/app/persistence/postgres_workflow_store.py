@@ -731,6 +731,388 @@ class PostgresWorkflowStore:
     def list_outgoing_invoices(self, *, client_id: str) -> list[dict[str, Any]]:
         return self._payloads(client_id, "outgoing_invoice")
 
+    def claim_outgoing_invoice_attempt(
+        self,
+        *,
+        client_id: str,
+        invoice_id: str,
+        idempotency_key: str,
+        ubl_sha256: str,
+        provider: str,
+        provider_operation: str,
+    ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
+        self._ensure_tenant()
+        idempotency_key_hash = sha256(idempotency_key.encode("utf-8")).hexdigest()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_key' and record_key = %s
+                    """,
+                    (self.tenant_id, client_id, idempotency_key_hash),
+                )
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    claim = existing_row[0]
+                    if claim.get("invoice_id") != invoice_id:
+                        raise ValueError("Idempotency key is already used for another invoice")
+                    if claim.get("ubl_sha256") != ubl_sha256:
+                        raise ValueError("Idempotency key is already used for another UBL hash")
+                    return False, *self._load_outgoing_attempt_rows(
+                        cursor,
+                        client_id=client_id,
+                        invoice_id=invoice_id,
+                        attempt_id=str(claim.get("attempt_id") or ""),
+                    )
+
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, invoice_id),
+                )
+                invoice_row = cursor.fetchone()
+                if not invoice_row:
+                    raise ValueError("Outgoing invoice not found")
+                invoice = invoice_row[0]
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_key' and record_key = %s
+                    """,
+                    (self.tenant_id, client_id, idempotency_key_hash),
+                )
+                committed_claim_row = cursor.fetchone()
+                if committed_claim_row:
+                    claim = committed_claim_row[0]
+                    if claim.get("invoice_id") != invoice_id or claim.get("ubl_sha256") != ubl_sha256:
+                        raise ValueError("Idempotency key is already used for another invoice or UBL hash")
+                    return False, *self._load_outgoing_attempt_rows(
+                        cursor,
+                        client_id=client_id,
+                        invoice_id=invoice_id,
+                        attempt_id=str(claim.get("attempt_id") or ""),
+                    )
+                if invoice.get("status") != "approved":
+                    raise ValueError("Only an approved invoice can be sent")
+
+                attempt_id = str(uuid4())
+                claimed_at = utc_now()
+                claim = {
+                    "client_id": client_id,
+                    "invoice_id": invoice_id,
+                    "idempotency_key_hash": idempotency_key_hash,
+                    "ubl_sha256": ubl_sha256,
+                    "attempt_id": attempt_id,
+                    "claimed_at": claimed_at,
+                }
+                cursor.execute(
+                    """
+                    insert into workflow_records (id, tenant_id, client_id, record_type, record_key, payload)
+                    values (%s, %s, %s, 'outgoing_invoice_send_key', %s, %s)
+                    on conflict do nothing
+                    returning payload
+                    """,
+                    (uuid4(), self.tenant_id, client_id, idempotency_key_hash, self._json(claim)),
+                )
+                inserted = cursor.fetchone()
+                if not inserted:
+                    cursor.execute(
+                        """
+                        select payload from workflow_records
+                        where tenant_id = %s and client_id = %s
+                          and record_type = 'outgoing_invoice_send_key' and record_key = %s
+                        """,
+                        (self.tenant_id, client_id, idempotency_key_hash),
+                    )
+                    winning_claim = cursor.fetchone()
+                    if not winning_claim:
+                        raise ValueError("Outgoing invoice attempt claim could not be resolved")
+                    claim = winning_claim[0]
+                    if claim.get("invoice_id") != invoice_id or claim.get("ubl_sha256") != ubl_sha256:
+                        raise ValueError("Idempotency key is already used for another invoice or UBL hash")
+                    return False, *self._load_outgoing_attempt_rows(
+                        cursor,
+                        client_id=client_id,
+                        invoice_id=invoice_id,
+                        attempt_id=str(claim.get("attempt_id") or ""),
+                    )
+
+                attempt = {
+                    "attempt_id": attempt_id,
+                    "client_id": client_id,
+                    "invoice_id": invoice_id,
+                    "idempotency_key_hash": idempotency_key_hash,
+                    "ubl_sha256": ubl_sha256,
+                    "document_type": str(invoice.get("document_type") or ""),
+                    "provider": provider,
+                    "provider_operation": provider_operation,
+                    "state": "claimed",
+                    "events": [{"event": "claimed", "at": claimed_at, "details": {}}],
+                    "created_at": claimed_at,
+                    "updated_at": claimed_at,
+                }
+                cursor.execute(
+                    """
+                    insert into workflow_records (id, tenant_id, client_id, record_type, record_key, payload)
+                    values (%s, %s, %s, 'outgoing_invoice_send_attempt', %s, %s)
+                    """,
+                    (uuid4(), self.tenant_id, client_id, attempt_id, self._json(attempt)),
+                )
+                invoice = {
+                    **invoice,
+                    "status": "sending",
+                    "current_attempt_id": attempt_id,
+                    "updated_at": claimed_at,
+                }
+                cursor.execute(
+                    """
+                    update workflow_records set payload = %s, updated_at = now()
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice' and record_key = %s
+                    """,
+                    (self._json(invoice), self.tenant_id, client_id, invoice_id),
+                )
+                return True, deepcopy(invoice), deepcopy(attempt)
+
+    def _load_outgoing_attempt_rows(
+        self, cursor: Any, *, client_id: str, invoice_id: str, attempt_id: str
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        cursor.execute(
+            """
+            select record_type, payload from workflow_records
+            where tenant_id = %s and client_id = %s
+              and ((record_type = 'outgoing_invoice' and record_key = %s)
+                or (record_type = 'outgoing_invoice_send_attempt' and record_key = %s))
+            """,
+            (self.tenant_id, client_id, invoice_id, attempt_id),
+        )
+        rows = cursor.fetchall()
+        payloads = {str(record_type): payload for record_type, payload in rows}
+        invoice = payloads.get("outgoing_invoice")
+        attempt = payloads.get("outgoing_invoice_send_attempt")
+        if not invoice or not attempt:
+            raise ValueError("Outgoing invoice attempt is incomplete")
+        return deepcopy(invoice), deepcopy(attempt)
+
+    def append_outgoing_invoice_attempt_event(
+        self,
+        *,
+        client_id: str,
+        attempt_id: str,
+        event: str,
+        state: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_attempt' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, attempt_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("Outgoing invoice attempt not found")
+                now = utc_now()
+                updated = deepcopy(row[0])
+                updated.setdefault("events", []).append(
+                    {"event": event, "at": now, "details": deepcopy(details or {})}
+                )
+                if state:
+                    updated["state"] = state
+                    if state != "reconciling":
+                        updated.pop("reconciliation_owner", None)
+                        updated.pop("reconciliation_lease_expires_at", None)
+                updated["updated_at"] = now
+                cursor.execute(
+                    """
+                    update workflow_records set payload = %s, updated_at = now()
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_attempt' and record_key = %s
+                    """,
+                    (self._json(updated), self.tenant_id, client_id, attempt_id),
+                )
+                return deepcopy(updated)
+
+    def get_outgoing_invoice_attempt(self, *, client_id: str, attempt_id: str) -> dict[str, Any] | None:
+        return self._get_record(client_id, "outgoing_invoice_send_attempt", attempt_id)
+
+    def claim_outgoing_invoice_reconciliation(
+        self,
+        *,
+        client_id: str,
+        attempt_id: str,
+        owner_id: str,
+        stale_before: str,
+        lease_expires_at: str,
+    ) -> tuple[bool, dict[str, Any]]:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_attempt' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, attempt_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("Outgoing invoice attempt not found")
+                attempt = deepcopy(row[0])
+                now = utc_now()
+                active_lease = str(attempt.get("reconciliation_lease_expires_at") or "")
+                if active_lease and active_lease > now:
+                    return False, attempt
+                state = str(attempt.get("state") or "")
+                if state == "request_started":
+                    request_started_at = next(
+                        (
+                            str(item.get("at") or "")
+                            for item in reversed(attempt.get("events") or [])
+                            if item.get("event") == "request_started"
+                        ),
+                        "",
+                    )
+                    if not request_started_at or request_started_at > stale_before:
+                        return False, attempt
+                elif state not in {"reconciliation_required", "reconciling"}:
+                    return False, attempt
+                attempt.setdefault("events", []).append(
+                    {"event": "reconciliation_started", "at": now, "details": {}}
+                )
+                attempt.update(
+                    {
+                        "state": "reconciling",
+                        "reconciliation_owner": owner_id,
+                        "reconciliation_lease_expires_at": lease_expires_at,
+                        "updated_at": now,
+                    }
+                )
+                cursor.execute(
+                    """
+                    update workflow_records set payload = %s, updated_at = now()
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_attempt' and record_key = %s
+                    """,
+                    (self._json(attempt), self.tenant_id, client_id, attempt_id),
+                )
+                return True, deepcopy(attempt)
+
+    def finalize_outgoing_invoice_attempt(
+        self,
+        *,
+        client_id: str,
+        attempt_id: str,
+        expected_state: str,
+        event: str,
+        state: str,
+        details: dict[str, Any] | None = None,
+        reconciliation_owner: str = "",
+    ) -> tuple[bool, dict[str, Any]]:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_attempt' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, client_id, attempt_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("Outgoing invoice attempt not found")
+                attempt = deepcopy(row[0])
+                if str(attempt.get("state") or "") != expected_state:
+                    return False, attempt
+                if reconciliation_owner and attempt.get("reconciliation_owner") != reconciliation_owner:
+                    return False, attempt
+                now = utc_now()
+                attempt.setdefault("events", []).append(
+                    {"event": event, "at": now, "details": deepcopy(details or {})}
+                )
+                attempt["state"] = state
+                attempt["updated_at"] = now
+                attempt.pop("reconciliation_owner", None)
+                attempt.pop("reconciliation_lease_expires_at", None)
+                cursor.execute(
+                    """
+                    update workflow_records set payload = %s, updated_at = now()
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'outgoing_invoice_send_attempt' and record_key = %s
+                    """,
+                    (self._json(attempt), self.tenant_id, client_id, attempt_id),
+                )
+                return True, deepcopy(attempt)
+
+    def finalize_outgoing_invoice_attempt_and_invoice(
+        self, *, client_id: str, attempt_id: str, expected_state: str, event: str,
+        state: str, invoice: dict[str, Any], details: dict[str, Any] | None = None,
+        reconciliation_owner: str = "",
+    ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """select payload from workflow_records where tenant_id = %s and client_id = %s
+                    and record_type = 'outgoing_invoice_send_attempt' and record_key = %s for update""",
+                    (self.tenant_id, client_id, attempt_id),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise ValueError("Outgoing invoice attempt not found")
+                attempt = deepcopy(row[0])
+                if str(attempt.get("state") or "") != expected_state:
+                    return False, deepcopy(invoice), attempt
+                if reconciliation_owner and attempt.get("reconciliation_owner") != reconciliation_owner:
+                    return False, deepcopy(invoice), attempt
+                cursor.execute(
+                    """select payload from workflow_records where tenant_id = %s and client_id = %s
+                    and record_type = 'outgoing_invoice' and record_key = %s for update""",
+                    (self.tenant_id, client_id, str(invoice.get("invoice_id") or "")),
+                )
+                if not cursor.fetchone():
+                    raise ValueError("Outgoing invoice not found")
+                now = utc_now()
+                attempt.setdefault("events", []).append(
+                    {"event": event, "at": now, "details": deepcopy(details or {})}
+                )
+                attempt.update({"state": state, "updated_at": now})
+                attempt.pop("reconciliation_owner", None)
+                attempt.pop("reconciliation_lease_expires_at", None)
+                cursor.execute(
+                    """update workflow_records set payload = %s, updated_at = now() where tenant_id = %s
+                    and client_id = %s and record_type = 'outgoing_invoice_send_attempt' and record_key = %s""",
+                    (self._json(attempt), self.tenant_id, client_id, attempt_id),
+                )
+                cursor.execute(
+                    """update workflow_records set payload = %s, updated_at = now() where tenant_id = %s
+                    and client_id = %s and record_type = 'outgoing_invoice' and record_key = %s""",
+                    (self._json(invoice), self.tenant_id, client_id, str(invoice.get("invoice_id") or "")),
+                )
+                return True, deepcopy(invoice), deepcopy(attempt)
+
+    def list_outgoing_invoice_attempts(self, *, client_id: str, invoice_id: str = "") -> list[dict[str, Any]]:
+        rows = self._payloads(client_id, "outgoing_invoice_send_attempt")
+        return [row for row in rows if not invoice_id or row.get("invoice_id") == invoice_id]
+
     def claim_outgoing_invoice_send(
         self, *, client_id: str, invoice_id: str, idempotency_key: str
     ) -> tuple[bool, dict[str, Any] | None]:

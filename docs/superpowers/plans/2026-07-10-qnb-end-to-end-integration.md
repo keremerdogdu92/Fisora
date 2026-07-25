@@ -791,6 +791,18 @@ olmadan baslatilmaz.
 - [x] Idempotent send key ve tekrar gonderim korumasi (JSON + PostgreSQL).
 - [x] Yetki/onay ayrimi; musavir/admin onayi olmadan gondermeme.
 - [x] Gercek provider kapali kalacak sekilde local fake send/receipt kaniti.
+- [x] Varsayilan `disabled`, acik `fake` ve yalniz test endpointli
+  `qnb_sandbox` provider factory; request payload'i provider secemez.
+- [x] Mutating `belgeGonderExt`/`faturaOlusturExt` icin otomatik retry yok;
+  belirsiz sonuc `reconciliation_required` ve ikinci gonderim kapali.
+- [x] Client-kapsamli encrypted credential, supplier VKN/TCKN eslesmesi,
+  immutable UBL hash kontrolu ve append-only send attempt/event izi.
+- [x] e-Fatura yerel belge no ve e-Arsiv provider fatura UUID/no ile salt-okunur
+  reconciliation; yalniz pozitif provider kaniti terminal durum uretiyor.
+- [x] QNB tarafindan dogrulanan UBL ayni SHA-256 ve attempt bagiyla mevcut
+  canonical `sales_invoice` processing hattina kuyruklaniyor.
+- [x] Ortak `OutgoingInvoiceService` uzerinden calisan, plan-only varsayimli ve
+  zorunlu `--confirm-send` kapili sandbox kabul araci.
 - [ ] e-Arsiv kesme ve iptal/itiraz akisi.
 - [ ] Hukuki/operasyonel alan testi ve QNB production kabul sureci.
 
@@ -801,9 +813,21 @@ yetki kararlari tamamlanmadan production gonderim acilmaz.
 servisi; `draft -> approved -> sending -> sent/failed` durumlari, onayda
 dondurulan UBL/hash, musteri izolasyonu ve atomik idempotency claim ile
 tamamlandi. API yalniz `accountant/admin` rollerine acik. Varsayilan provider
-bilerek `fake`; QNB tarafindaki blokaj kalkip sandbox kaniti alinana kadar bu
-API gercek belge gondermez. Seri/numara tahsis politikasi, gercek QNB dispatch,
+artik `disabled`; fake yalniz server tarafinda acikca secilir. Ortak servisin
+QNB sandbox routing ve reconciliation guvenlik katmani yerelde testlidir, ancak
+2026-07-21 itibariyla bu yeni ortak servis yolundan gercek sandbox e-Fatura ve
+e-Arsiv gonderimi henuz yapilmamistir. Seri/numara tahsis politikasi, gercek QNB dispatch,
 iptal/itiraz ve production kabul kapilari acik kalir.
+
+### 2026-07-21 ortak servis sandbox hazirlik notu
+
+Plan-only kabul kosusu e-Fatura ve e-Arsiv test endpointlerini, test taraf
+kimliklerini ve 100,00 + 20,00 KDV = 120,00 TRY senaryosunu dogruladi; mutating
+QNB istegi cikmadi. Gercek kabul kosusu once TEST2 GB/TEST1 PK etiketlerini
+salt-okunur bulacak, sonra kullanicinin ayri harici yan-etki onayiyla belge turu
+basina tek istek yapacak. Bu kanit alinmadan "QNB giden sandbox ortak servis
+uzerinden dogrulandi" denmez. Production modu ve kullaniciya acik fatura kesme
+UI'i bu dilimin disindadir.
 
 ---
 

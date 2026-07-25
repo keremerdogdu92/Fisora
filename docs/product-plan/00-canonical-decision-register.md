@@ -2868,6 +2868,23 @@ and will contain:
 
 ## 25. Deferred validations and implementation refinements
 
+### QNB outgoing sandbox boundary
+
+- Outgoing invoice dispatch is disabled by default. Server-controlled `fake`
+  and `qnb_sandbox` are the only implemented modes; no production dispatch mode
+  or accountant-facing send UI is introduced by this slice.
+- A mutating provider request is never transport-retried. An unknown
+  post-submit outcome remains `reconciliation_required` and blocks every resend
+  until read-only provider evidence closes it.
+- QNB credentials remain client-scoped and encrypted. Test endpoints and the
+  frozen supplier tax identity must match before any network mutation.
+- A confirmed provider receipt may enqueue the exact frozen UBL into the
+  canonical sales-invoice pipeline, but provider delivery never bypasses
+  accountant review, accounting evidence, revision or export gates.
+- Local readiness and plan-only acceptance do not prove the common-service QNB
+  sandbox send. That claim requires one explicitly approved real e-Invoice and
+  one e-Archive test artifact with receipt, status, hash and duplicate evidence.
+
 - Exact audit/backup-set retention, provider payload-field matrix, upload/page/
   disk thresholds and browser/accessibility budgets are fixed before the
   persistent-pilot infrastructure gate from measured evidence.

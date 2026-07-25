@@ -14,6 +14,27 @@ from app.api.phase0_schemas import OutgoingInvoiceDraftPayload, OutgoingInvoiceS
 router = APIRouter()
 
 
+def _safe_outgoing_action_error(exc: ValueError) -> str:
+    message = str(exc or "")
+    allowed_markers = (
+        "approved invoice",
+        "idempotency key",
+        "provider is disabled",
+        "frozen ubl",
+        "active client-scoped qnb connection",
+        "test endpoint",
+        "sandbox requires",
+        "supplier tax id",
+        "requiring reconciliation",
+        "reconciliation attempt",
+        "mutating request was not started",
+        "resultcode",
+    )
+    if any(marker in message.lower() for marker in allowed_markers):
+        return message[:240]
+    return "Giden fatura sağlayıcı işlemi tamamlanamadı; deneme kaydını kontrol edin."
+
+
 def _access(
     client_id: str,
     user_header: str | None,
@@ -103,4 +124,23 @@ def send_outgoing_invoice(
             actor_user_id=actor,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=_safe_outgoing_action_error(exc)) from exc
+
+
+@router.post("/outgoing-invoices/{client_id}/drafts/{invoice_id}/reconcile")
+def reconcile_outgoing_invoice(
+    client_id: str,
+    invoice_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    actor = _access(client_id, x_fisora_user_id, x_fisora_session, fisora_session)
+    try:
+        return get_outgoing_invoice_service().reconcile(
+            client_id=client_id,
+            invoice_id=invoice_id,
+            actor_user_id=actor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=_safe_outgoing_action_error(exc)) from exc

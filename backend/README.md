@@ -228,5 +228,33 @@ Export dosyasi adapter katmanindan uretilir. Su an desteklenen adapter'lar:
 - `zirve_universal_csv`: ilk aday CSV format.
 - `json_manifest`: denetim ve demo icin JSON entry paketi.
 
+## QNB giden fatura sandbox modu
+
+Ortak giden fatura API'si varsayilan olarak dis gonderime kapalidir:
+
+```text
+FISORA_OUTGOING_PROVIDER_MODE=disabled
+```
+
+Yalniz unit/demo icin `fake`, kontrollu QNB test kosusu icin `qnb_sandbox`
+secilebilir. `qnb_sandbox` production endpointini, pasif veya baska musteriye
+ait credential'i ve fatura satici VKN/TCKN uyusmazligini network oncesi
+reddeder. Mutating SOAP istekleri otomatik retry edilmez; cevabi kaybolan istek
+`reconciliation_required` olur ve salt-okunur mutabakat tamamlanmadan yeniden
+gonderilemez. Uzlastirma tek owner/lease ile claim edilir; aktif bir uzlastirma
+ikinci calisana verilmez ve yarim kalmis gonderim ancak stale esiginden sonra
+salt-okunur sorguyla devralinir.
+
+Plan-only kabul kosusu dis yan etki uretmez:
+
+```powershell
+python backend/scripts/run_qnb_outgoing_service_sandbox_acceptance.py --document-type efatura
+python backend/scripts/run_qnb_outgoing_service_sandbox_acceptance.py --document-type earsiv
+```
+
+Gercek QNB test faturasi ancak ayrica aciklanan kapsam onaylandiktan sonra
+`--confirm-send` ile olusturulur. Bu mod production fatura kesme yetkisi veya
+kullaniciya acik gonderim UI'i saglamaz.
+
 Gercek Zirve saha testinden sonra `zirve_verified_format` bu adapter katmanina
 eklenecek.

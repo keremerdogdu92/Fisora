@@ -26,6 +26,36 @@ kontratları.
 **Ana plan:** `docs/superpowers/plans/2026-07-10-qnb-end-to-end-integration.md`
 Faz 8-9.
 
+## 2026-07-21 uygulama durumu
+
+- Gorev 1-6 yerel olarak uygulandi. Son proof backend `554 OK (skipped=19)`,
+  frontend `147/147`, Next production build basarili; bagimsiz son engineering
+  review'da kalan P0/P1 bulgu yok.
+- Uzlastirma icin atomik owner/lease ve stale takeover eklendi; aktif gonderim
+  veya uzlastirma ile ikinci uzlastirma ayni provider/canonical isi yurutemez.
+- Gorev 7 plan-only e-Fatura ve e-Arsiv kosularinda `sent=false` tamamlandi.
+  Kullanici onayli gercek kabul denemelerinin sonucu asagida kayitli.
+- Gorev 8'in tam yerel proof'u tamamlandi. Gercek PostgreSQL concurrency
+  smoke'u `DATABASE_URL` olmadigi icin acik
+  DSN-gated kabul kapisidir.
+
+### 2026-07-21 gercek sandbox kabul sonucu
+
+- Kullanici iki test belgesi icin acik onay verdi.
+- e-Fatura TEST1 WS login HTTP 500 nedeniyle etiket preflight'inda durdu;
+  mutating `belgeGonderExt` cagrisi cikmadi ve belge olusmadi.
+- e-Arsiv icin tek `faturaOlusturExt` cagrisi yapildi ve QNB `AE00001` ile
+  kesin reddetti. Retry/resend yapilmadi. Fatura no ile salt-okunur sorgu
+  `AE00002` ile belgenin QNB'de kayitli olmadigini kanitladi.
+- Sorgu kontratinin `islemId` degil provider fatura kimlikleri istedigi
+  kanitlandi; adapter, reconciliation ve secret-safe resultText saklanmasi
+  duzeltildi. Hedefli QNB proof `55 OK`.
+- Canli kanitla e-Arsiv reconciliation `faturaUuid`/`faturaNo` sorgusuna
+  duzeltildi; `resultText` hata kanitinda korunuyor. Hedefli testler `55 OK`.
+- Gercek e-Fatura/e-Arsiv basari kapilari acik: TEST1 WS hesabi ve e-Arsiv
+  portal mali muhur/e-imza + ayri WS kullanicisi QNB tarafinda tamamlanmali.
+
+>>>>>>> codex/qnb-outgoing-sandbox
 ## Genel kısıtlar
 
 - Production provider modu veya production endpoint desteği eklenmeyecek.

@@ -116,6 +116,7 @@ def empty_store() -> dict[str, Any]:
         "qnb_incoming_status_snapshots": {},
         "outgoing_invoices": {},
         "outgoing_invoice_send_keys": {},
+        "outgoing_invoice_send_attempts": {},
         "ai_usage_events": [],
         "ai_capacity_snapshots": {},
         "operation_events": [],
@@ -763,6 +764,233 @@ class JsonWorkflowStore:
     def list_outgoing_invoices(self, *, client_id: str) -> list[dict[str, Any]]:
         rows = self._read().get("outgoing_invoices", {}).values()
         return [deepcopy(row) for row in rows if row.get("client_id") == client_id]
+
+    def claim_outgoing_invoice_attempt(
+        self,
+        *,
+        client_id: str,
+        invoice_id: str,
+        idempotency_key: str,
+        ubl_sha256: str,
+        provider: str,
+        provider_operation: str,
+    ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
+        idempotency_key_hash = sha256(idempotency_key.encode("utf-8")).hexdigest()
+        claim_key = f"{client_id}:{idempotency_key_hash}"
+        invoice_key = f"{client_id}:{invoice_id}"
+        with self._lock:
+            data = self._read()
+            claims = data.setdefault("outgoing_invoice_send_keys", {})
+            attempts = data.setdefault("outgoing_invoice_send_attempts", {})
+            invoices = data.setdefault("outgoing_invoices", {})
+            existing = claims.get(claim_key)
+            if existing:
+                if existing.get("invoice_id") != invoice_id:
+                    raise ValueError("Idempotency key is already used for another invoice")
+                if existing.get("ubl_sha256") != ubl_sha256:
+                    raise ValueError("Idempotency key is already used for another UBL hash")
+                attempt = attempts.get(f"{client_id}:{existing.get('attempt_id')}")
+                invoice = invoices.get(invoice_key)
+                if not invoice or not attempt:
+                    raise ValueError("Outgoing invoice attempt is incomplete")
+                return False, deepcopy(invoice), deepcopy(attempt)
+            invoice = invoices.get(invoice_key)
+            if not invoice:
+                raise ValueError("Outgoing invoice not found")
+            if invoice.get("status") != "approved":
+                raise ValueError("Only an approved invoice can be sent")
+            attempt_id = str(uuid4())
+            claimed_at = utc_now()
+            attempt = {
+                "attempt_id": attempt_id,
+                "client_id": client_id,
+                "invoice_id": invoice_id,
+                "idempotency_key_hash": idempotency_key_hash,
+                "ubl_sha256": ubl_sha256,
+                "document_type": str(invoice.get("document_type") or ""),
+                "provider": provider,
+                "provider_operation": provider_operation,
+                "state": "claimed",
+                "events": [{"event": "claimed", "at": claimed_at, "details": {}}],
+                "created_at": claimed_at,
+                "updated_at": claimed_at,
+            }
+            claims[claim_key] = {
+                "client_id": client_id,
+                "invoice_id": invoice_id,
+                "idempotency_key_hash": idempotency_key_hash,
+                "ubl_sha256": ubl_sha256,
+                "attempt_id": attempt_id,
+                "claimed_at": claimed_at,
+            }
+            attempts[f"{client_id}:{attempt_id}"] = attempt
+            invoice = {
+                **invoice,
+                "status": "sending",
+                "current_attempt_id": attempt_id,
+                "updated_at": claimed_at,
+            }
+            invoices[invoice_key] = invoice
+            self._write(data)
+        return True, deepcopy(invoice), deepcopy(attempt)
+
+    def append_outgoing_invoice_attempt_event(
+        self,
+        *,
+        client_id: str,
+        attempt_id: str,
+        event: str,
+        state: str = "",
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        key = f"{client_id}:{attempt_id}"
+        with self._lock:
+            data = self._read()
+            attempts = data.setdefault("outgoing_invoice_send_attempts", {})
+            attempt = attempts.get(key)
+            if not attempt:
+                raise ValueError("Outgoing invoice attempt not found")
+            now = utc_now()
+            attempt = deepcopy(attempt)
+            attempt.setdefault("events", []).append(
+                {"event": event, "at": now, "details": deepcopy(details or {})}
+            )
+            if state:
+                attempt["state"] = state
+                if state != "reconciling":
+                    attempt.pop("reconciliation_owner", None)
+                    attempt.pop("reconciliation_lease_expires_at", None)
+            attempt["updated_at"] = now
+            attempts[key] = attempt
+            self._write(data)
+        return deepcopy(attempt)
+
+    def get_outgoing_invoice_attempt(self, *, client_id: str, attempt_id: str) -> dict[str, Any] | None:
+        row = self._read().get("outgoing_invoice_send_attempts", {}).get(f"{client_id}:{attempt_id}")
+        return deepcopy(row) if row else None
+
+    def claim_outgoing_invoice_reconciliation(
+        self,
+        *,
+        client_id: str,
+        attempt_id: str,
+        owner_id: str,
+        stale_before: str,
+        lease_expires_at: str,
+    ) -> tuple[bool, dict[str, Any]]:
+        key = f"{client_id}:{attempt_id}"
+        with self._lock:
+            data = self._read()
+            attempts = data.setdefault("outgoing_invoice_send_attempts", {})
+            attempt = attempts.get(key)
+            if not attempt:
+                raise ValueError("Outgoing invoice attempt not found")
+            now = utc_now()
+            active_lease = str(attempt.get("reconciliation_lease_expires_at") or "")
+            if active_lease and active_lease > now:
+                return False, deepcopy(attempt)
+            state = str(attempt.get("state") or "")
+            if state == "request_started":
+                request_started_at = next(
+                    (
+                        str(event.get("at") or "")
+                        for event in reversed(attempt.get("events") or [])
+                        if event.get("event") == "request_started"
+                    ),
+                    "",
+                )
+                if not request_started_at or request_started_at > stale_before:
+                    return False, deepcopy(attempt)
+            elif state not in {"reconciliation_required", "reconciling"}:
+                return False, deepcopy(attempt)
+            updated = deepcopy(attempt)
+            updated.setdefault("events", []).append(
+                {"event": "reconciliation_started", "at": now, "details": {}}
+            )
+            updated.update(
+                {
+                    "state": "reconciling",
+                    "reconciliation_owner": owner_id,
+                    "reconciliation_lease_expires_at": lease_expires_at,
+                    "updated_at": now,
+                }
+            )
+            attempts[key] = updated
+            self._write(data)
+        return True, deepcopy(updated)
+
+    def finalize_outgoing_invoice_attempt(
+        self,
+        *,
+        client_id: str,
+        attempt_id: str,
+        expected_state: str,
+        event: str,
+        state: str,
+        details: dict[str, Any] | None = None,
+        reconciliation_owner: str = "",
+    ) -> tuple[bool, dict[str, Any]]:
+        key = f"{client_id}:{attempt_id}"
+        with self._lock:
+            data = self._read()
+            attempts = data.setdefault("outgoing_invoice_send_attempts", {})
+            attempt = attempts.get(key)
+            if not attempt:
+                raise ValueError("Outgoing invoice attempt not found")
+            if str(attempt.get("state") or "") != expected_state:
+                return False, deepcopy(attempt)
+            if reconciliation_owner and attempt.get("reconciliation_owner") != reconciliation_owner:
+                return False, deepcopy(attempt)
+            now = utc_now()
+            updated = deepcopy(attempt)
+            updated.setdefault("events", []).append(
+                {"event": event, "at": now, "details": deepcopy(details or {})}
+            )
+            updated["state"] = state
+            updated["updated_at"] = now
+            updated.pop("reconciliation_owner", None)
+            updated.pop("reconciliation_lease_expires_at", None)
+            attempts[key] = updated
+            self._write(data)
+        return True, deepcopy(updated)
+
+    def finalize_outgoing_invoice_attempt_and_invoice(
+        self, *, client_id: str, attempt_id: str, expected_state: str, event: str,
+        state: str, invoice: dict[str, Any], details: dict[str, Any] | None = None,
+        reconciliation_owner: str = "",
+    ) -> tuple[bool, dict[str, Any], dict[str, Any]]:
+        key = f"{client_id}:{attempt_id}"
+        invoice_key = f"{client_id}:{invoice.get('invoice_id')}"
+        with self._lock:
+            data = self._read()
+            attempts = data.setdefault("outgoing_invoice_send_attempts", {})
+            current = attempts.get(key)
+            if not current:
+                raise ValueError("Outgoing invoice attempt not found")
+            if str(current.get("state") or "") != expected_state:
+                return False, deepcopy(invoice), deepcopy(current)
+            if reconciliation_owner and current.get("reconciliation_owner") != reconciliation_owner:
+                return False, deepcopy(invoice), deepcopy(current)
+            now = utc_now()
+            updated = deepcopy(current)
+            updated.setdefault("events", []).append(
+                {"event": event, "at": now, "details": deepcopy(details or {})}
+            )
+            updated.update({"state": state, "updated_at": now})
+            updated.pop("reconciliation_owner", None)
+            updated.pop("reconciliation_lease_expires_at", None)
+            attempts[key] = updated
+            data.setdefault("outgoing_invoices", {})[invoice_key] = deepcopy(invoice)
+            self._write(data)
+        return True, deepcopy(invoice), deepcopy(updated)
+
+    def list_outgoing_invoice_attempts(self, *, client_id: str, invoice_id: str = "") -> list[dict[str, Any]]:
+        rows = self._read().get("outgoing_invoice_send_attempts", {}).values()
+        return [
+            deepcopy(row)
+            for row in rows
+            if row.get("client_id") == client_id and (not invoice_id or row.get("invoice_id") == invoice_id)
+        ]
 
     def claim_outgoing_invoice_send(
         self, *, client_id: str, invoice_id: str, idempotency_key: str

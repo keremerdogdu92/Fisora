@@ -165,7 +165,8 @@ reconciliation_required
   HTTP 429 ve HTTP 5xx belirsizdir; `reconciliation_required` oluşturur.
 - `reconciliation_required`, yeni key dahil bütün mutating retry'ları engeller.
 - Mutabakat read-only çalışır; e-Fatura için OID/fatura numarası, e-Arşiv için
-  stable transaction ID/invoice UUID kullanılır.
+  canlı QNB kontratının istediği provider fatura UUID'si veya fatura numarası
+  kullanılır. `islemId`, `faturaSorgulaExt` sorgu kimliği değildir.
 - QNB kontratı yokluğu kanıtlayamıyorsa deneme belirsiz kalır ve sandbox
   operatörü/portal kontrolü ister; iyimser retry yapılmaz.
 

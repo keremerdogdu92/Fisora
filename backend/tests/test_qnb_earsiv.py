@@ -156,6 +156,80 @@ class QnbEarsivTests(unittest.TestCase):
             is_qnb_earsiv_test_endpoint("https://evil.example/earsivtest.qnbesolutions.com.tr/earsiv/ws")
         )
 
+    def test_create_invoice_rejects_production_endpoint_before_network(self) -> None:
+        client = FakeSoapHttpClient([])
+        production = QnbEarsivCredentials(
+            user_service_url="https://connector.qnbesolutions.com.tr/connector/ws/userService",
+            service_url="https://earsiv.qnbesolutions.com.tr/earsiv/ws",
+            username="portal-user",
+            password="secret-password",
+            vkn="5910611340",
+            erp_code="FSR31422",
+        )
+
+        with self.assertRaisesRegex(ValueError, "test endpoint"):
+            QnbSoapEarsivAdapter(http_client=client).create_invoice_ubl(
+                production,
+                transaction_id="uuid-1",
+                content=b'<?xml version="1.0"?><Invoice>test</Invoice>',
+            )
+
+        self.assertEqual(client.requests, [])
+
+    def test_create_invoice_rejects_unsuccessful_result_code(self) -> None:
+        response = soap_body(
+            """
+<ns2:faturaOlusturExtResponse xmlns:ns2="http://service.earsiv.uut.cs.com.tr/">
+  <return><resultCode>AE99999</resultCode><resultText>Reddedildi</resultText></return>
+</ns2:faturaOlusturExtResponse>
+"""
+        )
+        client = FakeSoapHttpClient(
+            [soap_body('<ns2:wsLoginResponse xmlns:ns2="http://service.csap.cs.com.tr/"/>'), response]
+        )
+
+        with self.assertRaisesRegex(ValueError, "AE99999.*Reddedildi"):
+            QnbSoapEarsivAdapter(http_client=client).create_invoice_ubl(
+                credentials(),
+                transaction_id="uuid-1",
+                content=b'<?xml version="1.0"?><Invoice>test</Invoice>',
+            )
+
+    def test_query_invoice_uses_provider_invoice_number(self) -> None:
+        response = soap_body(
+            """
+<ns2:faturaSorgulaExtResponse xmlns:ns2="http://service.earsiv.uut.cs.com.tr/">
+  <return>
+    <resultCode>AE00000</resultCode>
+    <resultExtra>
+      <entry><key>uuid</key><value>uuid-1</value></entry>
+      <entry><key>faturaNo</key><value>EAR2026000000001</value></entry>
+    </resultExtra>
+    <resultText>Bulundu</resultText>
+  </return>
+</ns2:faturaSorgulaExtResponse>
+"""
+        )
+        client = FakeSoapHttpClient(
+            [soap_body('<ns2:wsLoginResponse xmlns:ns2="http://service.csap.cs.com.tr/"/>'), response]
+        )
+
+        result = QnbSoapEarsivAdapter(http_client=client).query_invoice(
+            credentials(), invoice_no="EAR2026000000001"
+        )
+
+        self.assertTrue(result.ok)
+        self.assertEqual(result.invoice_uuid, "uuid-1")
+        request = str(client.requests[1]["content"])
+        self.assertIn("<qnb:faturaSorgulaExt", request)
+        input_start = request.index("<input>") + len("<input>")
+        input_end = request.index("</input>")
+        payload = json.loads(request[input_start:input_end].replace("&quot;", '"'))
+        self.assertEqual(payload["faturaNo"], "EAR2026000000001")
+        self.assertNotIn("islemId", payload)
+        self.assertEqual(payload["vkn"], "5910611340")
+        self.assertEqual(payload["erpKodu"], "FSR31422")
+
 
 if __name__ == "__main__":
     unittest.main()

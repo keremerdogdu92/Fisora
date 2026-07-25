@@ -1,5 +1,6 @@
 # Current Handoff
 
+<<<<<<< HEAD
 ### 2026-07-25 main production deploy ve canlı smoke doğrulaması (canlı)
 
 - `main` branch release commit'i `935a1fa` ("docs: record live AI provider release") canlıya alındı.
@@ -105,6 +106,50 @@
   parity sonucu yoktur; Phase 2 quality exit gate aciktir. Bu degisiklikler
   local dirty `main` uzerindedir; commit, push, deploy, production reset veya
   gercek fatura upload'i yapilmadi.
+
+### 2026-07-21 QNB giden fatura ortak servis sandbox hazirligi (yerel)
+
+- Calisma `codex/qnb-outgoing-sandbox` yan worktree'sindedir; commit, push veya
+  deploy yapilmadi. Kullanici onayli sandbox kabul cagrilari asagida kayitli.
+- Outgoing runtime varsayilani `disabled` oldu. `fake` ve `qnb_sandbox` yalniz
+  server env ile acilir; request payload'i provider/endpoint secemez.
+- Frozen UBL SHA-256 gonderim oncesi yeniden dogrulanir. Client-kapsamli
+  idempotency claim, send attempt ve `sending` gecisi JSON/PostgreSQL hattinda
+  tek islem olarak kaydedilir; attempt olaylari append-only izdir.
+- `belgeGonderExt` ve `faturaOlusturExt` otomatik retry edilmez. Post-submit
+  timeout/transport belirsizligi `reconciliation_required` olur ve yeni key
+  dahil ikinci mutating gonderimi engeller.
+- Uzlastirma atomik owner/lease claim'i kullanir. Aktif uzlastirma ikinci
+  calisana verilmez; process cokmesinden kalan `request_started` denemesi ancak
+  stale esigi gectikten sonra salt-okunur uzlastirmayla devralinabilir.
+- QNB sandbox provider aktif client connection, encrypted credential, test
+  endpoint ve supplier VKN/TCKN eslesmesini zorunlu tutar. e-Fatura yerel belge
+  no, e-Arsiv provider fatura UUID/no ile salt-okunur mutabakat yapar.
+- Pozitif QNB receipt ile dogrulanan UBL ayni byte/hash ve attempt bagiyla
+  mevcut `einvoice_xml` + `sales_invoice` document processing hattina girer.
+  Provider teslimi musavir review veya export-ready durumunu atlamaz.
+- Yeni kabul araci ortak `OutgoingInvoiceService` ve provider factory yolunu
+  kullanir. Plan-only kosular `sent=false` ile basariliydi; gercek kabul sonucu
+  ve acik provider kapilari asagidadir.
+- Son proof: backend `554 OK (skipped=19)`, frontend `147/147`, Next production
+  build ve `git diff --check` basarili. Bagimsiz son engineering review'da
+  kalan P0/P1 bulgu yok. Gercek PostgreSQL concurrency smoke'u bu worktree'de
+  `DATABASE_URL` bulunmadigi icin calistirilmadi; PostgreSQL atomiklik kabul
+  kaniti bu DSN-gated kosu tamamlanana kadar acik kapidir.
+- 2026-07-21 kullanici onayli gercek sandbox kabulunde e-Fatura, TEST1
+  `userService/wsLogin` HTTP 500 verdigi icin etiket preflight'inda durdu;
+  `belgeGonderExt`, UBL, attempt veya QNB belgesi olusmadi. TEST2 login/etiket
+  sorgusu ayni anda basariliydi. TEST1 WS credential/hesap aktivasyonu dis
+  bagimlilik olarak acik.
+- Tek e-Arsiv `faturaOlusturExt` cagrisi QNB tarafindan kesin `AE00001` ile
+  reddedildi; otomatik veya manuel resend yapilmadi. Salt-okunur, fatura no
+  tabanli `faturaSorgulaExt` `AE00002` ile belgenin sistemde kayitli olmadigini
+  dogruladi. Portal mali muhur/e-imza dogrulamasi ve ayri WS kullanicisi kapisi
+  acik kalmaya devam ediyor.
+- Canli sorgu kaniti `faturaSorgulaExt` input'unun `islemId` degil
+  `faturaUuid` veya `faturaNo` istedigini gosterdi. Adapter ve reconciliation
+  bu provider kimliklerine duzeltildi; QNB `resultText` artik secret-safe hata
+  kanitinda korunuyor. Hedefli QNB proof `55 OK`.
 
 ### 2026-07-20 AI semantic authority pipeline repair (yerel)
 

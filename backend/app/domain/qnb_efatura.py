@@ -271,6 +271,10 @@ class QnbSoapEfaturaAdapter:
             return QnbConnectionTestResult(False, "connection_failed", _redacted_error_message(exc))
         return QnbConnectionTestResult(True, "active")
 
+    def prepare_outgoing_send(self, credentials: QnbConnectionCredentials) -> None:
+        validate_qnb_endpoint(credentials.base_url, "test")
+        self._login(credentials)
+
     def list_incoming_invoices(
         self,
         credentials: QnbConnectionCredentials,
@@ -379,6 +383,7 @@ class QnbSoapEfaturaAdapter:
             raise ValueError("QNB outgoing invoice number is required")
         if not bytes(content or b"").lstrip().startswith(b"<"):
             raise ValueError("QNB outgoing invoice must be UBL XML")
+        validate_qnb_endpoint(credentials.base_url, "test")
         self._login(credentials)
         body = _soap_operation(
             "belgeGonderExt",
@@ -428,6 +433,43 @@ class QnbSoapEfaturaAdapter:
         values = _first_return_values(response_xml)
         return QnbOutgoingInvoiceStatus(
             document_oid=document_oid,
+            status_code=values.get("durum", ""),
+            processing_state=normalize_qnb_outgoing_processing_state(values.get("durum", "")),
+            status_text=values.get("gonderimDurumu") or values.get("yanitDurumu", ""),
+            description=values.get("aciklama") or values.get("gonderimCevabiDetayi", ""),
+            ettn=values.get("ettn", ""),
+        )
+
+    def get_outgoing_invoice_status_by_local_invoice_no(
+        self,
+        credentials: QnbConnectionCredentials,
+        *,
+        invoice_no: str,
+    ) -> QnbOutgoingInvoiceStatus:
+        normalized_invoice_no = str(invoice_no or "").strip()
+        if not normalized_invoice_no:
+            raise ValueError("QNB outgoing invoice number is required")
+        self._login(credentials)
+        inner = "".join(
+            [
+                f"<vergiTcKimlikNo>{escape(credentials.vkn)}</vergiTcKimlikNo>",
+                "<parametreler>",
+                f"<belgeNo>{escape(normalized_invoice_no)}</belgeNo>",
+                "<belgeNoTipi>YEREL_BELGE_NO</belgeNoTipi>",
+                "<belgeTuru>FATURA_UBL</belgeTuru>",
+                "<donusTipiVersiyon>5.0</donusTipiVersiyon>",
+                "</parametreler>",
+            ]
+        )
+        body = _soap_operation("gidenBelgeDurumSorgulaExt", inner, namespace=QNB_CONNECTOR_NAMESPACE)
+        response_xml = self._post_soap(
+            _service_url(credentials.base_url, "connectorService"),
+            "gidenBelgeDurumSorgulaExt",
+            body,
+        )
+        values = _first_return_values(response_xml)
+        return QnbOutgoingInvoiceStatus(
+            document_oid=values.get("belgeOid") or values.get("oid", ""),
             status_code=values.get("durum", ""),
             processing_state=normalize_qnb_outgoing_processing_state(values.get("durum", "")),
             status_text=values.get("gonderimDurumu") or values.get("yanitDurumu", ""),
@@ -504,7 +546,8 @@ class QnbSoapEfaturaAdapter:
             f"<soapenv:Body>{operation_xml}</soapenv:Body>"
             "</soapenv:Envelope>"
         )
-        for attempt in range(1, self.max_attempts + 1):
+        max_attempts = 1 if action in {"belgeGonderExt"} else self.max_attempts
+        for attempt in range(1, max_attempts + 1):
             self._throttle()
             try:
                 response = self.http_client.post(
@@ -514,7 +557,7 @@ class QnbSoapEfaturaAdapter:
                     timeout=self.timeout,
                 )
                 status_code = int(getattr(response, "status_code", 200) or 200)
-                if (status_code == 429 or status_code >= 500) and attempt < self.max_attempts:
+                if (status_code == 429 or status_code >= 500) and attempt < max_attempts:
                     self._sleep(0.5 * (2 ** (attempt - 1)))
                     continue
                 if hasattr(response, "raise_for_status"):
@@ -523,7 +566,7 @@ class QnbSoapEfaturaAdapter:
                 _raise_for_soap_fault(text)
                 return text
             except (httpx.TimeoutException, httpx.TransportError):
-                if attempt >= self.max_attempts:
+                if attempt >= max_attempts:
                     raise
                 self._sleep(0.5 * (2 ** (attempt - 1)))
         raise ValueError("QNB SOAP request exhausted retry attempts")

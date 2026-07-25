@@ -1,11 +1,11 @@
 # Current Handoff
 
-<<<<<<< HEAD
-### 2026-07-25 main production deploy ve canlı smoke doğrulaması (canlı)
+### 2026-07-25 QNB gelen fatura güvenliği, scheduler readiness ve canlı deploy (canlı)
 
-- `main` branch release commit'i `935a1fa` ("docs: record live AI provider release") canlıya alındı.
-- Release wrapper `before_commit=935a1fa`, `after_commit=935a1fa`, `smoke=ok`, `/health` 200, readiness 200, root route 200, `ready=true` ve `pilot_sellable=true` döndü.
-- Deploy öncesi backend `550` test (`13` skipped DSN-gated), frontend `147/147` test, Next.js production build ve `git diff --check` başarıyla doğrulandı.
+- `main` branch runtime release commit'i `4d5d950` canlıya alındı.
+- Release wrapper `before_commit=25d9e39`, `after_commit=4d5d950`, `smoke=ok`, `/health` 200, readiness 200, root route 200, `ready=true` ve `pilot_sellable=true` döndü.
+- `006_qnb_incoming_safety.sql` migrasyonu, `qnb-scheduler` background worker'ı ve Nginx varsayılan yapılandırması canlı ortamda doğrulandı.
+- Deploy öncesi backend `618` test (`15` skipped DSN-gated), frontend `147/147` test ve `git diff --check` başarıyla doğrulandı.
 
 ### 2026-07-23 yedekleme yaşam döngüsü (yerel)
 

@@ -1,5 +1,11 @@
 # Current Handoff
 
+### 2026-07-25 main production deploy ve canlı smoke doğrulaması (canlı)
+
+- `main` branch release commit'i `935a1fa` ("docs: record live AI provider release") canlıya alındı.
+- Release wrapper `before_commit=935a1fa`, `after_commit=935a1fa`, `smoke=ok`, `/health` 200, readiness 200, root route 200, `ready=true` ve `pilot_sellable=true` döndü.
+- Deploy öncesi backend `550` test (`13` skipped DSN-gated), frontend `147/147` test, Next.js production build ve `git diff --check` başarıyla doğrulandı.
+
 ### 2026-07-23 NVIDIA, Cloudflare ve SambaNova provider release'i (canli)
 
 - `main` runtime release commit'i `9159152` olarak canliya alindi.
@@ -261,11 +267,11 @@ oturumdan devam etmek icin son durumu ozetler.
 
 - Repo: `keremerdogdu92/Fisora`
 - Aktif branch: `main`
-- Son dogrulanan runtime kod release'i: `9159152`; kod release scripti
-  `before_commit=384ebac`, `after_commit=9159152`, `smoke=ok`, `/health`
+- Son dogrulanan runtime kod release'i: `935a1fa`; kod release scripti
+  `before_commit=935a1fa`, `after_commit=935a1fa`, `smoke=ok`, `/health`
   200, readiness 200, root route 200, `ready=true`, `pilot_sellable=true`
   dondu.
-- Son deploy smoke: 2026-07-23, `/health` 200, readiness `ready=true`,
+- Son deploy smoke: 2026-07-25, `/health` 200, readiness `ready=true`,
   `pilot_sellable=true`; root route 200.
 - KDV ayrimi guven katmani canlida: PDF faturalarda `exact`, `derived`,
   `needs_review` statuleri uretildi; belge isleme sonucuna `vat_split_review`

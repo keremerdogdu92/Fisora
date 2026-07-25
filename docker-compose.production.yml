@@ -60,6 +60,10 @@ services:
       FISORA_PROTECTED_CORPUS_PATH: /opt/fisora/protected-corpus
       FISORA_EXPORT_PATH: /opt/fisora/data/exports
       FISORA_BACKUP_PATH: /opt/fisora/data/backups
+      FISORA_BACKUP_MODE: ${FISORA_BACKUP_MODE:-disabled}
+      FISORA_BACKUP_OFFHOST_ATTESTED: ${FISORA_BACKUP_OFFHOST_ATTESTED:-false}
+      FISORA_REAL_DATA_PILOT_ENABLED: ${FISORA_REAL_DATA_PILOT_ENABLED:-false}
+      FISORA_REAL_DATA_ACCESS_MODE: ${FISORA_REAL_DATA_ACCESS_MODE:-}
       FISORA_QNB_ADAPTER: ${FISORA_QNB_ADAPTER:-fake}
       FISORA_QNB_ERP_CODE: ${FISORA_QNB_ERP_CODE:-FSR31422}
       FISORA_QNB_CREDENTIAL_KEY: ${FISORA_QNB_CREDENTIAL_KEY:-}
@@ -224,6 +228,7 @@ services:
         restart: true
 
   backup:
+    profiles: ["backup"]
     image: fisero-backup
     build:
       context: .
@@ -235,7 +240,10 @@ services:
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
       FISORA_PROTECTED_CORPUS_PATH: /opt/fisora/protected-corpus
       FISORA_BACKUP_DIR: /opt/fisora/data/backups
+      FISORA_BACKUP_MODE: ${FISORA_BACKUP_MODE:-disabled}
       FISORA_BACKUP_INTERVAL_SECONDS: ${FISORA_BACKUP_INTERVAL_SECONDS:-86400}
+      FISORA_BACKUP_KEEP_DAYS: ${FISORA_BACKUP_KEEP_DAYS:-14}
+      FISORA_BACKUP_OFFHOST_KEEP_DAYS: ${FISORA_BACKUP_OFFHOST_KEEP_DAYS:-30}
       FISORA_BACKUP_COPY_DIR: /mnt/fisora-backups
       FISORA_BACKUP_AGE_RECIPIENT: ${FISORA_BACKUP_AGE_RECIPIENT:-}
     volumes:

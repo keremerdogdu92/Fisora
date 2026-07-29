@@ -8783,6 +8783,74 @@ TOPLAM: 1200.00"""
             ["153.01", "760.01"],
         )
 
+    def test_line_batch_with_pending_line_research_is_not_accepted_before_synthesis(self) -> None:
+        from app.domain.ai_classification import AiCandidateStrategy
+
+        provider = FakeProductProvider(
+            {
+                "category": "kisisel_bakim_kozmetik",
+                "confidence": 90,
+                "reason": "Satirlar birlikte degerlendirildi.",
+                "evidence": ["line_batch"],
+                "suggested_account_code": "153.01",
+                "suggested_counterparty_code": "320.01",
+                "risk_flags": [],
+                "account_reason": "Mevcut hesap plani kullanildi.",
+                "product_identity": "Kozmetik urunler",
+                "needs_research": False,
+                "research_query": "",
+                "line_decisions": [
+                    {
+                        "canonical_line_id": "line-1",
+                        "category": "kisisel_bakim_kozmetik",
+                        "confidence": 90,
+                        "product_identity": "Temizleme jeli",
+                        "suggested_account_code": "153.01",
+                        "reason": "Kozmetik urun.",
+                        "evidence": ["canonical_line"],
+                        "needs_research": False,
+                        "research_query": "",
+                        "risk_flags": [],
+                    },
+                    {
+                        "canonical_line_id": "line-2",
+                        "category": "kisisel_bakim_kozmetik",
+                        "confidence": 75,
+                        "product_identity": "Serum",
+                        "suggested_account_code": "153.01",
+                        "reason": "Urun kimligi kaynakla dogrulanmali.",
+                        "evidence": ["canonical_line"],
+                        "needs_research": True,
+                        "research_query": "HB5 Suract Serum",
+                        "risk_flags": ["research_required"],
+                    },
+                ],
+            }
+        )
+        classifier = StaticFirstClassifier(
+            provider=provider,
+            policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101),
+        )
+
+        result = classifier.classify(
+            "Temizleme jeli ve serum",
+            supplier_hint="Kozmetik Tedarik",
+            context=AiClassificationContext(
+                account_candidates=("153.01",),
+                counterparty_candidates=("320.01",),
+                canonical_lines=(
+                    {"canonical_line_id": "line-1", "description": "Temizleme jeli"},
+                    {"canonical_line_id": "line-2", "description": "HB5 Suract Serum"},
+                ),
+                candidate_strategy=AiCandidateStrategy(mode="single_stage", stage="line_batch"),
+            ),
+        )
+
+        self.assertTrue(result.ai_used)
+        self.assertEqual(len(result.semantic_attempts), 1)
+        self.assertFalse(result.semantic_attempts[0]["accepted"])
+        self.assertEqual(result.accepted_semantic_attempt_id, "")
+
     def test_line_batch_bypasses_single_line_static_shortcut(self) -> None:
         from app.domain.ai_classification import AiCandidateStrategy
 

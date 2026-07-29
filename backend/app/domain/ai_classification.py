@@ -896,10 +896,18 @@ def _semantic_attempt_record(
     validation_errors: Iterable[object] = (),
 ) -> dict[str, Any]:
     candidate_stage = str(request.context.candidate_strategy.stage or "")
+    line_research_pending = bool(
+        accepted_result
+        and any(
+            isinstance(item, Mapping) and item.get("needs_research") is True
+            for item in accepted_result.line_decisions
+        )
+    )
     accepted = (
         accepted_result is not None
         and candidate_stage in {"final_account", "line_batch"}
         and not accepted_result.needs_research
+        and not line_research_pending
     )
     validated_response: dict[str, Any] = {}
     if request.context.semantic_stage == "research_synthesis":

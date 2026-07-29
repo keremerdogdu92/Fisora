@@ -8595,6 +8595,78 @@ TOPLAM: 1200.00"""
                 }
             )
 
+    def test_research_cannot_create_second_authority_after_initial_decision_is_accepted(self) -> None:
+        from app.workflows.document_processing import _rebuild_result_with_research
+
+        initial = serialize_semantic_decision_attempt(
+            attempt_id="initial-accepted",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake",
+            model="fake-model",
+            validated_response={"suggested_account_code": "153.01"},
+            accepted=True,
+        )
+        synthesis = serialize_semantic_decision_attempt(
+            attempt_id="research-accepted",
+            stage="research_synthesis",
+            canonical_line_ids=("line-1",),
+            prompt_version="research-synthesis-v1",
+            provider="fake",
+            model="fake-model",
+            validated_response={"suggested_account_code": "770.01"},
+            accepted=True,
+        )
+        original = {
+            "product_category": "kisisel_bakim_kozmetik",
+            "selected_expense_account": "153.01",
+            "semantic_attempts": [initial],
+            "accepted_semantic_attempt_id": "initial-accepted",
+        }
+        profile = {
+            "canonical_line_ids": ["line-1"],
+            "research_evidence": [
+                {
+                    "source_url": "https://manufacturer.example/product",
+                    "source_kind": "manufacturer",
+                    "evidence_summary": "Canonical urun satirini destekleyen kaynak.",
+                    "accepted": True,
+                }
+            ],
+        }
+        rebuilt = {
+            "product_category": "kisisel_bakim_kozmetik",
+            "selected_expense_account": "770.01",
+            "semantic_attempts": [synthesis],
+            "accepted_semantic_attempt_id": "research-accepted",
+        }
+
+        with patch(
+            "app.workflows.document_processing.build_processing_result",
+            return_value=rebuilt,
+        ) as build:
+            result = _rebuild_result_with_research(
+                original,
+                document={},
+                job={},
+                workspace={},
+                profile=profile,
+                product_classifier=object(),
+            )
+
+        build.assert_not_called()
+        self.assertEqual(result["selected_expense_account"], "153.01")
+        self.assertEqual(result["accepted_semantic_attempt_id"], "initial-accepted")
+        self.assertEqual(
+            [item["stage"] for item in result["semantic_attempts"]],
+            ["initial_account_decision", "research_evidence_collection"],
+        )
+        self.assertEqual(
+            [item["attempt_id"] for item in result["semantic_attempts"] if item["accepted"]],
+            ["initial-accepted"],
+        )
+
     def test_provider_exception_text_is_not_persisted_in_result_or_ai_trace(self) -> None:
         class SecretRaisingProvider:
             provider_name = "secret_provider"

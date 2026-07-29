@@ -876,7 +876,13 @@ def _rebuild_result_with_research(
     evidence_only["research_evidence_gaps"] = list(profile.get("evidence_gaps") or [])
     if not profile.get("canonical_line_ids") or not evidence_only["research_evidence"]:
         return _merge_ai_result_history(evidence_only, result)
-    if product_classifier is None:
+    accepted_initial_authority = any(
+        isinstance(item, dict)
+        and item.get("accepted") is True
+        and not str(item.get("superseded_by_attempt_id") or "")
+        for item in result.get("semantic_attempts") or []
+    )
+    if product_classifier is None or accepted_initial_authority:
         research_attempt = _research_semantic_attempt(evidence_only, profile)
         return _merge_ai_result_history(
             evidence_only,

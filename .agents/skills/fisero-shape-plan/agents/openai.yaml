@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Fisero Plan Kararı"
+  short_description: "Seçenekleri ve tavsiyeyi karar formatına çevirir"
+  default_prompt: "Use $fisero-shape-plan to evaluate this Fisero decision with options, tradeoffs, and a clear recommendation."

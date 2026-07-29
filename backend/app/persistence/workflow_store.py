@@ -2094,7 +2094,11 @@ class JsonWorkflowStore:
         with self._lock:
             data = self._read()
             for job in data["processing_jobs"]:
-                if job.get("status") != "queued":
+                due_retry = (
+                    job.get("status") == "retry_wait"
+                    and str(job.get("next_attempt_at") or "") <= utc_now()
+                )
+                if job.get("status") != "queued" and not due_retry:
                     continue
                 job["status"] = "processing"
                 job["attempt_count"] = int(job.get("attempt_count") or 0) + 1
@@ -2111,6 +2115,9 @@ class JsonWorkflowStore:
         error_message: str = "",
         processing_metrics: dict[str, Any] | None = None,
         attempt_id: str = "",
+        next_attempt_at: Any | None = None,
+        retry_step: int = 0,
+        outage_episode_id: str | None = None,
     ) -> dict[str, Any] | None:
         data = self._read()
         for job in data["processing_jobs"]:
@@ -2120,6 +2127,9 @@ class JsonWorkflowStore:
             job["error_message"] = error_message
             if processing_metrics is not None:
                 job["processing_metrics"] = processing_metrics
+            job["next_attempt_at"] = next_attempt_at.isoformat() if hasattr(next_attempt_at, "isoformat") else str(next_attempt_at or "")
+            job["retry_step"] = int(retry_step or 0)
+            job["outage_episode_id"] = str(outage_episode_id or "")
             job["updated_at"] = utc_now()
             self._write(data)
             return deepcopy(job)

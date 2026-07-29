@@ -410,7 +410,52 @@ class ProtectedCorpusCreatePayload(BaseModel):
 class ProtectedCorpusEnrollPayload(BaseModel):
     client_id: str
     document_ref: str
+
+
+class DocumentRetentionReadPayload(BaseModel):
+    batch_id: str
     direction: Literal["purchase", "sale"]
+
+
+class LearningRuleLifecyclePayload(BaseModel):
+    expected_version: int
+    reason: str = Field(default="", max_length=500)
+
+
+class LearningRuleNewVersionPayload(BaseModel):
+    expected_version: int
+    rule_snapshot: dict[str, object]
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class JournalEditLeaseAcquirePayload(BaseModel):
+    client_id: str
+    document_ref: str
+    expected_revision: int
+
+
+class JournalEditLeaseRenewPayload(BaseModel):
+    client_id: str
+    document_ref: str
+    lease_id: str = ""
+    user_activity_at: str
+
+
+class JournalEditLeaseTakeoverPayload(BaseModel):
+    client_id: str
+    document_ref: str
+    expected_revision: int
+    reason: str = Field(min_length=3, max_length=500)
+    user_activity_at: str
+
+
+class JournalWorkingDraftPayload(BaseModel):
+    client_id: str
+    document_ref: str
+    edit_lease_id: str = ""
+    expected_revision: int
+    draft_lines: list[dict[str, object]] = Field(default_factory=list)
+    reason: str = ""
 
 
 class ProtectedCorpusFreezePayload(BaseModel):
@@ -418,6 +463,12 @@ class ProtectedCorpusFreezePayload(BaseModel):
 
 
 class DocumentRetentionRunPayload(BaseModel):
+    delete_files: bool = True
+
+
+class PilotReinitializationExecutePayload(BaseModel):
+    confirmation: str
+    preview_fingerprint: str = Field(min_length=64, max_length=64)
     delete_files: bool = True
 
 

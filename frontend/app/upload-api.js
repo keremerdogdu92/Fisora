@@ -903,6 +903,42 @@ async function storeReviewDecision({
   return response.json();
 }
 
+async function reviewCollaborationRequest({ apiBaseUrl, path, method = "POST", payload, userId = "", sessionToken = "", fetchImpl = fetch }) {
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...backendAuthHeaders({ userId, sessionToken }) },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(await responseErrorMessage(response, `${path} failed with ${response.status}`));
+  return response.json();
+}
+
+async function acquireReviewEditLease(args) {
+  return reviewCollaborationRequest({ ...args, path: "/phase0/store/journal/edit-lease/acquire", payload: { client_id: args.clientId, document_ref: args.documentRef, expected_revision: args.expectedRevision } });
+}
+
+async function renewReviewEditLease(args) {
+  return reviewCollaborationRequest({ ...args, path: "/phase0/store/journal/edit-lease/renew", payload: { client_id: args.clientId, document_ref: args.documentRef, user_activity_at: args.userActivityAt } });
+}
+
+async function releaseReviewEditLease(args) {
+  return reviewCollaborationRequest({ ...args, path: "/phase0/store/journal/edit-lease/release", payload: { client_id: args.clientId, document_ref: args.documentRef, user_activity_at: new Date().toISOString() } });
+}
+
+async function saveReviewWorkingDraft(args) {
+  return reviewCollaborationRequest({ ...args, method: "PUT", path: "/phase0/store/journal/working-draft", payload: { client_id: args.clientId, document_ref: args.documentRef, edit_lease_id: args.editLeaseId || args.documentRef, expected_revision: args.expectedRevision, draft_lines: args.draftLines || [], corrected_account_code: args.correctedAccountCode || "", corrected_counterparty_code: args.correctedCounterpartyCode || "", reason: args.reason || "" } });
+}
+
+async function fetchLearningRules({ apiBaseUrl, userId = "", sessionToken = "", fetchImpl = fetch }) {
+  const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/learning-rules`, { headers: backendAuthHeaders({ userId, sessionToken }) });
+  if (!response.ok) throw new Error(await responseErrorMessage(response, `learning rules failed with ${response.status}`));
+  return response.json();
+}
+
+async function changeLearningRuleLifecycle({ apiBaseUrl, ruleKey, action, expectedVersion, reason = "", userId = "", sessionToken = "", fetchImpl = fetch }) {
+  return reviewCollaborationRequest({ apiBaseUrl, path: `/phase0/store/learning-rules/${encodeURIComponent(ruleKey)}/${action}`, payload: { expected_version: Number(expectedVersion || 0), reason }, userId, sessionToken, fetchImpl });
+}
+
 async function reprocessDocument({
   apiBaseUrl,
   clientId,
@@ -1146,6 +1182,12 @@ module.exports = {
   sessionAuthErrorMessage,
   setPortalPassword,
   storeReviewDecision,
+  acquireReviewEditLease,
+  renewReviewEditLease,
+  releaseReviewEditLease,
+  saveReviewWorkingDraft,
+  fetchLearningRules,
+  changeLearningRuleLifecycle,
   syncQnbIncomingInvoices,
   updateClientPortalAccess,
   uploadChartAccountsToBackend,

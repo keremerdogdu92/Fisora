@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, UploadFile
@@ -8,6 +9,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
     get_document_service,
+    get_retention_service,
     request_auth_context,
     request_user_id,
 )
@@ -95,7 +97,51 @@ async def store_document_upload_multipart(
 
 @router.post("/store/document-retention/run")
 def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
-    return get_document_service().store_document_retention_run(delete_files=payload.delete_files)
+    document_service = get_document_service()
+    if getattr(document_service.store, "normalized_accounting_enabled", False):
+        return get_retention_service(document_service.store).run_due(
+            now=datetime.now(UTC),
+            worker_id="phase0-api-retention",
+        )
+    return document_service.store_document_retention_run(delete_files=payload.delete_files)
+
+
+@router.get("/store/document-retention/pending")
+def store_document_retention_pending(
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="user_required")
+    document_service = get_document_service()
+    if not getattr(document_service.store, "normalized_accounting_enabled", False):
+        return {"items": []}
+    service = get_retention_service(document_service.store)
+    try:
+        return service.list_pending(user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post("/store/document-retention/{batch_id}/read")
+def store_document_retention_read(
+    batch_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="user_required")
+    document_service = get_document_service()
+    if not getattr(document_service.store, "normalized_accounting_enabled", False):
+        raise HTTPException(status_code=404, detail="retention_batch_not_found_or_access_denied")
+    try:
+        return get_retention_service(document_service.store).mark_read(batch_id=batch_id, user_id=user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/store/document-retention/preview")

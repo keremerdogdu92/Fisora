@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
+from app.domain.period_retention import parse_accounting_period
 from app.domain.storage_adapters import build_document_storage_adapter
 
 
@@ -88,6 +89,15 @@ def normalize_intake_category(*, document_type: str, intake_category: str = "") 
     return selected
 
 
+def normalize_document_period(*, document_type: str, period: str = "") -> str:
+    selected = period.strip()
+    if document_type in {"invoice", "einvoice_xml"} and not selected:
+        raise ValueError("invalid_accounting_period")
+    if not selected:
+        return ""
+    return parse_accounting_period(selected).strftime("%Y-%m")
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -149,6 +159,7 @@ def store_document_content(
     declared_size_bytes: int = 0,
     declared_sha256: str = "",
     retention_days: int = DEFAULT_RETENTION_DAYS,
+    period_retention_managed: bool = False,
     created_at: datetime | None = None,
 ) -> StoredDocument:
     if document_type not in ALLOWED_DOCUMENT_TYPES:
@@ -164,7 +175,11 @@ def store_document_content(
 
     document_id = str(uuid4())
     created = created_at or utc_now()
-    expires_at = retention_deadline(created_at=created, retention_days=retention_days)
+    expires_at = (
+        None
+        if period_retention_managed
+        else retention_deadline(created_at=created, retention_days=retention_days)
+    )
     safe_client = sanitize_identifier(client_id)
     safe_name = sanitize_file_name(file_name)
     storage_path = Path(base_dir) / safe_client / document_id / safe_name
@@ -187,7 +202,11 @@ def store_document_content(
         actual_size = len(content)
         actual_sha256 = hashlib.sha256(content).hexdigest()
         status = "stored"
-        storage_status = document_storage_status(expires_at=expires_at, now=created)
+        storage_status = (
+            "stored"
+            if period_retention_managed
+            else document_storage_status(expires_at=expires_at, now=created)
+        )
 
     return StoredDocument(
         document_id=document_id,

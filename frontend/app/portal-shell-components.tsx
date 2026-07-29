@@ -7,6 +7,7 @@ import {
   Files,
   Landmark,
   LayoutDashboard,
+  LogOut,
   Settings,
   Users,
   type LucideIcon,
@@ -14,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { Info } from "./portal-shared";
 import { roleLabels } from "./portal-session";
+import type { PortalNotification } from "./portal-notifications";
 import type { DocumentSegment, DraftLine, LocalSession, PilotClient, PilotDocument, PilotMode, PilotStatus, PortalNavItem } from "./portal-types";
 
 export function ModeButton({ active, href, label }: { active: boolean; href: string; label: string }) {
@@ -172,28 +174,29 @@ export function PortalSidebar({
             <small>{session ? roleLabels[session.role] : "Mali Müşavir"}</small>
           </div>
         </div>
-        <button className="sidebar-exit" onClick={onExit} type="button">Çıkış</button>
+        <button aria-label="Çıkış yap" className="sidebar-exit" onClick={onExit} title="Çıkış" type="button">
+          <LogOut aria-hidden="true" />
+          <span>Çıkış</span>
+        </button>
       </div>
     </aside>
   );
 }
 
 export function PortalTopbarStatus({
-  clientName,
-  localFallbackAllowed,
-  onExit,
+  notificationPendingCount,
+  notifications,
+  onReadNotification,
   onToggleSidebar,
-  session,
   showSidebarToggle,
   source,
   subtitle = "",
   title,
 }: {
-  clientName?: string;
-  localFallbackAllowed: boolean;
-  onExit: () => void;
+  notificationPendingCount: number;
+  notifications: PortalNotification[];
+  onReadNotification: (notificationId: string) => Promise<void>;
   onToggleSidebar?: () => void;
-  session: LocalSession | null;
   showSidebarToggle?: boolean;
   source: { label: string; status: string; detail: string };
   subtitle?: string;
@@ -222,22 +225,13 @@ export function PortalTopbarStatus({
         </div>
       </div>
       <div className="portal-topbar-actions">
-        <button className="topbar-action" onClick={() => setActivePanel("notifications")} type="button">Bildirimler <strong>3</strong></button>
+        <button className="topbar-action" onClick={() => setActivePanel("notifications")} type="button">Bildirimler <strong>{notificationPendingCount}</strong></button>
         <button className="topbar-action" onClick={() => setActivePanel("help")} type="button">Yardım</button>
-        <div className="topbar-user">
-          <span>{session ? roleLabels[session.role] : localFallbackAllowed ? "Lokal ofis" : "Oturum kapalı"}</span>
-          <strong>{clientName || session?.userId || "Oturum yok"}</strong>
-        </div>
         <div className={`pilot-source compact ${source.status}`}>
           <span>Veri kaynağı</span>
           <strong>{source.label}</strong>
           <small>{source.detail}</small>
         </div>
-        {session?.delegatedBy ? null : (
-          <button className="secondary compact-exit" onClick={onExit} type="button">
-            Çıkış
-          </button>
-        )}
       </div>
       {activePanel ? (
         <div className="topbar-popover" role="dialog" aria-label={activePanel === "notifications" ? "Bildirimler" : "Yardım"}>
@@ -245,6 +239,23 @@ export function PortalTopbarStatus({
           {activePanel === "notifications" ? (
             <div>
               <strong>Bildirimler</strong>
+              <div className="notification-list">
+                {notifications.map((notification) => (
+                  <article className={notification.read ? "notification-item read" : "notification-item"} key={notification.notificationId}>
+                    <strong>{notification.title}</strong>
+                    <p>{notification.message}</p>
+                    <span className="notification-badge">{notification.badgeLabel}</span>
+                    <button
+                      className="secondary compact"
+                      disabled={notification.read}
+                      onClick={() => void onReadNotification(notification.notificationId)}
+                      type="button"
+                    >
+                      {notification.read ? "Okundu" : "Okundu işaretle"}
+                    </button>
+                  </article>
+                ))}
+              </div>
               <p>Kontrol bekleyen belgeler ve çıktı blokajları belge listesinde gerekçeleriyle gösterilir.</p>
             </div>
           ) : (

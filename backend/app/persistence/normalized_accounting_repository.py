@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from copy import copy
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 from typing import Any, Callable
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+
+from app.domain.period_retention import parse_accounting_period
 
 
 ConnectFactory = Callable[[], Any]
@@ -53,6 +55,15 @@ def _date_or_none(value: object) -> date | None:
         return date.fromisoformat(text[:10])
     except ValueError:
         return None
+
+
+def _accounting_period_or_none(value: object) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if len(text) == 7:
+        return parse_accounting_period(text)
+    return _date_or_none(text)
 
 
 def _canonical_payload(result: dict[str, Any]) -> dict[str, Any]:
@@ -293,20 +304,21 @@ class NormalizedAccountingRepository:
                 cursor.execute(
                     """
                     insert into source_files (
-                        id, tenant_id, taxpayer_id, source_ref, original_filename,
+                        id, tenant_id, taxpayer_id, accounting_period, source_ref, original_filename,
                         stored_filename, storage_path, storage_backend, size_bytes,
                         sha256, status, retention_policy_days,
                         download_available_until, expires_at, deleted_at
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (tenant_id, taxpayer_id, sha256) do update
                     set source_ref = source_files.source_ref
-                    returning id, source_ref
+                    returning id, source_ref, (xmax = 0)
                     """,
                     (
                         source_id,
                         self.tenant_id,
                         taxpayer_id,
+                        _accounting_period_or_none(document.get("accounting_period") or document.get("period")),
                         requested_ref,
                         str(document.get("original_file_name") or requested_ref),
                         str(document.get("stored_file_name") or ""),
@@ -324,17 +336,17 @@ class NormalizedAccountingRepository:
                 source_row = cursor.fetchone()
                 if not source_row:
                     raise NormalizedAccountingError("source persistence did not return an identity")
-                stored_source_id, authoritative_ref = source_row
+                stored_source_id, authoritative_ref, source_created = source_row
                 document_id = _uuid_for("document", f"{self.tenant_id}:{client_id}:{authoritative_ref}")
                 cursor.execute(
                     """
                     insert into documents (
-                        id, tenant_id, taxpayer_id, source_ref, source_filename,
+                        id, tenant_id, taxpayer_id, accounting_period, source_ref, source_filename,
                         stored_filename, storage_path, size_bytes, sha256,
                         document_type, status, storage_status,
                         retention_policy_days, download_available_until, expires_at
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (tenant_id, taxpayer_id, source_ref) where source_ref is not null
                     do update set updated_at = now()
                     returning id
@@ -343,6 +355,7 @@ class NormalizedAccountingRepository:
                         document_id,
                         self.tenant_id,
                         taxpayer_id,
+                        _accounting_period_or_none(document.get("accounting_period") or document.get("period")),
                         authoritative_ref,
                         str(document.get("original_file_name") or authoritative_ref),
                         str(document.get("stored_file_name") or ""),
@@ -385,7 +398,7 @@ class NormalizedAccountingRepository:
             "document_ref": str(authoritative_ref),
             "normalized_document_id": str(stored_document_id),
             "normalized_source_file_id": str(stored_source_id),
-            "deduplicated": str(authoritative_ref) != requested_ref,
+            "deduplicated": (not bool(source_created)) or str(authoritative_ref) != requested_ref,
             "requested_document_ref": requested_ref,
         }
 
@@ -429,12 +442,12 @@ class NormalizedAccountingRepository:
                 cursor.execute(
                     """
                     insert into source_files (
-                        id, tenant_id, taxpayer_id, source_ref, original_filename,
+                        id, tenant_id, taxpayer_id, accounting_period, source_ref, original_filename,
                         stored_filename, storage_path, storage_backend, size_bytes,
                         sha256, status, retention_policy_days,
                         download_available_until, expires_at, deleted_at
                     )
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     on conflict (tenant_id, taxpayer_id, sha256) do update
                     set source_ref = source_files.source_ref
                     returning id, source_ref
@@ -443,6 +456,7 @@ class NormalizedAccountingRepository:
                         source_id,
                         self.tenant_id,
                         taxpayer_id,
+                        _accounting_period_or_none(document.get("accounting_period") or document.get("period")),
                         requested_ref,
                         str(document.get("original_file_name") or requested_ref),
                         str(document.get("stored_file_name") or ""),
@@ -490,7 +504,7 @@ class NormalizedAccountingRepository:
                     cursor.execute(
                         """
                         insert into documents (
-                            id, tenant_id, taxpayer_id, source_ref, source_filename,
+                            id, tenant_id, taxpayer_id, accounting_period, source_ref, source_filename,
                             stored_filename, storage_path, size_bytes, sha256,
                             document_type, status, storage_status,
                             retention_policy_days, download_available_until, expires_at,
@@ -498,7 +512,7 @@ class NormalizedAccountingRepository:
                         )
                         values (
                             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                         )
                         returning id
                         """,
@@ -506,6 +520,7 @@ class NormalizedAccountingRepository:
                             document_id,
                             self.tenant_id,
                             taxpayer_id,
+                            _accounting_period_or_none(document.get("accounting_period") or document.get("period")),
                             authoritative_source_ref,
                             str(document.get("original_file_name") or authoritative_source_ref),
                             str(document.get("stored_file_name") or ""),
@@ -772,6 +787,7 @@ class NormalizedAccountingRepository:
                         where tenant_id = %s
                           and (
                               status = 'queued'
+                              or (status = 'retry_wait' and next_attempt_at <= now())
                               or (status = 'processing' and claim_expires_at < now())
                           )
                         order by created_at asc
@@ -789,7 +805,8 @@ class NormalizedAccountingRepository:
                     returning jobs.id, jobs.taxpayer_id, jobs.document_id,
                               jobs.document_ref, jobs.document_type, jobs.parser_kind,
                               jobs.intake_category, jobs.status, jobs.attempt_count,
-                              jobs.created_at, jobs.updated_at
+                              jobs.created_at, jobs.updated_at, jobs.next_attempt_at,
+                              jobs.retry_step, jobs.outage_episode_id
                     """,
                     (self.tenant_id, worker_id),
                 )
@@ -821,6 +838,113 @@ class NormalizedAccountingRepository:
             "normalized_attempt_id": str(attempt_id),
             "created_at": row[9].isoformat() if hasattr(row[9], "isoformat") else str(row[9]),
             "updated_at": row[10].isoformat() if hasattr(row[10], "isoformat") else str(row[10]),
+            "next_attempt_at": row[11].isoformat() if row[11] is not None and hasattr(row[11], "isoformat") else str(row[11] or ""),
+            "retry_step": int(row[12] or 0),
+            "outage_episode_id": str(row[13] or ""),
+        }
+
+    def record_ai_outage_failure(
+        self,
+        *,
+        task_kind: str,
+        document_id: str,
+        evidence: dict[str, str],
+        now: datetime,
+    ) -> dict[str, Any]:
+        """Join a document to one tenant/task outage episode atomically."""
+
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, opened_at, last_failure_at, failed_provider_categories,
+                           affected_document_count
+                    from ai_outage_episodes
+                    where tenant_id = %s and task_kind = %s and status = 'open'
+                    for update
+                    """,
+                    (self.tenant_id, task_kind),
+                )
+                row = cursor.fetchone()
+                if row is None:
+                    episode_id = uuid4()
+                    categories = [dict(evidence)]
+                    cursor.execute(
+                        """
+                        insert into ai_outage_episodes (
+                            id, tenant_id, task_kind, status, opened_at,
+                            last_failure_at, failed_provider_categories,
+                            affected_document_count
+                        ) values (%s, %s, %s, 'open', %s, %s, %s, 1)
+                        """,
+                        (episode_id, self.tenant_id, task_kind, now, now, self._json(categories)),
+                    )
+                    opened_at = now
+                    count = 1
+                else:
+                    episode_id, opened_at, _, raw_categories, count = row
+                    categories = list(raw_categories or []) if isinstance(raw_categories, list) else []
+                    key = (str(evidence.get("provider") or ""), str(evidence.get("category") or ""))
+                    existing = {
+                        (str(item.get("provider") or ""), str(item.get("category") or ""))
+                        for item in categories
+                        if isinstance(item, dict)
+                    }
+                    if key not in existing:
+                        categories.append(dict(evidence))
+                    count = int(count or 0) + 1
+                    cursor.execute(
+                        """
+                        update ai_outage_episodes
+                        set last_failure_at = %s,
+                            failed_provider_categories = %s,
+                            affected_document_count = %s,
+                            updated_at = now()
+                        where id = %s and tenant_id = %s and status = 'open'
+                        """,
+                        (now, self._json(categories), count, episode_id, self.tenant_id),
+                    )
+        return {
+            "id": str(episode_id),
+            "tenant_id": str(self.tenant_id),
+            "task_kind": task_kind,
+            "status": "open",
+            "opened_at": opened_at.isoformat() if hasattr(opened_at, "isoformat") else str(opened_at),
+            "affected_document_count": count,
+            "failed_provider_categories": categories,
+            "last_document_id": document_id,
+        }
+
+    def recover_ai_outage_episode(self, *, episode_id: str, now: datetime) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select count(*)
+                    from processing_jobs
+                    where tenant_id = %s and outage_episode_id = %s and status = 'retry_wait'
+                    """,
+                    (self.tenant_id, episode_id),
+                )
+                if int(cursor.fetchone()[0] or 0) > 0:
+                    return None
+                cursor.execute(
+                    """
+                    update ai_outage_episodes
+                    set status = 'recovered', recovered_at = %s, updated_at = now()
+                    where tenant_id = %s and id = %s and status = 'open'
+                    returning id, task_kind, affected_document_count
+                    """,
+                    (now, self.tenant_id, episode_id),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        return {
+            "id": str(row[0]),
+            "task_kind": str(row[1]),
+            "affected_document_count": int(row[2] or 0),
+            "status": "recovered",
         }
 
     def update_processing_job(
@@ -831,6 +955,9 @@ class NormalizedAccountingRepository:
         error_message: str,
         processing_metrics: dict[str, Any] | None,
         attempt_id: str = "",
+        next_attempt_at: datetime | str | None = None,
+        retry_step: int = 0,
+        outage_episode_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self._connect() as conn:
             with conn.cursor() as cursor:
@@ -838,7 +965,11 @@ class NormalizedAccountingRepository:
                     """
                     update processing_jobs
                     set status = %s, error_message = %s, claimed_by = null,
-                        claim_expires_at = null, updated_at = now()
+                        claim_expires_at = null,
+                        next_attempt_at = case when %s = 'retry_wait' then %s::timestamptz else null end,
+                        retry_step = case when %s = 'retry_wait' then %s else 0 end,
+                        outage_episode_id = case when %s = 'retry_wait' then %s::uuid else null end,
+                        updated_at = now()
                     where tenant_id = %s and id = %s
                       and (%s = '' or current_attempt_id = %s::uuid)
                     returning id, document_ref, document_type, parser_kind,
@@ -847,6 +978,12 @@ class NormalizedAccountingRepository:
                     (
                         status,
                         error_message or None,
+                        status,
+                        next_attempt_at,
+                        status,
+                        int(retry_step or 0),
+                        status,
+                        outage_episode_id,
                         self.tenant_id,
                         job_id,
                         attempt_id,
@@ -883,6 +1020,9 @@ class NormalizedAccountingRepository:
             "processing_metrics": processing_metrics or {},
             "created_at": row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7]),
             "updated_at": row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8]),
+            "next_attempt_at": next_attempt_at.isoformat() if hasattr(next_attempt_at, "isoformat") else str(next_attempt_at or ""),
+            "retry_step": int(retry_step or 0),
+            "outage_episode_id": str(outage_episode_id or ""),
         }
 
     def persist_canonical_journal(

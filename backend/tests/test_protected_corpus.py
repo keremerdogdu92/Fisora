@@ -106,6 +106,25 @@ class ProtectedCorpusTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(protected.read_bytes()).hexdigest(), digest)
         self.assertEqual(item["source_sha256"], digest)
 
+    def test_corpus_progress_exposes_direction_and_reference_gates(self) -> None:
+        self._store_source()
+        self.service.enroll_document(
+            corpus_id=self.corpus["corpus_id"],
+            client_id="client-1",
+            document_ref="invoice-1",
+            direction="purchase",
+            actor="mali-musavir",
+        )
+
+        progress = self.service.get_corpus(self.corpus["corpus_id"])
+
+        self.assertEqual(progress["target_purchase_count"], 1)
+        self.assertEqual(progress["enrolled_purchase_count"], 1)
+        self.assertEqual(progress["enrolled_sales_count"], 0)
+        self.assertEqual(progress["reference_ready_count"], 0)
+        self.assertEqual(progress["missing_reference_count"], 1)
+        self.assertEqual(progress["status"], "draft")
+
     def test_enroll_document_leaves_no_file_or_row_on_hash_mismatch(self) -> None:
         self._store_source()
         data = self.store._read()

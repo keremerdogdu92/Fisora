@@ -78,6 +78,69 @@ class DbMigrationTests(unittest.TestCase):
         self.assertIn("create table protected_rule_versions", migration.sql.lower())
         self.assertIn("unique (corpus_id, source_sha256)", migration.sql.lower())
 
+    def test_period_retention_migration_is_complete(self) -> None:
+        migration = next(
+            item
+            for item in discover_migrations(ROOT / "backend" / "db" / "migrations")
+            if item.version == "007"
+        )
+        sql = migration.sql.lower()
+
+        self.assertIn("ck_documents_accounting_period_month_start", sql)
+        self.assertIn("ck_source_files_accounting_period_month_start", sql)
+        self.assertIn("create table if not exists retention_batches", sql)
+        self.assertIn("create table if not exists retention_batch_sources", sql)
+        self.assertIn("create table if not exists retention_scheduler_state", sql)
+        self.assertIn("unique (tenant_id, taxpayer_id, accounting_period)", sql)
+        self.assertIn("idx_retention_batches_due", sql)
+
+    def test_learning_rule_lifecycle_migration_is_versioned_and_immutable(self) -> None:
+        migration = next(
+            item
+            for item in discover_migrations(ROOT / "backend" / "db" / "migrations")
+            if item.version == "008"
+        )
+        sql = migration.sql.lower()
+
+        self.assertIn("alter table learning_rules add column if not exists rule_key text", sql)
+        self.assertIn("add column if not exists version integer not null default 1", sql)
+        self.assertIn("check (status in ('draft', 'active', 'paused', 'archived'))", sql)
+        self.assertIn("scope_snapshot jsonb not null default '{}'", sql)
+        self.assertIn("rule_snapshot jsonb not null default '{}'", sql)
+        self.assertIn("uq_learning_rules_key_version", sql)
+        self.assertIn("idx_learning_rules_active_scope", sql)
+
+    def test_journal_edit_collaboration_migration_keeps_candidate_revisions_separate(self) -> None:
+        migration = next(
+            item
+            for item in discover_migrations(ROOT / "backend" / "db" / "migrations")
+            if item.version == "009"
+        )
+        sql = migration.sql.lower()
+
+        self.assertIn("create table if not exists journal_edit_leases", sql)
+        self.assertIn("create table if not exists journal_working_drafts", sql)
+        self.assertIn("revision_role text not null default 'candidate'", sql)
+        self.assertIn("check (revision_role = 'candidate')", sql)
+        self.assertIn("primary key (tenant_id, journal_entry_id)", sql)
+
+    def test_ai_outage_retry_migration_is_complete(self) -> None:
+        migration = next(
+            item
+            for item in discover_migrations(ROOT / "backend" / "db" / "migrations")
+            if item.version == "010"
+        )
+        sql = migration.sql.lower()
+
+        self.assertIn("create table if not exists ai_outage_episodes", sql)
+        self.assertIn("check (status in ('open', 'recovered'))", sql)
+        self.assertIn("failed_provider_categories jsonb not null default '[]'", sql)
+        self.assertIn("add column if not exists next_attempt_at timestamptz", sql)
+        self.assertIn("add column if not exists retry_step integer not null default 0", sql)
+        self.assertIn("add column if not exists outage_episode_id uuid references ai_outage_episodes(id)", sql)
+        self.assertIn("idx_processing_jobs_due_retry", sql)
+        self.assertIn("uq_ai_outage_episode_open_task", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1059,6 +1059,42 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertFalse(stored_file_exists)
         self.assertFalse(export_file_exists)
 
+    def test_pilot_reinitialization_preview_requires_authenticated_accountant(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        previous_auth_mode = os.environ.get("FISORA_AUTH_MODE")
+        previous_store_path = phase0.DEFAULT_STORE_PATH
+        os.environ["FISORA_AUTH_MODE"] = "mock_header_required"
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+                client = TestClient(app)
+                client.post(
+                    "/phase0/store/portal-user",
+                    json={
+                        "user_id": "client-user",
+                        "display_name": "Client User",
+                        "role": "client_user",
+                        "allowed_client_ids": ["client-1"],
+                    },
+                )
+                missing_user = client.get("/phase0/store/admin/pilot-reinitialization/preview")
+                forbidden = client.get(
+                    "/phase0/store/admin/pilot-reinitialization/preview",
+                    headers={"X-Fisora-User-Id": "client-user"},
+                )
+        finally:
+            if previous_auth_mode is None:
+                os.environ.pop("FISORA_AUTH_MODE", None)
+            else:
+                os.environ["FISORA_AUTH_MODE"] = previous_auth_mode
+            phase0.DEFAULT_STORE_PATH = previous_store_path
+
+        self.assertEqual(missing_user.status_code, 401)
+        self.assertEqual(missing_user.json()["detail"]["reason"], "user_required")
+        self.assertEqual(forbidden.status_code, 403)
+        self.assertEqual(forbidden.json()["detail"]["reason"], "accountant_required")
+
     def test_product_classification_records_ai_usage_when_client_id_is_supplied(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

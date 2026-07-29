@@ -374,7 +374,7 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
     return (
       <section className="panel review-panel">
         <h2>Orijinal belge</h2>
-        <p className="empty">Belge seçimi yok.</p>
+        <p className="empty">İşlemek için listeden belge seçin.</p>
       </section>
     );
   }
@@ -487,7 +487,7 @@ export function JournalPanel({
     return (
       <section className="panel review-panel">
         <h2>Muhasebe fişi</h2>
-        <p className="empty">Belge seçimi yok.</p>
+        <p className="empty">İşlemek için listeden belge seçin.</p>
       </section>
     );
   }

@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 import { AgentTrainingView } from "./portal-agents-view";
 import { AccountantDashboard } from "./portal-dashboard-view";
@@ -22,6 +21,7 @@ import {
 } from "./features/workspace";
 import { useClientManagementCommands } from "./features/clients";
 import { useDocumentRetentionCommands } from "./features/operations";
+import { useNotifications } from "./features/notifications";
 import { useQnbCommands } from "./features/qnb";
 import { addLocalUploadsAction, useDocumentWorkflow } from "./features/documents";
 import { useExportCommands } from "./features/export";
@@ -41,7 +41,7 @@ import { scopePilotDataForSession } from "./portal-data-scope";
 import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
 import { emptyCorrectionDraft, useReviewCommands } from "./features/review";
-
+import { useReviewEditLease } from "./features/review";
 type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
 
 export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
@@ -51,7 +51,6 @@ export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteK
     </PilotQueryProvider>
   );
 }
-
 function workspaceSourceState(payload: PilotData, nextSource: string): WorkspaceSourceState {
   if (nextSource === "Backend okunamadı") {
     return {
@@ -80,7 +79,6 @@ function workspaceSourceState(payload: PilotData, nextSource: string): Workspace
     detail: "Sunucu çalışma alanı kullanılıyor.",
   };
 }
-
 function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
   const portalConfig = portalConfigForRouteKey(routeKey);
   const lockedRole = portalConfig.lockedRole as LocalSession["role"] | undefined;
@@ -117,6 +115,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [exportMode, setExportMode] = useState<ExportMode>("bulk");
   const [exportType, setExportType] = useState("zirve_mapping_csv");
   const [correctionDraft, setCorrectionDraft] = useState<CorrectionDraft>(() => emptyCorrectionDraft());
+  const notificationApiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
+  const notifications = useNotifications({ apiBaseUrl: notificationApiBaseUrl, session });
   const readinessQuery = usePilotReadinessQuery();
   const aiCapacityQuery = useAiCapacityQuery({ defaultUserId: portalConfig.defaultUserId, session });
 
@@ -327,7 +327,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     logout();
     if (typeof window !== "undefined") window.location.assign("/");
   }
-
   const addLocalUploads = (files: FileList | null) => {
     void addLocalUploadsAction({
       files,
@@ -356,6 +355,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     setSelectedDocumentId,
   });
   const hasUnsavedReviewChanges = useMemo(() => Boolean(correctionDraft.accountCode.trim() || correctionDraft.counterpartyCode.trim() || correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim() || correctionDraft.applyToSimilar || correctionDraft.manualDraftLines.length), [correctionDraft]);
+  useReviewEditLease({ correctionDraft, hasUnsavedReviewChanges, loginUserId, selectedDocument, session, onStatus: (status) => { if (status !== "idle") setDecisionStatus(status); } });
   const {
     approveSelectedAndMoveNext,
     reprocessSelectedDocument,
@@ -399,13 +399,12 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       ) : null}
       <section className="portal-main-shell">
         <PortalTopbarStatus
-          clientName={mode === "client" ? selectedClient?.clientName : undefined}
-          localFallbackAllowed={localFallbackAllowed}
-          onExit={exitPortal}
           onToggleSidebar={() => setMobileSidebarOpen((current) => !current)}
-          session={session}
           showSidebarToggle={showSidebar}
           source={source}
+          notifications={notifications.notifications}
+          notificationPendingCount={notifications.pendingCount}
+          onReadNotification={notifications.markRead}
           subtitle={mode === "client" && session?.delegatedBy ? "Müşavir vekaletinde işlem yapılıyor" : ""}
           title={mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Fatura İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
         />
@@ -449,7 +448,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         />
       ) : null}
 
-      {mode === "agents" ? <AgentTrainingView agentSummaries={dashboardView.agentSummaries} learningInsights={dashboardView.learningInsights} /> : null}
+      {mode === "agents" ? <AgentTrainingView agentSummaries={dashboardView.agentSummaries} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} /> : null}
 
       {mode === "accountant" ? (
         <AccountantDashboard
@@ -599,7 +598,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onMarkPackaged={markBasketPackaged} periodLabel={periodLabel} setExportMode={setExportMode} setExportType={setExportType}
         />
       ) : null}
-
       {mode === "operations" ? (
         <OperationsRouteView
           aiCapacity={aiCapacityQuery.data} data={data} localFallbackAllowed={localFallbackAllowed}
@@ -612,7 +610,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     </main>
   );
 }
-
 export default function Home() {
   return <FisoraPortalApp routeKey="home" />;
 }

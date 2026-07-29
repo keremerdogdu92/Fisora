@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 from fastapi import APIRouter, Cookie, Header, HTTPException
@@ -12,6 +12,7 @@ from app.api.phase0_context import (
     default_document_storage_path,
     default_export_path,
     get_workflow_store,
+    get_retention_service,
     record_operation_event,
     request_user_id,
     require_client_access,
@@ -40,6 +41,78 @@ def store_system_readiness() -> dict[str, object]:
         backup_path=default_backup_path(),
         store=get_workflow_store(),
     )
+
+
+_TURKISH_MONTHS = (
+    "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+    "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık",
+)
+
+
+def _retention_notification(item: dict[str, object]) -> dict[str, object]:
+    period = str(item.get("accounting_period") or "")
+    year, month = period.split("-", 1) if "-" in period else ("", "")
+    month_name = _TURKISH_MONTHS[int(month) - 1] if month.isdigit() and 1 <= int(month) <= 12 else period
+    count = int(item.get("document_count") or 0)
+    delete_on = str(item.get("delete_on") or "")
+    try:
+        parsed_delete_on = date.fromisoformat(delete_on[:10])
+        delete_label = f"{parsed_delete_on.day} {_TURKISH_MONTHS[parsed_delete_on.month - 1]} {parsed_delete_on.year}"
+    except ValueError:
+        delete_label = delete_on
+    return {
+        "notification_id": f"retention:{item['batch_id']}",
+        "kind": "retention",
+        "severity": "warning",
+        "status": "pending",
+        "title": f"{month_name} {year} belgeleri ay sonunda silinecek",
+        "message": f"{count} kaynak belge {delete_label} tarihinde silinecek.",
+        "client_id": str(item.get("client_id") or ""),
+        "accounting_period": period,
+        "document_count": count,
+        "read_at": str(item.get("read_at") or ""),
+        "created_at": str(item.get("created_at") or ""),
+        "delete_on": delete_on,
+    }
+
+
+@router.get("/store/notifications")
+def store_notifications(
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"allowed": False, "reason": "portal_user_required"})
+    store = get_workflow_store()
+    if not getattr(store, "normalized_accounting_enabled", False):
+        return {"items": []}
+    return {"items": [_retention_notification(item) for item in get_retention_service(store).list_pending(user_id=user_id)["items"]]}
+
+
+@router.post("/store/notifications/{notification_id}/read")
+def store_notification_read(
+    notification_id: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    if not user_id:
+        raise HTTPException(status_code=401, detail={"allowed": False, "reason": "portal_user_required"})
+    if not notification_id.startswith("retention:"):
+        raise HTTPException(status_code=404, detail="notification_not_found")
+    store = get_workflow_store()
+    if not getattr(store, "normalized_accounting_enabled", False):
+        raise HTTPException(status_code=404, detail="notification_not_found")
+    try:
+        return get_retention_service(store).mark_read(
+            batch_id=notification_id.removeprefix("retention:"),
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _require_accountant_or_admin(

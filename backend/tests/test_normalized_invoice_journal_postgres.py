@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import sys
 import threading
+import tempfile
 import unittest
 from uuid import uuid4
 
@@ -27,6 +28,8 @@ from app.persistence.postgres_workflow_store import (
     PostgresWorkflowStore,
     ProcessingAttemptConflict,
 )
+from app.services.retention_service import RetentionService
+from datetime import UTC, datetime
 
 
 POSTGRES_DSN = os.environ.get("FISORA_TEST_POSTGRES_DSN", "").strip()
@@ -167,6 +170,144 @@ class NormalizedInvoiceJournalPostgresTests(unittest.TestCase):
             },
         )
         return store, client_id, document_ref
+
+    def test_source_and_document_store_normalized_accounting_period(self) -> None:
+        suffix = uuid4().hex
+        store = PostgresWorkflowStore(
+            POSTGRES_DSN,
+            tenant_key=f"period-postgres-test-{suffix}",
+            accounting_store_target="normalized",
+        )
+        client_id = f"client-{suffix}"
+        store.upsert_client(
+            client_id=client_id,
+            profile={"title": "Period Client", "tax_id": "3333333333"},
+            onboarding={},
+        )
+        document = {
+            "document_id": f"document-{suffix}",
+            "original_file_name": "february.xml",
+            "storage_path": f"/tmp/{suffix}.xml",
+            "document_type": "einvoice_xml",
+            "status": "stored",
+            "storage_status": "stored",
+            "size_bytes": 12,
+            "sha256": f"period-sha-{suffix}",
+            "period": "2026-02",
+        }
+
+        first = store.save_uploaded_document(client_id=client_id, document=document)
+        duplicate = store.save_uploaded_document(client_id=client_id, document=document)
+
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select d.accounting_period, s.accounting_period,
+                           (select count(*) from documents where tenant_id = %s),
+                           (select count(*) from source_files where tenant_id = %s)
+                    from documents d
+                    join source_files s on s.tenant_id = d.tenant_id
+                    where d.tenant_id = %s and d.source_ref = %s
+                    """,
+                    (store.tenant_id, store.tenant_id, store.tenant_id, first["document_ref"]),
+                )
+                accounting_period, source_period, document_count, source_count = cursor.fetchone()
+
+        self.assertEqual(accounting_period.isoformat(), "2026-02-01")
+        self.assertEqual(source_period.isoformat(), "2026-02-01")
+        self.assertEqual(document_count, 1)
+        self.assertEqual(source_count, 1)
+        self.assertTrue(duplicate["deduplicated"])
+
+    def test_period_retention_groups_reads_deletes_raw_only_and_is_idempotent(self) -> None:
+        suffix = uuid4().hex
+        store = PostgresWorkflowStore(
+            POSTGRES_DSN,
+            tenant_key=f"retention-postgres-test-{suffix}",
+            accounting_store_target="normalized",
+        )
+        client_id = f"client-{suffix}"
+        store.upsert_client(
+            client_id=client_id,
+            profile={"title": "Retention Client", "tax_id": "4444444444"},
+            onboarding={},
+        )
+        store.upsert_portal_user(
+            user_id="accountant",
+            display_name="Accountant",
+            role="accountant",
+            allowed_client_ids=[client_id],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            paths = []
+            for index in range(3):
+                path = Path(temp_dir) / f"february-{index}.xml"
+                path.write_bytes(f"invoice-{index}".encode())
+                paths.append(path)
+                store.save_uploaded_document(
+                    client_id=client_id,
+                    document={
+                        "document_id": f"document-{suffix}-{index}",
+                        "original_file_name": path.name,
+                        "storage_path": str(path),
+                        "document_type": "einvoice_xml",
+                        "status": "stored",
+                        "storage_status": "stored",
+                        "size_bytes": path.stat().st_size,
+                        "sha256": f"retention-{suffix}-{index}",
+                        "period": "2026-02",
+                    },
+                )
+
+            service = RetentionService(store=store, document_storage_path=Path(temp_dir))
+            april = service.run_due(
+                now=datetime(2026, 4, 30, 12, tzinfo=UTC),
+                worker_id="w1",
+            )
+            self.assertEqual(april["prepared_batch_count"], 1)
+            self.assertEqual(april["opened_warning_count"], 0)
+
+            may_first = service.run_due(
+                now=datetime(2026, 5, 1, 0, 5, tzinfo=UTC),
+                worker_id="w1",
+            )
+            self.assertEqual(may_first["opened_warning_count"], 1)
+            pending = service.list_pending(user_id="accountant")
+            self.assertEqual(pending["items"][0]["document_count"], 3)
+            batch_id = pending["items"][0]["batch_id"]
+            read = service.mark_read(batch_id=batch_id, user_id="accountant")
+            self.assertEqual(read["status"], "warning_open")
+            self.assertTrue(read["read_at"])
+
+            deleted = service.run_due(
+                now=datetime(2026, 5, 31, 23, 59, tzinfo=UTC),
+                worker_id="w1",
+            )
+            self.assertEqual(deleted["deleted_source_count"], 3)
+            self.assertEqual(deleted["resolved_batch_count"], 1)
+            self.assertTrue(all(not path.exists() for path in paths))
+
+            repeated = service.run_due(
+                now=datetime(2026, 5, 31, 23, 59, tzinfo=UTC),
+                worker_id="w2",
+            )
+            self.assertEqual(repeated["deleted_source_count"], 0)
+            with store._connect() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        select
+                            (select count(*) from documents where tenant_id = %s),
+                            (select count(*) from workflow_events
+                             where tenant_id = %s
+                               and event_type = 'raw_sources_deleted_for_period')
+                        """,
+                        (store.tenant_id, store.tenant_id),
+                    )
+                    document_count, event_count = cursor.fetchone()
+            self.assertEqual(document_count, 3)
+            self.assertEqual(event_count, 1)
 
     @staticmethod
     def _semantic_attempt(attempt_id: str, *, model: str = "fake-model") -> dict[str, object]:

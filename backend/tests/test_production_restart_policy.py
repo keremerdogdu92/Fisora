@@ -10,6 +10,7 @@ LONG_RUNNING_SERVICES = {
     "redis",
     "backend",
     "worker",
+    "qnb-scheduler",
     "frontend",
     "nginx",
     "backup",
@@ -41,6 +42,22 @@ class ProductionRestartPolicyTest(unittest.TestCase):
         blocks = service_blocks(COMPOSE_FILE.read_text(encoding="utf-8"))
 
         self.assertNotIn("restart:", blocks["migrate"])
+
+    def test_store_target_is_forwarded_consistently_to_backend_worker_and_qnb_scheduler(self):
+        blocks = service_blocks(COMPOSE_FILE.read_text(encoding="utf-8"))
+        expected = "FISORA_ACCOUNTING_STORE_TARGET: ${FISORA_ACCOUNTING_STORE_TARGET:-compatibility}"
+
+        self.assertIn(expected, blocks["backend"])
+        self.assertIn(expected, blocks["worker"])
+        self.assertIn(expected, blocks["qnb-scheduler"])
+
+    def test_doctor_command_reports_only_safe_store_settings(self):
+        script = (ROOT / "deploy" / "scripts" / "fisora-prod.sh").read_text(encoding="utf-8")
+
+        self.assertIn("doctor)", script)
+        self.assertIn("FISORA_STORE_BACKEND=", script)
+        self.assertIn("FISORA_ACCOUNTING_STORE_TARGET=", script)
+        self.assertNotRegex(script, r"doctor[\s\S]*DATABASE_URL")
 
 
 if __name__ == "__main__":

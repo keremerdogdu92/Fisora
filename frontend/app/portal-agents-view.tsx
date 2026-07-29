@@ -1,4 +1,6 @@
 import { Bot, CircleCheckBig, GraduationCap } from "lucide-react";
+import { useAgentRuleCommands } from "./features/agents";
+import type { LocalSession } from "./portal-types";
 
 type AgentSummary = {
   key: string;
@@ -28,10 +30,15 @@ function stageBucket(stageLabel: string) {
 export function AgentTrainingView({
   agentSummaries,
   learningInsights,
+  loginUserId,
+  session,
 }: {
   agentSummaries: AgentSummary[];
   learningInsights: AgentLearningInsight[];
+  loginUserId: string;
+  session: LocalSession | null;
 }) {
+  const { rules: learningRules, status: ruleStatus, changeStatus: onRuleStatusChange } = useAgentRuleCommands({ loginUserId, session });
   const trainingNotes = learningInsights.filter((item) => stageBucket(item.stageLabel) === "note");
   const ruleCandidates = learningInsights.filter((item) => stageBucket(item.stageLabel) === "candidate");
   const automationCandidates = learningInsights.filter((item) => stageBucket(item.stageLabel) === "automation");
@@ -99,6 +106,27 @@ export function AgentTrainingView({
             </div>
           </section>
         ))}
+      </section>
+
+      <section className="panel agent-rule-board" aria-label="Kural yaşam döngüsü">
+        <div className="section-heading"><span>Öğrenilmiş kural yönetimi</span><strong>{learningRules.length}</strong></div>
+        {ruleStatus ? <p className="status-line">{ruleStatus}</p> : null}
+        <div className="agent-learning-list">
+          {learningRules.map((rule) => {
+            const key = String(rule.rule_key || "");
+            const state = String(rule.status || "draft");
+            return <article className="agent-learning-item" key={`${key}:${String(rule.version || 0)}`}>
+              <Bot aria-hidden="true" />
+              <div><span>{state}</span><strong>{String(rule.meaning_label || rule.rule_key || "Kural")}</strong><p>{String(rule.binding_label || rule.source_document_label || "Kaynak kanıtı mevcut")}</p></div>
+              <div className="inline-actions">
+                {state === "draft" || state === "paused" ? <button type="button" onClick={() => onRuleStatusChange?.(rule, "activate")}>Etkinleştir</button> : null}
+                {state === "active" ? <button type="button" onClick={() => onRuleStatusChange?.(rule, "pause")}>Duraklat</button> : null}
+                {state !== "archived" ? <button type="button" onClick={() => onRuleStatusChange?.(rule, "archive")}>Arşivle</button> : null}
+              </div>
+            </article>;
+          })}
+          {!learningRules.length ? <p className="empty">Henüz yönetilebilir doğrulanmış kural yok.</p> : null}
+        </div>
       </section>
     </section>
   );

@@ -6,6 +6,9 @@ from app.api import (
     phase0_routes_ai,
     phase0_routes_auth,
     phase0_routes_corpus,
+    phase0_routes_learning_rules,
+    phase0_routes_review_collaboration,
+    phase0_routes_maintenance,
     phase0_routes_operations,
     phase0_routes_outgoing_invoices,
     phase0_routes_qnb,
@@ -89,6 +92,9 @@ from app.domain.tax_certificates import parse_tax_certificate_file
 router = APIRouter()
 router.include_router(phase0_routes_auth.router)
 router.include_router(phase0_routes_corpus.router)
+router.include_router(phase0_routes_learning_rules.router)
+router.include_router(phase0_routes_review_collaboration.router)
+router.include_router(phase0_routes_maintenance.router)
 router.include_router(phase0_routes_operations.router)
 router.include_router(phase0_routes_outgoing_invoices.router)
 router.include_router(phase0_routes_qnb.router)

@@ -3,9 +3,12 @@ from __future__ import annotations
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Mapping
 
 from app.persistence.store_factory import build_workflow_store
+from app.services.retention_service import RetentionService
 from app.workflows.document_processing import process_queued_documents
 
 
@@ -26,6 +29,11 @@ def worker_concurrency_from_env(env: Mapping[str, str] | None = None) -> int:
 
 def run_retention_once() -> dict[str, object]:
     store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
+    if getattr(store, "normalized_accounting_enabled", False):
+        return RetentionService(
+            store=store,
+            document_storage_path=Path(os.environ.get("FISORA_DOCUMENT_STORAGE_PATH", "/opt/fisora/data/exports/documents")),
+        ).run_due(now=datetime.now(UTC), worker_id=f"worker-{os.getpid()}")
     return store.apply_document_retention(delete_files=True)
 
 

@@ -1,0 +1,21 @@
+export type AgentRuleStatus = "draft" | "active" | "paused" | "archived";
+export type AgentRuleViewModel = {
+  ruleKey: string;
+  version: number;
+  status: AgentRuleStatus | string;
+  scopeLabel: string;
+  triggerLabel: string;
+  meaningLabel: string;
+  bindingLabel: string;
+  sourceDocumentLabel: string;
+  confirmedBy: string;
+  lastMatchedAt: string;
+  matchCount: number;
+  correctionCount: number;
+  canActivate: boolean;
+  canPause: boolean;
+  canArchive: boolean;
+};
+export function ruleStatusBuckets(rules?: unknown[]): Record<"awaiting" | "active" | "paused" | "archived", unknown[]>;
+export function maskTaxId(value?: unknown): string;
+export function buildAgentRuleViewModel(raw?: Record<string, unknown>, options?: { detail?: boolean }): AgentRuleViewModel;

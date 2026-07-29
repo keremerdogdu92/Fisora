@@ -97,6 +97,7 @@ from app.domain.pdf_invoices import (
     parse_pdf_invoice,
     resolve_payable_total,
 )
+from app.domain.pdf_invoice_boundaries import PdfPageText
 from app.domain.production_readiness import production_readiness_payload
 from app.domain.review_learning import ReviewDecision, build_learning_event
 from app.domain.workspace_review_updates import apply_review_decision_to_document
@@ -1458,7 +1459,7 @@ class Phase0DomainTests(unittest.TestCase):
     def test_textless_pdf_invoice_is_reviewed_without_ocr(self) -> None:
         from unittest.mock import patch
 
-        with patch("app.domain.pdf_invoices.extract_pdf_text", return_value=(1, "", ("pdf_text_empty",))):
+        with patch("app.domain.pdf_invoices.extract_pdf_pages", return_value=((PdfPageText(1, ""),), ("pdf_text_empty",))):
             invoice = parse_pdf_invoice(Path("scanned.pdf"))
 
         self.assertEqual(invoice.suggested_route, "review_queue")

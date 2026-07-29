@@ -24,10 +24,12 @@ from app.domain.outgoing_invoices import OutgoingInvoiceService
 from app.domain.qnb_outgoing import build_outgoing_invoice_provider
 from app.workflows.document_processing import _provider_chain_from_env
 from app.services.document_service import DocumentService
+from app.services.retention_service import RetentionService
 from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
 from app.services.protected_corpus_service import ProtectedCorpusService
 from app.services.workspace_service import WorkspaceService
+from app.services.pilot_reinitialization_service import PilotReinitializationService
 
 
 DEFAULT_STORE_PATH = Path(os.environ.get("FISORA_STORE_PATH", "exports/phase0_store.json"))
@@ -69,6 +71,15 @@ def get_workflow_store():
     return build_workflow_store(json_path=default_store_path())
 
 
+def get_pilot_reinitialization_service() -> PilotReinitializationService:
+    return PilotReinitializationService(
+        store=get_workflow_store(),
+        document_storage_path=default_document_storage_path(),
+        export_path=default_export_path(),
+        protected_storage_path=default_protected_corpus_path(),
+    )
+
+
 def get_workspace_service() -> WorkspaceService:
     store = get_workflow_store()
     return WorkspaceService(
@@ -99,6 +110,14 @@ def build_nace_researcher(store):
 
 def get_document_service() -> DocumentService:
     return _build_document_service(get_workflow_store())
+
+
+def get_retention_service(store=None) -> RetentionService:
+    selected_store = store or get_workflow_store()
+    return RetentionService(
+        store=selected_store,
+        document_storage_path=default_document_storage_path(),
+    )
 
 
 def _build_document_service(store) -> DocumentService:

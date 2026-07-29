@@ -25,6 +25,7 @@ from app.domain.canonical_invoices import (
 )
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text, invoice_line_hints
+from app.domain.pdf_invoice_boundaries import PdfPageText, detect_multiple_invoice_identities
 from app.domain.vat_splits import VatSplitLine, extract_pdf_vat_split
 
 
@@ -124,21 +125,27 @@ class ParsedInvoice:
     canonical_invoice: CanonicalInvoice | None = None
 
 
-def extract_pdf_text(path: Path) -> tuple[int, str, tuple[str, ...]]:
+def extract_pdf_pages(path: Path) -> tuple[tuple[PdfPageText, ...], tuple[str, ...]]:
     notes: list[str] = []
     try:
         from pypdf import PdfReader
     except ImportError:
-        return 0, "", ("pypdf_not_installed",)
+        return (), ("pypdf_not_installed",)
 
     try:
         reader = PdfReader(str(path))
-        chunks = []
-        for page in reader.pages:
-            chunks.append(page.extract_text() or "")
-        return len(reader.pages), "\n".join(chunks), tuple(notes)
+        pages = tuple(
+            PdfPageText(page_no=index + 1, text=page.extract_text() or "")
+            for index, page in enumerate(reader.pages)
+        )
+        return pages, tuple(notes)
     except Exception as exc:  # noqa: BLE001
-        return 0, "", (f"pdf_read_error:{type(exc).__name__}",)
+        return (), (f"pdf_read_error:{type(exc).__name__}",)
+
+
+def extract_pdf_text(path: Path) -> tuple[int, str, tuple[str, ...]]:
+    pages, notes = extract_pdf_pages(path)
+    return len(pages), "\n".join(page.text for page in pages), notes
 
 
 def normalize_spaces(value: str) -> str:
@@ -1121,7 +1128,9 @@ def parse_pdf_invoice(
     canonical_extraction_policy: CanonicalExtractionPolicy | None = None,
     client_identity: dict[str, object] | None = None,
 ) -> ParsedInvoice:
-    page_count, text, extraction_notes = extract_pdf_text(path)
+    pages, extraction_notes = extract_pdf_pages(path)
+    page_count = len(pages)
+    text = "\n".join(page.text for page in pages)
     stripped_text = text.strip()
     if page_count > 0 and not stripped_text:
         return ParsedInvoice(
@@ -1145,6 +1154,30 @@ def parse_pdf_invoice(
             risk_flags=("scanned_pdf_unsupported",),
             suggested_route="review_queue",
             parse_notes=tuple(dict.fromkeys((*extraction_notes, "scanned_pdf_unsupported"))),
+        )
+    boundary = detect_multiple_invoice_identities(pages)
+    if boundary.status == "confirmed_multiple":
+        return ParsedInvoice(
+            file_name=path.name,
+            provider_hint="",
+            page_count=page_count,
+            text_extractable=len(stripped_text) >= 100,
+            extracted_char_count=len(stripped_text),
+            scenario="",
+            invoice_type="",
+            invoice_no="",
+            ettn="",
+            issue_date="",
+            tax_ids=(),
+            vat_rates=(),
+            goods_services_total="",
+            vat_total="",
+            special_tax_total="",
+            tax_inclusive_total="",
+            payable_total="",
+            risk_flags=("multi_invoice_container_confirmed",),
+            suggested_route="review_queue",
+            parse_notes=(*extraction_notes, "separate_invoice_upload_required"),
         )
     edge_summary = summarize_invoice_edge_cases(path.name, text, extracted_char_count=len(stripped_text))
     parsed_totals = {

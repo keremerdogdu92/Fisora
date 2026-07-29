@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Fisero Canlı Teşhis"
+  short_description: "Gerçek UI servis veri yolunu kanıtla izler"
+  default_prompt: "Use $fisero-diagnose-live to trace this Fisero issue through the real UI, API, service, storage, and runtime path."

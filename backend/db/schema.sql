@@ -82,6 +82,7 @@ create table if not exists documents (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
+    accounting_period date,
     uploaded_by_user_id uuid,
     source_filename text not null,
     stored_filename text,
@@ -99,12 +100,15 @@ create table if not exists documents (
     risk_flags jsonb not null default '[]',
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
+    ,constraint ck_documents_accounting_period_month_start
+        check (accounting_period is null or accounting_period = date_trunc('month', accounting_period)::date)
 );
 
 create table if not exists source_files (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
     taxpayer_id uuid not null references taxpayers(id),
+    accounting_period date,
     source_ref text not null,
     original_filename text not null,
     stored_filename text,
@@ -119,8 +123,51 @@ create table if not exists source_files (
     expires_at timestamptz,
     deleted_at timestamptz,
     created_at timestamptz not null default now(),
-    unique (tenant_id, taxpayer_id, sha256)
+    unique (tenant_id, taxpayer_id, sha256),
+    constraint ck_source_files_accounting_period_month_start
+        check (accounting_period is null or accounting_period = date_trunc('month', accounting_period)::date)
 );
+
+create table if not exists retention_batches (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    accounting_period date not null,
+    preparation_on date not null,
+    warning_on date not null,
+    delete_on date not null,
+    status text not null default 'scheduled'
+        check (status in ('scheduled', 'warning_open', 'deleting', 'resolved')),
+    opened_at timestamptz,
+    read_at timestamptz,
+    resolved_at timestamptz,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (tenant_id, taxpayer_id, accounting_period),
+    check (accounting_period = date_trunc('month', accounting_period)::date),
+    check (preparation_on < warning_on and warning_on <= delete_on)
+);
+
+create table if not exists retention_batch_sources (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    retention_batch_id uuid not null references retention_batches(id) on delete cascade,
+    source_file_id uuid not null references source_files(id),
+    created_at timestamptz not null default now(),
+    unique (retention_batch_id, source_file_id)
+);
+
+create table if not exists retention_scheduler_state (
+    tenant_id uuid primary key references tenants(id),
+    next_run_at timestamptz not null default now(),
+    claimed_by text,
+    claim_expires_at timestamptz,
+    updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_retention_batches_due
+    on retention_batches(tenant_id, status, warning_on, delete_on);
 
 create table if not exists document_sources (
     id uuid primary key,
@@ -164,6 +211,21 @@ create table if not exists invoice_lines (
     created_at timestamptz not null default now()
 );
 
+create table if not exists ai_outage_episodes (
+    id uuid primary key,
+    tenant_id uuid not null references tenants(id),
+    task_kind text not null,
+    status text not null
+        check (status in ('open', 'recovered')),
+    opened_at timestamptz not null,
+    last_failure_at timestamptz not null,
+    recovered_at timestamptz,
+    failed_provider_categories jsonb not null default '[]',
+    affected_document_count integer not null default 0,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
 create table if not exists processing_jobs (
     id uuid primary key,
     tenant_id uuid not null references tenants(id),
@@ -177,6 +239,9 @@ create table if not exists processing_jobs (
     attempt_count integer not null default 0,
     claimed_by text,
     claim_expires_at timestamptz,
+    next_attempt_at timestamptz,
+    retry_step integer not null default 0,
+    outage_episode_id uuid references ai_outage_episodes(id),
     error_message text,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
@@ -288,6 +353,38 @@ create table if not exists journal_revisions (
     reopen_reason text,
     unique (journal_entry_id, revision_no),
     check (total_debit = total_credit or status <> 'approved')
+);
+
+create table if not exists journal_edit_leases (
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    journal_entry_id uuid not null references journal_entries(id),
+    owner_actor_id text not null,
+    owner_role text not null,
+    acquired_at timestamptz not null,
+    last_user_activity_at timestamptz not null,
+    expires_at timestamptz not null,
+    takeover_reason text,
+    updated_at timestamptz not null default now(),
+    primary key (tenant_id, journal_entry_id),
+    check (expires_at = last_user_activity_at + interval '5 minutes')
+);
+
+create table if not exists journal_working_drafts (
+    tenant_id uuid not null references tenants(id),
+    taxpayer_id uuid not null references taxpayers(id),
+    journal_entry_id uuid not null references journal_entries(id),
+    base_revision_no integer not null,
+    candidate_revision_no integer not null,
+    revision_role text not null default 'candidate',
+    current_export_status text not null,
+    draft_snapshot jsonb not null default '{}',
+    saved_by text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    primary key (tenant_id, journal_entry_id),
+    check (revision_role = 'candidate'),
+    check (candidate_revision_no = base_revision_no + 1)
 );
 
 create table if not exists journal_revision_lines (
@@ -431,6 +528,17 @@ create table if not exists learning_rules (
     reason text,
     automation_candidate boolean not null default false,
     consistent_approval_count integer not null default 1,
+    rule_key text,
+    version integer not null default 1,
+    status text not null default 'draft'
+        check (status in ('draft', 'active', 'paused', 'archived')),
+    schema_version text not null default 'v1',
+    scope_snapshot jsonb not null default '{}',
+    rule_snapshot jsonb not null default '{}',
+    activation_event_id uuid,
+    confirmed_by text,
+    confirmed_at timestamptz,
+    supersedes_rule_id uuid references learning_rules(id),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
@@ -451,6 +559,12 @@ create index if not exists idx_workflow_records_type_key on workflow_records(ten
 create index if not exists idx_journal_entries_taxpayer_export on journal_entries(tenant_id, taxpayer_id, export_status);
 create index if not exists idx_review_decisions_taxpayer_created on review_decisions(tenant_id, taxpayer_id, created_at desc);
 create index if not exists idx_learning_rules_scope on learning_rules(tenant_id, taxpayer_id, scope, automation_candidate);
+create unique index if not exists uq_learning_rules_key_version
+    on learning_rules(tenant_id, rule_key, version)
+    where rule_key is not null;
+create index if not exists idx_learning_rules_active_scope
+    on learning_rules(tenant_id, taxpayer_id, status, scope, rule_key)
+    where status = 'active';
 create index if not exists idx_export_batches_taxpayer_status on export_batches(tenant_id, taxpayer_id, status);
 create unique index if not exists uq_documents_tenant_taxpayer_source_ref
     on documents(tenant_id, taxpayer_id, source_ref) where source_ref is not null;
@@ -470,6 +584,13 @@ create index if not exists idx_journal_line_allocations_invoice_line
     on journal_line_allocations(invoice_line_id);
 create index if not exists idx_source_files_taxpayer_created on source_files(tenant_id, taxpayer_id, created_at);
 create index if not exists idx_processing_jobs_claim on processing_jobs(tenant_id, status, created_at);
+create index if not exists idx_processing_jobs_due_retry
+    on processing_jobs(tenant_id, status, next_attempt_at)
+    where status = 'retry_wait';
 create index if not exists idx_journal_revisions_document on journal_revisions(tenant_id, taxpayer_id, document_id, revision_no desc);
+create index if not exists idx_journal_edit_leases_expiry
+    on journal_edit_leases(tenant_id, expires_at);
+create index if not exists idx_journal_working_drafts_updated
+    on journal_working_drafts(tenant_id, taxpayer_id, updated_at desc);
 create index if not exists idx_workflow_events_document on workflow_events(tenant_id, taxpayer_id, document_id, created_at);
 

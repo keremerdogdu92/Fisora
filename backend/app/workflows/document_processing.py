@@ -18,12 +18,19 @@ from app.domain.ai_classification import (
     serialize_semantic_decision_attempt,
 )
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
+from app.domain.ai_outage import next_ai_retry, sanitize_provider_failure_evidence
 from app.domain.business_relevance import ClientProfile, ProductClassification
 from app.domain.canonical_invoices import CanonicalExtractionPolicy
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
-from app.domain.matching_simulation import AccountSelection, select_accounts, simulate_invoice
+from app.domain.matching_simulation import (
+    AccountSelection,
+    infer_accounting_direction,
+    select_accounts,
+    simulate_invoice,
+)
+from app.domain.verified_rule_authority import compile_verified_rule_authorities
 from app.domain.nace_research import resolve_nace_research_profile
 from app.domain.openai_provider import (
     CEREBRAS_CHAT_COMPLETIONS_URL,
@@ -232,21 +239,55 @@ def _serializable_simulation(
     accounts = _chart_accounts(workspace)
     profile = _client_profile(workspace)
     counterparty = _counterparty_match_for_invoice(accounts, invoice, profile)
+    selection = _account_selection(workspace)
+    direction, _, _ = infer_accounting_direction(
+        invoice,
+        profile,
+        intended_direction=intended_direction,
+    )
+    canonical_lines = tuple(getattr(getattr(invoice, "canonical_invoice", None), "line_items", ()) or ())
+    counterparty_tax_id = (
+        str(getattr(invoice, "recipient_tax_id", "") or "")
+        if direction == "sales"
+        else str(getattr(invoice, "issuer_tax_id", "") or "")
+    )
+    invoice_mode = "return" if bool(getattr(invoice, "is_return_invoice", False)) else "ordinary"
+    active_rules = tuple(workspace.get("learning_rules") or ())
+    compiled_rules = compile_verified_rule_authorities(
+        rules=active_rules,
+        client_id=profile.client_id if profile else "",
+        direction=direction if direction in {"purchase", "sales"} else "purchase",
+        invoice_mode=invoice_mode,
+        counterparty_tax_id=counterparty_tax_id,
+        canonical_lines=canonical_lines,
+        account_selection=selection,
+    )
     result = simulate_invoice(
         invoice,
-        _account_selection(workspace),
+        selection,
         profile,
         counterparty,
         product_classifier or StaticFirstClassifier(),
         processing_mode="ai_assisted_draft" if product_classifier else "controlled_automation",
         intended_direction=intended_direction,
         classification_override=classification_override,
+        verified_rule_authorities=compiled_rules.authorities,
     )
     result = apply_learning_rules(
         result,
         [rule_from_event_payload(event) for event in workspace.get("learning_events") or []],
     )
     data = asdict(result)
+    conflicts = list(getattr(compiled_rules, "conflicts", ()) or ())
+    if conflicts:
+        data["review_reason_codes"] = list(
+            dict.fromkeys((*data.get("review_reason_codes", []), "verified_rule_conflict"))
+        )
+        data["risk_flags"] = list(dict.fromkeys((*data.get("risk_flags", []), "verified_rule_conflict")))
+        data["export_status"] = "review_required"
+        data["export_gate_reason"] = "Dogrulanmis kurallar ayni satir icin celisiyor; musavir secimi gerekli."
+    data["verified_rule_authority_digest"] = _verified_rule_authority_digest(compiled_rules.authorities)
+    data["verified_rule_conflicts"] = conflicts
     if invoice.canonical_invoice is not None:
         data["canonical_invoice"] = asdict(invoice.canonical_invoice)
     data["invoice_no"] = invoice.invoice_no
@@ -289,6 +330,22 @@ def _serializable_simulation(
             data["export_status"] = "review_required"
             data["export_gate_reason"] = "KDV oran/matrah ayrimi musavir kontrolu gerektiriyor."
     return _with_review_summary(data)
+
+
+def _verified_rule_authority_digest(authorities: tuple[object, ...]) -> str:
+    import hashlib
+    import json
+
+    payload = [
+        {
+            "canonical_line_id": str(getattr(item, "canonical_line_id", "")),
+            "rule_id": str(getattr(item, "rule_id", "")),
+            "rule_version": str(getattr(item, "rule_version", "")),
+            "account_code": str(getattr(item, "account_code", "")),
+        }
+        for item in authorities
+    ]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
@@ -1665,6 +1722,47 @@ def process_next_job_once(
             "research_cache_hit": research_cache_hit,
             "nace_cache_hit": nace_cache_hit,
         }
+        if _ai_attention_status(result) == "ai_retry_required":
+            try:
+                opened_at = datetime.fromisoformat(str(job.get("created_at") or "").replace("Z", "+00:00"))
+                if opened_at.tzinfo is None:
+                    opened_at = opened_at.replace(tzinfo=UTC)
+            except ValueError:
+                opened_at = datetime.now(UTC)
+            retry = next_ai_retry(
+                step=max(int(job.get("attempt_count") or 1) - 1, 0),
+                opened_at=opened_at,
+                now=datetime.now(UTC),
+                document_id=document_ref,
+            )
+            outage_episode_id = ""
+            if hasattr(store, "record_ai_outage_failure"):
+                evidence = sanitize_provider_failure_evidence(
+                    provider_name=str(result.get("ai_classification_provider") or "unknown"),
+                    category="timeout" if "timeout" in str(result.get("ai_retry_reason") or "").lower() else "unavailable",
+                    attempted_at=datetime.now(UTC),
+                )
+                episode = store.record_ai_outage_failure(
+                    task_kind="invoice_classification",
+                    document_id=document_ref,
+                    evidence=evidence,
+                    now=datetime.now(UTC),
+                )
+                outage_episode_id = str(episode.get("id") or "")
+            store.update_processing_job(
+                job_id=str(job["id"]),
+                status=retry.status,
+                processing_metrics=processing_metrics,
+                next_attempt_at=retry.next_attempt_at,
+                retry_step=retry.retry_step,
+                outage_episode_id=outage_episode_id or None,
+                **(
+                    {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+                    if job.get("normalized_attempt_id")
+                    else {}
+                ),
+            )
+            return {"processed_count": 1, "completed_count": 0, "failed_count": 0}
         store.update_processing_job(
             job_id=str(job["id"]),
             status="completed",
@@ -1675,6 +1773,11 @@ def process_next_job_once(
                 else {}
             ),
         )
+        if hasattr(store, "recover_ai_outage_episode") and str(job.get("outage_episode_id") or ""):
+            store.recover_ai_outage_episode(
+                episode_id=str(job["outage_episode_id"]),
+                now=datetime.now(UTC),
+            )
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
         pipeline_event(

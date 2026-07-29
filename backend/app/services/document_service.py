@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.domain.business_relevance import ClientProfile, check_client_onboarding
-from app.domain.document_uploads import store_document_content
+from app.domain.document_uploads import normalize_document_period, store_document_content
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
 from app.domain.tax_certificates import parse_tax_certificate_file
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
@@ -97,20 +97,37 @@ class DocumentService:
         )
         onboarding = self._workspace_onboarding_check(client_id)
         try:
+            normalized_period = normalize_document_period(
+                document_type=document_type,
+                period=period,
+            )
             document = store_document_content(
                 base_dir=self.document_storage_path,
                 client_id=client_id,
                 file_name=file_name,
                 document_type=document_type,
                 intake_category=intake_category,
-                period=period,
+                period=normalized_period,
                 uploaded_by=uploaded_by,
                 content=content,
                 declared_size_bytes=size_bytes,
                 declared_sha256=sha256,
                 retention_days=retention_policy_days,
+                period_retention_managed=(
+                    bool(getattr(self.store, "normalized_accounting_enabled", False))
+                    and document_type in {"invoice", "einvoice_xml"}
+                ),
             )
         except ValueError as exc:
+            if str(exc) == "invalid_accounting_period":
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "allowed": False,
+                        "reason": "invalid_accounting_period",
+                        "expected": "YYYY-MM",
+                    },
+                ) from exc
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         document_payload = asdict(document)
         document_payload["uploaded_by_user_id"] = effective_user_id
@@ -407,6 +424,14 @@ class DocumentService:
         action: str,
         delete_files: bool,
     ) -> dict[str, object]:
+        if getattr(self.store, "normalized_accounting_enabled", False) and action == "extend_90_days":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "allowed": False,
+                    "reason": "period_retention_extension_not_supported",
+                },
+            )
         try:
             summary = self.store.apply_document_retention_action(
                 document_refs=document_refs,

@@ -45,6 +45,7 @@ services:
     environment:
       FISORA_ENV: production
       FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
+      FISORA_ACCOUNTING_STORE_TARGET: ${FISORA_ACCOUNTING_STORE_TARGET:-compatibility}
       FISORA_AUTH_MODE: ${FISORA_AUTH_MODE:-session_required}
       FISORA_AUTH_HEADER: ${FISORA_AUTH_HEADER:-X-Fisora-User-Id}
       FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED: ${FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED:-false}
@@ -134,6 +135,7 @@ services:
     environment:
       FISORA_ENV: production
       FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
+      FISORA_ACCOUNTING_STORE_TARGET: ${FISORA_ACCOUNTING_STORE_TARGET:-compatibility}
       FISORA_AUTH_MODE: ${FISORA_AUTH_MODE:-session_required}
       FISORA_AUTH_HEADER: ${FISORA_AUTH_HEADER:-X-Fisora-User-Id}
       FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED: ${FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED:-false}
@@ -203,6 +205,7 @@ services:
     environment:
       FISORA_ENV: production
       FISORA_STORE_BACKEND: ${FISORA_STORE_BACKEND:-postgres}
+      FISORA_ACCOUNTING_STORE_TARGET: ${FISORA_ACCOUNTING_STORE_TARGET:-compatibility}
       FISORA_STORE_PATH: /opt/fisora/data/exports/phase0_store.json
       FISORA_DOCUMENT_STORAGE_PATH: /opt/fisora/data/documents
       FISORA_QNB_SCHEDULER_ENABLED: ${FISORA_QNB_SCHEDULER_ENABLED:-false}
@@ -253,7 +256,7 @@ services:
       - "${FISORA_HTTP_PORT:-80}:80"
       - "${FISORA_HTTPS_PORT:-443}:443"
     volumes:
-      - ${FISORA_NGINX_CONFIG:-./deploy/nginx/default.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${FISORA_NGINX_CONFIG:-./deploy/nginx/default.tls.conf}:/etc/nginx/conf.d/default.conf:ro
       - ${FISORA_TLS_CERT_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
     depends_on:
       frontend:

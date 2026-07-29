@@ -182,9 +182,22 @@ class ProtectedCorpusService:
         corpus = self.store.get_protected_corpus(corpus_id)
         if not corpus:
             raise ProtectedCorpusError("corpus_not_found")
+        items = self.store.list_protected_items(corpus_id)
+        target_purchase_count = int(corpus.get("target_purchase_count") or 0)
+        target_sales_count = int(corpus.get("target_sales_count") or 0)
+        enrolled_purchase_count = sum(1 for item in items if item.get("direction") == "purchase")
+        enrolled_sales_count = sum(1 for item in items if item.get("direction") in {"sale", "sales"})
+        reference_ready_count = sum(1 for item in items if item.get("status") == "reference_ready")
         return {
             **corpus,
-            "items": self.store.list_protected_items(corpus_id),
+            "items": items,
+            "target_purchase_count": target_purchase_count,
+            "target_sales_count": target_sales_count,
+            "enrolled_purchase_count": enrolled_purchase_count,
+            "enrolled_sales_count": enrolled_sales_count,
+            "reference_ready_count": reference_ready_count,
+            "missing_reference_count": max(target_purchase_count + target_sales_count - reference_ready_count, 0),
+            "status": str(corpus.get("status") or "draft"),
         }
 
     def capture_reference_if_enrolled(

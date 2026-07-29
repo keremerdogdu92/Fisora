@@ -143,13 +143,13 @@ export function ResearchKnowledgeView({
 
   useEffect(() => {
     let cancelled = false;
-    setStatus("Bilgi havuzu okunuyor.");
+    setStatus("Araştırma kayıtları yükleniyor.");
     void loadResearchData()
       .then(() => {
         if (!cancelled) setStatus("");
       })
       .catch(() => {
-        if (!cancelled) setStatus("Bilgi havuzu sunucudan okunamadı. Yenile düğmesiyle tekrar deneyin.");
+        if (!cancelled) setStatus("Araştırma kayıtları şu an alınamadı. Yenile ile tekrar deneyin.");
       });
     return () => {
       cancelled = true;
@@ -157,19 +157,19 @@ export function ResearchKnowledgeView({
   }, [apiBaseUrl, session?.sessionToken, session?.userId, loginUserId]);
 
   async function submitRefresh(payload: ResearchPayload) {
-    setStatus("İşlem çalışıyor.");
+    setStatus("İşlem sürüyor.");
     try {
       await refreshResearchProfile({ apiBaseUrl, payload, ...auth });
       await loadResearchData();
-      setStatus("Bilgi havuzu güncellendi.");
+      setStatus("Araştırma kayıtları güncellendi.");
     } catch {
-      setStatus("İşlem tamamlanamadı. Sunucu yanıtını operasyon ekranından kontrol edin.");
+      setStatus("İşlem tamamlanamadı. Daha sonra tekrar deneyin.");
     }
   }
 
   async function submitOverride() {
     if (!selectedProfile) return;
-    setStatus("İşlem çalışıyor.");
+    setStatus("İşlem sürüyor.");
     try {
       await overrideResearchProfile({
         apiBaseUrl,
@@ -189,20 +189,20 @@ export function ResearchKnowledgeView({
         ...auth,
       });
       await loadResearchData();
-      setStatus("Bilgi havuzu güncellendi.");
+      setStatus("Araştırma kayıtları güncellendi.");
     } catch {
-      setStatus("İşlem tamamlanamadı. Sunucu yanıtını operasyon ekranından kontrol edin.");
+      setStatus("İşlem tamamlanamadı. Daha sonra tekrar deneyin.");
     }
   }
 
   async function submitBenchmark() {
-    setStatus("İşlem çalışıyor.");
+    setStatus("İşlem sürüyor.");
     try {
       await runResearchBenchmark({ apiBaseUrl, ...auth });
       await loadResearchData();
-      setStatus("Bilgi havuzu güncellendi.");
+      setStatus("Kalite ölçümü güncellendi.");
     } catch {
-      setStatus("İşlem tamamlanamadı. Sunucu yanıtını operasyon ekranından kontrol edin.");
+      setStatus("İşlem tamamlanamadı. Daha sonra tekrar deneyin.");
     }
   }
 
@@ -210,24 +210,24 @@ export function ResearchKnowledgeView({
   const latestRun = sortedBenchmarkRuns[0];
 
   return (
-    <section className="operations-grid">
+    <section className="operations-grid research-knowledge-page">
       <div className="panel">
         <div className="panel-heading">
           <div>
             <h2>Bilgi havuzu</h2>
-            <span>Research cache, kaynak politikası ve manuel ofis kararları.</span>
+            <span>Ürün ve hizmet bilgileri, kaynaklar ve müşavir kararları burada tutulur.</span>
           </div>
-          <button onClick={() => void loadResearchData()} type="button">Yenile</button>
+          <button className="secondary" onClick={() => void loadResearchData()} type="button">Kayıtları yenile</button>
         </div>
         <div className="summary-grid compact">
-          <Metric label="Profil" value={profiles.length} />
-          <Metric label="Benchmark" value={benchmarkRuns.length} />
+          <Metric label="Kayıt" value={profiles.length} />
+          <Metric label="Kalite ölçümü" value={benchmarkRuns.length} />
         </div>
-        <p className={status.includes("okunamadı") || status.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>{status || "Yeni belgelerde güvenli research sinyali kullanılır; export kapısı yine müşavir kontrolündedir."}</p>
+        <p className={status.includes("alınamadı") || status.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>{status || "Yeni belgelerde kaynaklı bilgi kullanılır. Fiş yine müşavir kontrolünden geçer."}</p>
       </div>
 
       <div className="panel">
-        <h2>Araştırma profilleri</h2>
+        <h2>Araştırma kayıtları</h2>
         <div className="basket-list">
           {profiles.length ? profiles.map((profile) => (
             <button
@@ -243,27 +243,32 @@ export function ResearchKnowledgeView({
               <span className="status export_ready">{formatConfidence(profileResearchConfidence(profile))}</span>
             </button>
           )) : (
-            <p className="decision-status">Henüz research profili yok.</p>
+            <p className="decision-status">Araştırma sonucu oluştuğunda burada görünür.</p>
           )}
         </div>
       </div>
 
       <div className="panel">
-        <h2>Seçili profil</h2>
+        <h2>Seçilen kayıt</h2>
         <Info label="Anahtar" value={selectedProfile?.key || ""} />
         <Info label="Kategori" value={categorySummary(selectedProfile)} />
-        <Info label="Research guveni" value={formatConfidence(profileResearchConfidence(selectedProfile))} />
-        <Info label="Muhasebe etkisi" value={formatConfidence(profileImpactConfidence(selectedProfile))} />
-        <Info label="Kontrol nedeni" value={reviewReason(selectedProfile)} />
+        <Info label="Kaynak güveni" value={formatConfidence(profileResearchConfidence(selectedProfile))} />
+        <Info label="Fiş kararına etkisi" value={formatConfidence(profileImpactConfidence(selectedProfile))} />
+        <Info label="Neden kontrol gerekiyor?" value={reviewReason(selectedProfile)} />
         <Info label="Kaynak" value={selectedProfile ? sourceSummary(selectedProfile) : ""} />
-        <Info label="Durum" value={selectedProfile?.override ? "Ofis override" : selectedProfile?.status || "Cache"} />
+        <Info label="Durum" value={selectedProfile?.override ? "Müşavir kararı" : selectedProfile?.status || "Kayıtlı"} />
+        <p className="research-help">Kaynak güveni düşükse sistem fiş kararını müşavir kontrolüne bırakır.</p>
         <input
           aria-label="Araştırma sorgusu"
+          className="research-field"
+          disabled={!selectedProfile}
           onChange={(event) => setRefreshQuery(event.target.value)}
-          placeholder="Marka/model + tedarikçi"
+          placeholder="Ürün/marka + tedarikçi"
           value={refreshQuery}
         />
         <button
+          className="secondary"
+          disabled={!selectedProfile}
           onClick={() =>
             selectedProfile &&
             void submitRefresh({
@@ -277,61 +282,64 @@ export function ResearchKnowledgeView({
           }
           type="button"
         >
-          Manuel yenile
+          Araştırmayı yenile
         </button>
       </div>
 
       <div className="panel">
-        <h2>Musavir kanit notu</h2>
+        <h2>Müşavir kararı</h2>
+        <p className="research-help">Seçilen kayıt için ofis kararınızı saklayın.</p>
         <input
           aria-label="Override kategori"
+          className="research-field"
           onChange={(event) => setOverrideCategory(event.target.value)}
           placeholder="Kategori"
           value={overrideCategory}
         />
         <textarea
           aria-label="Override özeti"
+          className="research-field"
           onChange={(event) => setOverrideSummary(event.target.value)}
-          placeholder="Müşavir kararı"
+          placeholder="Müşavir kararını yazın"
           rows={4}
           value={overrideSummary}
         />
         <button className="primary" disabled={!selectedProfile} onClick={() => void submitOverride()} type="button">
-          Override kaydet
+          Müşavir kararını kaydet
         </button>
       </div>
 
       <div className="panel">
         <div className="panel-heading">
           <div>
-            <h2>Benchmark</h2>
-            <span>Altın set ile bilgi havuzu eşleşmeleri.</span>
+            <h2>Kalite ölçümü</h2>
+            <span>Örnek kayıtlarla eşleşme kalitesini gösterir.</span>
           </div>
-          <button onClick={() => void submitBenchmark()} type="button">Benchmark çalıştır</button>
+          <button className="secondary" onClick={() => void submitBenchmark()} type="button">Kalite ölçümünü çalıştır</button>
         </div>
-        <Info label="Son başarı" value={formatRunAccuracy(latestRun?.accuracy)} />
-        <Info label="Case" value={latestRun?.case_count ? String(latestRun.case_count) : ""} />
-        <Info label="Marka" value={formatRunAccuracy(latestRun?.metrics?.brand_accuracy)} />
+        <Info label="Son ölçüm doğruluğu" value={formatRunAccuracy(latestRun?.accuracy)} />
+        <Info label="Örnek sayısı" value={latestRun?.case_count ? String(latestRun.case_count) : ""} />
+        <Info label="Marka / ürün" value={formatRunAccuracy(latestRun?.metrics?.brand_accuracy)} />
         <Info label="Kategori" value={formatRunAccuracy(latestRun?.metrics?.category_accuracy)} />
-        <Info label="Muhasebe etkisi" value={formatRunAccuracy(latestRun?.metrics?.accounting_impact_accuracy)} />
-        <Info label="Kontrol kapisi" value={formatRunAccuracy(latestRun?.metrics?.review_gate_accuracy)} />
+        <Info label="Fiş kararına etkisi" value={formatRunAccuracy(latestRun?.metrics?.accounting_impact_accuracy)} />
+        <Info label="Kontrole ayırma doğruluğu" value={formatRunAccuracy(latestRun?.metrics?.review_gate_accuracy)} />
         <p className="decision-status">
-          Benchmark canlı model çağırmaz; mevcut research cache ve override kayıtlarını ölçer.
+          Bu ölçüm canlı model çağırmaz; araştırma kayıtları ve müşavir kararlarını ölçer.
         </p>
         <div className="basket-list">
           {sortedBenchmarkRuns.length ? sortedBenchmarkRuns.slice(0, 5).map((run) => (
             <div className="basket-row" key={run.run_id || run.created_at}>
               <div>
                 <strong>{benchmarkRunTime(run)}</strong>
-                <span>{run.passed_count ?? run.matched_count ?? 0}/{run.case_count || 0} cache eşleşmesi</span>
+                <span>{run.passed_count ?? run.matched_count ?? 0}/{run.case_count || 0} araştırma kaydı eşleşmesi</span>
               </div>
               <span className="status export_added">{formatRunAccuracy(run.accuracy)}</span>
             </div>
           )) : (
             <div className="basket-row">
               <div>
-                <strong>Henüz ölçüm yok</strong>
-                <span>Profil yenileme veya override sonrası benchmark çalıştırılır.</span>
+                <strong>Henüz kalite ölçümü yok</strong>
+                <span>Araştırma veya müşavir kararı sonrası kalite ölçümünü çalıştırın.</span>
               </div>
               <span className="status queued">Bekliyor</span>
             </div>

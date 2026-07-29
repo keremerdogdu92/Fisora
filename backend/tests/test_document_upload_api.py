@@ -24,6 +24,94 @@ except ModuleNotFoundError:
 
 
 class DocumentUploadApiTests(unittest.TestCase):
+    def test_invoice_upload_requires_typed_accounting_period(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+
+            response = client.post(
+                "/phase0/store/document-upload",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZmF0dXJh",
+                },
+            )
+            malformed_response = client.post(
+                "/phase0/store/document-upload",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "period": "2026-2",
+                    "file_name": "fatura.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZmF0dXJh",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["detail"],
+            {"allowed": False, "reason": "invalid_accounting_period", "expected": "YYYY-MM"},
+        )
+        self.assertEqual(malformed_response.status_code, 400)
+        self.assertEqual(malformed_response.json()["detail"], response.json()["detail"])
+
+    def test_bank_statement_can_have_empty_accounting_period(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-1", "title": "Demo Mukellef", "has_chart_accounts": True},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-1"],
+                },
+            )
+            response = client.post(
+                "/phase0/store/document-upload",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "client-1",
+                    "document_type": "bank_statement",
+                    "file_name": "ekstre.pdf",
+                    "uploaded_by_user_id": "mali-musavir",
+                    "content_base64": "ZWtzdHJl",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["period"], "")
+
     def test_store_document_upload_writes_content_and_workspace_metadata(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")
@@ -98,6 +186,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by": "mukellef-user",
                     "uploaded_by_user_id": "mukellef-user",
@@ -142,6 +231,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                     "client_id": "client-1",
                     "document_type": "invoice",
                     "intake_category": "purchase_invoice",
+                    "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
                     "content_base64": "ZmF0dXJh",
@@ -191,6 +281,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "eski-fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
                     "content_base64": "ZXNraS1mYXR1cmE=",
@@ -237,6 +328,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "eski-fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
                     "content_base64": "ZXNraS1mYXR1cmE=",
@@ -625,6 +717,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by": "mukellef-user",
                     "uploaded_by_user_id": "mukellef-user",
@@ -699,6 +792,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mukellef-user",
                     "content_base64": "ZmF0dXJhLW9yaWppbmFs",
@@ -939,6 +1033,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                     "client_id": "client-1",
                     "document_type": "invoice",
                     "intake_category": "purchase_invoice",
+                    "period": "2026-05",
                     "uploaded_by": "Mali Musavir",
                     "uploaded_by_user_id": "mukellef-user",
                 },
@@ -1048,6 +1143,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mukellef-user",
                     "content_base64": "ZmF0dXJh",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, datetime
 from hashlib import sha256
+import json
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -33,6 +34,7 @@ from app.persistence.workflow_store import (
     simulation_input_digest,
 )
 from app.persistence.normalized_accounting_repository import NormalizedAccountingRepository
+from app.persistence.learning_rule_repository import LearningRuleRepository
 from app.persistence.protected_corpus_repository import (
     ProtectedCorpusConflict,
     ProtectedCorpusRepository,
@@ -71,6 +73,44 @@ def normalize_nace_code(value: str) -> str:
 
 def normalize_brand_name(value: str) -> str:
     return " ".join(str(value or "").strip().lower().split())
+
+
+def _pilot_reinitialization_roots(
+    *,
+    document_storage_path: Path | str,
+    export_path: Path | str,
+    protected_storage_path: Path | str,
+) -> tuple[tuple[Path, Path, Path], list[Path]]:
+    ordinary_root = Path(document_storage_path).resolve()
+    export_root = Path(export_path).resolve()
+    protected_root = Path(protected_storage_path).resolve()
+    if len({ordinary_root, export_root, protected_root}) != 3:
+        raise ValueError("unsafe_storage_root_overlap")
+    _validate_reset_roots(
+        document_storage_path=ordinary_root,
+        export_path=export_root,
+        protected_storage_path=protected_root,
+    )
+    inventory: list[Path] = []
+    for root in (ordinary_root, export_root, protected_root):
+        if root.exists() and root.is_dir():
+            inventory.extend(path for path in root.rglob("*") if path.is_file())
+    return (ordinary_root, export_root, protected_root), inventory
+
+
+def _delete_inventoried_files(inventory: list[Path]) -> tuple[int, list[str]]:
+    deleted = 0
+    warnings: list[str] = []
+    for path in inventory:
+        try:
+            if not path.exists():
+                warnings.append("file_missing")
+                continue
+            path.unlink()
+            deleted += 1
+        except OSError:
+            warnings.append("file_delete_failed")
+    return deleted, sorted(set(warnings))
 
 
 class PostgresWorkflowStore:
@@ -629,6 +669,149 @@ class PostgresWorkflowStore:
             "preserved_portal_user_count": len(preserved_user_ids),
             "preserved_user_ids": preserved_user_ids,
             **protected_counts,
+        }
+
+    def _pilot_reinitialization_snapshot(self, cursor: Any) -> dict[str, Any]:
+        preserved_user_ids: list[str] = []
+        cursor.execute(
+            """
+            select record_key from workflow_records
+            where tenant_id = %s and client_id = %s and record_type = 'portal_user'
+              and lower(payload->>'role') in ('accountant', 'admin')
+            order by record_key asc
+            """,
+            (self.tenant_id, PORTAL_USERS_CLIENT_ID),
+        )
+        preserved_user_ids = [str(row[0]) for row in cursor.fetchall()]
+        operational_tables = (
+            "taxpayers", "documents", "source_files", "document_sources",
+            "processing_jobs", "processing_attempts", "ai_attempts", "invoice_lines",
+            "counterparties", "journal_entries", "journal_entry_lines", "journal_revisions",
+            "journal_revision_lines", "journal_line_allocations", "review_decisions",
+            "export_batches", "export_batch_items", "learning_rules", "chart_accounts",
+            "chart_account_imports", "workflow_events", "document_identities",
+            "provider_document_links", "external_status_events", "document_safety_holds",
+        )
+        operational_ids: list[str] = []
+        counts: dict[str, int] = {}
+        for table_name in operational_tables:
+            cursor.execute(f"select id::text from {table_name} where tenant_id = %s order by id", (self.tenant_id,))
+            rows = [str(row[0]) for row in cursor.fetchall()]
+            operational_ids.extend(f"{table_name}:{value}" for value in rows)
+            counts[table_name] = len(rows)
+        cursor.execute(
+            """
+            select id::text from workflow_records
+            where tenant_id = %s and not (
+                client_id = %s and record_type in ('portal_user', 'auth_credential')
+                and record_key = any(%s)
+            ) order by id
+            """,
+            (self.tenant_id, PORTAL_USERS_CLIENT_ID, preserved_user_ids or [""]),
+        )
+        operational_ids.extend(f"workflow_records:{row[0]}" for row in cursor.fetchall())
+        protected_ids: dict[str, list[str]] = {}
+        for table_name in ("protected_corpora", "protected_corpus_items", "reference_outcome_versions", "protected_rule_versions"):
+            cursor.execute(f"select id::text from {table_name} where tenant_id = %s order by id", (self.tenant_id,))
+            protected_ids[table_name] = [str(row[0]) for row in cursor.fetchall()]
+        fingerprint_payload = {
+            "tenant_id": str(self.tenant_id),
+            "operational_ids": sorted(operational_ids),
+            "protected_corpus_ids": sorted(protected_ids["protected_corpora"]),
+            "protected_item_ids": sorted(protected_ids["protected_corpus_items"]),
+            "protected_rule_ids": sorted(protected_ids["protected_rule_versions"] + protected_ids["reference_outcome_versions"]),
+            "preserved_user_ids": sorted(preserved_user_ids),
+        }
+        preview_fingerprint = sha256(json.dumps(fingerprint_payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+        return {
+            "preview_fingerprint": preview_fingerprint,
+            "operational_document_count": counts.get("documents", 0),
+            "operational_client_count": counts.get("taxpayers", 0),
+            "operational_record_count": len(operational_ids),
+            "protected_corpus_count": len(protected_ids["protected_corpora"]),
+            "protected_item_count": len(protected_ids["protected_corpus_items"]),
+            "protected_rule_count": len(protected_ids["protected_rule_versions"]),
+            "protected_reference_count": len(protected_ids["reference_outcome_versions"]),
+            "preserved_accountant_admin_count": len(preserved_user_ids),
+        }
+
+    def preview_pilot_reinitialization(self) -> dict[str, Any]:
+        if not self.normalized_accounting_enabled:
+            raise ValueError("normalized_accounting_required")
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("select id from tenants where id = %s for update", (self.tenant_id,))
+                return self._pilot_reinitialization_snapshot(cursor)
+
+    def reinitialize_pilot_data(
+        self, *, actor_user_id: str, preview_fingerprint: str,
+        document_storage_path: Path | str, export_path: Path | str,
+        protected_storage_path: Path | str, delete_files: bool = True,
+    ) -> dict[str, Any]:
+        if not self.normalized_accounting_enabled:
+            raise ValueError("normalized_accounting_required")
+        inventory: list[Path] = []
+        if delete_files:
+            _, inventory = _pilot_reinitialization_roots(
+                document_storage_path=document_storage_path,
+                export_path=export_path,
+                protected_storage_path=protected_storage_path,
+            )
+        self._ensure_tenant()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("select id from tenants where id = %s for update", (self.tenant_id,))
+                before = self._pilot_reinitialization_snapshot(cursor)
+                if str(before["preview_fingerprint"]) != str(preview_fingerprint):
+                    raise ValueError("pilot_reinitialization_preview_stale")
+                cursor.execute("update provider_document_links set current_status_event_id = null where tenant_id = %s", (self.tenant_id,))
+                for table_name in (
+                    "protected_rule_versions", "reference_outcome_versions", "protected_corpus_items", "protected_corpora", "workflow_events",
+                    "document_safety_holds", "external_status_events", "provider_document_links", "document_identities",
+                    "export_batch_items", "export_batches", "review_decisions", "journal_line_allocations", "journal_revision_lines",
+                    "journal_revisions", "journal_entry_lines", "journal_entries", "ai_attempts", "processing_attempts",
+                    "processing_jobs", "invoice_lines", "document_sources", "source_files", "documents", "counterparties",
+                    "learning_rules", "chart_accounts", "chart_account_imports", "portal_user_client_access",
+                    "taxpayers",
+                ):
+                    cursor.execute(f"delete from {table_name} where tenant_id = %s", (self.tenant_id,))
+                cursor.execute("delete from portal_users where tenant_id = %s and lower(role) not in ('accountant', 'admin')", (self.tenant_id,))
+                cursor.execute("delete from workflow_records where tenant_id = %s and client_id <> %s", (self.tenant_id, PORTAL_USERS_CLIENT_ID))
+                cursor.execute("""delete from workflow_records where tenant_id = %s and client_id = %s
+                    and record_type = 'portal_user' and lower(payload->>'role') not in ('accountant', 'admin')""", (self.tenant_id, PORTAL_USERS_CLIENT_ID))
+                cursor.execute("delete from workflow_records where tenant_id = %s and client_id = %s and record_type in ('auth_session', 'auth_token')", (self.tenant_id, PORTAL_USERS_CLIENT_ID))
+                cursor.execute("""delete from workflow_records where tenant_id = %s and client_id = %s
+                    and record_type = 'auth_credential' and record_key not in (
+                        select record_key from workflow_records where tenant_id = %s and client_id = %s
+                          and record_type = 'portal_user' and lower(payload->>'role') in ('accountant', 'admin'))""",
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID, self.tenant_id, PORTAL_USERS_CLIENT_ID))
+                cursor.execute("delete from workflow_records where tenant_id = %s and client_id = %s and record_type not in ('portal_user', 'auth_credential')", (self.tenant_id, PORTAL_USERS_CLIENT_ID))
+        deleted_file_count = 0
+        warning_categories: list[str] = []
+        if delete_files:
+            deleted_file_count, warning_categories = _delete_inventoried_files(inventory)
+        after = self.preview_pilot_reinitialization()
+        self.record_operation_event(
+            client_id="__system__",
+            event={
+                "event_type": "pilot_reinitialization", "status": "completed", "actor": actor_user_id,
+                "created_at": utc_now(),
+                "metadata": {
+                    "preview_fingerprint": preview_fingerprint,
+                    "pre_counts": {key: value for key, value in before.items() if key.endswith("count")},
+                    "post_counts": {key: value for key, value in after.items() if key.endswith("count")},
+                },
+            },
+        )
+        return {
+            **after,
+            "remaining_operational_document_count": after["operational_document_count"],
+            "remaining_protected_corpus_count": after["protected_corpus_count"],
+            "remaining_protected_rule_count": after["protected_rule_count"],
+            "deleted_file_count": deleted_file_count,
+            "file_delete_warning_count": len(warning_categories),
+            "file_delete_warning_categories": warning_categories,
         }
 
     def preview_test_data_reset(self) -> dict[str, Any]:
@@ -2685,6 +2868,9 @@ class PostgresWorkflowStore:
         error_message: str = "",
         processing_metrics: dict[str, Any] | None = None,
         attempt_id: str = "",
+        next_attempt_at: Any | None = None,
+        retry_step: int = 0,
+        outage_episode_id: str | None = None,
     ) -> dict[str, Any] | None:
         if self.normalized_accounting_enabled:
             update_kwargs = {
@@ -2693,6 +2879,14 @@ class PostgresWorkflowStore:
                 "error_message": error_message,
                 "processing_metrics": processing_metrics,
             }
+            if next_attempt_at is not None or retry_step or outage_episode_id:
+                update_kwargs.update(
+                    {
+                        "next_attempt_at": next_attempt_at,
+                        "retry_step": retry_step,
+                        "outage_episode_id": outage_episode_id,
+                    }
+                )
             if attempt_id:
                 update_kwargs["attempt_id"] = attempt_id
             updated = self.normalized_repository.update_processing_job(**update_kwargs)
@@ -2712,8 +2906,29 @@ class PostgresWorkflowStore:
         payload["error_message"] = error_message
         if processing_metrics is not None:
             payload["processing_metrics"] = processing_metrics
+        payload["next_attempt_at"] = next_attempt_at.isoformat() if hasattr(next_attempt_at, "isoformat") else str(next_attempt_at or "")
+        payload["retry_step"] = int(retry_step or 0)
+        payload["outage_episode_id"] = str(outage_episode_id or "")
         payload["updated_at"] = utc_now()
         return self._upsert_record(str(row["client_id"]), "processing_job", job_id, payload)
+
+    def record_ai_outage_failure(self, *, task_kind: str, document_id: str, evidence: dict[str, str], now: datetime) -> dict[str, Any]:
+        if self.normalized_accounting_enabled:
+            return self.normalized_repository.record_ai_outage_failure(
+                task_kind=task_kind, document_id=document_id, evidence=evidence, now=now
+            )
+        episode = self._get_record(PORTAL_USERS_CLIENT_ID, "ai_outage_episode", task_kind) or {
+            "id": str(uuid4()), "task_kind": task_kind, "status": "open", "affected_document_count": 0,
+            "failed_provider_categories": [],
+        }
+        episode["affected_document_count"] = int(episode.get("affected_document_count") or 0) + 1
+        episode["failed_provider_categories"] = [*episode.get("failed_provider_categories", []), evidence]
+        return self._upsert_record(PORTAL_USERS_CLIENT_ID, "ai_outage_episode", task_kind, episode)
+
+    def recover_ai_outage_episode(self, *, episode_id: str, now: datetime) -> dict[str, Any] | None:
+        if self.normalized_accounting_enabled:
+            return self.normalized_repository.recover_ai_outage_episode(episode_id=episode_id, now=now)
+        return None
 
     def _client_id_for_taxpayer_job(self, job_id: str) -> str:
         row = self._get_record_by_key("processing_job", job_id)
@@ -2894,6 +3109,7 @@ class PostgresWorkflowStore:
             "processing_jobs": self._payloads(client_id, "processing_job"),
             "review_decisions": self._payloads(client_id, "review_decision"),
             "learning_events": self._payloads(client_id, "learning_event"),
+            "learning_rules": self.list_active_learning_rules(client_id=client_id),
             "export_packages": self._payloads(client_id, "export_package"),
             "portal_users": [
                 user
@@ -2925,6 +3141,19 @@ class PostgresWorkflowStore:
                 for document in workspace["documents"]
             ]
         return workspace
+
+    def list_active_learning_rules(self, *, client_id: str) -> list[dict[str, Any]]:
+        """Return only activated, tenant-scoped rules for worker compilation."""
+
+        repository = LearningRuleRepository(
+            connect=self._connect,
+            tenant_id=self.tenant_id,
+            json_value=self._json,
+        )
+        try:
+            return repository.list_active(client_id=client_id)
+        except Exception:  # compatibility databases may predate migration 008
+            return []
 
     def authoritative_export_workspace(self, client_id: str) -> dict[str, Any]:
         workspace = self.get_workspace(client_id)

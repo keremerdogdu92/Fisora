@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "Fisero Muhasebe İncelemesi"
+  short_description: "Muhasebe kanıtını ve taslak doğruluğunu inceler"
+  default_prompt: "Use $fisero-review-accounting to review this Fisero accounting flow for evidence, correctness, and accountant usability."

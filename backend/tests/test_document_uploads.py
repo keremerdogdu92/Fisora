@@ -75,6 +75,24 @@ class DocumentUploadTests(unittest.TestCase):
         self.assertEqual(document.size_bytes, 123)
         self.assertEqual(document.sha256, "declared")
 
+    def test_period_managed_invoice_has_no_upload_time_retention_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            document = store_document_content(
+                base_dir=Path(temp_dir),
+                client_id="client-1",
+                file_name="subat-faturasi.xml",
+                document_type="einvoice_xml",
+                period="2026-02",
+                uploaded_by="mukellef-user",
+                content=b"invoice-bytes",
+                period_retention_managed=True,
+            )
+
+        self.assertEqual(document.period, "2026-02")
+        self.assertEqual(document.storage_status, "stored")
+        self.assertEqual(document.download_available_until, "")
+        self.assertEqual(document.expires_at, "")
+
     def test_special_document_keeps_intake_category_for_manual_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             document = store_document_content(

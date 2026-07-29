@@ -293,7 +293,7 @@ button:disabled {
 
 .portal-sidebar.collapsed .portal-brand > div,
 .portal-sidebar.collapsed .sidebar-user div,
-.portal-sidebar.collapsed .sidebar-exit,
+.portal-sidebar.collapsed .sidebar-exit span,
 .portal-sidebar.collapsed .sidebar-link span:not(.nav-symbol) {
   display: none;
 }
@@ -313,6 +313,14 @@ button:disabled {
 .portal-sidebar.collapsed .sidebar-user {
   grid-template-columns: 1fr;
   justify-items: center;
+}
+
+.portal-sidebar.collapsed .sidebar-exit {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0;
 }
 
 .brand-mark {
@@ -418,12 +426,22 @@ button:disabled {
 }
 
 .sidebar-exit {
+  align-items: center;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
+  display: inline-flex;
+  gap: 8px;
   font-weight: 800;
+  justify-content: center;
   min-height: 36px;
+  padding: 8px 10px;
+}
+
+.sidebar-exit svg {
+  height: 17px;
+  width: 17px;
 }
 
 .portal-main-shell {
@@ -520,6 +538,33 @@ button:disabled {
   margin: 0;
 }
 
+.notification-list {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.notification-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.notification-item.read {
+  opacity: 0.72;
+}
+
+.notification-item > strong {
+  margin-bottom: 4px;
+}
+
+.notification-badge {
+  color: var(--muted);
+  display: block;
+  font-size: 0.78rem;
+  margin: 6px 0;
+}
+
 .portal-title-block h1 {
   font-size: 1.22rem;
   line-height: 1.2;
@@ -536,16 +581,6 @@ button:disabled {
 
 .pilot-source.compact {
   min-width: 180px;
-}
-
-.compact-exit {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-weight: 800;
-  min-height: 38px;
-  padding: 8px 11px;
 }
 
 .private-topbar > div:first-child {
@@ -3348,17 +3383,39 @@ tbody tr:last-child td {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.topbar-user {
-  align-items: flex-end;
-  color: var(--muted);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  text-align: right;
+.research-knowledge-page .panel {
+  align-content: start;
+  display: grid;
+  gap: 12px;
 }
 
-.topbar-user strong {
+.research-field {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   color: var(--text);
+  font: inherit;
+  min-height: 44px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+textarea.research-field {
+  min-height: 108px;
+  resize: vertical;
+}
+
+.research-field:disabled {
+  background: var(--surface-muted);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.research-help {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: -2px 0 0;
 }
 
 .accountant-dashboard-page,
@@ -4284,11 +4341,26 @@ code {
   }
 
   .portal-topbar,
-  .portal-topbar-actions,
   .panel-heading,
   .workbench-toolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .portal-topbar-actions {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .portal-topbar-actions .topbar-action {
+    justify-content: center;
+  }
+
+  .portal-topbar-actions .pilot-source {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
   .document-context-bar {
@@ -4436,11 +4508,6 @@ code {
 
   .bar-row {
     grid-template-columns: 1fr;
-  }
-
-  .topbar-user {
-    align-items: flex-start;
-    text-align: left;
   }
 
   .document-canvas {

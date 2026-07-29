@@ -242,6 +242,11 @@ temporary.replace(target)
 print(target.name)
 '
     ;;
+  doctor)
+    require_env_file
+    printf 'FISORA_STORE_BACKEND=%s\n' "$(env_value FISORA_STORE_BACKEND)"
+    printf 'FISORA_ACCOUNTING_STORE_TARGET=%s\n' "$(env_value FISORA_ACCOUNTING_STORE_TARGET)"
+    ;;
   logs)
     require_env_file
     service="${2:-backend}"

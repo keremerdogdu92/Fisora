@@ -419,7 +419,7 @@ export function AccountantWorkspace({
               </div>
             );
           })}
-          {!queueDocuments.length ? <p className="empty">Bu filtrede belge yok.</p> : null}
+          {!queueDocuments.length ? <p className="empty">Bu filtrede belge yok. Mükellef seçin veya filtreyi değiştirin.</p> : null}
         </div>
       </section>
     </section>

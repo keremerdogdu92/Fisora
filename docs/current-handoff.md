@@ -1,5 +1,40 @@
 # Current Handoff
 
+### 2026-07-29 protected 50-invoice live baseline and semantic research repair (live)
+
+- `main` runtime release commit `e06addc` is live. The release wrapper reported
+  `before_commit=d4266ee`, `after_commit=e06addc`, HTTPS root/health/readiness
+  `200`, `ready=true`, and `pilot_sellable=true`.
+- Research no longer creates a second accounting authority when an initial
+  semantic decision is already accepted. It appends
+  `research_evidence_collection` evidence instead; research synthesis remains
+  available when the initial decision was not accepted. The regression was
+  reproduced before the fix, then the targeted scenarios and the full backend
+  suite passed (`667 OK`, `19` DSN-gated skips).
+- The Cansu + Arif 35-purchase/15-sales source set completed its first live
+  processing pass: `19 completed`, `31 failed`, with no remaining queued or
+  processing jobs. All 19 completed documents belong to Cansu. The failures are
+  Cansu `12` and Arif `19`; every failure is
+  `normalized journal requires populated draft lines`. The previous
+  `multiple accepted unsuperseded semantic attempts` error is absent after the
+  release. The worker remains running.
+- The empty-draft condition is now the next product/runtime blocker. Canonical
+  evidence and AI/review diagnostics exist, but normalized persistence turns an
+  empty draft into a failed job instead of preserving an accountant-visible
+  insufficient-evidence/review-required result. Do not treat the 50-document
+  baseline or accountant-learning measurement as complete until this behavior
+  is resolved and the failed documents are reprocessed.
+- Protected corpus `8c302dec-7c47-411d-8b9c-b553bf7bfe8e` exists in `draft`
+  state with targets `35 purchase + 15 sales`, but
+  `protected_corpus_items=0`. No accountant reference outcome or learning rule
+  has been created. Source uploads remain available; corpus admission/freeze
+  must be completed only after the processing and tenant/source mappings are
+  verified.
+- A separate operational defect remains: there is no total document-level
+  deadline across provider fallbacks, so slow PDF/provider calls can occupy a
+  worker thread for several minutes. This did not prevent the current queue
+  from reaching a terminal state but remains open.
+
 ### 2026-07-29 normalized 50-invoice pilot foundation, learning rules, period retention ve canlı deploy (canlı)
 
 - `main` branch runtime release commit'i `5bf3db1` canlıya alındı.

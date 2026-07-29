@@ -1,5 +1,12 @@
 # Current Handoff
 
+### 2026-07-29 normalized 50-invoice pilot foundation, learning rules, period retention ve canlı deploy (canlı)
+
+- `main` branch runtime release commit'i `5bf3db1` canlıya alındı.
+- Release wrapper `before_commit=d026345`, `after_commit=5bf3db1`, `smoke=ok`, `ready=true` ve `pilot_sellable=true` döndü.
+- Öğrenme kuralları yaşam döngüsü (`008_learning_rule_lifecycle.sql`), fiş düzenleme iş birliği kilitleri (`009_journal_edit_collaboration.sql`), dönem muhafazası (`007_period_retention.sql`) ve AI kesinti/retry altyapısı (`010_ai_outage_retry.sql`) canlı veritabanında doğrulandı.
+- Deploy öncesi backend `665` test (`19` skipped DSN-gated), frontend `159/159` test, Next.js production build ve `git diff --check` başarıyla doğrulandı.
+
 ### 2026-07-25 QNB gelen fatura güvenliği, scheduler readiness ve canlı deploy (canlı)
 
 - `main` branch runtime release commit'i `4d5d950` canlıya alındı.

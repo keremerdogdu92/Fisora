@@ -637,7 +637,7 @@ test("processed backend documents preserve AI correction draft status and attemp
   assert.deepEqual(document.pipelineEvents.map((event) => event.step), ["ai_correction_required"]);
 });
 
-test("fetchBackendPilotData loads clients then each allowed summary workspace with a longer backend timeout", async () => {
+test("fetchBackendPilotData loads clients then each allowed review workspace with a longer backend timeout", async () => {
   const requests = [];
   const fetchImpl = async (url, init = {}) => {
     requests.push({ url, init });
@@ -647,7 +647,7 @@ test("fetchBackendPilotData loads clients then each allowed summary workspace wi
         json: async () => ({ clients: [clientRecord] }),
       };
     }
-    if (url.endsWith("/phase0/store/workspace/client-1?view=summary")) {
+    if (url.endsWith("/phase0/store/workspace/client-1?view=review")) {
       return {
         ok: true,
         json: async () => workspaceRecord,
@@ -668,7 +668,7 @@ test("fetchBackendPilotData loads clients then each allowed summary workspace wi
     requests.map((request) => request.url),
     [
       "http://localhost:8000/phase0/store/clients",
-      "http://localhost:8000/phase0/store/workspace/client-1?view=summary",
+      "http://localhost:8000/phase0/store/workspace/client-1?view=review",
     ],
   );
   assert.deepEqual(requests[0].init.headers, { "X-Fisora-User-Id": "mukellef-user" });

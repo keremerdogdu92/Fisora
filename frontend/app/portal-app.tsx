@@ -6,11 +6,10 @@ import { ClientPortal } from "./portal-client-view";
 import { ClientManagementView } from "./portal-clients-view";
 import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
-import { ResearchKnowledgeView } from "./portal-research-view";
 import { SettingsView } from "./portal-settings-view";
 import { PortalSidebar, PortalTopbarStatus } from "./shared/components";
 import { AccountantWorkspace } from "./portal-workspace-view";
-import { loginWithPassword, persistSession, readStoredSession, resolveApiBaseUrl, useTestDataReset } from "./features/session";
+import { loginWithPassword, persistSession, resolveApiBaseUrl, usePortalSessionGuard, useTestDataReset } from "./features/session";
 import {
   PilotQueryProvider,
   buildPilotReadinessView,
@@ -26,7 +25,7 @@ import { useQnbCommands } from "./features/qnb";
 import { addLocalUploadsAction, useDocumentWorkflow } from "./features/documents";
 import { useExportCommands } from "./features/export";
 import { buildPortalDashboardViewModels } from "./portal-dashboard";
-import { normalizeSessionForPortalConfig, PORTAL_NAV_ITEMS, portalConfigForRouteKey } from "./portal-routes";
+import { PORTAL_NAV_ITEMS, portalConfigForRouteKey } from "./portal-routes";
 import type {
   CancellationRequest,
   CorrectionDraft,
@@ -80,7 +79,7 @@ function workspaceSourceState(payload: PilotData, nextSource: string): Workspace
   };
 }
 function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
-  const portalConfig = portalConfigForRouteKey(routeKey);
+  const portalConfig = useMemo(() => portalConfigForRouteKey(routeKey), [routeKey]);
   const lockedRole = portalConfig.lockedRole as LocalSession["role"] | undefined;
   const visibleNavItems = (PORTAL_NAV_ITEMS as PortalNavItem[]).filter((item) =>
     portalConfig.visibleModes.includes(item.mode),
@@ -100,8 +99,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [clientSearch, setClientSearch] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [session, setSession] = useState<LocalSession | null>(null);
-  const [sessionHydrated, setSessionHydrated] = useState(false);
+  const { session, sessionHydrated, setSession } = usePortalSessionGuard({ lockedRole, portalConfig, routeKey: String(routeKey), setLocalFallbackAllowed });
   const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
   const [loginPassword, setLoginPassword] = useState("");
   const [loginRole, setLoginRole] = useState<"client_user" | "accountant">(portalConfig.defaultRole as "client_user" | "accountant");
@@ -142,11 +140,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   }
 
   useEffect(() => {
-    setSession(normalizeSessionForPortalConfig(readStoredSession(), portalConfig));
-    setSessionHydrated(true);
-  }, [routeKey]);
-
-  useEffect(() => {
     if (!sessionHydrated) return;
     let cancelled = false;
     void loadInitialPilotData({
@@ -155,7 +148,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       explicitAllowLocalFallback: process.env.NEXT_PUBLIC_FISORA_ALLOW_LOCAL_FALLBACK === "true",
       session,
       setLocalFallbackAllowed,
-      setReadinessPayload,
       shouldCancel: () => cancelled,
     });
     return () => {
@@ -385,6 +377,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const activeNavItem = (PORTAL_NAV_ITEMS as PortalNavItem[]).find((item) => item.mode === mode);
   const showSidebar = visibleNavItems.length > 1;
 
+  if (!sessionHydrated || (lockedRole && !session)) return <main className="landing-shell"><p className="decision-status">Oturum doğrulanıyor.</p></main>;
+
   return (
     <main className={showSidebar ? `private-shell portal-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}` : "private-shell portal-shell no-sidebar"}>
       {showSidebar ? (
@@ -448,25 +442,25 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         />
       ) : null}
 
-      {mode === "agents" ? <AgentTrainingView agentSummaries={dashboardView.agentSummaries} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} /> : null}
+      {mode === "agents" ? <AgentTrainingView agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} /> : null}
 
       {mode === "accountant" ? (
         <AccountantDashboard
-          agentSummaries={dashboardView.agentSummaries}
           clientRows={visibleDashboardClientRows}
           dashboardMetrics={dashboardView.dashboardMetrics}
           documents={data.documents}
-          durationMetrics={dashboardView.durationMetrics}
-          funnelRows={dashboardView.funnelRows}
-          intakeDistribution={dashboardView.intakeDistribution}
-          learningInsights={dashboardView.learningInsights}
+          isLoading={source.status === "loading"}
           onClientSelect={(clientId) => {
             setSelectedClientId(clientId);
             setSelectedDocumentId("");
           }}
+          onOpenDocument={(document) => {
+            setSelectedClientId(document.clientId);
+            setSelectedDocumentId(document.id);
+            setMode("documents");
+          }}
           priorityItems={dashboardView.priorityItems}
           selectedClientId={selectedClient?.clientId ?? ""}
-          uploadTrackingRows={dashboardView.uploadTrackingRows}
         />
       ) : null}
 
@@ -531,6 +525,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           clients={filteredClients}
           clientSearch={clientSearch}
           documents={clientDocuments}
+          isLoading={source.status === "loading"}
           inviteStatus={inviteStatus}
           newClientDraft={newClientDraft}
           newClientNaceResearchPending={newClientNaceResearchPending} newClientNaceResearchProfile={newClientNaceResearchProfile} newClientNaceResearchStatus={newClientNaceResearchStatus}
@@ -589,8 +584,6 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           {...testDataReset}
         />
       ) : null}
-
-      {mode === "research" ? <ResearchKnowledgeView loginUserId={loginUserId} session={session} /> : null}
 
       {mode === "exports" ? (
         <ExportBasketRouteView

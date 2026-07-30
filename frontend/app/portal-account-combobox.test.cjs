@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   applyAccountSelectionToLine,
+  classifyDraftAccountCode,
   filterAccountOptions,
   normalizeChartAccountOptions,
   resolveAccountSelection,
@@ -104,4 +105,12 @@ test("applyAccountSelectionToLine always fills description from chart name", () 
     applyAccountSelectionToLine({ account_code: "191.01.020", description: "Elle yazildi", debit: "0.00", credit: "0.00" }, accounts[1], accounts),
     { account_code: "191.01.020", description: "Indirilecek KDV %20", debit: "0.00", credit: "0.00" },
   );
+});
+
+test("classifyDraftAccountCode treats a missing suggested cari as a warning, not an invalid account", () => {
+  assert.equal(classifyDraftAccountCode(accounts, "191.01.020", ["320.19736107464"]), "valid");
+  assert.equal(classifyDraftAccountCode(accounts, "153.99.999", ["320.19736107464"]), "invalid");
+  assert.equal(classifyDraftAccountCode(accounts, "320.19736107464", ["320.19736107464"]), "new_counterparty");
+  assert.equal(classifyDraftAccountCode(accounts, "120.9876543210", ["120.9876543210"]), "new_counterparty");
+  assert.equal(classifyDraftAccountCode(accounts, "320.B04", ["320.B04"]), "valid");
 });

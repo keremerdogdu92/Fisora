@@ -65,7 +65,6 @@ export async function loadInitialPilotData({
   explicitAllowLocalFallback,
   session,
   setLocalFallbackAllowed,
-  setReadinessPayload,
   shouldCancel,
 }: {
   applyPilotData: (payload: PilotData, source: string) => void;
@@ -73,7 +72,6 @@ export async function loadInitialPilotData({
   explicitAllowLocalFallback: boolean;
   session: LocalSession | null;
   setLocalFallbackAllowed: (allowed: boolean) => void;
-  setReadinessPayload: (payload: Record<string, unknown> | null) => void;
   shouldCancel: () => boolean;
 }) {
   const allowLocalFallback = canUseLocalPilotFallback({
@@ -81,7 +79,6 @@ export async function loadInitialPilotData({
     explicitAllow: explicitAllowLocalFallback,
   });
   if (!shouldCancel()) setLocalFallbackAllowed(allowLocalFallback);
-  await refreshBackendReadiness({ setReadinessPayload, shouldCancel });
   if (await refreshBackendPilotData({ applyPilotData, defaultUserId, session, shouldCancel })) return;
   if (!allowLocalFallback) {
     if (!shouldCancel()) applyPilotData(emptyPilotData, "Backend okunamadı");

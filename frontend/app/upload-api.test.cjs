@@ -14,6 +14,7 @@ const {
   createWorkspaceExportPackage,
   deleteClientDocuments,
   ensureUploadWorkspace,
+  fetchAuthSession,
   fetchQnbConnectionStatus,
   loginWithPassword,
   sessionAuthErrorMessage,
@@ -554,6 +555,36 @@ test("loginWithPassword posts credentials and returns a backend session", async 
   });
   assert.equal(result.sessionToken, "session-token-1");
   assert.equal(result.userId, "mali-musavir");
+});
+
+test("fetchAuthSession validates the stored token before opening a portal route", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return {
+      ok: true,
+      json: async () => ({
+        valid: true,
+        user_id: "mali-musavir",
+        expires_at: "2026-06-06T22:00:00+00:00",
+      }),
+    };
+  };
+
+  const result = await fetchAuthSession({
+    apiBaseUrl: "http://localhost:8000",
+    sessionToken: "session-token-1",
+    userId: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(request.url, "http://localhost:8000/phase0/store/auth/session");
+  assert.deepEqual(request.init.headers, {
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.user_id, "mali-musavir");
 });
 
 test("createDelegatedClientSession posts accountant-authorized delegated session request", async () => {

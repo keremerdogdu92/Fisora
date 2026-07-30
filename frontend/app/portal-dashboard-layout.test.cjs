@@ -11,13 +11,12 @@ test("dashboard metrics use semantic Lucide icons through the shared Metric comp
   const dashboard = source("portal-dashboard-view.tsx");
   const shared = source("portal-shared.tsx");
 
-  assert.match(dashboard, /Users/);
-  assert.match(dashboard, /Upload/);
-  assert.match(dashboard, /UserX/);
   assert.match(dashboard, /ClipboardCheck/);
+  assert.match(dashboard, /FileSearch/);
   assert.match(dashboard, /PackageCheck/);
-  assert.match(dashboard, /MessageSquareWarning/);
-  assert.match(dashboard, /<Metric icon=\{Users\} label="Mükellef"/);
+  assert.match(dashboard, /<Metric icon=\{ClipboardCheck\} label="Kontrol"/);
+  assert.match(dashboard, /<Metric icon=\{FileSearch\} label="Sırada"/);
+  assert.match(dashboard, /<Metric icon=\{PackageCheck\} label="Hazır"/);
   assert.match(shared, /icon\?: LucideIcon/);
   assert.match(shared, /aria-hidden="true"/);
   assert.match(shared, /className="metric-icon"/);
@@ -28,7 +27,8 @@ test("sidebar uses semantic icons instead of two-letter navigation badges", () =
 
   assert.match(shell, /LayoutDashboard/);
   assert.match(shell, /Landmark/);
-  assert.match(shell, /BookOpen/);
+  assert.match(shell, /Bot/);
+  assert.doesNotMatch(shell, /BookOpen/);
   assert.match(shell, /Settings/);
   assert.match(shell, /icon: LayoutDashboard/);
   assert.match(shell, /<Icon aria-hidden="true"/);
@@ -108,23 +108,14 @@ test("document review toolbar and main workspace can wrap before desktop overflo
   assert.match(styles, /@media \(max-width:\s*1320px\)[\s\S]*?\.document-review-main\s*\{[\s\S]*?grid-template-columns:\s*1fr;/);
 });
 
-test("dashboard metric grid follows the approved desktop tablet and mobile columns", () => {
+test("dashboard review summary keeps three compact counts at every working width", () => {
   const styles = source("styles.css");
 
   assert.match(
     styles,
-    /\.office-dashboard\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\);/,
+    /\.office-dashboard\.dashboard-review-summary\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
   );
-  assert.match(
-    styles,
-    /@media \(max-width: 1279px\)[\s\S]*?\.office-dashboard\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
-  );
-  assert.match(
-    styles,
-    /@media \(max-width: 759px\)[\s\S]*?\.office-dashboard\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/,
-  );
-  assert.match(styles, /\.metric\.with-icon/);
-  assert.match(styles, /\.nav-symbol svg/);
+  assert.match(styles, /@media \(max-width: 520px\)[\s\S]*?\.office-dashboard\.dashboard-review-summary \.metric\s*\{/);
 });
 
 test("tablet dashboard stacks charts before they can overflow the page", () => {
@@ -144,22 +135,19 @@ test("global controls have focus-visible and minimum target contracts", () => {
   assert.match(styles, /\.topbar-popover/);
 });
 
-test("accountant dashboard exposes agent workbench and short priority list instead of a crowded document table", () => {
+test("accountant dashboard keeps agents and secondary telemetry off the daily review surface", () => {
   const dashboard = source("portal-dashboard-view.tsx");
   const styles = source("styles.css");
 
-  assert.match(dashboard, /agent-workbench-panel/);
-  assert.match(dashboard, /priority-work-list/);
-  assert.match(dashboard, /className="duration-metrics"/);
-  assert.match(dashboard, /learning-prep-panel/);
-  assert.match(dashboard, /Eğitim hazırlığı/);
-  assert.match(dashboard, /Müşavirce değişmeden onaylandı/);
-  assert.doesNotMatch(dashboard, /Doğruluk/);
-  assert.doesNotMatch(dashboard, /Yeni ajan oluştur/);
-  assert.match(styles, /\.dashboard-workbench-grid\s*\{/);
-  assert.match(styles, /\.priority-work-list\s*\{/);
-  assert.match(styles, /\.learning-prep-panel\s*\{/);
-  assert.match(styles, /\.duration-metrics\s*\{/);
+  assert.match(dashboard, /dashboard-review-layout/);
+  assert.match(dashboard, /review-work-list/);
+  assert.match(dashboard, /office-summary/);
+  assert.doesNotMatch(dashboard, /agent-workbench-panel/);
+  assert.doesNotMatch(dashboard, /learning-prep-panel/);
+  assert.doesNotMatch(dashboard, /ChartBars/);
+  assert.match(styles, /\.dashboard-review-layout\s*\{/);
+  assert.match(styles, /\.review-work-row\s*\{/);
+  assert.match(styles, /\.office-summary\s*\{/);
 });
 
 test("document cockpit keeps corrections inline with dirty-state reset and no primary Duzelt action", () => {
@@ -186,6 +174,16 @@ test("agent training page is read-only and uses learning evidence language", () 
   assert.match(styles, /\.agent-training-grid\s*\{/);
 });
 
+test("dashboard distinguishes workspace loading from a real empty work queue", () => {
+  const dashboard = source("portal-dashboard-view.tsx");
+  const portalApp = source("portal-app.tsx");
+
+  assert.match(dashboard, /isLoading/);
+  assert.match(dashboard, /Çalışma alanı yükleniyor/);
+  assert.match(dashboard, /isLoading \? "…" : dashboardMetrics/);
+  assert.match(portalApp, /isLoading=\{source\.status === "loading"\}/);
+});
+
 test("document cockpit exposes accountant learning preview modal controls", () => {
   const reviewPanels = source("portal-review-panels.tsx");
 
@@ -193,4 +191,20 @@ test("document cockpit exposes accountant learning preview modal controls", () =
   assert.match(reviewPanels, /onPreviewReviewRule/);
   assert.match(reviewPanels, /Kural olarak kaydet/);
   assert.match(reviewPanels, /Benzerlerde oner/);
+});
+
+test("accountant dashboard promotes review work and keeps agent metrics off the home surface", () => {
+  const dashboard = source("portal-dashboard-view.tsx");
+  const styles = source("styles.css");
+
+  assert.match(dashboard, /dashboard-review-summary/);
+  assert.match(dashboard, /Bugün bakılacak belgeler/);
+  assert.match(dashboard, /onOpenDocument/);
+  assert.match(dashboard, />İncele<\/button>/);
+  assert.match(dashboard, /office-summary/);
+  assert.doesNotMatch(dashboard, /agent-workbench-panel/);
+  assert.doesNotMatch(dashboard, /className="duration-metrics"/);
+  assert.match(styles, /\.dashboard-review-layout\s*\{/);
+  assert.match(styles, /\.review-work-list,/);
+  assert.match(styles, /\.office-summary \{/);
 });

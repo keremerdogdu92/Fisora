@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const shouldStartWebServer = process.env.FISORA_PLAYWRIGHT_NO_WEBSERVER !== "1";
+const baseURL = process.env.FISORA_PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
+const webServerPort = new URL(baseURL).port || "3000";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -11,13 +13,13 @@ export default defineConfig({
   fullyParallel: true,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL,
     trace: "retain-on-failure",
   },
   webServer: shouldStartWebServer
     ? {
-        command: "npm run dev -- --hostname 127.0.0.1 --port 3000",
-        url: "http://127.0.0.1:3000",
+        command: `npm run dev -- --hostname 127.0.0.1 --port ${webServerPort}`,
+        url: baseURL,
         reuseExistingServer: !process.env.CI,
         gracefulShutdown: { signal: "SIGINT", timeout: 500 },
         timeout: 120_000,

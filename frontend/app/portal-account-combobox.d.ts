@@ -11,6 +11,11 @@ export type ChartAccountOption = {
 };
 
 export function applyAccountSelectionToLine(line: DraftLine, account: ChartAccountOption, options?: ChartAccountOption[]): DraftLine;
+export function classifyDraftAccountCode(
+  options: ChartAccountOption[],
+  accountCode: string,
+  suggestedNewCounterpartyCodes?: string[],
+): "valid" | "new_counterparty" | "invalid";
 export function filterAccountOptions(options: ChartAccountOption[], query: string, limit?: number): ChartAccountOption[];
 export function normalizeChartAccountOptions(accounts: unknown[]): ChartAccountOption[];
 export function resolveAccountSelection(options: ChartAccountOption[], input: string, activeIndex?: number): ChartAccountOption | null;

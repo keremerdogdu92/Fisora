@@ -223,7 +223,7 @@ export function ResearchKnowledgeView({
           <Metric label="Kayıt" value={profiles.length} />
           <Metric label="Kalite ölçümü" value={benchmarkRuns.length} />
         </div>
-        <p className={status.includes("alınamadı") || status.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>{status || "Yeni belgelerde kaynaklı bilgi kullanılır. Fiş yine müşavir kontrolünden geçer."}</p>
+        <p aria-live="polite" className={status.includes("alınamadı") || status.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>{status || "Yeni belgelerde kaynaklı bilgi kullanılır. Fiş yine müşavir kontrolünden geçer."}</p>
       </div>
 
       <div className="panel">

@@ -583,6 +583,63 @@ button:disabled {
   min-width: 180px;
 }
 
+.workspace-status {
+  align-items: center;
+  background: #f4f7f9;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.workspace-status strong {
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.workspace-status-dot {
+  background: #8293a5;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.workspace-status.loading .workspace-status-dot,
+.client-list-state.loading .workspace-status-dot {
+  animation: workspace-status-pulse 1.2s ease-in-out infinite;
+  background: var(--accent);
+}
+
+.workspace-status.error {
+  background: #fff3f1;
+  border-color: #e7b5ae;
+  color: var(--danger);
+}
+
+.workspace-status.error .workspace-status-dot {
+  background: var(--danger);
+}
+
+.workspace-status.fallback,
+.workspace-status.empty {
+  background: #fff9e9;
+  border-color: #e6d39a;
+  color: #765b08;
+}
+
+@keyframes workspace-status-pulse {
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+
 .private-topbar > div:first-child {
   min-width: 0;
 }
@@ -2624,6 +2681,15 @@ button:disabled {
   margin-top: 4px;
 }
 
+.field-notice {
+  color: #9a6700;
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 4px;
+}
+
 .accountant-guidance {
   display: grid;
   gap: 8px;
@@ -4518,5 +4584,239 @@ code {
   .paper-document {
     min-height: 420px;
     padding: 18px;
+  }
+}
+
+.client-list-state {
+  align-items: flex-start;
+  background: #f7f9fb;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  min-height: 126px;
+  padding: 18px;
+}
+
+.client-list-state.loading {
+  align-items: center;
+  flex-direction: row;
+}
+
+.client-list-state small {
+  color: var(--muted);
+}
+
+/* Accountant work area: keep the next document, not system telemetry, in view. */
+.office-dashboard.dashboard-review-summary {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  gap: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+}
+
+.office-dashboard.dashboard-review-summary .metric {
+  border: 0;
+  border-radius: 0;
+  border-right: 1px solid var(--border);
+  min-height: 88px;
+}
+
+.office-dashboard.dashboard-review-summary .metric:last-child {
+  border-right: 0;
+}
+
+.dashboard-review-layout {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.34fr);
+}
+
+.dashboard-review-heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.dashboard-review-heading h2 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.dashboard-review-heading p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  margin: 5px 0 0;
+}
+
+.dashboard-review-heading > strong {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.review-work-list,
+.office-summary {
+  padding: 18px;
+}
+
+.review-work-items {
+  margin-top: 16px;
+}
+
+.review-work-row {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  min-height: 86px;
+  padding: 14px 0;
+}
+
+.review-work-row > svg {
+  color: var(--accent);
+  height: 22px;
+  width: 22px;
+}
+
+.review-work-row strong,
+.review-work-row span,
+.review-work-row p {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.review-work-row strong {
+  font-size: 0.94rem;
+}
+
+.review-work-row div > span,
+.review-work-row p {
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
+  margin: 3px 0 0;
+}
+
+.review-status-chip {
+  background: var(--amber-soft);
+  border-radius: 999px;
+  color: var(--amber);
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 5px 8px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.review-work-row button {
+  background: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.review-work-row button:hover {
+  background: #eef6f4;
+}
+
+.office-summary dl {
+  display: grid;
+  gap: 0;
+  margin: 16px 0 0;
+}
+
+.office-summary dl div {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 52px;
+}
+
+.office-summary dt {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.84rem;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.office-summary dt svg {
+  color: var(--accent);
+  height: 18px;
+  width: 18px;
+}
+
+.office-summary dd {
+  font-size: 1rem;
+  font-weight: 900;
+  margin: 0;
+}
+
+@media (max-width: 1080px) {
+  .dashboard-review-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .office-summary dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .office-summary dl div:nth-child(odd) {
+    padding-right: 12px;
+  }
+
+  .office-summary dl div:nth-child(even) {
+    border-left: 1px solid var(--border);
+    padding-left: 12px;
+  }
+}
+
+@media (max-width: 520px) {
+  .office-dashboard.dashboard-review-summary .metric {
+    min-height: 78px;
+    padding: 10px;
+  }
+
+  .office-dashboard.dashboard-review-summary .metric-label {
+    font-size: 0.72rem;
+  }
+
+  .review-work-list,
+  .office-summary {
+    padding: 14px;
+  }
+
+  .review-work-row {
+    gap: 10px;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+
+  .review-work-row > svg {
+    height: 20px;
+    width: 20px;
+  }
+
+  .review-status-chip {
+    display: none;
+  }
+
+  .review-work-row button {
+    padding: 8px 10px;
   }
 }

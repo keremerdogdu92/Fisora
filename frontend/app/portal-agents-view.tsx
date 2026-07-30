@@ -1,5 +1,7 @@
 import { Bot, CircleCheckBig, GraduationCap } from "lucide-react";
+import { useState } from "react";
 import { useAgentRuleCommands } from "./features/agents";
+import { ResearchKnowledgeView } from "./portal-research-view";
 import type { LocalSession } from "./portal-types";
 
 type AgentSummary = {
@@ -29,15 +31,18 @@ function stageBucket(stageLabel: string) {
 
 export function AgentTrainingView({
   agentSummaries,
+  defaultSection = "learning",
   learningInsights,
   loginUserId,
   session,
 }: {
   agentSummaries: AgentSummary[];
+  defaultSection?: "learning" | "research";
   learningInsights: AgentLearningInsight[];
   loginUserId: string;
   session: LocalSession | null;
 }) {
+  const [activeSection, setActiveSection] = useState<"learning" | "research">(defaultSection);
   const { rules: learningRules, status: ruleStatus, changeStatus: onRuleStatusChange } = useAgentRuleCommands({ loginUserId, session });
   const trainingNotes = learningInsights.filter((item) => stageBucket(item.stageLabel) === "note");
   const ruleCandidates = learningInsights.filter((item) => stageBucket(item.stageLabel) === "candidate");
@@ -50,6 +55,21 @@ export function AgentTrainingView({
 
   return (
     <section className="agent-training-page">
+      <div className="mode-tabs" role="tablist" aria-label="AI ajanları bölümleri">
+        <button aria-controls="agent-learning-panel" aria-selected={activeSection === "learning"} className={activeSection === "learning" ? "mode-tab active" : "mode-tab"} id="agent-learning-tab" onClick={() => setActiveSection("learning")} role="tab" type="button">
+          Öğrenme ve kurallar
+        </button>
+        <button aria-controls="agent-research-panel" aria-selected={activeSection === "research"} className={activeSection === "research" ? "mode-tab active" : "mode-tab"} id="agent-research-tab" onClick={() => setActiveSection("research")} role="tab" type="button">
+          Araştırma kayıtları
+        </button>
+      </div>
+
+      {activeSection === "research" ? (
+        <section aria-labelledby="agent-research-tab" id="agent-research-panel" role="tabpanel">
+          <ResearchKnowledgeView loginUserId={loginUserId} session={session} />
+        </section>
+      ) : (
+        <section aria-labelledby="agent-learning-tab" id="agent-learning-panel" role="tabpanel">
       <section className="agent-training-grid" aria-label="AI ajanları">
         {agentSummaries.map((agent) => (
           <article className="agent-training-card" key={agent.key}>
@@ -128,6 +148,8 @@ export function AgentTrainingView({
           {!learningRules.length ? <p className="empty">Henüz yönetilebilir doğrulanmış kural yok.</p> : null}
         </div>
       </section>
+        </section>
+      )}
     </section>
   );
 }

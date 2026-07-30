@@ -36,10 +36,39 @@ test("research screen uses accountant-facing labels and clear empty guidance", (
   assert.doesNotMatch(research, /Research cache, kaynak politikası/);
 });
 
+test("research knowledge stays behind an AI agents tab and leaves the sidebar", () => {
+  const agents = source("portal-agents-view.tsx");
+  const shell = source("portal-shell-components.tsx");
+
+  assert.match(agents, /ResearchKnowledgeView/);
+  assert.match(agents, /role="tablist"/);
+  assert.match(agents, /activeSection === "research"/);
+  assert.doesNotMatch(shell, /key: "research"/);
+});
+
 test("empty document review tells accountant next action", () => {
   const workspace = source("portal-workspace-view.tsx");
   const reviewPanels = source("portal-review-panels.tsx");
 
   assert.match(workspace, /Bu filtrede belge yok\. Mükellef seçin veya filtreyi değiştirin\./);
   assert.match(reviewPanels, /İşlemek için listeden belge seçin\./);
+});
+
+test("portal does not invent an accountant identity when session is missing", () => {
+  const shell = source("portal-shell-components.tsx");
+
+  assert.match(shell, /Oturum bilgisi yok/);
+  assert.match(shell, /Rol bilgisi yok/);
+  assert.doesNotMatch(shell, /\u00d6mer Ya\u011fc\u0131/);
+});
+
+test("topbar popovers expose their state and research status is announced", () => {
+  const shell = source("portal-shell-components.tsx");
+  const research = source("portal-research-view.tsx");
+
+  assert.match(shell, /aria-controls="portal-notifications-panel"/);
+  assert.match(shell, /aria-controls="portal-help-panel"/);
+  assert.match(shell, /aria-expanded=\{activePanel === "notifications"\}/);
+  assert.match(shell, /aria-expanded=\{activePanel === "help"\}/);
+  assert.match(research, /aria-live="polite"/);
 });

@@ -261,8 +261,11 @@ class WorkspaceService:
             user_id=self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
         )
         workspace = self.store.get_workspace(client_id)
-        if view.strip().lower() in {"summary", "compact"}:
+        normalized_view = view.strip().lower()
+        if normalized_view in {"summary", "compact"}:
             return compact_workspace_payload(workspace)
+        if normalized_view == "review":
+            return review_workspace_payload(workspace)
         return workspace
 
     def delete_client_documents(
@@ -316,12 +319,40 @@ def compact_workspace_payload(workspace: dict[str, object]) -> dict[str, object]
     return compact
 
 
+def review_workspace_payload(workspace: dict[str, object]) -> dict[str, object]:
+    review = compact_workspace_payload(workspace)
+    review["chart_accounts"] = review_chart_accounts(workspace.get("chart_accounts"))
+    return review
+
+
 def compact_chart_accounts(value: object) -> dict[str, object]:
     source = value if isinstance(value, dict) else {}
     accounts = safe_list(source.get("accounts"))
     return {
         "account_count": source.get("account_count", len(accounts)),
         "accounts": [],
+    }
+
+
+def review_chart_accounts(value: object) -> dict[str, object]:
+    source = value if isinstance(value, dict) else {}
+    accounts = safe_list(source.get("accounts"))
+    allowed_keys = {
+        "normalized_account_code",
+        "raw_account_code",
+        "account_name",
+        "is_detail_account",
+        "tax_id",
+        "tax_office",
+        "iban",
+    }
+    return {
+        "account_count": source.get("account_count", len(accounts)),
+        "accounts": [
+            {key: item.get(key) for key in allowed_keys if key in item}
+            for item in accounts
+            if isinstance(item, dict)
+        ],
     }
 
 

@@ -18,7 +18,7 @@ from app.persistence.workflow_store import JsonWorkflowStore
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
-from app.services.workspace_service import WorkspaceService, compact_workspace_payload
+from app.services.workspace_service import WorkspaceService, compact_workspace_payload, review_workspace_payload
 
 
 def allow_access(**_: object) -> dict[str, object]:
@@ -93,6 +93,54 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertNotIn("ai_stage_evidence", result)
         self.assertEqual(result["account_candidates"], {"purchase_expense": [{"code": "770.01"}]})
         self.assertEqual(result["draft_lines"], [{"account_code": "770.01"}])
+
+    def test_review_workspace_payload_keeps_selectable_chart_accounts_without_heavy_history(self) -> None:
+        workspace = {
+            "chart_accounts": {
+                "account_count": 2,
+                "accounts": [
+                    {
+                        "normalized_account_code": "153.01.001",
+                        "raw_account_code": "153.01.001",
+                        "account_name": "ALINAN CİHAZLAR",
+                        "is_detail_account": True,
+                        "tax_id": "1234567890",
+                        "tax_office": "Kadıköy",
+                        "iban": "TR0001",
+                        "unused_private_field": "drop-me",
+                    },
+                    {
+                        "normalized_account_code": "191.01.020",
+                        "account_name": "Yüzde20 Hesaplanan Kdv",
+                        "is_detail_account": True,
+                    },
+                ],
+            },
+            "documents": [],
+            "uploaded_documents": [],
+            "processing_jobs": [],
+            "review_decisions": [],
+            "learning_events": [],
+            "document_pipeline_events": [{"document_ref": "doc-1", "step": "uploaded"}],
+            "operation_events": [{"event_type": "one"}],
+        }
+
+        review = review_workspace_payload(workspace)
+
+        self.assertEqual(review["chart_accounts"]["account_count"], 2)
+        self.assertEqual(
+            review["chart_accounts"]["accounts"][0],
+            {
+                "normalized_account_code": "153.01.001",
+                "raw_account_code": "153.01.001",
+                "account_name": "ALINAN CİHAZLAR",
+                "is_detail_account": True,
+                "tax_id": "1234567890",
+                "tax_office": "Kadıköy",
+                "iban": "TR0001",
+            },
+        )
+        self.assertEqual(review["document_pipeline_events"], [])
 
     def test_workspace_service_filters_clients_by_portal_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

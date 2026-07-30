@@ -22,6 +22,7 @@ export function ClientManagementView({
   clients,
   clientSearch,
   documents,
+  isLoading,
   inviteStatus,
   newClientDraft,
   newClientNaceResearchPending,
@@ -67,6 +68,7 @@ export function ClientManagementView({
   clients: PilotClient[];
   clientSearch: string;
   documents: PilotDocument[];
+  isLoading: boolean;
   inviteStatus: string;
   newClientDraft: NewClientDraft;
   newClientNaceResearchPending: boolean;
@@ -102,7 +104,7 @@ export function ClientManagementView({
   setSelectedDocumentRefs: (value: string[]) => void;
   setSelectedClientId: (value: string) => void;
 }) {
-  const [activeTab, setActiveTab] = useState<ClientManagementTab>("new-client");
+  const [activeTab, setActiveTab] = useState<ClientManagementTab>("client-list");
   const selectedDocumentRefSet = new Set(selectedDocumentRefs);
   const selectableDocumentRefs = documents.map((document) => document.originalDocumentRef || document.id).filter(Boolean);
   const allDocumentsSelected = Boolean(selectableDocumentRefs.length && selectableDocumentRefs.every((ref) => selectedDocumentRefSet.has(ref)));
@@ -127,7 +129,7 @@ export function ClientManagementView({
         </button>
         <button aria-selected={activeTab === "client-list"} className={tabClass("client-list")} onClick={() => setActiveTab("client-list")} role="tab" type="button">
           Mükellef listesi
-          <strong>{clients.length}</strong>
+          <strong>{isLoading ? "…" : clients.length}</strong>
         </button>
         <button aria-selected={activeTab === "requests"} className={tabClass("requests")} onClick={() => setActiveTab("requests")} role="tab" type="button">
           İptal / düzeltme
@@ -163,16 +165,26 @@ export function ClientManagementView({
           <section className="panel">
             <div className="section-heading">
               <span>Mükellef listesi</span>
-              <strong>{clients.length}</strong>
+              <strong>{isLoading ? "Yükleniyor" : clients.length}</strong>
             </div>
-            <input
-              className="search-input"
-              onChange={(event) => onClientSearchChange(event.target.value)}
-              placeholder="Mükellef ara"
-              value={clientSearch}
-            />
-            <div className="client-list dashboard-client-list">
-              {clientRows.map((row) => (
+            {isLoading ? (
+              <div className="client-list-state loading" role="status" aria-live="polite">
+                <span className="workspace-status-dot" aria-hidden="true" />
+                <div>
+                  <strong>Mükellefler yükleniyor</strong>
+                  <small>Çalışma alanındaki belgeler hazırlanıyor.</small>
+                </div>
+              </div>
+            ) : clients.length ? (
+              <>
+                <input
+                  className="search-input"
+                  onChange={(event) => onClientSearchChange(event.target.value)}
+                  placeholder="Mükellef ara"
+                  value={clientSearch}
+                />
+                <div className="client-list dashboard-client-list">
+                  {clientRows.map((row) => (
                 <button
                   className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
                   key={row.clientId}
@@ -183,10 +195,20 @@ export function ClientManagementView({
                   <span>{row.status}</span>
                   <em>{row.documentCount} belge / {row.cancellationCount} talep</em>
                 </button>
-              ))}
-            </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="client-list-state empty">
+                <strong>Henüz mükellef yok</strong>
+                <small>İlk kaydı vergi levhası ve hesap planıyla oluşturabilirsiniz.</small>
+                <button className="secondary compact" onClick={() => setActiveTab("new-client")} type="button">
+                  Yeni mükellef oluştur
+                </button>
+              </div>
+            )}
           </section>
-          <section className="panel onboarding-panel client-existing-operations">
+          {!isLoading && clients.length ? <section className="panel onboarding-panel client-existing-operations">
             <div className="section-heading">
               <span>Mevcut mükellef işlemleri</span>
               <strong>{selectedClient?.clientName ?? "-"}</strong>
@@ -310,7 +332,7 @@ export function ClientManagementView({
               {!selectedDocumentRefs.length ? <small className="blocked-reason">Önce silinecek belgeleri seçin.</small> : null}
               {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
             </div>
-          </section>
+          </section> : null}
         </section>
       ) : null}
 

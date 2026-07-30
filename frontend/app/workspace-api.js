@@ -110,7 +110,7 @@ function normalizeDecisionNarrative(value) {
 }
 
 const DEFAULT_BACKEND_TIMEOUT_MS = 20000;
-const DEFAULT_WORKSPACE_VIEW = "summary";
+const DEFAULT_WORKSPACE_VIEW = "review";
 
 function backendAuthHeaders({ sessionToken = "", userId = "" } = {}) {
   const token = safeText(sessionToken).trim();

@@ -1,4 +1,4 @@
-const ACCOUNTANT_MODES = ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"];
+const ACCOUNTANT_MODES = ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"];
 
 const LANDING_ROLE_ENTRIES = [
   {
@@ -25,7 +25,6 @@ const PORTAL_NAV_ITEMS = [
   { mode: "agents", label: "AI ajanları", href: "/portal/ajanlar" },
   { mode: "documents", label: "Belge işleme", href: "/portal/belgeler" },
   { mode: "clients", label: "Mükellefler", href: "/portal/mukellefler" },
-  { mode: "research", label: "Bilgi havuzu", href: "/portal/bilgi-havuzu" },
   { mode: "exports", label: "Çıktı listesi", href: "/portal/cikti" },
   { mode: "settings", label: "Ayarlar", href: "/portal/ayarlar" },
   { mode: "operations", label: "Operasyon", href: "/portal/operasyon" },
@@ -81,7 +80,7 @@ const PORTAL_ROUTE_CONFIGS = {
   },
   "bilgi-havuzu": {
     routeKey: "bilgi-havuzu",
-    initialMode: "research",
+    initialMode: "agents",
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",

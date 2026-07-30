@@ -91,13 +91,6 @@ export default function RoleGatewayLanding() {
         <a className="landing-brand" href="/">
           <span>Fisero</span>
         </a>
-        <nav aria-label="Portal girişleri">
-          {entries.map((entry) => (
-            <a href={entry.href} key={entry.role}>
-              {entry.label}
-            </a>
-          ))}
-        </nav>
       </header>
 
       <section className="role-gateway">

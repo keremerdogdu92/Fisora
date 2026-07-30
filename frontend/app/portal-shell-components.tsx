@@ -1,6 +1,5 @@
 import {
   Activity,
-  BookOpen,
   Bot,
   CircleCheckBig,
   FileText,
@@ -41,7 +40,6 @@ const sidebarItems: {
   { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", fallbackHref: "/portal/belgeler", icon: Landmark },
   { key: "other", label: "Diğer Belgeler", mode: "documents", segment: "other_documents", fallbackHref: "/portal/belgeler", icon: Files },
   { key: "exports", label: "Çıktı / Kontroller", mode: "exports", fallbackHref: "/portal/cikti", icon: CircleCheckBig },
-  { key: "research", label: "Bilgi Havuzu", mode: "research", fallbackHref: "/portal/bilgi-havuzu", icon: BookOpen },
   { key: "operations", label: "Operasyon", mode: "operations", fallbackHref: "/portal/operasyon", icon: Activity },
   { key: "settings", label: "Ayarlar", mode: "settings", fallbackHref: "/portal/ayarlar", icon: Settings },
 ];
@@ -168,10 +166,10 @@ export function PortalSidebar({
       </nav>
       <div className="sidebar-footer">
         <div className="sidebar-user">
-          <span>{session?.userId?.slice(0, 2).toLocaleUpperCase("tr-TR") || "OY"}</span>
+          <span>{session?.userId?.slice(0, 2).toLocaleUpperCase("tr-TR") || "--"}</span>
           <div>
-            <strong>{session?.userId || "Ömer Yağcı"}</strong>
-            <small>{session ? roleLabels[session.role] : "Mali Müşavir"}</small>
+            <strong>{session?.userId || "Oturum bilgisi yok"}</strong>
+            <small>{session ? roleLabels[session.role] : "Rol bilgisi yok"}</small>
           </div>
         </div>
         <button aria-label="Çıkış yap" className="sidebar-exit" onClick={onExit} title="Çıkış" type="button">
@@ -225,16 +223,22 @@ export function PortalTopbarStatus({
         </div>
       </div>
       <div className="portal-topbar-actions">
-        <button className="topbar-action" onClick={() => setActivePanel("notifications")} type="button">Bildirimler <strong>{notificationPendingCount}</strong></button>
-        <button className="topbar-action" onClick={() => setActivePanel("help")} type="button">Yardım</button>
-        <div className={`pilot-source compact ${source.status}`}>
-          <span>Veri kaynağı</span>
-          <strong>{source.label}</strong>
-          <small>{source.detail}</small>
-        </div>
+        <button aria-controls="portal-notifications-panel" aria-expanded={activePanel === "notifications"} className="topbar-action" onClick={() => setActivePanel("notifications")} type="button">Bildirimler <strong>{notificationPendingCount}</strong></button>
+        <button aria-controls="portal-help-panel" aria-expanded={activePanel === "help"} className="topbar-action" onClick={() => setActivePanel("help")} type="button">Yardım</button>
+        {source.status === "backend" ? null : (
+          <div
+            aria-label={`${source.label}. ${source.detail}`}
+            className={`workspace-status ${source.status}`}
+            role="status"
+            title={source.detail}
+          >
+            <span className="workspace-status-dot" aria-hidden="true" />
+            <strong>{source.label}</strong>
+          </div>
+        )}
       </div>
       {activePanel ? (
-        <div className="topbar-popover" role="dialog" aria-label={activePanel === "notifications" ? "Bildirimler" : "Yardım"}>
+        <div className="topbar-popover" id={activePanel === "notifications" ? "portal-notifications-panel" : "portal-help-panel"} role="dialog" aria-label={activePanel === "notifications" ? "Bildirimler" : "Yardım"}>
           <button aria-label="Paneli kapat" onClick={() => setActivePanel(null)} type="button">x</button>
           {activePanel === "notifications" ? (
             <div>

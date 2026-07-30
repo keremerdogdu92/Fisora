@@ -12,6 +12,8 @@ const {
 } = require("./portal-routes");
 
 test("root page is the private pilot role gateway", () => {
+  const rootPage = require("node:fs").readFileSync(join(__dirname, "page.tsx"), "utf8");
+
   assert.deepEqual(
     LANDING_ROLE_ENTRIES.map((entry) => ({
       role: entry.role,
@@ -26,6 +28,7 @@ test("root page is the private pilot role gateway", () => {
   );
   assert.equal(portalEntryForRole("accountant").href, "/portal/musavir");
   assert.equal(portalEntryForRole("client_user").href, "/portal/mukellef");
+  assert.doesNotMatch(rootPage, /aria-label="Portal girişleri"/);
 });
 
 test("same-domain portal paths open the correct private pilot screen", () => {
@@ -43,7 +46,7 @@ test("same-domain portal paths open the correct private pilot screen", () => {
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",
-    visibleModes: ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"],
+    visibleModes: ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"],
   });
 });
 
@@ -51,32 +54,29 @@ test("accountant subpaths stay under the accountant link family", () => {
   assert.equal(portalConfigForPath("/portal/ajanlar").initialMode, "agents");
   assert.equal(portalConfigForPath("/portal/belgeler").initialMode, "documents");
   assert.equal(portalConfigForPath("/portal/mukellefler").initialMode, "clients");
-  assert.equal(portalConfigForPath("/portal/bilgi-havuzu").initialMode, "research");
+  assert.equal(portalConfigForPath("/portal/bilgi-havuzu").initialMode, "agents");
   assert.equal(portalConfigForPath("/portal/ayarlar").initialMode, "settings");
   assert.equal(portalConfigForPath("/portal/cikti").initialMode, "exports");
   assert.equal(portalConfigForPath("/portal/operasyon").initialMode, "operations");
-  assert.deepEqual(portalConfigForRouteKey("ajanlar").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "agents", "documents", "clients", "research", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ajanlar").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
 });
 
-test("research knowledge hub and agent training center are visible to accountant users", () => {
+test("research knowledge is an AI agents subview, not a sidebar destination", () => {
   const {
     ACCOUNTANT_MODES,
     PORTAL_NAV_ITEMS,
   } = require("./portal-routes");
 
   assert.equal(ACCOUNTANT_MODES.includes("agents"), true);
-  assert.equal(ACCOUNTANT_MODES.includes("research"), true);
+  assert.equal(ACCOUNTANT_MODES.includes("research"), false);
   assert.deepEqual(
     PORTAL_NAV_ITEMS.find((item) => item.mode === "agents"),
     { mode: "agents", label: "AI ajanları", href: "/portal/ajanlar" },
   );
-  assert.deepEqual(
-    PORTAL_NAV_ITEMS.find((item) => item.mode === "research"),
-    { mode: "research", label: "Bilgi havuzu", href: "/portal/bilgi-havuzu" },
-  );
+  assert.equal(PORTAL_NAV_ITEMS.some((item) => item.mode === "research"), false);
 });
 
 test("research view reads legacy labels only from non-authoritative display", () => {
@@ -120,7 +120,8 @@ test("portal implementation is split into route view modules", () => {
   assert.match(portalApp, /portal-clients-view/);
   assert.match(portalApp, /portal-documents-view/);
   assert.match(portalApp, /portal-exports-view/);
-  assert.match(portalApp, /portal-research-view/);
+  assert.doesNotMatch(portalApp, /portal-research-view/);
+  assert.match(require("node:fs").readFileSync(join(__dirname, "portal-agents-view.tsx"), "utf8"), /portal-research-view/);
   assert.match(portalApp, /portal-settings-view/);
   assert.match(portalApp, /portal-workspace-view/);
   assert.match(workspaceView, /portal-review-panels/);
@@ -189,15 +190,29 @@ test("portal shell delegates session and review helpers to feature modules", () 
   assert.doesNotMatch(portalApp, /const statementTypeLabels/);
 });
 
-test("client management view keeps new-client onboarding readable in tabs", () => {
+test("client management defaults to the existing-client list and separates loading from empty", () => {
   const clientsView = require("node:fs").readFileSync(join(__dirname, "portal-clients-view.tsx"), "utf8");
 
   assert.match(clientsView, /type ClientManagementTab = "new-client" \| "client-list" \| "requests"/);
-  assert.match(clientsView, /useState<ClientManagementTab>\("new-client"\)/);
+  assert.match(clientsView, /useState<ClientManagementTab>\("client-list"\)/);
+  assert.match(clientsView, /isLoading/);
+  assert.match(clientsView, /Mükellefler yükleniyor/);
+  assert.match(clientsView, /Henüz mükellef yok/);
   assert.match(clientsView, /className="client-management-tabs"/);
   assert.match(clientsView, /Vergi levhası bilgileri/);
   assert.match(clientsView, /className="tax-certificate-preview"/);
   assert.match(clientsView, /NACE araştırmasını onayla/);
+});
+
+test("initial workspace loading is not blocked by the separate readiness request", () => {
+  const actions = require("node:fs").readFileSync(join(__dirname, "portal-workspace-actions.ts"), "utf8");
+  const initialLoader = actions.slice(
+    actions.indexOf("export async function loadInitialPilotData"),
+    actions.indexOf("export { buildPilotReadinessView"),
+  );
+
+  assert.doesNotMatch(initialLoader, /await refreshBackendReadiness/);
+  assert.match(initialLoader, /refreshBackendPilotData/);
 });
 
 test("export view exposes Zirve mapping adapter for field testing", () => {
@@ -223,6 +238,15 @@ test("client management view separates tax certificate OCR loading from NACE res
   assert.match(clientActions, /setNewClientTaxCertificateStage\("Alanlar dolduruldu"\)/);
 });
 
+test("journal distinguishes a missing new cari suggestion from an invalid ledger account", () => {
+  const reviewPanels = require("node:fs").readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /Yeni cari hesabı önerisi/);
+  assert.match(reviewPanels, /mevcut cariyi seçin veya müşavir onayıyla yeni cari açın/);
+  assert.match(reviewPanels, /className="field-notice"/);
+  assert.match(reviewPanels, /className="field-warning"/);
+});
+
 test("locked portal links ignore stale sessions from the other role", () => {
   const clientConfig = portalConfigForRouteKey("mukellef");
   const accountantConfig = portalConfigForRouteKey("musavir");
@@ -238,10 +262,15 @@ test("locked portal links ignore stale sessions from the other role", () => {
 
 test("portal shell hydrates stored sessions after the first client render", () => {
   const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+  const sessionGuard = require("node:fs").readFileSync(
+    join(__dirname, "features", "session", "use-portal-session-guard.ts"),
+    "utf8",
+  );
 
   assert.doesNotMatch(portalApp, /useState<LocalSession \| null>\(\(\) =>/);
-  assert.match(portalApp, /const \[session, setSession\] = useState<LocalSession \| null>\(null\);/);
-  assert.match(portalApp, /const \[sessionHydrated, setSessionHydrated\] = useState\(false\);/);
-  assert.match(portalApp, /useEffect\(\(\) => \{\s*setSession\(normalizeSessionForPortalConfig\(readStoredSession\(\), portalConfig\)\);/);
+  assert.match(portalApp, /usePortalSessionGuard/);
+  assert.match(sessionGuard, /fetchAuthSession/);
+  assert.match(sessionGuard, /window\.location\.replace\("\/"\)/);
+  assert.match(sessionGuard, /persistSession\(null\)/);
   assert.match(portalApp, /if \(!sessionHydrated\) return;/);
 });

@@ -102,10 +102,12 @@ test("portal visible source does not contain mojibake Turkish copy", () => {
 
   assert.doesNotMatch(visibleSource, /(?:Ã|Ä|Å|�|ï¿½)/);
   assert.match(visibleSource, /Çalışma alanı boş/);
-  assert.match(visibleSource, /Veri kaynağı/);
+  assert.doesNotMatch(source("portal-shell-components.tsx"), /Veri kaynağı/);
+  assert.match(source("portal-shell-components.tsx"), /workspace-status/);
+  assert.match(source("portal-shell-components.tsx"), /role="status"/);
   assert.match(visibleSource, /Çıkış/);
-  assert.match(visibleSource, /Mükellef takibi/);
-  assert.match(visibleSource, /Yükleme ve kontrol sırası/);
+  assert.match(visibleSource, /Bugün bakılacak belgeler/);
+  assert.match(visibleSource, /Ofis özeti/);
 });
 
 test("document processing workbench keeps the journal review explicit", () => {

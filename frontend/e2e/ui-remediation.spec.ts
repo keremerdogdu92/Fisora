@@ -60,7 +60,29 @@ const pilotWorkspace = {
   ],
 };
 
+async function setupAccountantSession(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("fisora.office.session.v1", JSON.stringify({
+      userId: "mali-musavir",
+      role: "accountant",
+      sessionToken: "accountant-session",
+      storageScope: "local",
+    }));
+  });
+  await page.context().route("**/phase0/store/auth/session", async (route) => {
+    const headers = await route.request().allHeaders();
+    await route.fulfill({
+      json: {
+        valid: true,
+        user_id: headers["x-fisora-user-id"] || "mali-musavir",
+        expires_at: "2026-12-31T22:00:00+00:00",
+      },
+    });
+  });
+}
+
 async function setupPilotRoutes(page: Page) {
+  await setupAccountantSession(page);
   await page.route("**/phase0/store/system/readiness", async (route) => {
     await route.fulfill({ json: readyForRealDataPayload });
   });
@@ -95,7 +117,7 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/portal/belgeler");
-  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
+  await expect(page.getByLabel("Mükellef")).toHaveValue("pilot-client");
   const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(desktopOverflow).toBeLessThanOrEqual(0);
 
@@ -106,6 +128,7 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
 });
 
 test("workspace backend failure does not stay as loading copy", async ({ page }) => {
+  await setupAccountantSession(page);
   await page.route("**/phase0/store/clients", async (route) => {
     await route.fulfill({ status: 404, body: "not found" });
   });
@@ -138,7 +161,7 @@ test("mobile portal starts with content visible and opens menu as drawer", async
   await page.goto("/portal/belgeler");
 
   await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
-  await expect(page.getByLabel("Belge işleme özeti")).toBeVisible();
+  await expect(page.locator(".document-review-toolbar")).toBeVisible();
 
   await page.getByRole("button", { name: /Menüyü aç/ }).click();
   await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "true");
@@ -151,7 +174,9 @@ test("client management shows onboarding steps and readable blocked actions", as
   await setupPilotRoutes(page);
   await page.goto("/portal/mukellefler");
   const tabs = page.locator(".client-management-tabs button");
-  await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
+  await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".client-existing-operations")).toBeVisible();
+  await tabs.nth(0).click();
   await expect(page.locator(".tax-certificate-preview")).toBeVisible();
   await expect(page.getByLabel("Vergi levhası alanları")).toBeVisible();
 
@@ -176,7 +201,24 @@ test("Bilgi Havuzu uses Turkish fallback copy for English-only profiles", async 
   await expect(page.getByText(/Kaynak .*Turkceye|Kaynak .*Türkçeye|Kaynak .*TÃ¼rkÃ§eye/i)).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Failed to fetch");
 });
+
+test("Bilgi Havuzu stays secondary under AI Ajanlari and legacy route opens its tab", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.goto("/portal/ajanlar");
+
+  const researchTab = page.getByRole("tab", { name: /Araştırma kayıtları/ });
+  await expect(researchTab).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByLabel("Müşavir menüsü")).not.toContainText("Bilgi Havuzu");
+
+  await researchTab.click();
+  await expect(researchTab).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText(/Kaynak .*Türkçeye/i)).toBeVisible();
+
+  await page.goto("/portal/bilgi-havuzu");
+  await expect(page.getByRole("tab", { name: /Araştırma kayıtları/ })).toHaveAttribute("aria-selected", "true");
+});
 test("accountant opens selected client portal in a delegated tab without return controls", async ({ page }) => {
+  await setupAccountantSession(page);
   await page.context().route("**/phase0/store/system/readiness", async (route) => {
     await route.fulfill({ json: readyForRealDataPayload });
   });

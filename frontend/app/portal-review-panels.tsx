@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
-import { applyAccountSelectionToLine, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
+import { applyAccountSelectionToLine, classifyDraftAccountCode, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
 import { backendAuthHeaders, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
@@ -120,12 +120,19 @@ function newCounterpartyCodesForDocument(document: PilotDocument) {
 }
 
 function invalidDraftAccountCodes(lines: DraftLine[], chartAccounts: ChartAccountOption[], document: PilotDocument) {
-  const detailCodes = new Set(chartAccounts.filter((account) => account.isDetail).map((account) => normalizeAccountCodeInput(account.code)));
-  const allowedNewCounterparties = newCounterpartyCodesForDocument(document);
+  const allowedNewCounterparties = [...newCounterpartyCodesForDocument(document)];
   return lines
     .map((line) => normalizeAccountCodeInput(line.account_code))
     .filter(Boolean)
-    .filter((code) => !detailCodes.has(code) && !allowedNewCounterparties.has(code));
+    .filter((code) => classifyDraftAccountCode(chartAccounts, code, allowedNewCounterparties) === "invalid");
+}
+
+function newCounterpartyDraftAccountCodes(lines: DraftLine[], chartAccounts: ChartAccountOption[], document: PilotDocument) {
+  const allowedNewCounterparties = [...newCounterpartyCodesForDocument(document)];
+  return lines
+    .map((line) => normalizeAccountCodeInput(line.account_code))
+    .filter(Boolean)
+    .filter((code) => classifyDraftAccountCode(chartAccounts, code, allowedNewCounterparties) === "new_counterparty");
 }
 
 function isImageMime(value: string) {
@@ -497,6 +504,7 @@ export function JournalPanel({
   const totals = draftTotals(activeDraftLines);
   const needsManualDraft = !generatedDraftLines.length || document.draftStatus === "manual_draft_required";
   const invalidAccountCodes = invalidDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
+  const newCounterpartyAccountCodes = newCounterpartyDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const hasInvalidDraftAccounts = invalidAccountCodes.length > 0;
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const accountingDirection = accountingDirectionForDocument(document);
@@ -615,6 +623,7 @@ export function JournalPanel({
           chartAccounts={document.chartAccounts}
           generatedDraftLines={generatedDraftLines}
           invalidAccountCodes={invalidAccountCodes}
+          newCounterpartyAccountCodes={newCounterpartyAccountCodes}
           needsManualDraft={needsManualDraft}
           onAddLine={addManualDraftLine}
           onRemoveLine={removeManualDraftLine}
@@ -870,6 +879,7 @@ function ManualDraftEditor({
   chartAccounts,
   generatedDraftLines,
   invalidAccountCodes,
+  newCounterpartyAccountCodes,
   needsManualDraft,
   onAddLine,
   onRemoveLine,
@@ -879,6 +889,7 @@ function ManualDraftEditor({
   chartAccounts: ChartAccountOption[];
   generatedDraftLines: DraftLine[];
   invalidAccountCodes: string[];
+  newCounterpartyAccountCodes: string[];
   needsManualDraft: boolean;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
@@ -947,6 +958,11 @@ function ManualDraftEditor({
                   />
                   {invalidAccountCodes.includes(normalizeAccountCodeInput(line.account_code)) ? (
                     <small className="field-warning">Hesap planında olmayan veya seçilemeyen kod.</small>
+                  ) : null}
+                  {newCounterpartyAccountCodes.includes(normalizeAccountCodeInput(line.account_code)) ? (
+                    <small className="field-notice">
+                      Yeni cari hesabı önerisi. Hesap planında henüz yok; mevcut cariyi seçin veya müşavir onayıyla yeni cari açın.
+                    </small>
                   ) : null}
                 </td>
                 <td>

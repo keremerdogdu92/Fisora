@@ -78,6 +78,29 @@ function accountNameForCode(options, accountCode) {
   return safeText(safeList(options).find((option) => normalizeSearchText(option?.code) === normalizedCode)?.name);
 }
 
+function normalizeDraftAccountCode(value) {
+  return safeText(value)
+    .trim()
+    .replace(/[\s,-]+/g, ".")
+    .replace(/[^0-9A-Za-z.]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^\.+|\.+$/g, "");
+}
+
+function classifyDraftAccountCode(options, accountCode, suggestedNewCounterpartyCodes = []) {
+  const code = normalizeDraftAccountCode(accountCode);
+  if (!code) return "valid";
+  const detailAccountExists = safeList(options).some(
+    (option) => Boolean(option?.isDetail) && normalizeDraftAccountCode(option?.code) === code,
+  );
+  if (detailAccountExists) return "valid";
+  const suggestedCodes = new Set(safeList(suggestedNewCounterpartyCodes).map(normalizeDraftAccountCode).filter(Boolean));
+  if ((code.startsWith("120") || code.startsWith("320")) && suggestedCodes.has(code)) {
+    return "new_counterparty";
+  }
+  return "invalid";
+}
+
 function applyAccountSelectionToLine(line, account, options = []) {
   const accountName = safeText(account?.name);
   return {
@@ -90,6 +113,7 @@ function applyAccountSelectionToLine(line, account, options = []) {
 
 module.exports = {
   applyAccountSelectionToLine,
+  classifyDraftAccountCode,
   filterAccountOptions,
   normalizeChartAccountOptions,
   resolveAccountSelection,

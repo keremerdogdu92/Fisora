@@ -227,6 +227,20 @@ async function loginWithPassword({
   };
 }
 
+async function fetchAuthSession({
+  apiBaseUrl,
+  sessionToken = "",
+  userId = "",
+  fetchImpl = fetch,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/session",
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
 async function createDelegatedClientSession({
   apiBaseUrl,
   clientId,
@@ -1162,6 +1176,7 @@ module.exports = {
   deleteClientDocuments,
   disableQnbConnection,
   ensureUploadWorkspace,
+  fetchAuthSession,
   fetchQnbConnectionStatus,
   fetchQnbHealth,
   fetchQnbSyncPolicy,

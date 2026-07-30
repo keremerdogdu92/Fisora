@@ -1,5 +1,42 @@
 # Current Handoff
 
+### 2026-07-30 accountant review UI repair and live quality audit (live)
+
+- `main` runtime release commit `1dec1e3` is live on
+  `185.184.208.188`. Server checkout, `origin/main`, and local `main` matched
+  after deploy; backend/frontend/PostgreSQL/Redis/QNB scheduler were healthy,
+  `/health` returned `200`, and system readiness returned `ready=true` and
+  `pilot_sellable=true`.
+- The release repaired session guarding, removed the duplicate header login
+  shortcuts, restored the accountant workspace review data request, and made
+  missing generated `120/320` counterparty accounts an amber new-counterparty
+  notice while keeping genuinely missing chart accounts blocking/red.
+- The release wrapper itself returned a false-negative after deployment because
+  its remote smoke/readiness JSON parser received non-JSON output. Deployment
+  success was verified independently from commit parity, containers, and HTTP
+  endpoints. The wrapper parsing defect remains open.
+- The live 50-document baseline is still `19 completed / 31 failed`. The 19
+  completed Cansu documents are all balanced, canonical-valid, amount
+  reconciled, and use non-counterparty accounts present in the 629-code chart.
+  All require a new `120/320` counterparty; 18 have valid canonical line
+  allocation and one is `ai_correction_required`.
+- Semantic correctness is not yet an accepted quality result. Five zero-VAT
+  exemption sales were mapped to `600.01.020` and correctly held for direction
+  review; one off-activity clothing purchase produced a gross
+  `153.01.001` draft and was held for AI correction/account mismatch. These
+  must be decided by the accountant before measuring account-choice accuracy.
+- The 31 failed jobs still hit
+  `normalized journal requires populated draft lines` (`12` XML and `19` PDF).
+  Their pipeline events show that extraction/AI can finish, but normalized
+  persistence rejects an intentionally empty draft instead of preserving an
+  accountant-visible `insufficient-evidence/review_required` result. The UI
+  consequently reports the misleading terminal step `parser_failed`.
+- `review_decisions=0`, `learning_rules=0`, and
+  `protected_corpus_items=0`; therefore accountant-learning quality is not yet
+  measurable. The next primary engineering task is to persist empty-draft
+  review cases safely, reprocess the 31 failures, and then collect accountant
+  decisions across all 50 documents.
+
 ### 2026-07-29 protected 50-invoice live baseline and semantic research repair (live)
 
 - `main` runtime release commit `e06addc` is live. The release wrapper reported

@@ -103,6 +103,18 @@ function blankDraftLine(): DraftLine {
   return { account_code: "", description: "", debit: "0.00", credit: "0.00" };
 }
 
+function vatGroupEvidenceText(line: DraftLine) {
+  const sourceLineNumbers = Array.isArray(line.source_line_numbers)
+    ? line.source_line_numbers.filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+  if (!line.vat_group_id && !sourceLineNumbers.length) return "";
+  const rate = String(line.vat_group_id || "").split("|")[2] || line.tax_rate || "0";
+  const sourceText = sourceLineNumbers.length
+    ? sourceLineNumbers.join(", ")
+    : (line.contributing_line_ids || []).map((_, index) => index + 1).join(", ");
+  return `Kaynak: KDV %${rate} · Fatura satırları ${sourceText}`;
+}
+
 function normalizeAccountCodeInput(value: string) {
   return String(value || "").trim().replace(/[\s-]+/g, ".").replace(/,+/g, ".").replace(/[^0-9A-Za-z.]/g, "").replace(/\.+/g, ".").replace(/^\.+|\.+$/g, "");
 }
@@ -295,13 +307,14 @@ function JsonTraceBlock({ label, value }: { label: string; value: unknown }) {
 
 export function AiTracePanel({ document }: { document?: PilotDocument }) {
   const stages = aiTraceStages(document);
+  const lineDecisions = document?.lineDecisions ?? [];
   return (
     <details className="ai-trace-panel">
       <summary>
         <span>AI karar izi</span>
-        <strong>{stages.length ? `${stages.length} AI adımı` : "Kayıt yok"}</strong>
+        <strong>{stages.length || lineDecisions.length ? `${stages.length} AI adımı` : "Kayıt yok"}</strong>
       </summary>
-      {stages.length ? (
+      {stages.length || lineDecisions.length ? (
         <div className="ai-trace-stage-list">
           {stages.map((stage, index) => {
             const requestPayload = asRecord(stage.request_payload);
@@ -330,6 +343,7 @@ export function AiTracePanel({ document }: { document?: PilotDocument }) {
               </article>
             );
           })}
+          <JsonTraceBlock label="Kabul edilen satır hesapları" value={lineDecisions} />
         </div>
       ) : (
         <p className="empty">Bu belge için AI trace kaydı yok.</p>
@@ -977,6 +991,13 @@ function ManualDraftEditor({
                     ref={(element) => { descriptionRefs.current[index] = element; }}
                     value={line.description}
                   />
+                  {vatGroupEvidenceText(line) ? (
+                    <small className="field-notice">
+                      {vatGroupEvidenceText(line)}
+                      <br />
+                      Grup hesabı: {line.account_code} · {line.description || "Hesap açıklaması"}
+                    </small>
+                  ) : null}
                 </td>
                 <td>
                   <input

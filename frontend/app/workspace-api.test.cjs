@@ -185,6 +185,14 @@ const workspaceRecord = {
         counterparty_match_confidence: 92,
         review_reason_codes: [],
         risk_flags: [],
+        line_decisions: [
+          {
+            canonical_line_id: "line-1",
+            description: "Isitme cihazi",
+            account_code: "600.20",
+            decision_source: "ai",
+          },
+        ],
         deterministic_checks: ["balanced_entry"],
         export_gate_reason: "Export hazir.",
         document_validation_status: "expected_document",
@@ -232,7 +240,16 @@ const workspaceRecord = {
         },
         draft_lines: [
           { account_code: "120.01", description: "Alici", debit: "120.00", credit: "0.00" },
-          { account_code: "600.01", description: "Satis", debit: "0.00", credit: "100.00" },
+          {
+            account_code: "600.01",
+            description: "Satis",
+            debit: "0.00",
+            credit: "100.00",
+            vat_group_id: "KDV|S|20|",
+            contributing_line_ids: ["line-1"],
+            source_line_numbers: [1],
+            allocated_amounts: [{ canonical_line_id: "line-1", amount: "100.00" }],
+          },
           { account_code: "391.01", description: "KDV", debit: "0.00", credit: "20.00" },
         ],
       },
@@ -351,6 +368,8 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].status, "export_ready");
   assert.equal(data.documents[0].intakeCategory, "sales_invoice");
   assert.equal(data.documents[0].draftLines.length, 3);
+  assert.deepEqual(data.documents[0].draftLines[1].source_line_numbers, [1]);
+  assert.equal(data.documents[0].draftLines[1].vat_group_id, "KDV|S|20|");
   assert.equal(data.documents[0].businessRelation, "core_business");
   assert.equal(data.documents[0].accountTreatment, "stock_or_cogs");
   assert.equal(data.documents[0].requiresAccountantReview, false);
@@ -449,6 +468,14 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
       },
     ],
   });
+  assert.deepEqual(data.documents[0].lineDecisions, [
+    {
+      canonical_line_id: "line-1",
+      description: "Isitme cihazi",
+      account_code: "600.20",
+      decision_source: "ai",
+    },
+  ]);
   assert.deepEqual(data.documents[0].aiQualityScorecard.final, {
     selected_account_code: "600.20",
     selected_counterparty_account: "120.01",

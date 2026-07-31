@@ -43,6 +43,10 @@ class CanonicalInvoiceLine:
     vat_rate: str = ""
     tax_amount: str = ""
     gross_amount: str = ""
+    tax_scheme_code: str = ""
+    tax_category_code: str = ""
+    exemption_reason_code: str = ""
+    vat_group_id: str = ""
     evidence: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -51,6 +55,11 @@ class CanonicalVatSummaryLine:
     rate: str
     taxable_amount: str = ""
     tax_amount: str = ""
+    tax_scheme_code: str = ""
+    tax_category_code: str = ""
+    exemption_reason_code: str = ""
+    vat_group_id: str = ""
+    contributing_line_ids: tuple[str, ...] = field(default_factory=tuple)
     evidence: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -291,6 +300,10 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
             vat_rate=_string(line.get("observed_vat_rate") or line.get("vat_rate")),
             tax_amount=_string(line.get("observed_tax_amount") or line.get("tax_amount")),
             gross_amount=_string(line.get("observed_gross_amount") or line.get("gross_amount")),
+            tax_scheme_code=_string(line.get("tax_scheme_code")),
+            tax_category_code=_string(line.get("tax_category_code")),
+            exemption_reason_code=_string(line.get("exemption_reason_code")),
+            vat_group_id=_string(line.get("vat_group_id")),
             evidence=_strings(line.get("evidence")),
         )
         for item in payload.get("line_items") or []
@@ -302,6 +315,11 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
             rate=_string(line.get("observed_rate") or line.get("rate")),
             taxable_amount=_string(line.get("observed_taxable_amount") or line.get("taxable_amount")),
             tax_amount=_string(line.get("observed_tax_amount") or line.get("tax_amount")),
+            tax_scheme_code=_string(line.get("tax_scheme_code")),
+            tax_category_code=_string(line.get("tax_category_code")),
+            exemption_reason_code=_string(line.get("exemption_reason_code")),
+            vat_group_id=_string(line.get("vat_group_id")),
+            contributing_line_ids=_strings(line.get("contributing_line_ids")),
             evidence=_strings(line.get("evidence")),
         )
         for item in payload.get("observed_vat_summary") or payload.get("vat_summary") or []
@@ -450,6 +468,85 @@ def _decimal(value: str) -> Decimal | None:
         return None
 
 
+def _normalized_decimal_text(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return raw
+    compact = raw.replace(" ", "")
+    if "," in compact:
+        compact = compact.replace(".", "").replace(",", ".")
+    try:
+        parsed = Decimal(compact)
+    except (InvalidOperation, ValueError):
+        return raw
+    if not parsed.is_finite():
+        return raw
+    normalized = format(parsed.normalize(), "f")
+    return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
+
+
+def canonical_vat_group_id(
+    *,
+    tax_scheme_code: str,
+    tax_category_code: str,
+    vat_rate: str,
+    exemption_reason_code: str = "",
+) -> str:
+    """Build the stable tax identity used to reconcile UBL VAT groups."""
+    return "|".join(
+        (
+            tax_scheme_code.strip().upper(),
+            tax_category_code.strip().upper(),
+            _normalized_decimal_text(vat_rate),
+            exemption_reason_code.strip().upper(),
+        )
+    )
+
+
+def bind_canonical_lines_to_vat_summary(invoice: CanonicalInvoice) -> CanonicalInvoice:
+    """Attach canonical line IDs to the declared VAT summary group they evidence."""
+    identified = ensure_stable_line_ids(invoice)
+    lines = tuple(
+        replace(
+            line,
+            vat_group_id=canonical_vat_group_id(
+                tax_scheme_code=line.tax_scheme_code,
+                tax_category_code=line.tax_category_code,
+                vat_rate=line.vat_rate,
+                exemption_reason_code=line.exemption_reason_code,
+            ),
+        )
+        for line in identified.line_items
+    )
+    line_ids_by_group: dict[str, list[str]] = {}
+    for line in lines:
+        line_ids_by_group.setdefault(line.vat_group_id, []).append(line.canonical_line_id)
+    summary = tuple(
+        replace(
+            line,
+            vat_group_id=canonical_vat_group_id(
+                tax_scheme_code=line.tax_scheme_code,
+                tax_category_code=line.tax_category_code,
+                vat_rate=line.rate,
+                exemption_reason_code=line.exemption_reason_code,
+            ),
+            contributing_line_ids=tuple(
+                line_ids_by_group.get(
+                    canonical_vat_group_id(
+                        tax_scheme_code=line.tax_scheme_code,
+                        tax_category_code=line.tax_category_code,
+                        vat_rate=line.rate,
+                        exemption_reason_code=line.exemption_reason_code,
+                    ),
+                    (),
+                )
+            ),
+        )
+        for line in identified.vat_summary
+    )
+    return replace(identified, line_items=lines, vat_summary=summary)
+
+
 def _sum(values: list[Decimal]) -> Decimal | None:
     if not values:
         return None
@@ -471,7 +568,7 @@ def _line_tax(line: CanonicalInvoiceLine) -> Decimal | None:
 
 
 def validate_canonical_invoice(invoice: CanonicalInvoice) -> CanonicalInvoiceValidation:
-    invoice = ensure_stable_line_ids(invoice)
+    invoice = bind_canonical_lines_to_vat_summary(invoice)
     reasons: list[str] = []
     evidence: list[str] = []
 
@@ -517,6 +614,34 @@ def validate_canonical_invoice(invoice: CanonicalInvoice) -> CanonicalInvoiceVal
     if invoice.vat_summary and not _close(summary_tax_sum, tax_sum):
         reasons.append("vat_summary_tax_mismatch")
 
+    declared_vat_groups = {line.vat_group_id for line in invoice.vat_summary}
+    line_groups: dict[str, list[CanonicalInvoiceLine]] = {}
+    for line in invoice.line_items:
+        line_groups.setdefault(line.vat_group_id, []).append(line)
+    for summary_line in invoice.vat_summary:
+        group_lines = line_groups.get(summary_line.vat_group_id, [])
+        if not group_lines:
+            reasons.append("vat_group_lines_missing")
+            evidence.append(f"vat_group:{summary_line.vat_group_id}")
+            continue
+        group_taxable = _sum(
+            [value for line in group_lines if (value := _decimal(line.taxable_amount)) is not None]
+        )
+        group_tax = _sum([value for line in group_lines if (value := _decimal(line.tax_amount)) is not None])
+        declared_taxable = _decimal(summary_line.taxable_amount)
+        declared_tax = _decimal(summary_line.tax_amount)
+        if (group_taxable is not None and declared_taxable is None) or not _close(group_taxable, declared_taxable):
+            reasons.append("vat_group_taxable_mismatch")
+            evidence.append(f"vat_group:{summary_line.vat_group_id}")
+        if (group_tax is not None and declared_tax is None) or not _close(group_tax, declared_tax):
+            reasons.append("vat_group_tax_mismatch")
+            evidence.append(f"vat_group:{summary_line.vat_group_id}")
+    if invoice.vat_summary:
+        for group_id in line_groups:
+            if group_id not in declared_vat_groups:
+                reasons.append("vat_group_unexpected_lines")
+                evidence.append(f"vat_group:{group_id}")
+
     special_tax = _decimal(invoice.totals.special_tax_total) or Decimal("0.00")
     expected_gross = None
     if taxable_sum is not None and tax_sum is not None:
@@ -536,5 +661,5 @@ def validate_canonical_invoice(invoice: CanonicalInvoice) -> CanonicalInvoiceVal
 
 
 def with_validation(invoice: CanonicalInvoice) -> CanonicalInvoice:
-    identified = ensure_stable_line_ids(invoice)
-    return replace(identified, validation=validate_canonical_invoice(identified))
+    bound = bind_canonical_lines_to_vat_summary(invoice)
+    return replace(bound, validation=validate_canonical_invoice(bound))

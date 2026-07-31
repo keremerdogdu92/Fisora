@@ -36,6 +36,8 @@ const REVIEW_REASON_LABELS = {
   export_blocked_until_review: "Müşavir onayı gerekli",
   statement_review_required: "Ekstre satırı kontrolü",
   tax_payment_review: "Vergi ödemesi kontrolü",
+  line_decision_journal_incomplete: "Fatura satırı dağılımı kontrol edilmeli",
+  insufficient_evidence: "Tutar veya KDV kanıtı tamamlanmalı",
 };
 
 function reviewReasonLabel(code) {

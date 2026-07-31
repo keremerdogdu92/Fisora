@@ -1,11 +1,13 @@
 ﻿from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -21,7 +23,14 @@ from app.persistence.store_factory import build_workflow_store
 from app.services.document_service import DocumentService
 from app.worker import worker_concurrency_from_env
 from backend.scripts.import_private_intake_manifest import import_manifest
-from app.workflows.document_processing import build_ai_runtime_from_env, build_statement_processing_result, parser_kind_for_document_type, process_queued_documents
+from app.workflows.document_processing import (
+    _accountant_summary,
+    _draft_status,
+    build_ai_runtime_from_env,
+    build_statement_processing_result,
+    parser_kind_for_document_type,
+    process_queued_documents,
+)
 
 
 class FakeStatementSuggestionProvider:
@@ -56,6 +65,50 @@ class RaisingProductProvider:
 
 
 class WorkflowStoreTests(unittest.TestCase):
+    def test_no_posting_result_stays_distinct_from_manual_draft(self) -> None:
+        result = {
+            "simulated_status": "no_posting_suggested",
+            "export_gate_reason": "Kaynak fatura iptal; muhasebe kaydi onerilmez.",
+            "draft_lines": [],
+        }
+
+        self.assertEqual(_draft_status(result), "no_posting_suggested")
+        self.assertEqual(_accountant_summary(result), result["export_gate_reason"])
+
+    def test_private_intake_manifest_requires_invoice_direction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            source_dir = base / "source"
+            source_dir.mkdir()
+            (source_dir / "missing-direction.xml").write_text("<Invoice />", encoding="utf-8")
+            manifest_path = base / "intake_manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "source_dir": str(source_dir),
+                        "files": [
+                            {
+                                "relative_path": "missing-direction.xml",
+                                "extension": ".xml",
+                                "document_kind": "invoice",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "invoice manifest row requires purchase_invoice or sales_invoice"):
+                import_manifest(
+                    manifest_path=manifest_path,
+                    source_dir=None,
+                    document_storage_path=base / "documents",
+                    output_path=base / "summary.json",
+                    client_id="client-1",
+                    client_name="Pilot",
+                    store_backend="json",
+                    json_store_path=base / "store.json",
+                )
+
     def test_outgoing_attempt_claim_is_idempotent_and_events_are_append_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")
@@ -442,6 +495,136 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("nace_cache_hit", metrics)
         self.assertGreaterEqual(metrics["total_ms"], 0)
 
+    def test_processing_worker_labels_persistence_failure_without_calling_it_parser_failure(self) -> None:
+        class PersistenceFailingStore(JsonWorkflowStore):
+            def save_simulation_result(
+                self,
+                *,
+                client_id: str,
+                document_ref: str,
+                result: dict[str, object],
+                attempt_id: str = "",
+            ) -> dict[str, object]:
+                raise RuntimeError("forced persistence failure")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = PersistenceFailingStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_ref": "doc-1",
+                    "document_type": "special_document",
+                    "intake_category": "special_document",
+                    "original_file_name": "manual.txt",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="special_document",
+                parser_kind="manual_review",
+                intake_category="special_document",
+            )
+
+            summary = process_queued_documents(store, max_jobs=1)
+            workspace = store.get_workspace("client-1")
+
+        steps = [event["step"] for event in workspace["document_pipeline_events"]]
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertIn("persistence_failed", steps)
+        self.assertNotIn("parser_failed", steps)
+        failure = next(
+            event
+            for event in workspace["document_pipeline_events"]
+            if event["step"] == "persistence_failed"
+        )
+        self.assertEqual(failure["message_tr"], "Belge sonucu kaydedilemedi.")
+
+    def test_processing_worker_does_not_label_simulation_failure_as_parser_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_ref": "doc-1",
+                    "document_type": "special_document",
+                    "intake_category": "special_document",
+                    "original_file_name": "manual.txt",
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="special_document",
+                parser_kind="manual_review",
+                intake_category="special_document",
+            )
+
+            with patch(
+                "app.workflows.document_processing.build_processing_result",
+                side_effect=RuntimeError("forced simulation failure"),
+            ):
+                summary = process_queued_documents(store, max_jobs=1)
+            workspace = store.get_workspace("client-1")
+
+        steps = [event["step"] for event in workspace["document_pipeline_events"]]
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertIn("processing_failed", steps)
+        self.assertNotIn("parser_failed", steps)
+
+    def test_processing_worker_labels_statement_parser_failure_as_parser_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "statement.csv"
+            source_path.write_text("broken", encoding="utf-8")
+            store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
+            store.upsert_client(
+                client_id="client-1",
+                profile={"client_id": "client-1"},
+                onboarding={"is_ready": True, "missing_fields": []},
+            )
+            store.save_uploaded_document(
+                client_id="client-1",
+                document={
+                    "document_id": "doc-1",
+                    "document_ref": "doc-1",
+                    "document_type": "bank_statement",
+                    "intake_category": "bank_statement",
+                    "original_file_name": "statement.csv",
+                    "storage_path": str(source_path),
+                },
+            )
+            store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="bank_statement",
+                parser_kind="bank_statement",
+                intake_category="bank_statement",
+            )
+
+            with patch(
+                "app.workflows.document_processing.parse_statement_file",
+                side_effect=ValueError("forced statement parse failure"),
+            ):
+                summary = process_queued_documents(store, max_jobs=1)
+            workspace = store.get_workspace("client-1")
+
+        steps = [event["step"] for event in workspace["document_pipeline_events"]]
+        self.assertEqual(summary["failed_count"], 1)
+        self.assertIn("parser_failed", steps)
+        self.assertNotIn("processing_failed", steps)
+
     def test_json_store_is_scoped_by_client_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
@@ -557,6 +740,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref="doc-1",
                 document_type="invoice",
                 parser_kind="invoice_pdf",
+                intake_category="purchase_invoice",
             )
             store.record_document_pipeline_event(
                 client_id="client-1",
@@ -633,6 +817,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref="stored.pdf",
                 document_type="invoice",
                 parser_kind="invoice_pdf",
+                intake_category="purchase_invoice",
             )
             store.save_export_package(client_id="client-1", package={"output_filename": export_file.name})
 
@@ -805,6 +990,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref="doc-1",
                 document_type="invoice",
                 parser_kind=parser_kind_for_document_type("invoice"),
+                intake_category="purchase_invoice",
             )
             claimed = store.claim_next_processing_job()
             store.update_processing_job(job_id=job["id"], status="completed")
@@ -822,6 +1008,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref="doc-1",
                 document_type="invoice",
                 parser_kind="text_pdf_invoice",
+                intake_category="purchase_invoice",
             )
             claimed: list[str] = []
 
@@ -1627,6 +1814,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="invoice",
                 parser_kind=parser_kind_for_document_type("invoice"),
+                intake_category="purchase_invoice",
             )
 
             summary = process_queued_documents(store)
@@ -1720,6 +1908,9 @@ class WorkflowStoreTests(unittest.TestCase):
       <cac:PartyTaxScheme><cbc:CompanyID>1234567890</cbc:CompanyID></cac:PartyTaxScheme>
     </cac:Party>
   </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party>
+  </cac:AccountingCustomerParty>
   <cac:InvoiceLine>
     <cbc:InvoicedQuantity>1</cbc:InvoicedQuantity>
     <cac:Item><cbc:Name>Rexton RLi 20</cbc:Name></cac:Item>
@@ -1772,6 +1963,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
 
             summary = process_queued_documents(store)
@@ -1890,6 +2082,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
 
             summary = process_queued_documents(store)
@@ -1913,6 +2106,7 @@ class WorkflowStoreTests(unittest.TestCase):
   <cbc:IssueDate>2026-05-03</cbc:IssueDate>
   <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
   <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Medikal Tedarik</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party></cac:AccountingCustomerParty>
   <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>ZX Sonic Pro 9 receiver</cbc:Name></cac:Item></cac:InvoiceLine>
   <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>1200.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1200.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
@@ -1949,6 +2143,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
             classifier = StaticFirstClassifier(
                 provider=FakeProductProvider(
@@ -1995,6 +2190,7 @@ class WorkflowStoreTests(unittest.TestCase):
   <cbc:IssueDate>2026-05-03</cbc:IssueDate>
   <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
   <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Medikal Tedarik</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party></cac:AccountingCustomerParty>
   <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>ZX Sonic Pro 9 receiver</cbc:Name></cac:Item></cac:InvoiceLine>
   <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>1200.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1200.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
@@ -2073,6 +2269,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
             provider = FakeProductProvider(
                 {
@@ -2122,6 +2319,9 @@ class WorkflowStoreTests(unittest.TestCase):
       <cac:PartyTaxScheme><cbc:CompanyID>2222222222</cbc:CompanyID></cac:PartyTaxScheme>
     </cac:Party>
   </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party>
+  </cac:AccountingCustomerParty>
   <cac:InvoiceLine><cbc:InvoicedQuantity>10</cbc:InvoicedQuantity><cac:Item><cbc:Name>Domates gida alimi</cbc:Name></cac:Item></cac:InvoiceLine>
   <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>10</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>200.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>220.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>220.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
@@ -2179,6 +2379,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
 
             process_queued_documents(store)
@@ -2202,6 +2403,7 @@ class WorkflowStoreTests(unittest.TestCase):
   <cbc:IssueDate>2026-05-04</cbc:IssueDate>
   <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
   <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Bilinmeyen Tedarik</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party></cac:AccountingCustomerParty>
   <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>ZX Pilot Kalem</cbc:Name></cac:Item></cac:InvoiceLine>
   <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>120.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>120.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
@@ -2246,6 +2448,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 document_ref=uploaded["document_ref"],
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
             classifier = StaticFirstClassifier(
                 provider=RaisingProductProvider(),
@@ -2623,6 +2826,7 @@ class WorkflowStoreTests(unittest.TestCase):
                 "2026-06-03,GIB ODEME,100.00,out\n",
                 encoding="utf-8",
             )
+            (source_dir / "alis_faturasi.xml").write_text("<Invoice />", encoding="utf-8")
             manifest_path = base / "intake_manifest.json"
             manifest_path.write_text(
                 """
@@ -2644,6 +2848,15 @@ class WorkflowStoreTests(unittest.TestCase):
       "file_name": "banka_ekstresi.csv",
       "extension": ".csv",
       "document_kind": "bank_statement"
+    },
+    {
+      "client_id": "client-1",
+      "client_name": "Pilot",
+      "relative_path": "alis_faturasi.xml",
+      "file_name": "alis_faturasi.xml",
+      "extension": ".xml",
+      "document_kind": "invoice",
+      "intake_category": "purchase_invoice"
     }
   ]
 }
@@ -2668,9 +2881,11 @@ class WorkflowStoreTests(unittest.TestCase):
             workspace = JsonWorkflowStore(base / "store.json").get_workspace("client-1")
 
         self.assertEqual(summary["chart_account_count"], 2)
-        self.assertEqual(summary["imported_document_count"], 1)
+        self.assertEqual(summary["imported_document_count"], 2)
+        self.assertEqual(summary["imported_documents"][1]["intake_category"], "purchase_invoice")
         self.assertEqual(workspace["chart_accounts"]["account_count"], 2)
         self.assertEqual(workspace["processing_jobs"][0]["status"], "completed")
+        self.assertEqual(workspace["processing_jobs"][1]["intake_category"], "purchase_invoice")
         self.assertEqual(workspace["documents"][0]["result"]["statement_lines"][0]["transaction_type"], "tax_payment")
         self.assertEqual(workspace["operation_events"][-1]["event_type"], "private_intake_imported")
 

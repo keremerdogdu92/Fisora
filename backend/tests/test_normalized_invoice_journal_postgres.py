@@ -171,6 +171,323 @@ class NormalizedInvoiceJournalPostgresTests(unittest.TestCase):
         )
         return store, client_id, document_ref
 
+    def test_review_evidence_without_safe_draft_persists_without_creating_journal(self) -> None:
+        suffix = uuid4().hex
+        client_id = f"client-{suffix}"
+        document_ref = f"document-{suffix}"
+        store = PostgresWorkflowStore(
+            POSTGRES_DSN,
+            tenant_key=f"normalized-review-evidence-{suffix}",
+            accounting_store_target="normalized",
+        )
+        store.upsert_client(
+            client_id=client_id,
+            profile={"title": "Alici Ltd", "tax_id": "2222222222"},
+            onboarding={},
+        )
+        store.save_uploaded_document(
+            client_id=client_id,
+            document={
+                "document_id": document_ref,
+                "original_file_name": "incomplete.xml",
+                "storage_path": f"/tmp/{document_ref}.xml",
+                "document_type": "einvoice_xml",
+                "status": "stored",
+                "storage_status": "stored",
+                "size_bytes": 512,
+                "sha256": uuid4().hex,
+            },
+        )
+        canonical_line_id = f"line-{suffix}"
+
+        saved = store.save_simulation_result(
+            client_id=client_id,
+            document_ref=document_ref,
+            result={
+                "file_name": "incomplete.xml",
+                "accounting_direction": "purchase",
+                "issue_date": "2026-07-18",
+                "simulated_status": "review_required",
+                "export_status": "review_required",
+                "draft_quality": "no_positive_amount",
+                "canonical_validation_status": "invalid",
+                "canonical_validation_reasons": ["line_tax_amount_missing"],
+                "line_decision_coverage": {"status": "valid"},
+                "line_decisions": [
+                    {
+                        "canonical_line_id": canonical_line_id,
+                        "account_code": "770.01",
+                    }
+                ],
+                "review_reason_codes": ["insufficient_evidence"],
+                "draft_lines": [],
+                "canonical_invoice": {
+                    "header": {
+                        "invoice_no": f"INV-{suffix}",
+                        "issue_date": "2026-07-18",
+                        "currency": "TRY",
+                    },
+                    "supplier_party": {
+                        "title": "Satici Ltd",
+                        "tax_id": "1111111111",
+                    },
+                    "customer_party": {
+                        "title": "Alici Ltd",
+                        "tax_id": "2222222222",
+                    },
+                    "totals": {
+                        "goods_services_total": "0.00",
+                        "vat_total": "0.00",
+                        "payable_total": "0.00",
+                    },
+                    "line_items": [
+                        {
+                            "canonical_line_id": canonical_line_id,
+                            "source_position": "xml:InvoiceLine[1]",
+                            "description": "Kaniti eksik hizmet",
+                            "quantity": "1",
+                            "taxable_amount": "",
+                            "vat_rate": "",
+                            "tax_amount": "",
+                            "gross_amount": "",
+                        }
+                    ],
+                },
+            },
+        )
+
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select
+                        (select count(*) from invoice_lines where tenant_id = %s),
+                        (select count(*) from journal_entries where tenant_id = %s)
+                    """,
+                    (store.tenant_id, store.tenant_id),
+                )
+                canonical_line_count, journal_count = cursor.fetchone()
+
+        self.assertEqual(saved["status"], "review_required")
+        self.assertEqual(saved["result"]["normalized_revision"], 0)
+        self.assertEqual(saved["result"]["draft_lines"], [])
+        self.assertEqual(canonical_line_count, 1)
+        self.assertEqual(journal_count, 0)
+
+    def test_reprocessing_approved_journal_preserves_history_and_blocks_export_until_review(self) -> None:
+        store, client_id, document_ref = self._prepare_draft()
+        approved = self._approve(
+            store,
+            client_id=client_id,
+            document_ref=document_ref,
+        )
+        self.assertTrue(approved["normalized_review"]["approved"])
+        approved_document = store._get_record(client_id, "document", document_ref)
+        self.assertIsNotNone(approved_document)
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select r.result_snapshot,
+                           (select count(*) from ai_attempts where tenant_id = %s)
+                    from documents d
+                    join journal_entries j on j.id = d.current_journal_entry_id
+                    join journal_revisions r
+                      on r.journal_entry_id = j.id
+                     and r.revision_no = j.approved_revision_no
+                    where d.tenant_id = %s and d.source_ref = %s
+                    """,
+                    (store.tenant_id, store.tenant_id, document_ref),
+                )
+                approved_snapshot_before, ai_attempt_count_before = cursor.fetchone()
+        reprocessed_result = deepcopy(approved_document["result"])
+        reprocessed_result.update(
+            {
+                "simulated_status": "review_required",
+                "export_status": "review_required",
+                "review_reason_codes": ["line_decision_journal_incomplete"],
+                "accountant_summary": "Yeni islem sonucu kontrol edilmeli.",
+                "draft_quality": "gross_balanced_needs_vat_split",
+                "draft_lines": [
+                    {
+                        "account_code": "770.01",
+                        "description": "KDV dagilimi kontrol edilecek brut tutar",
+                        "debit": "180.00",
+                        "credit": "0.00",
+                    },
+                    {
+                        "account_code": "320.01",
+                        "description": "Satici",
+                        "debit": "0.00",
+                        "credit": "180.00",
+                    },
+                ],
+                "ai_trace": [
+                    {
+                        "provider": "reprocess-test-ai",
+                        "model": "test-model",
+                        "status": "completed",
+                    }
+                ],
+            }
+        )
+        canonical = reprocessed_result["canonical_invoice"]
+        canonical["totals"].update(
+            {
+                "goods_services_total": "150.00",
+                "vat_total": "30.00",
+                "payable_total": "180.00",
+            }
+        )
+        canonical["line_items"][0].update(
+            {
+                "taxable_amount": "150.00",
+                "tax_amount": "30.00",
+                "gross_amount": "180.00",
+            }
+        )
+
+        saved = store.save_simulation_result(
+            client_id=client_id,
+            document_ref=document_ref,
+            result=reprocessed_result,
+        )
+
+        self.assertEqual(self._revision_count(store, document_ref=document_ref), 2)
+        self.assertEqual(saved["status"], "review_required")
+        self.assertEqual(saved["result"]["normalized_revision"], 2)
+        self.assertFalse(saved["result"]["normalized_journal_persisted"])
+        self.assertIn(
+            "line_decision_journal_incomplete",
+            saved["result"]["review_reason_codes"],
+        )
+        workspace_document = next(
+            item
+            for item in store.get_workspace(client_id)["documents"]
+            if item["document_ref"] == document_ref
+        )
+        self.assertEqual(workspace_document["status"], "review_required")
+        self.assertEqual(
+            workspace_document["result"]["accountant_summary"],
+            "Yeni islem sonucu kontrol edilmeli.",
+        )
+        self.assertEqual(
+            store.authoritative_export_workspace(client_id)["documents"],
+            [],
+        )
+        self.assertEqual(
+            store.reprocess_review_required_document_refs(
+                client_id=client_id,
+                document_refs=[document_ref],
+            ),
+            [document_ref],
+        )
+
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select d.status, d.current_revision_no,
+                           j.current_revision_no, j.approved_revision_no,
+                           r.status, r.result_snapshot,
+                           (select count(*) from invoice_lines
+                             where document_id = d.id),
+                           (select count(*) from invoice_lines
+                             where document_id = d.id and superseded_at is null),
+                           (select net_amount from invoice_lines
+                             where document_id = d.id and superseded_at is null
+                             limit 1),
+                           (select count(*) from ai_attempts
+                             where tenant_id = d.tenant_id)
+                    from documents d
+                    join journal_entries j on j.id = d.current_journal_entry_id
+                    join journal_revisions r
+                      on r.journal_entry_id = j.id
+                     and r.revision_no = j.approved_revision_no
+                    where d.tenant_id = %s and d.source_ref = %s
+                    """,
+                    (store.tenant_id, document_ref),
+                )
+                state = cursor.fetchone()
+
+        self.assertEqual(
+            state[:5],
+            ("reprocess_review_required", 2, 2, 2, "approved"),
+        )
+        self.assertEqual(state[5], approved_snapshot_before)
+        self.assertEqual(state[6:9], (2, 1, Decimal("150.00")))
+        self.assertGreater(state[9], ai_attempt_count_before)
+
+    def test_reprocessing_reopened_journal_creates_a_new_working_revision(self) -> None:
+        store, client_id, document_ref = self._prepare_draft()
+        approved = self._approve(
+            store,
+            client_id=client_id,
+            document_ref=document_ref,
+        )
+        self.assertTrue(approved["normalized_review"]["approved"])
+        store.reopen_journal(
+            client_id=client_id,
+            document_ref=document_ref,
+            expected_revision=2,
+            reviewer="accountant-1",
+            reason="Yeniden islenecek.",
+        )
+        reopened_document = store._get_record(client_id, "document", document_ref)
+        self.assertIsNotNone(reopened_document)
+        result = deepcopy(reopened_document["result"])
+        result["accountant_summary"] = "Reopen sonrasi yeni islem."
+
+        saved = store.save_simulation_result(
+            client_id=client_id,
+            document_ref=document_ref,
+            result=result,
+        )
+
+        self.assertEqual(self._revision_count(store, document_ref=document_ref), 4)
+        self.assertEqual(saved["result"]["normalized_revision"], 4)
+        self.assertNotEqual(
+            saved["result"].get("normalized_journal_persisted"),
+            False,
+        )
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select d.status, d.current_revision_no,
+                           j.current_revision_no, j.approved_revision_no
+                    from documents d
+                    join journal_entries j on j.id = d.current_journal_entry_id
+                    where d.tenant_id = %s and d.source_ref = %s
+                    """,
+                    (store.tenant_id, document_ref),
+                )
+                state = cursor.fetchone()
+        self.assertEqual(state, ("review_required", 4, 4, 2))
+
+    def test_empty_draft_keeps_specific_ai_reason_without_false_evidence_label(self) -> None:
+        store, client_id, document_ref = self._prepare_draft()
+        stored_document = store._get_record(client_id, "document", document_ref)
+        self.assertIsNotNone(stored_document)
+        result = deepcopy(stored_document["result"])
+        result.update(
+            {
+                "draft_lines": [],
+                "review_reason_codes": ["ai_correction_required"],
+                "canonical_validation_status": "valid",
+                "canonical_validation_reasons": [],
+            }
+        )
+
+        saved = store.save_simulation_result(
+            client_id=client_id,
+            document_ref=document_ref,
+            result=result,
+        )
+
+        self.assertIn("ai_correction_required", saved["result"]["review_reason_codes"])
+        self.assertNotIn("insufficient_evidence", saved["result"]["review_reason_codes"])
+
     def test_source_and_document_store_normalized_accounting_period(self) -> None:
         suffix = uuid4().hex
         store = PostgresWorkflowStore(

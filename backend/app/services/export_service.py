@@ -178,32 +178,51 @@ class ExportService:
         client_id: str,
         document_refs: list[str],
     ) -> None:
-        holds_reader = getattr(self.store, "active_document_safety_holds", None)
         requested = [item for item in document_refs if item]
-        if not callable(holds_reader) or not requested:
+        if not requested:
             return
-        holds = holds_reader(client_id=client_id, document_refs=requested)
-        if holds:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "reason": "qnb_external_status_hold",
-                    "document_refs": sorted(
-                        {
-                            str(hold.get("document_ref") or "")
-                            for hold in holds
-                            if str(hold.get("document_ref") or "")
-                        }
-                    ),
-                    "hold_codes": sorted(
-                        {
-                            str(hold.get("hold_code") or "")
-                            for hold in holds
-                            if str(hold.get("hold_code") or "")
-                        }
-                    ),
-                },
+        holds_reader = getattr(self.store, "active_document_safety_holds", None)
+        if callable(holds_reader):
+            holds = holds_reader(client_id=client_id, document_refs=requested)
+            if holds:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "reason": "qnb_external_status_hold",
+                        "document_refs": sorted(
+                            {
+                                str(hold.get("document_ref") or "")
+                                for hold in holds
+                                if str(hold.get("document_ref") or "")
+                            }
+                        ),
+                        "hold_codes": sorted(
+                            {
+                                str(hold.get("hold_code") or "")
+                                for hold in holds
+                                if str(hold.get("hold_code") or "")
+                            }
+                        ),
+                    },
+                )
+        reprocess_reader = getattr(
+            self.store,
+            "reprocess_review_required_document_refs",
+            None,
+        )
+        if callable(reprocess_reader):
+            held_refs = reprocess_reader(
+                client_id=client_id,
+                document_refs=requested,
             )
+            if held_refs:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "reason": "normalized_reprocess_review_required",
+                        "document_refs": sorted(set(held_refs)),
+                    },
+                )
 
     def mark_export_package_downloaded(self, *, client_id: str, output_filename: str) -> None:
         self.store.mark_export_package_downloaded(client_id=client_id, output_filename=output_filename)

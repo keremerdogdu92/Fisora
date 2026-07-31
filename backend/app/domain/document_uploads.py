@@ -83,7 +83,12 @@ def decode_base64_content(content_base64: str) -> bytes:
 
 
 def normalize_intake_category(*, document_type: str, intake_category: str = "") -> str:
-    selected = intake_category.strip() or DEFAULT_INTAKE_CATEGORY_BY_DOCUMENT_TYPE.get(document_type, "purchase_invoice")
+    selected = intake_category.strip()
+    if document_type in {"invoice", "einvoice_xml"} and not selected:
+        raise ValueError("invoice intake_category is required")
+    if document_type in {"invoice", "einvoice_xml"} and selected not in {"purchase_invoice", "sales_invoice"}:
+        raise ValueError("invoice intake_category must be purchase_invoice or sales_invoice")
+    selected = selected or DEFAULT_INTAKE_CATEGORY_BY_DOCUMENT_TYPE.get(document_type, "")
     if selected not in ALLOWED_INTAKE_CATEGORIES:
         raise ValueError(f"unsupported intake_category: {selected}")
     return selected

@@ -519,6 +519,7 @@ function processedBackendDocument(document, workspace, client) {
     reviewReasons: safeList(document?.review_reason_codes || result.review_reason_codes).map(String),
     riskFlags: safeList(result.risk_flags).map(String),
     draftLines: safeList(result.draft_lines),
+    lineDecisions: safeList(result.line_decisions),
     statementLines: safeList(result.statement_lines),
     statementEntries: safeList(result.statement_entries),
     statementAiSuggestions: safeList(result.statement_ai_suggestions),

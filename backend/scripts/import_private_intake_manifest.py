@@ -37,6 +37,19 @@ def _document_type(row: dict[str, Any]) -> str:
     return "invoice"
 
 
+def _invoice_intake_category(row: dict[str, Any], *, document_type: str) -> str:
+    if document_type not in {"invoice", "einvoice_xml"}:
+        return str(row.get("intake_category") or "")
+
+    direction = str(row.get("intake_category") or "").strip()
+    if direction not in {"purchase_invoice", "sales_invoice"}:
+        raise ValueError(
+            "invoice manifest row requires purchase_invoice or sales_invoice: "
+            f"{row.get('relative_path')}"
+        )
+    return direction
+
+
 def _load_manifest(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload.get("files"), list):
@@ -149,11 +162,13 @@ def import_manifest(
             continue
         content = path.read_bytes()
         document_type = _document_type(row)
+        intake_category = _invoice_intake_category(row, document_type=document_type)
         stored = store_document_content(
             base_dir=document_storage_path,
             client_id=client_id,
             file_name=str(row.get("file_name") or path.name),
             document_type=document_type,
+            intake_category=intake_category,
             uploaded_by=uploaded_by,
             content=content,
             retention_days=retention_days,
@@ -164,12 +179,14 @@ def import_manifest(
             document_ref=str(saved["document_ref"]),
             document_type=document_type,
             parser_kind=parser_kind_for_document_type(document_type),
+            intake_category=intake_category,
         )
         imported_documents.append(
             {
                 "relative_path": row.get("relative_path"),
                 "document_ref": saved["document_ref"],
                 "document_type": document_type,
+                "intake_category": intake_category,
                 "processing_job_id": job["id"],
             }
         )

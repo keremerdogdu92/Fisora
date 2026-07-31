@@ -178,10 +178,12 @@ def _allocation_plan(
         ]
         for canonical in canonical_lines:
             canonical_line_id = str(canonical.get("canonical_line_id") or "")
+            vat_group_id = str(canonical.get("vat_group_id") or "")
+            line_decision = decisions_by_id.get(canonical_line_id) or {}
             amount = _line_amount(canonical, component)
             if amount <= 0:
                 continue
-            preferred_code = str((decisions_by_id.get(canonical_line_id) or {}).get("account_code") or "")
+            preferred_code = str(line_decision.get("account_code") or "")
             candidates = list(component_candidates)
             if component == "net":
                 candidates = [
@@ -219,6 +221,12 @@ def _allocation_plan(
                     {
                         "journal_line_no": line_no,
                         "canonical_line_id": canonical_line_id,
+                        "vat_group_id": vat_group_id,
+                        "component": component,
+                        "allocated_amount": allocated,
+                        "decision_origin": str(
+                            line_decision.get("decision_origin") or ""
+                        ),
                         "allocation_kind": component,
                         f"allocated_{component}": allocated,
                         "allocation_method": (
@@ -1046,10 +1054,40 @@ class NormalizedAccountingRepository:
             raise NormalizedAccountingError("normalized invoice requires stable canonical line ids")
         if len({str(line.get("canonical_line_id")) for line in lines}) != len(lines):
             raise NormalizedAccountingError("normalized invoice canonical line ids must be unique")
-        draft_lines, total_debit, total_credit = _validated_draft_lines(result.get("draft_lines"))
+        raw_draft_lines = result.get("draft_lines")
+        has_draft_lines = isinstance(raw_draft_lines, (list, tuple)) and bool(raw_draft_lines)
+        if has_draft_lines:
+            draft_lines, total_debit, total_credit = _validated_draft_lines(raw_draft_lines)
+            result["is_balanced"] = True
+        else:
+            draft_lines = []
+            total_debit = Decimal("0.00")
+            total_credit = Decimal("0.00")
+            result["is_balanced"] = False
+            result["export_status"] = "review_required"
+            existing_review_reasons = list(result.get("review_reason_codes") or [])
+            canonical_validation_reasons = [
+                str(reason or "").lower()
+                for reason in result.get("canonical_validation_reasons") or []
+            ]
+            amount_evidence_missing = any(
+                any(token in reason for token in ("amount", "tax", "vat", "total"))
+                for reason in canonical_validation_reasons
+            )
+            result["review_reason_codes"] = list(
+                dict.fromkeys(
+                    [
+                        *existing_review_reasons,
+                        *(
+                            ["insufficient_evidence"]
+                            if not existing_review_reasons or amount_evidence_missing
+                            else []
+                        ),
+                    ]
+                )
+            )
         result["total_debit"] = f"{total_debit:.2f}"
         result["total_credit"] = f"{total_credit:.2f}"
-        result["is_balanced"] = True
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -1278,6 +1316,77 @@ class NormalizedAccountingRepository:
                             self._json(attempt),
                         ),
                     )
+                approved_revision_no = None
+                current_revision_status = ""
+                if current_journal_id:
+                    cursor.execute(
+                        """
+                        select journal_entries.approved_revision_no, revisions.status
+                        from journal_entries
+                        left join journal_revisions revisions
+                          on revisions.journal_entry_id = journal_entries.id
+                         and revisions.revision_no = journal_entries.current_revision_no
+                        where journal_entries.id = %s
+                        """,
+                        (current_journal_id,),
+                    )
+                    journal_state = cursor.fetchone()
+                    approved_revision_no = journal_state[0] if journal_state else None
+                    current_revision_status = str(journal_state[1] or "") if journal_state else ""
+                if approved_revision_no is not None and current_revision_status == "approved":
+                    revision_no = int(current_revision_no or approved_revision_no or 0)
+                    result["normalized_revision"] = revision_no
+                    result["normalized_revision_status"] = "review_required"
+                    result["normalized_journal_persisted"] = False
+                    cursor.execute(
+                        """
+                        update documents
+                        set status = 'reprocess_review_required', updated_at = now()
+                        where id = %s
+                        """,
+                        (document_id,),
+                    )
+                    self._append_event(
+                        cursor,
+                        taxpayer_id=taxpayer_id,
+                        document_id=document_id,
+                        event_type="normalized_approved_reprocess_held",
+                        status="warning",
+                        actor="document_worker",
+                        details={
+                            "approved_revision_no": int(approved_revision_no),
+                            "canonical_line_count": len(canonical_line_ids),
+                            "review_reason_codes": result.get("review_reason_codes") or [],
+                        },
+                    )
+                    return {
+                        "revision_no": revision_no,
+                        "journal_entry_id": str(current_journal_id),
+                        "journal_saved": False,
+                    }
+                if not has_draft_lines:
+                    revision_no = int(current_revision_no or 0)
+                    result["normalized_revision"] = revision_no
+                    result["normalized_revision_status"] = "review_required"
+                    result["normalized_journal_persisted"] = False
+                    self._append_event(
+                        cursor,
+                        taxpayer_id=taxpayer_id,
+                        document_id=document_id,
+                        event_type="normalized_review_evidence_saved",
+                        status="warning",
+                        actor="document_worker",
+                        details={
+                            "revision_no": revision_no,
+                            "canonical_line_count": len(canonical_line_ids),
+                            "review_reason_codes": result["review_reason_codes"],
+                        },
+                    )
+                    return {
+                        "revision_no": revision_no,
+                        "journal_entry_id": str(current_journal_id or ""),
+                        "journal_saved": False,
+                    }
                 journal_id = current_journal_id or _uuid_for("journal", str(document_id))
                 cursor.execute(
                     """
@@ -1320,8 +1429,6 @@ class NormalizedAccountingRepository:
                 if not journal_row:
                     raise NormalizedAccountingError("journal upsert did not return an identity")
                 journal_id, journal_current_revision, approved_revision_no = journal_row
-                if approved_revision_no is not None:
-                    raise NormalizedAccountingError("approved normalized journal cannot be replaced by processing")
                 revision_no = int(journal_current_revision or current_revision_no or 0) + 1
                 revision_id = uuid4()
                 result["normalized_revision"] = revision_no
@@ -1776,7 +1883,11 @@ class NormalizedAccountingRepository:
 
     def project_documents(self, *, client_id: str, approved_only: bool = False) -> list[dict[str, Any]]:
         taxpayer_id = _uuid_for("taxpayer", f"{self.tenant_id}:{client_id}")
-        status_sql = "and revisions.status = 'approved'" if approved_only else ""
+        status_sql = (
+            "and revisions.status = 'approved' and documents.status = 'approved'"
+            if approved_only
+            else "and documents.status <> 'reprocess_review_required'"
+        )
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -1806,6 +1917,31 @@ class NormalizedAccountingRepository:
             }
             for row in rows
         ]
+
+    def reprocess_review_required_document_refs(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str],
+    ) -> list[str]:
+        requested = [str(item or "").strip() for item in document_refs if str(item or "").strip()]
+        if not requested:
+            return []
+        taxpayer_id = _uuid_for("taxpayer", f"{self.tenant_id}:{client_id}")
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select source_ref
+                    from documents
+                    where tenant_id = %s and taxpayer_id = %s
+                      and status = 'reprocess_review_required'
+                      and source_ref = any(%s)
+                    order by source_ref
+                    """,
+                    (self.tenant_id, taxpayer_id, requested),
+                )
+                return [str(row[0]) for row in cursor.fetchall()]
 
     def _locked_current_journal(
         self,
@@ -1966,7 +2102,13 @@ class NormalizedAccountingRepository:
                     self._json(
                         {
                             "canonical_line_id": str(allocation["canonical_line_id"]),
+                            "vat_group_id": str(allocation.get("vat_group_id") or ""),
                             "journal_line_no": int(allocation["journal_line_no"]),
+                            "component": str(allocation.get("component") or kind),
+                            "allocated_amount": f"{_decimal(allocation.get('allocated_amount')):.2f}",
+                            "decision_origin": str(
+                                allocation.get("decision_origin") or ""
+                            ),
                         }
                     ),
                 ),

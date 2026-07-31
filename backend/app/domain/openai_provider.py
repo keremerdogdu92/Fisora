@@ -72,6 +72,13 @@ def classification_instructions_for(request: AiClassificationRequest) -> str:
             "VKN/TCKN, unvan ve dogrulanmis baglari birlikte kullan. "
             "Uygun cari yoksa yeni cari ihtiyacini belirt; cari kodu uydurma."
         )
+    if stage == "vat_group_account":
+        return (
+            "Tek bir canonical KDV grubunun tum satirlarini birlikte degerlendir. Yalniz verilen gercek ve "
+            "yon-filtreli net hesap adaylarindan bir hesap sec. Farkli satir anlatimi veya dusuk guven grubu "
+            "kendiliginden bolmez; yalniz muhtemel istisna satir kimliklerini inceleme kaniti olarak belirt. "
+            "Canonical kimlikleri, grup uyeligini, tutarlari veya KDV degerlerini degistirme."
+        )
     return (
         "Her canonical fatura satiri icin mukellefin gercek hesap planindaki en uygun gercek hesabi sec. "
         "Satir kaniti, belge yonu, faaliyet/NACE, dogrulanmis kurallar ve verilen adaylari birlikte degerlendir. "

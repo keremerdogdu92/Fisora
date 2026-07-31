@@ -23,6 +23,44 @@ from app.domain.storage_adapters import storage_readiness
 
 
 class DocumentUploadTests(unittest.TestCase):
+    def test_invoice_upload_requires_explicit_purchase_or_sales_direction(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "invoice intake_category is required"):
+                store_document_content(
+                    base_dir=Path(temp_dir),
+                    client_id="pilot",
+                    file_name="invoice.xml",
+                    document_type="einvoice_xml",
+                    uploaded_by="test",
+                    content=b"<Invoice />",
+                )
+
+    def test_invoice_upload_rejects_non_invoice_intake_category(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "invoice intake_category must be purchase_invoice or sales_invoice"):
+                store_document_content(
+                    base_dir=Path(temp_dir),
+                    client_id="pilot",
+                    file_name="invoice.xml",
+                    document_type="einvoice_xml",
+                    intake_category="bank_statement",
+                    uploaded_by="test",
+                    content=b"<Invoice />",
+                )
+
+    def test_non_invoice_document_keeps_its_existing_default_category(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            stored = store_document_content(
+                base_dir=Path(temp_dir),
+                client_id="pilot",
+                file_name="bank.csv",
+                document_type="bank_statement",
+                uploaded_by="test",
+                content=b"date,amount",
+            )
+
+        self.assertEqual(stored.intake_category, "bank_statement")
+
     def test_document_content_is_stored_under_client_and_document_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             document = store_document_content(
@@ -30,6 +68,7 @@ class DocumentUploadTests(unittest.TestCase):
                 client_id="client 1",
                 file_name="../Rexton Alis Faturasi.pdf",
                 document_type="invoice",
+                intake_category="purchase_invoice",
                 uploaded_by="mukellef-user",
                 content=b"invoice-bytes",
             )
@@ -82,6 +121,7 @@ class DocumentUploadTests(unittest.TestCase):
                 client_id="client-1",
                 file_name="subat-faturasi.xml",
                 document_type="einvoice_xml",
+                intake_category="purchase_invoice",
                 period="2026-02",
                 uploaded_by="mukellef-user",
                 content=b"invoice-bytes",

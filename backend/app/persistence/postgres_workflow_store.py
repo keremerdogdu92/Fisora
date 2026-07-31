@@ -3165,6 +3165,19 @@ class PostgresWorkflowStore:
         )
         return workspace
 
+    def reprocess_review_required_document_refs(
+        self,
+        *,
+        client_id: str,
+        document_refs: list[str],
+    ) -> list[str]:
+        if not self.normalized_accounting_enabled:
+            return []
+        return self.normalized_repository.reprocess_review_required_document_refs(
+            client_id=client_id,
+            document_refs=document_refs,
+        )
+
     def reopen_journal(
         self,
         *,

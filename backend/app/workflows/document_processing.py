@@ -569,6 +569,8 @@ def _ai_attention_status(result: dict[str, Any]) -> str:
 def _draft_status(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "wrong_document_type"
+    if result.get("simulated_status") == "no_posting_suggested":
+        return "no_posting_suggested"
     if attention := _ai_attention_status(result):
         return attention
     if result.get("draft_lines"):
@@ -579,6 +581,8 @@ def _draft_status(result: dict[str, Any]) -> str:
 def _accountant_summary(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "Bu dosya beklenen fatura/ekstre yapisinda gorunmuyor. Dogru belge yeniden istenmeli."
+    if result.get("simulated_status") == "no_posting_suggested":
+        return str(result.get("export_gate_reason") or "Kaynak belge icin muhasebe kaydi onerilmiyor.")
     if _ai_attention_status(result) == "ai_retry_required":
         return "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek."
     if _ai_attention_status(result) == "ai_correction_required":
@@ -1009,8 +1013,12 @@ def build_statement_processing_result(
     statement_ai_provider: StatementSuggestionProvider | None = None,
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
 ) -> dict[str, Any]:
+    try:
+        parsed_lines = parse_statement_file(path)
+    except Exception as exc:
+        raise DocumentParseError(str(exc)) from exc
     lines = enrich_statement_lines_with_counterparties(
-        parse_statement_file(path),
+        parsed_lines,
         _chart_accounts(workspace),
         workspace.get("learning_events") or (),
     )
@@ -1165,6 +1173,10 @@ def build_initial_processing_result(document: dict[str, Any], job: dict[str, Any
     }, document_validation_status="manual_review" if parser_kind == "manual_review" else "parse_pending")
 
 
+class DocumentParseError(RuntimeError):
+    """Raised only when source-document parsing itself fails."""
+
+
 def build_processing_result(
     document: dict[str, Any],
     job: dict[str, Any],
@@ -1189,13 +1201,16 @@ def build_processing_result(
             statement_ai_provider=statement_ai_provider,
             statement_ai_policy=statement_ai_policy,
         )
-    invoice = _parse_invoice_document(
-        path,
-        document_type,
-        canonical_extraction_provider=canonical_extraction_provider,
-        canonical_extraction_policy=canonical_extraction_policy,
-        client_identity=_canonical_client_identity(workspace),
-    )
+    try:
+        invoice = _parse_invoice_document(
+            path,
+            document_type,
+            canonical_extraction_provider=canonical_extraction_provider,
+            canonical_extraction_policy=canonical_extraction_policy,
+            client_identity=_canonical_client_identity(workspace),
+        )
+    except Exception as exc:
+        raise DocumentParseError(str(exc)) from exc
     if not _invoice_has_expected_shape(invoice):
         return _unexpected_document_result(
             document,
@@ -1206,7 +1221,9 @@ def build_processing_result(
         invoice,
         workspace,
         product_classifier=product_classifier,
-        intended_direction=str(document.get("intake_category") or job.get("intake_category") or ""),
+        intended_direction=_intake_direction(
+            str(document.get("intake_category") or job.get("intake_category") or "")
+        ),
     )
 
 
@@ -1299,6 +1316,7 @@ def process_next_job_once(
     selected_provider = ""
     research_cache_hit = False
     nace_cache_hit = False
+    failure_stage = "parse"
 
     def pipeline_event(step: str, status: str, message_tr: str, debug_code: str, details: dict[str, Any] | None = None) -> None:
         if not hasattr(store, "record_document_pipeline_event"):
@@ -1360,6 +1378,7 @@ def process_next_job_once(
             )
         workspace = _workspace_with_nace_research(workspace, store)
         parse_start = time.perf_counter()
+        failure_stage = "processing"
         result = build_processing_result(
             document,
             job,
@@ -1707,6 +1726,7 @@ def process_next_job_once(
                 "export_ready",
                 {},
             )
+        failure_stage = "persistence"
         store.save_simulation_result(
             client_id=client_id,
             document_ref=document_ref,
@@ -1717,6 +1737,7 @@ def process_next_job_once(
                 else {}
             ),
         )
+        failure_stage = "processing"
         _record_ai_usage_from_result(store, client_id=client_id, result=result)
         processing_metrics = {
             "queue_wait_ms": _timestamp_to_ms(job.get("created_at")),
@@ -1786,12 +1807,30 @@ def process_next_job_once(
             )
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
+        if isinstance(exc, DocumentParseError):
+            failure_stage = "parse"
+        failure_event = {
+            "parse": (
+                "parser_failed",
+                "Belge parse edilemedi.",
+            ),
+            "persistence": (
+                "persistence_failed",
+                "Belge sonucu kaydedilemedi.",
+            ),
+        }.get(
+            failure_stage,
+            (
+                "processing_failed",
+                "Belge isleme tamamlanamadi.",
+            ),
+        )
         pipeline_event(
-            "parser_failed",
+            failure_event[0],
             "error",
-            "Belge parse edilemedi.",
-            "parser_failed",
-            {"error": str(exc)},
+            failure_event[1],
+            failure_event[0],
+            {"error": str(exc), "failure_stage": failure_stage},
         )
         processing_metrics = {
             "queue_wait_ms": _timestamp_to_ms(job.get("created_at")),

@@ -531,6 +531,46 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertFalse(adapter["verified_in_zirve"])
         self.assertTrue(any("manual column mapping" in note.lower() for note in adapter["field_mapping_notes"]))
 
+    def test_export_download_blocks_package_containing_reprocessed_approved_document(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_root = Path(temp_dir) / "exports"
+            output_path = export_root / "client-1" / "old.csv"
+            output_path.parent.mkdir(parents=True)
+            output_path.write_text("old export", encoding="utf-8")
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.save_export_package(
+                client_id="client-1",
+                package={
+                    "output_filename": "old.csv",
+                    "entries": [{"document_ref": "approved.pdf"}],
+                },
+            )
+            store.reprocess_review_required_document_refs = (
+                lambda *, client_id, document_refs: ["approved.pdf"]
+            )
+            service = ExportService(
+                store=store,
+                export_path=export_root,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+
+            with self.assertRaises(HTTPException) as raised:
+                service.export_download_path(
+                    client_id="client-1",
+                    file_name="old.csv",
+                    user_id="mali-musavir",
+                )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(
+            raised.exception.detail,
+            {
+                "reason": "normalized_reprocess_review_required",
+                "document_refs": ["approved.pdf"],
+            },
+        )
+
     def test_review_decision_payload_normalizes_decision_note(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")

@@ -6,6 +6,20 @@ export type DraftLine = {
   debit: string;
   credit: string;
   tax_rate?: string;
+  vat_group_id?: string;
+  contributing_line_ids?: string[];
+  source_line_numbers?: number[];
+  allocated_amounts?: { canonical_line_id: string; amount: string }[];
+};
+
+export type VatGroupEvidence = {
+  vatGroupId: string;
+  label: string;
+  taxableAmount: string;
+  taxAmount: string;
+  grossAmount: string;
+  contributingLineIds: string[];
+  sourceLineNumbers: number[];
 };
 
 export type ChartAccountOption = {
@@ -219,6 +233,7 @@ export type PilotDocument = {
   riskFlags: string[];
   chartAccounts: ChartAccountOption[];
   draftLines: DraftLine[];
+  lineDecisions?: Record<string, unknown>[];
   statementLines: StatementLineReview[];
   statementEntries: StatementEntryReview[];
   statementAiSuggestions: StatementAiSuggestionView[];

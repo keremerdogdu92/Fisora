@@ -51,6 +51,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
                     "content_base64": "ZmF0dXJh",
@@ -62,6 +63,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-2",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
@@ -138,6 +140,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by": "mukellef-user",
@@ -186,6 +189,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by": "mukellef-user",
@@ -281,6 +285,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "eski-fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
@@ -328,6 +333,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "eski-fatura.pdf",
                     "uploaded_by_user_id": "mali-musavir",
@@ -717,6 +723,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by": "mukellef-user",
@@ -792,6 +799,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mukellef-user",
@@ -852,6 +860,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mukellef-user",
                     "content_base64": "not valid base64",
@@ -1143,6 +1152,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "period": "2026-05",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "mukellef-user",
@@ -1309,6 +1319,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 json={
                     "client_id": "client-1",
                     "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
                     "file_name": "fatura.pdf",
                     "uploaded_by_user_id": "other-user",
                     "content_base64": "ZmF0dXJh",

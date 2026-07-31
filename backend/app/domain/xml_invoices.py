@@ -14,6 +14,8 @@ from app.domain.canonical_invoices import (
     CanonicalInvoiceParty,
     CanonicalInvoiceTotals,
     CanonicalVatSummaryLine,
+    _normalized_decimal_text,
+    canonical_vat_group_id,
     with_validation,
 )
 from app.domain.pdf_invoices import ParsedInvoice
@@ -96,6 +98,16 @@ def _direct_child(root: ET.Element, local_name: str) -> ET.Element | None:
 
 def _direct_children(root: ET.Element, local_name: str) -> list[ET.Element]:
     return [child for child in list(root) if _local_name(child.tag) == local_name]
+
+
+def _first_descendant(root: ET.Element | None, local_name: str) -> ET.Element | None:
+    if root is None:
+        return None
+    return next((element for element in root.iter() if _local_name(element.tag) == local_name), None)
+
+
+def _first_direct_text(root: ET.Element, local_name: str) -> str:
+    return _text(_direct_child(root, local_name))
 
 
 def _text_at(root: ET.Element | None, path: tuple[str, ...]) -> str:
@@ -262,6 +274,27 @@ def _invoice_line_hints(root: ET.Element, *, max_lines: int = 20) -> tuple[str, 
     return tuple(dict.fromkeys(hints))
 
 
+def _tax_identity(element: ET.Element) -> dict[str, str]:
+    category = _first_descendant(element, "ClassifiedTaxCategory")
+    if category is None:
+        category = _first_descendant(element, "TaxCategory")
+    if category is None:
+        return {
+            "tax_scheme_code": "",
+            "tax_category_code": "",
+            "vat_rate": "",
+            "exemption_reason_code": "",
+        }
+
+    scheme = _first_descendant(category, "TaxScheme")
+    return {
+        "tax_scheme_code": _first_text_under(scheme, ("TaxTypeCode", "ID")) if scheme is not None else "",
+        "tax_category_code": _first_direct_text(category, "ID"),
+        "vat_rate": _first_text_under(category, ("Percent",)),
+        "exemption_reason_code": _first_text_under(category, ("TaxExemptionReasonCode",)),
+    }
+
+
 def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple[CanonicalInvoiceLine, ...]:
     lines: list[CanonicalInvoiceLine] = []
     for index, line in enumerate((element for element in root.iter() if _local_name(element.tag) == "InvoiceLine"), start=1):
@@ -279,7 +312,7 @@ def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple
             ("LineExtensionAmount",),
         )
         tax_amount = _first_amount_in_child(line, "TaxTotal", ("TaxAmount",))
-        vat_rate = _first_text_under(line, ("Percent",))
+        tax_identity = _tax_identity(line)
         unit_price = _first_amount_in_child(line, "Price", ("PriceAmount",))
         quantity_element = next(
             (
@@ -301,9 +334,13 @@ def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple
                     unit_code=unit_code,
                     unit_price=unit_price,
                     taxable_amount=taxable_amount,
-                    vat_rate=str(int(Decimal(vat_rate))) if vat_rate else "",
+                    vat_rate=_normalized_decimal_text(tax_identity["vat_rate"]),
                     tax_amount=tax_amount,
                     gross_amount=_format_sum(taxable_amount, tax_amount),
+                    tax_scheme_code=tax_identity["tax_scheme_code"],
+                    tax_category_code=tax_identity["tax_category_code"],
+                    exemption_reason_code=tax_identity["exemption_reason_code"],
+                    vat_group_id=canonical_vat_group_id(**tax_identity),
                     evidence=(f"xml:InvoiceLine[{external_line_id or index}]",),
                 )
             )
@@ -321,12 +358,16 @@ def _canonical_vat_summary(root: ET.Element) -> tuple[CanonicalVatSummaryLine, .
             (element for element in tax_total.iter() if _local_name(element.tag) == "TaxSubtotal"),
             start=1,
         ):
-            rate = _first_text_under(subtotal, ("Percent",))
+            tax_identity = _tax_identity(subtotal)
             summary.append(
                 CanonicalVatSummaryLine(
-                    rate=str(int(Decimal(rate))) if rate else "",
+                    rate=_normalized_decimal_text(tax_identity["vat_rate"]),
                     taxable_amount=_first_amount_under(subtotal, ("TaxableAmount",)),
                     tax_amount=_first_amount_under(subtotal, ("TaxAmount",)),
+                    tax_scheme_code=tax_identity["tax_scheme_code"],
+                    tax_category_code=tax_identity["tax_category_code"],
+                    exemption_reason_code=tax_identity["exemption_reason_code"],
+                    vat_group_id=canonical_vat_group_id(**tax_identity),
                     evidence=(f"xml:TaxSubtotal[{index}]",),
                 )
             )

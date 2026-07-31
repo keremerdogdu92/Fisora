@@ -44,6 +44,7 @@ Manifest su alanlari tutar:
 - `client_id`, `client_name`, `period`, `privacy_level`
 - `relative_path`, `file_name`, `extension`
 - `document_kind`
+- Invoice rows: `intake_category` (`purchase_invoice` veya `sales_invoice`)
 - `size_bytes`, `sha256`
 
 ## Manifestten Store Import
@@ -64,11 +65,28 @@ Bu komut:
 
 - `chart_accounts` dosyasini hesap plani olarak import eder.
 - PDF faturayi `invoice`, XML faturayi `einvoice_xml` olarak kaydeder.
+- Her fatura manifest satirinda `intake_category` alanini zorunlu tutar:
+  `purchase_invoice` veya `sales_invoice`. Eksik yon sessizce alis kabul
+  edilmez.
 - Banka/POS ekstrelerini ilgili parser job'una alir.
 - Ham dosyanin uygulama storage kopyasini `exports/documents` altina yazar.
 - Import sonucunu `private_samples/intake_import_summary.json` olarak tutar.
+  Her `imported_documents` kaydi, denetlenebilir preflight icin kendi
+  `intake_category` degerini de icerir.
 
 Gercek veri kullanildiginda bu ciktilar GitHub'a eklenmez.
+
+Planlanan 50-fatura accountant-reference corpus importundan once
+dry-run/preflight su sonuclari zorunlu tutar:
+
+- 50 benzersiz invoice source hash;
+- 35 `purchase_invoice`;
+- 15 `sales_invoice`;
+- sifir eksik veya desteklenmeyen fatura yonu;
+- XML kaynaklarda current client VKN ile supplier/customer tarafindan uretilen
+  yon arasinda sifir exact conflict.
+
+Bu kontrol gecmeden pilot belgeleri silinmez veya yeniden import edilmez.
 
 ## Belge Tipi Tahmini
 

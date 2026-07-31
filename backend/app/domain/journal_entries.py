@@ -17,6 +17,10 @@ class JournalLine:
     tax_rate: Decimal | None = None
     counterparty_tax_id: str | None = None
     document_ref: str | None = None
+    vat_group_id: str = ""
+    contributing_line_ids: tuple[str, ...] = field(default_factory=tuple)
+    source_line_numbers: tuple[int, ...] = field(default_factory=tuple)
+    allocated_amounts: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

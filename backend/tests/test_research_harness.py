@@ -106,6 +106,7 @@ def write_invoice_xml(
   <cbc:IssueDate>2026-05-03</cbc:IssueDate>
   <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
   <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>{supplier_name}</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party></cac:AccountingCustomerParty>
 {invoice_lines}
   <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>{total}</cbc:TaxInclusiveAmount><cbc:PayableAmount>{total}</cbc:PayableAmount></cac:LegalMonetaryTotal>
@@ -134,6 +135,7 @@ def queue_invoice(store: JsonWorkflowStore, xml_path: Path, *, document_type: st
             "document_id": "xml-doc",
             "document_ref": "xml-doc",
             "document_type": document_type,
+            "intake_category": "purchase_invoice",
             "original_file_name": xml_path.name,
             "storage_path": str(xml_path),
             "status": "stored",
@@ -144,6 +146,7 @@ def queue_invoice(store: JsonWorkflowStore, xml_path: Path, *, document_type: st
         document_ref="xml-doc",
         document_type=document_type,
         parser_kind=parser_kind_for_document_type(document_type),
+        intake_category="purchase_invoice",
     )
 
 
@@ -1549,6 +1552,7 @@ class ResearchHarnessTests(unittest.TestCase):
   <cbc:IssueDate>2026-05-03</cbc:IssueDate>
   <cbc:InvoiceTypeCode>ALIS</cbc:InvoiceTypeCode>
   <cac:AccountingSupplierParty><cac:Party><cac:PartyLegalEntity><cbc:RegistrationName>Acme Kozmetik A.S.</cbc:RegistrationName></cac:PartyLegalEntity></cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party><cac:PartyTaxScheme><cbc:CompanyID>1111111111</cbc:CompanyID></cac:PartyTaxScheme></cac:Party></cac:AccountingCustomerParty>
   <cac:InvoiceLine><cbc:InvoicedQuantity>1</cbc:InvoicedQuantity><cac:Item><cbc:Name>Mystery Sonic Pro bakım seti</cbc:Name></cac:Item></cac:InvoiceLine>
   <cac:TaxTotal><cbc:TaxAmount>200.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:Percent>20</cbc:Percent></cac:TaxSubtotal></cac:TaxTotal>
   <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>1000.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>1200.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1200.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
@@ -1585,6 +1589,7 @@ class ResearchHarnessTests(unittest.TestCase):
                 document_ref="xml-doc",
                 document_type="einvoice_xml",
                 parser_kind=parser_kind_for_document_type("einvoice_xml"),
+                intake_category="purchase_invoice",
             )
             provider = FakeResearchProvider(
                 {

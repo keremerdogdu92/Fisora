@@ -76,7 +76,7 @@ from app.domain.matching_simulation import (
     private_benchmark_summary,
     infer_accounting_direction,
     simulate_chart_run,
-    simulate_invoice as _simulate_invoice,
+    simulate_invoice as _production_simulate_invoice,
     simulate_private_matching,
 )
 from app.domain.invoice_ai_gate import VerifiedRuleAuthorityV1, invoice_ai_gate
@@ -111,8 +111,14 @@ from app.domain.workspace_exports import build_workspace_export_package, export_
 class FakeProductProvider:
     provider_name = "fake_llm"
 
-    def __init__(self, response: dict[str, object]) -> None:
+    def __init__(
+        self,
+        response: dict[str, object],
+        *,
+        register_suggested_candidate: bool = True,
+    ) -> None:
         self.response = response
+        self.register_suggested_candidate = register_suggested_candidate
         self.requests: list[AiClassificationRequest] = []
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
@@ -135,10 +141,18 @@ class SequentialFakeProductProvider:
 class AcceptedSemanticAccountClassifier:
     policy = AiClassificationPolicy(enabled=True, static_confidence_threshold=101)
 
-    def __init__(self, account_code: str, *, category: str = "", line_account_codes: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        account_code: str,
+        *,
+        category: str = "",
+        line_account_codes: tuple[str, ...] = (),
+        line_account_by_id: dict[str, str] | None = None,
+    ) -> None:
         self.account_code = account_code
         self.category = category
         self.line_account_codes = line_account_codes
+        self.line_account_by_id = dict(line_account_by_id or {})
 
     def classify(
         self,
@@ -164,7 +178,17 @@ class AcceptedSemanticAccountClassifier:
             for line in effective_context.canonical_lines
             if str(line.get("canonical_line_id") or "")
         )
-        line_codes = self.line_account_codes or tuple(self.account_code for _ in canonical_ids)
+        line_codes = (
+            tuple(self.line_account_by_id.get(line_id, self.account_code) for line_id in canonical_ids)
+            if self.line_account_by_id
+            else self.line_account_codes
+            or tuple(self.account_code for _ in canonical_ids)
+        )
+        selected_account_code = (
+            line_codes[0]
+            if line_codes and len(set(line_codes)) == 1
+            else self.account_code
+        )
         line_decisions = tuple(
             {
                 "canonical_line_id": line_id,
@@ -175,9 +199,9 @@ class AcceptedSemanticAccountClassifier:
                 "research_query": "",
             }
             for line_id, code in zip(canonical_ids, line_codes)
-        ) if len(canonical_ids) > 1 else ()
+        ) if canonical_ids else ()
         validated_response = {
-            "suggested_account_code": self.account_code,
+            "suggested_account_code": selected_account_code,
             "needs_research": False,
             "line_decisions": list(line_decisions),
         }
@@ -199,7 +223,7 @@ class AcceptedSemanticAccountClassifier:
             ai_used=True,
             provider="accepted_semantic_fixture",
             provider_reason="Test fixture supplies an accepted semantic account decision.",
-            suggested_account_code=self.account_code,
+            suggested_account_code=selected_account_code,
             account_reason="Accepted semantic test decision.",
             accepted_semantic_attempt_id="accepted-semantic-fixture",
             candidate_strategy=effective_context.candidate_strategy,
@@ -323,13 +347,62 @@ def simulate_mechanical_invoice(
     verified_rule_bindings: tuple[dict[str, object], ...] = (),
     verified_rule_authorities: tuple[VerifiedRuleAuthorityV1, ...] = (),
 ):
+    invoice = _legacy_text_pdf_fixture(invoice)
     fixture_invoice = (
         invoice
         if invoice.canonical_invoice is not None or not invoice.line_items
         else replace(invoice, canonical_invoice=_mechanical_canonical_invoice(invoice))
     )
+    resolved_intended_direction = _fixture_intended_direction(
+        fixture_invoice,
+        client_profile,
+        intended_direction,
+    )
     fixture_selection = selection
     classifier = product_classifier
+    if (
+        isinstance(classifier, StaticFirstClassifier)
+        and bool(getattr(classifier.provider, "register_suggested_candidate", True))
+    ):
+        provider_response = getattr(classifier.provider, "response", {})
+        suggested_code = (
+            str(provider_response.get("selected_account_code") or provider_response.get("suggested_account_code") or "")
+            if isinstance(provider_response, dict)
+            else ""
+        )
+        if suggested_code:
+            direction, _, _ = infer_accounting_direction(
+                fixture_invoice,
+                client_profile,
+                intended_direction=resolved_intended_direction,
+            )
+            candidate_group = (
+                "sales_revenue"
+                if direction == "sales"
+                else "purchase_stock"
+                if suggested_code.startswith(("153", "25"))
+                else "purchase_expense"
+            )
+            candidate_groups = dict(selection.account_candidates)
+            current_group = tuple(candidate_groups.get(candidate_group, ()))
+            if suggested_code not in {
+                str(candidate.get("code") or "")
+                for candidate in current_group
+            }:
+                candidate_groups[candidate_group] = (
+                    *current_group,
+                    {
+                        "code": suggested_code,
+                        "name": "Explicit provider fixture account",
+                        "reason": "test fixture",
+                        "is_detail_account": True,
+                        "is_active": True,
+                    },
+                )
+                fixture_selection = replace(
+                    selection,
+                    account_candidates=candidate_groups,
+                )
     if classifier is None and not verified_rule_bindings:
         canonical = _mechanical_canonical_invoice(fixture_invoice)
         base_account = _accepted_semantic_fixture_account(
@@ -337,12 +410,12 @@ def simulate_mechanical_invoice(
             selection,
             client_profile,
             classification_override,
-            intended_direction,
+            resolved_intended_direction,
         )
         direction, _, _ = infer_accounting_direction(
             fixture_invoice,
             client_profile,
-            intended_direction=intended_direction,
+            intended_direction=resolved_intended_direction,
         )
         candidate_group = "sales_revenue" if direction == "sales" else (
             "purchase_stock" if base_account.startswith("153") else
@@ -388,6 +461,14 @@ def simulate_mechanical_invoice(
         classifier = AcceptedSemanticAccountClassifier(
             base_account,
             line_account_codes=line_codes,
+            line_account_by_id=(
+                {
+                    line.canonical_line_id: code
+                    for line, code in zip(canonical.line_items, line_codes)
+                }
+                if line_codes
+                else None
+            ),
         )
     return _simulate_invoice(
         fixture_invoice,
@@ -396,7 +477,93 @@ def simulate_mechanical_invoice(
         counterparty_match,
         classifier,
         processing_mode,
-        intended_direction,
+        resolved_intended_direction,
+        classification_override,
+        verified_rule_bindings,
+        verified_rule_authorities,
+    )
+
+
+def _fixture_intended_direction(
+    invoice: ParsedInvoice,
+    client_profile: ClientProfile | None,
+    intended_direction: str | None,
+) -> str:
+    if intended_direction:
+        return intended_direction
+    client_ids = {
+        str(value or "").strip()
+        for value in (
+            getattr(client_profile, "tax_id", "") if client_profile else "",
+            getattr(client_profile, "tax_identifier", "") if client_profile else "",
+            getattr(client_profile, "effective_tax_identifier", "") if client_profile else "",
+        )
+        if str(value or "").strip()
+    }
+    if str(getattr(invoice, "issuer_tax_id", "") or "").strip() in client_ids:
+        return "sales"
+    if str(getattr(invoice, "recipient_tax_id", "") or "").strip() in client_ids:
+        return "purchase"
+    # Some fixture scenarios deliberately omit party fields but explicitly
+    # declare ALIS/SATIS. Use that test declaration solely to construct the
+    # required intake lane; `infer_accounting_direction` never receives it as
+    # a production fallback.
+    legacy_invoice_type = str(invoice.invoice_type or "").strip().upper()
+    if legacy_invoice_type in {"ALIS", "ALIŞ"}:
+        return "purchase"
+    if legacy_invoice_type in {"SATIS", "SATIŞ"}:
+        return "sales"
+    # Older domain fixtures encode the party order only in `tax_ids`: issuer
+    # first, recipient later. This is a test-fixture adapter; production intake
+    # accepts only an explicit lane or canonical supplier/customer fields.
+    legacy_tax_ids = tuple(str(value or "").strip() for value in invoice.tax_ids)
+    if legacy_tax_ids and legacy_tax_ids[0] in client_ids:
+        return "sales"
+    if any(value in client_ids for value in legacy_tax_ids[1:]):
+        return "purchase"
+    raise ValueError("test invoice fixture requires explicit intended_direction")
+
+
+def _legacy_text_pdf_fixture(invoice: ParsedInvoice) -> ParsedInvoice:
+    if (
+        str(invoice.file_name).lower().endswith(".xml")
+        and not str(invoice.issuer_tax_id or "").strip()
+        and not str(invoice.recipient_tax_id or "").strip()
+    ):
+        # Legacy semantic fixtures predate canonical XML parties. They model
+        # text PDFs, so make that source provenance explicit rather than
+        # weakening the production XML identity contract.
+        return replace(
+            invoice,
+            file_name=f"{Path(invoice.file_name).stem}.pdf",
+            page_count=max(1, invoice.page_count),
+            text_extractable=True,
+            extracted_char_count=max(1, invoice.extracted_char_count),
+        )
+    return invoice
+
+
+def _simulate_invoice(
+    invoice: ParsedInvoice,
+    selection: AccountSelection,
+    client_profile: ClientProfile | None = None,
+    counterparty_match: CounterpartyMatch | None = None,
+    product_classifier: object | None = None,
+    processing_mode: str = "controlled_automation",
+    intended_direction: str | None = None,
+    classification_override: ProductClassification | None = None,
+    verified_rule_bindings: tuple[dict[str, object], ...] = (),
+    verified_rule_authorities: tuple[VerifiedRuleAuthorityV1, ...] = (),
+):
+    invoice = _legacy_text_pdf_fixture(invoice)
+    return _production_simulate_invoice(
+        invoice,
+        selection,
+        client_profile,
+        counterparty_match,
+        product_classifier,
+        processing_mode,
+        _fixture_intended_direction(invoice, client_profile, intended_direction),
         classification_override,
         verified_rule_bindings,
         verified_rule_authorities,
@@ -1533,6 +1700,246 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(lines[1].taxable_amount, "545,46")
         self.assertEqual(lines[1].tax_amount, "54,55")
 
+    def test_pdf_money_parser_keeps_turkish_thousands_and_decimal(self) -> None:
+        from app.domain.invoice_lines import parse_invoice_money
+
+        self.assertEqual(parse_invoice_money("1.641,20"), Decimal("1641.20"))
+        self.assertEqual(parse_invoice_money("70.000,00 TL"), Decimal("70000.00"))
+
+    def test_pdf_page_line_extraction_deduplicates_source_position_not_equal_amounts(self) -> None:
+        from app.domain.invoice_lines import extract_invoice_lines_from_pages
+        from app.domain.pdf_invoice_boundaries import PdfPageText
+
+        page_text = """
+Mal Hizmet
+1
+Pil
+1 Adet
+%20
+200,00
+1.000,00
+2
+Aksesuar
+1 Adet
+%20
+200,00
+1.000,00
+"""
+        lines = extract_invoice_lines_from_pages(
+            (
+                PdfPageText(page_no=1, text=page_text),
+                PdfPageText(page_no=1, text=page_text),
+            )
+        )
+
+        self.assertEqual([line.description for line in lines], ["Pil", "Aksesuar"])
+        self.assertEqual([line.taxable_amount for line in lines], ["1.000,00", "1.000,00"])
+        self.assertNotEqual(lines[0].source_position, lines[1].source_position)
+
+    def test_pdf_line_extraction_recovers_inline_product_row(self) -> None:
+        from app.domain.invoice_lines import extract_invoice_lines_from_pages
+        from app.domain.pdf_invoice_boundaries import PdfPageText
+
+        lines = extract_invoice_lines_from_pages(
+            (
+                PdfPageText(
+                    page_no=1,
+                    text="""
+NoHizmet / Ürün Adı Miktar Birim Fiyat Toplam
+1 BATTERY, 6-PACK 312 *H OTICON 3.000 Adet 5,3333TL 15.999,90 TL
+KDV % 20,00 - 3.199,98
+Ara Toplam 15.999,90
+""",
+                ),
+            )
+        )
+
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].description, "BATTERY, 6-PACK 312 *H OTICON")
+        self.assertEqual(lines[0].vat_rate, "20")
+        self.assertEqual(lines[0].taxable_amount, "15.999,90")
+        self.assertEqual(lines[0].tax_amount, "3.199,98")
+        self.assertEqual(lines[0].source_position, "pdf:page:1:row:2")
+
+    def test_pdf_table_line_stops_before_document_totals(self) -> None:
+        from app.domain.invoice_lines import extract_invoice_lines_from_text
+
+        lines = extract_invoice_lines_from_text(
+            """
+Mal Hizmet
+1
+Mua.Kat.Payı (Elden)
+1 Adet
+100 TL
+%0
+0,00 TL
+100,00 TL
+Mal Hizmet Toplam Tutarı
+251,13 TL
+Hesaplanan KDV
+14,61 TL
+"""
+        )
+
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].vat_rate, "0")
+        self.assertEqual(lines[0].taxable_amount, "100,00")
+        self.assertEqual(lines[0].tax_amount, "0,00")
+
+    def test_pdf_table_does_not_treat_exemption_code_as_next_line_number(self) -> None:
+        from app.domain.invoice_lines import extract_invoice_lines_from_text
+
+        lines = extract_invoice_lines_from_text(
+            """
+Mal Hizmet
+1
+MOXI B1-R
+2
+Adet
+25.500TL
+51.000,00TL
+%0,00
+0,00TL
+317
+-
+17/4-s Engellilerin kullanımına ilişkin araçlar
+2
+UNITRON CHARGER
+1
+Adet
+2.500TL
+2.500,00TL
+%20,00
+500,00TL
+317
+-
+17/4-s Engellilerin kullanımına ilişkin araçlar
+*
+"""
+        )
+
+        self.assertEqual([line.description for line in lines], ["MOXI B1-R", "UNITRON CHARGER"])
+        self.assertEqual([line.vat_rate for line in lines], ["0", "20"])
+        self.assertEqual([line.taxable_amount for line in lines], ["51.000,00", "2.500,00"])
+
+    def test_pdf_line_extraction_recovers_columnar_product_row(self) -> None:
+        from app.domain.invoice_lines import extract_invoice_lines_from_pages
+        from app.domain.pdf_invoice_boundaries import PdfPageText
+
+        lines = extract_invoice_lines_from_pages(
+            (
+                PdfPageText(
+                    page_no=1,
+                    text="""
+No/Kalem
+No
+Malzeme
+Açıklama
+KDV
+Adet
+B.Fiyat
+Tutar
+1
+-
+30
+KARGO
+KARGO BEDELİ
+20
+1,0
+41,58
+41,58
+KDV MATRAHI
+41,58 TL
+""",
+                ),
+            )
+        )
+
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].description, "KARGO KARGO BEDELİ")
+        self.assertEqual(lines[0].vat_rate, "20")
+        self.assertEqual(lines[0].taxable_amount, "41,58")
+        self.assertEqual(lines[0].tax_amount, "8.32")
+        self.assertEqual(lines[0].source_position, "pdf:page:1:row:9")
+
+    def test_pdf_missing_group_recovery_uses_explicit_matrah_evidence(self) -> None:
+        from app.domain.pdf_invoice_boundaries import PdfPageText
+        from app.domain.pdf_invoices import recover_missing_pdf_group_lines
+        from app.domain.vat_splits import VatSplitLine
+
+        recovered = recover_missing_pdf_group_lines(
+            pages=(
+                PdfPageText(
+                    page_no=2,
+                    text="""
+Enerji Tük.Bed.-Düşük Kad.
+KDV %20 (Matrah: 580,81 TL )
+116,16
+""",
+                ),
+            ),
+            lines=(),
+            vat_split_lines=(
+                VatSplitLine(
+                    rate="20",
+                    taxable_amount="580.81",
+                    tax_amount="116.16",
+                    source="pdf:summary",
+                ),
+            ),
+        )
+
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0].description, "KDV matrahı (%20) - toplu kaynak satırı")
+        self.assertEqual(recovered[0].taxable_amount, "580.81")
+        self.assertEqual(recovered[0].tax_amount, "116.16")
+        self.assertEqual(recovered[0].source_position, "pdf:page:2:text:line:2")
+
+    def test_supported_text_pdf_rejects_unreconciled_declared_vat_group(self) -> None:
+        from app.domain.pdf_invoices import SupportedPdfExtractionError
+        from app.domain.vat_splits import VatSplitLine, VatSplitResult
+
+        text = """
+Fatura No: ABC2026000000001
+Fatura Tarihi: 31.07.2026
+Mal Hizmet
+1
+Pil
+1 Adet
+%20
+16,00
+80,00
+Mal Hizmet Toplam Tutarı 100,00
+Hesaplanan KDV 20,00
+Vergiler Dahil Toplam Tutar 120,00
+Ödenecek Tutar 120,00
+"""
+        split = VatSplitResult(
+            status="exact",
+            lines=(
+                VatSplitLine(
+                    rate="20",
+                    taxable_amount="100.00",
+                    tax_amount="20.00",
+                    source="pdf:summary",
+                ),
+            ),
+            total_taxable_amount="100.00",
+            total_tax_amount="20.00",
+            tax_inclusive_total="120.00",
+            payable_total="120.00",
+        )
+
+        with (
+            patch(
+                "app.domain.pdf_invoices.extract_pdf_pages",
+                return_value=((PdfPageText(page_no=1, text=text),), ()),
+            ),
+            patch("app.domain.pdf_invoices.extract_pdf_vat_split", return_value=split),
+            self.assertRaisesRegex(SupportedPdfExtractionError, "line-missing"),
+        ):
+            parse_pdf_invoice(Path("supported-text.pdf"))
+
     def test_canonical_invoice_validation_accepts_balanced_line_vat_and_totals(self) -> None:
         from app.domain.canonical_invoices import (
             CanonicalInvoice,
@@ -1573,6 +1980,119 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual(validation.status, "valid")
         self.assertEqual(validation.reason_codes, ())
+
+    def test_canonical_invoice_validation_reports_each_vat_group_reconciliation_failure(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalVatSummaryLine,
+            validate_canonical_invoice,
+        )
+
+        validation = validate_canonical_invoice(
+            CanonicalInvoice(
+                source="xml",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Standard",
+                        source_position="xml:InvoiceLine[1]",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                    CanonicalInvoiceLine(
+                        description="Undeclared",
+                        source_position="xml:InvoiceLine[2]",
+                        taxable_amount="50.00",
+                        vat_rate="10",
+                        tax_amount="5.00",
+                        gross_amount="55.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(
+                        rate="20",
+                        taxable_amount="90.00",
+                        tax_amount="10.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                    CanonicalVatSummaryLine(
+                        rate="0",
+                        taxable_amount="0.00",
+                        tax_amount="0.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="E",
+                        exemption_reason_code="3065",
+                    ),
+                ),
+            )
+        )
+
+        self.assertIn("vat_group_lines_missing", validation.reason_codes)
+        self.assertIn("vat_group_taxable_mismatch", validation.reason_codes)
+        self.assertIn("vat_group_tax_mismatch", validation.reason_codes)
+        self.assertIn("vat_group_unexpected_lines", validation.reason_codes)
+
+    def test_canonical_vat_group_id_preserves_non_money_rate_precision(self) -> None:
+        from app.domain.canonical_invoices import canonical_vat_group_id
+
+        precise_rate_group = canonical_vat_group_id(
+            tax_scheme_code="KDV",
+            tax_category_code="S",
+            vat_rate="20.004",
+        )
+        standard_rate_group = canonical_vat_group_id(
+            tax_scheme_code="KDV",
+            tax_category_code="S",
+            vat_rate="20.00",
+        )
+
+        self.assertEqual(precise_rate_group, "KDV|S|20.004|")
+        self.assertEqual(standard_rate_group, "KDV|S|20|")
+        self.assertNotEqual(precise_rate_group, standard_rate_group)
+
+    def test_canonical_invoice_validation_rejects_empty_declared_vat_group_amounts(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalVatSummaryLine,
+            validate_canonical_invoice,
+        )
+
+        validation = validate_canonical_invoice(
+            CanonicalInvoice(
+                source="xml",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Standard",
+                        source_position="xml:InvoiceLine[1]",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(
+                        rate="20",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                ),
+            )
+        )
+
+        self.assertIn("vat_group_taxable_mismatch", validation.reason_codes)
+        self.assertIn("vat_group_tax_mismatch", validation.reason_codes)
+        self.assertIn("vat_group:KDV|S|20|", validation.evidence)
 
     def test_canonical_invoice_validation_flags_missing_lines_before_product_classification(self) -> None:
         from app.domain.canonical_invoices import (
@@ -1865,6 +2385,73 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(canonical.vat_summary[0].taxable_amount, "1000.00")
         self.assertEqual(canonical.validation.status, "valid")
 
+    def test_xml_invoice_preserves_vat_identity_and_group_line_links(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        def invoice_line(
+            line_id: int,
+            description: str,
+            taxable_amount: str,
+            tax_amount: str,
+            category_code: str,
+            rate: str,
+            exemption_reason_code: str = "",
+        ) -> str:
+            exemption = (
+                f"<cbc:TaxExemptionReasonCode>{exemption_reason_code}</cbc:TaxExemptionReasonCode>"
+                if exemption_reason_code
+                else ""
+            )
+            return f"""
+   <cac:InvoiceLine>
+     <cbc:ID>{line_id}</cbc:ID>
+     <cbc:LineExtensionAmount>{taxable_amount}</cbc:LineExtensionAmount>
+     <cac:TaxTotal><cbc:TaxAmount>{tax_amount}</cbc:TaxAmount><cac:TaxSubtotal>
+       <cbc:TaxableAmount>{taxable_amount}</cbc:TaxableAmount><cbc:TaxAmount>{tax_amount}</cbc:TaxAmount>
+       <cac:TaxCategory><cbc:ID>{category_code}</cbc:ID><cbc:Percent>{rate}</cbc:Percent>{exemption}<cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:TaxCategory>
+     </cac:TaxSubtotal></cac:TaxTotal>
+     <cac:Item><cbc:Name>{description}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>{category_code}</cbc:ID><cbc:Percent>{rate}</cbc:Percent>{exemption}<cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
+   </cac:InvoiceLine>"""
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>VAT2026000000001</cbc:ID>
+  <cbc:IssueDate>2026-07-31</cbc:IssueDate>
+  <cac:TaxTotal>
+    <cbc:TaxAmount>120.00</cbc:TaxAmount>
+    <cac:TaxSubtotal><cbc:TaxableAmount>300.00</cbc:TaxableAmount><cbc:TaxAmount>0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>E</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReasonCode>3065</cbc:TaxExemptionReasonCode><cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>
+    <cac:TaxSubtotal><cbc:TaxableAmount>600.00</cbc:TaxableAmount><cbc:TaxAmount>120.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>20</cbc:Percent><cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>900.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>1020.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>1020.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+""" + "\n".join(
+            (
+                invoice_line(1, "Istisna 1", "100.00", "0.00", "E", "0", "3065"),
+                invoice_line(2, "Istisna 2", "200.00", "0.00", "E", "0", "3065"),
+                invoice_line(3, "Standart 1", "100.00", "20.00", "S", "20"),
+                invoice_line(4, "Standart 2", "200.00", "40.00", "S", "20"),
+                invoice_line(5, "Standart 3", "300.00", "60.00", "S", "20"),
+            )
+        ) + "\n</Invoice>"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mixed-vat.xml"
+            path.write_text(xml, encoding="utf-8")
+            parsed = parse_xml_invoice(path)
+
+        self.assertEqual(
+            [line.vat_group_id for line in parsed.canonical_invoice.line_items],
+            ["KDV|E|0|3065", "KDV|E|0|3065", "KDV|S|20|", "KDV|S|20|", "KDV|S|20|"],
+        )
+        self.assertEqual(
+            parsed.canonical_invoice.vat_summary[1].contributing_line_ids,
+            (
+                parsed.canonical_invoice.line_items[2].canonical_line_id,
+                parsed.canonical_invoice.line_items[3].canonical_line_id,
+                parsed.canonical_invoice.line_items[4].canonical_line_id,
+            ),
+        )
+        self.assertEqual(parsed.canonical_invoice.validation.status, "valid")
+
     def test_xml_invoice_line_description_uses_item_name_not_tax_scheme_name(self) -> None:
         from app.domain.xml_invoices import parse_xml_invoice
 
@@ -1988,7 +2575,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("Bagdat Cad.", supplier.address)
         self.assertIn("Istanbul", supplier.address)
 
-    def test_xml_invoice_with_visible_cancellation_warning_still_builds_draft(self) -> None:
+    def test_xml_invoice_with_visible_cancellation_warning_suggests_no_posting(self) -> None:
         from app.domain.xml_invoices import parse_xml_invoice
 
         xml = """<?xml version="1.0" encoding="UTF-8"?>
@@ -2041,10 +2628,12 @@ class Phase0DomainTests(unittest.TestCase):
 
         result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="purchase")
 
-        self.assertTrue(result.draft_lines)
-        self.assertEqual(result.export_status, "review_required")
+        self.assertEqual(result.simulated_status, "no_posting_suggested")
+        self.assertEqual(result.draft_quality, "no_posting_suggested")
+        self.assertEqual(result.draft_lines, ())
+        self.assertEqual(result.export_status, "blocked")
         self.assertIn("cancelled_invoice_visible", result.review_reason_codes)
-        self.assertIn("iptal", result.export_gate_reason.lower())
+        self.assertIn("muhasebe kaydi onerilmez", result.export_gate_reason.lower())
 
     def test_ubl_party_resolution_uses_supplier_as_counterparty_for_purchase(self) -> None:
         from app.domain.xml_invoices import parse_xml_invoice
@@ -2403,6 +2992,101 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(all(not line.external_line_id for line in completed.line_items))
         self.assertEqual(completed.validation.status, "valid")
         self.assertIn("canonical_ai_discovery_used", completed.extraction_notes)
+
+    def test_pdf_canonical_ai_keeps_recovered_group_when_another_group_is_still_missing(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import (
+            CanonicalExtractionPolicy,
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import (
+            _maybe_complete_canonical_with_ai,
+            _pdf_canonical_extraction_outcome,
+        )
+
+        deterministic = with_validation(
+            CanonicalInvoice(
+                source="pdf_text",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Standart",
+                        source_position="pdf:page:1:row:1",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(rate="20", taxable_amount="100.00", tax_amount="20.00"),
+                    CanonicalVatSummaryLine(rate="0", taxable_amount="50.00", tax_amount="0.00"),
+                    CanonicalVatSummaryLine(rate="10", taxable_amount="30.00", tax_amount="3.00"),
+                ),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="180.00",
+                    vat_total="23.00",
+                    tax_inclusive_total="203.00",
+                    payable_total="203.00",
+                ),
+            )
+        )
+
+        class Provider:
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                return {
+                    "line_items": [
+                        {
+                            "source_position": "pdf:page:1:row:1",
+                            "description": "Standart",
+                            "taxable_amount": "100.00",
+                            "vat_rate": "20",
+                            "tax_amount": "20.00",
+                            "gross_amount": "120.00",
+                        },
+                        {
+                            "source_position": "pdf:page:1:row:2",
+                            "description": "Istisna",
+                            "taxable_amount": "50.00",
+                            "vat_rate": "0",
+                            "tax_amount": "0.00",
+                            "gross_amount": "50.00",
+                        },
+                    ],
+                    "vat_summary": [
+                        {"rate": "20", "taxable_amount": "100.00", "tax_amount": "20.00"},
+                        {"rate": "0", "taxable_amount": "50.00", "tax_amount": "0.00"},
+                    ],
+                    "totals": {
+                        "goods_services_total": "150.00",
+                        "vat_total": "20.00",
+                        "tax_inclusive_total": "170.00",
+                        "payable_total": "203.00",
+                    },
+                }
+
+        completed = _maybe_complete_canonical_with_ai(
+            provider=Provider(),
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="Standart ve istisna satirlari",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertIn("Istisna", [line.description for line in completed.line_items])
+        self.assertEqual(
+            _pdf_canonical_extraction_outcome(completed).missing_vat_group_ids,
+            ("||10|",),
+        )
+        self.assertIn("canonical_ai_partial_recovery_used", completed.extraction_notes)
 
     def test_pdf_canonical_ai_rejects_discovery_with_duplicate_source_positions(self) -> None:
         from types import SimpleNamespace
@@ -3003,6 +3687,198 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("<dd>-</dd>", html)
         self.assertNotIn("<Invoice", html)
 
+    def test_ubl_invoice_preview_renders_accessible_vat_distribution(self) -> None:
+        from app.domain.ubl_invoice_preview import render_ubl_invoice_preview_html
+
+        def invoice_line(
+            line_id: int,
+            description: str,
+            taxable_amount: str,
+            tax_amount: str,
+            category_code: str,
+            rate: str,
+            exemption_reason_code: str = "",
+        ) -> str:
+            exemption = (
+                f"<cbc:TaxExemptionReasonCode>{exemption_reason_code}</cbc:TaxExemptionReasonCode>"
+                if exemption_reason_code
+                else ""
+            )
+            return f"""
+  <cac:InvoiceLine><cbc:ID>{line_id}</cbc:ID><cbc:LineExtensionAmount>{taxable_amount}</cbc:LineExtensionAmount>
+    <cac:TaxTotal><cac:TaxSubtotal><cbc:TaxableAmount>{taxable_amount}</cbc:TaxableAmount><cbc:TaxAmount>{tax_amount}</cbc:TaxAmount>
+      <cac:TaxCategory><cbc:ID>{category_code}</cbc:ID><cbc:Percent>{rate}</cbc:Percent>{exemption}<cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:TaxCategory>
+    </cac:TaxSubtotal></cac:TaxTotal>
+    <cac:Item><cbc:Name>{description}</cbc:Name><cac:ClassifiedTaxCategory><cbc:ID>{category_code}</cbc:ID><cbc:Percent>{rate}</cbc:Percent>{exemption}<cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:ClassifiedTaxCategory></cac:Item>
+  </cac:InvoiceLine>"""
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cac:TaxTotal>
+    <cac:TaxSubtotal><cbc:TaxableAmount>70000.00</cbc:TaxableAmount><cbc:TaxAmount>0.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>E</cbc:ID><cbc:Percent>0</cbc:Percent><cbc:TaxExemptionReasonCode>3065</cbc:TaxExemptionReasonCode><cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>
+    <cac:TaxSubtotal><cbc:TaxableAmount>10000.00</cbc:TaxableAmount><cbc:TaxAmount>2000.00</cbc:TaxAmount><cac:TaxCategory><cbc:ID>S</cbc:ID><cbc:Percent>20</cbc:Percent><cac:TaxScheme><cbc:ID>KDV</cbc:ID></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>
+  </cac:TaxTotal>
+""" + "\n".join(
+            (
+                invoice_line(1, "İstisna bir", "35000.00", "0.00", "E", "0", "3065"),
+                invoice_line(2, "İstisna iki", "35000.00", "0.00", "E", "0", "3065"),
+                invoice_line(3, "Standart bir", "3000.00", "600.00", "S", "20"),
+                invoice_line(4, "Standart iki", "3000.00", "600.00", "S", "20"),
+                invoice_line(5, "Standart üç", "4000.00", "800.00", "S", "20"),
+            )
+        ) + "\n</Invoice>"
+
+        html = render_ubl_invoice_preview_html(xml)
+
+        self.assertIn("KDV dağılımı", html)
+        self.assertIn("KDV %0", html)
+        self.assertIn("İstisna 3065", html)
+        self.assertIn("70.000,00", html)
+        self.assertIn("KDV %20", html)
+        self.assertIn("10.000,00", html)
+        self.assertIn("2.000,00", html)
+        self.assertIn("12.000,00", html)
+        self.assertIn("Satırlar 3, 4, 5", html)
+        self.assertEqual(html.count('id="invoice-line-'), 5)
+        self.assertEqual(html.count('href="#vat-group-KDV-E-0-3065"'), 2)
+        self.assertEqual(html.count('href="#vat-group-KDV-S-20"'), 3)
+        self.assertIn('id="vat-group-KDV-E-0-3065"', html)
+        self.assertIn('id="vat-group-KDV-S-20"', html)
+
+    def test_ubl_invoice_preview_shows_group_validation_detail_only_for_affected_group(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+        from app.domain.ubl_invoice_preview import _vat_distribution_rows
+
+        invoice = with_validation(
+            CanonicalInvoice(
+                source="xml",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Standard",
+                        canonical_line_id="line-1",
+                        source_position="xml:InvoiceLine[1]",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                    CanonicalInvoiceLine(
+                        description="Istisna",
+                        canonical_line_id="line-2",
+                        source_position="xml:InvoiceLine[2]",
+                        taxable_amount="50.00",
+                        vat_rate="0",
+                        tax_amount="0.00",
+                        gross_amount="50.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="E",
+                        exemption_reason_code="3065",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(
+                        rate="20",
+                        taxable_amount="90.00",
+                        tax_amount="20.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                    ),
+                    CanonicalVatSummaryLine(
+                        rate="0",
+                        taxable_amount="50.00",
+                        tax_amount="0.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="E",
+                        exemption_reason_code="3065",
+                    ),
+                ),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="150.00",
+                    vat_total="20.00",
+                    tax_inclusive_total="170.00",
+                    payable_total="170.00",
+                ),
+            )
+        )
+
+        rows = _vat_distribution_rows(invoice)
+
+        standard_row = rows.split('id="vat-group-KDV-S-20"', 1)[1].split('id="vat-group-KDV-E-0-3065"', 1)[0]
+        exempt_row = rows.split('id="vat-group-KDV-E-0-3065"', 1)[1]
+        self.assertIn("Kaynak doğrulama ayrıntısı", standard_row)
+        self.assertNotIn("Kaynak doğrulama ayrıntısı", exempt_row)
+
+    def test_pdf_canonical_extraction_outcome_exposes_missing_vat_groups(self) -> None:
+        from app.domain.canonical_invoices import CanonicalInvoice
+        from app.domain.pdf_invoices import PdfCanonicalExtractionOutcome
+
+        outcome = PdfCanonicalExtractionOutcome(
+            invoice=CanonicalInvoice(source="pdf_text"),
+            missing_vat_group_ids=("KDV|S|20|",),
+            attempts=("deterministic",),
+        )
+
+        self.assertFalse(outcome.complete)
+        self.assertEqual(outcome.missing_vat_group_ids, ("KDV|S|20|",))
+
+    def test_pdf_canonical_extraction_outcome_marks_unreconciled_vat_group_missing(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+        from app.domain.pdf_invoices import _pdf_canonical_extraction_outcome
+
+        outcome = _pdf_canonical_extraction_outcome(
+            with_validation(
+                CanonicalInvoice(
+                    source="pdf_text",
+                    line_items=(
+                        CanonicalInvoiceLine(
+                            description="Eksik satır kapsaması",
+                            taxable_amount="80.00",
+                            vat_rate="20",
+                            tax_amount="16.00",
+                            gross_amount="96.00",
+                            tax_scheme_code="KDV",
+                            tax_category_code="S",
+                        ),
+                    ),
+                    vat_summary=(
+                        CanonicalVatSummaryLine(
+                            rate="20",
+                            taxable_amount="100.00",
+                            tax_amount="20.00",
+                            tax_scheme_code="KDV",
+                            tax_category_code="S",
+                        ),
+                    ),
+                    totals=CanonicalInvoiceTotals(
+                        goods_services_total="100.00",
+                        vat_total="20.00",
+                        tax_inclusive_total="120.00",
+                        payable_total="120.00",
+                    ),
+                )
+            ),
+            attempts=("deterministic",),
+        )
+
+        self.assertEqual(outcome.missing_vat_group_ids, ("KDV|S|20|",))
+        self.assertFalse(outcome.complete)
+
     def test_pdf_vat_split_extracts_real_pilot_table_and_summary_evidence(self) -> None:
         cases = [
             (
@@ -3350,7 +4226,7 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_mechanical_invoice(invoice, selection, _task3_profile())
+        result = simulate_mechanical_invoice(invoice, selection, _task3_profile(), intended_direction="sales")
 
         self.assertEqual(result.simulated_status, "review_required")
         self.assertEqual(result.draft_quality, "gross_balanced_needs_vat_split")
@@ -3750,13 +4626,22 @@ class Phase0DomainTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            result.draft_lines,
+            tuple(
+                {
+                    key: line[key]
+                    for key in ("account_code", "description", "debit", "credit", "tax_rate")
+                    if key in line
+                }
+                for line in result.draft_lines
+            ),
             (
                 {"account_code": "153.01.001", "description": "Rexton stok hesabi", "debit": "1000.00", "credit": "0.00"},
                 {"account_code": "191.01.020", "description": "Rexton indirilecek KDV 20", "debit": "200.00", "credit": "0.00", "tax_rate": "20.0000"},
                 {"account_code": "320.01.015", "description": "Rexton Medikal cari", "debit": "0.00", "credit": "1200.00"},
             ),
         )
+        self.assertEqual(result.draft_lines[0]["source_line_numbers"], [1])
+        self.assertTrue(result.draft_lines[0]["vat_group_id"])
 
     def test_account_selection_carries_full_chart_account_name_map(self) -> None:
         accounts = [
@@ -4052,7 +4937,7 @@ class Phase0DomainTests(unittest.TestCase):
                 "product_identity": "Kargo hizmeti",
                 "needs_research": False,
                 "research_query": "",
-            }
+            },
         )
         classifier = StaticFirstClassifier(
             provider=provider,
@@ -4282,10 +5167,11 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.direction_conflict["intake_direction"], "sales")
         self.assertEqual(result.direction_conflict["detected_direction"], "purchase")
         self.assertIn("Alış yönüne geçirilsin mi?", result.direction_conflict["question_tr"])
+        self.assertIn("intake_conflict_sales", result.direction_evidence)
         self.assertIn("direction_conflict_review", result.review_reason_codes)
         self.assertEqual(result.export_status, "review_required")
 
-    def test_low_confidence_direction_difference_does_not_open_conflict_question(self) -> None:
+    def test_unverified_party_identity_preserves_explicit_intake_direction(self) -> None:
         profile = ClientProfile(
             client_id="client-1",
             title="Isitme Merkezi A",
@@ -4325,10 +5211,83 @@ class Phase0DomainTests(unittest.TestCase):
 
         result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="sales_invoice")
 
-        self.assertEqual(result.accounting_direction, "purchase")
-        self.assertLess(result.direction_confidence, 80)
+        self.assertEqual(result.accounting_direction, "sales")
+        self.assertEqual(result.direction_confidence, 88)
+        self.assertIn("intake_category_sales", result.direction_evidence)
+        self.assertIn("party_identity_unverified", result.direction_evidence)
         self.assertEqual(result.direction_conflict, {})
         self.assertNotIn("direction_conflict_review", result.review_reason_codes)
+
+    def test_canonical_party_identity_without_client_match_rejects_intake_fallback(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="unmatched-canonical.xml",
+            provider_hint="Baska Firma",
+            page_count=0,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="ABC2026000000004",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=("9999999999", "8888888888"),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            issuer_title="Baska Satici",
+            issuer_tax_id="9999999999",
+            recipient_title="Baska Alici",
+            recipient_tax_id="8888888888",
+            canonical_invoice=_task3_canonical_invoice(("Hizmet", "1000.00", "20", "200.00", "1200.00")),
+        )
+
+        with self.assertRaisesRegex(ValueError, "party identity does not identify the client"):
+            infer_accounting_direction(invoice, profile, intended_direction="purchase")
+
+    def test_missing_identity_xml_rejects_intake_fallback(self) -> None:
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi A",
+            tax_id="1234567890",
+            has_chart_accounts=True,
+        )
+        invoice = ParsedInvoice(
+            file_name="missing-identity.xml",
+            provider_hint="",
+            page_count=0,
+            text_extractable=True,
+            extracted_char_count=0,
+            scenario="TEMELFATURA",
+            invoice_type="SATIS",
+            invoice_no="ABC2026000000005",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="1000.00",
+            vat_total="200.00",
+            special_tax_total="",
+            tax_inclusive_total="1200.00",
+            payable_total="1200.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "party identity is required for non-PDF invoice intake"):
+            infer_accounting_direction(invoice, profile, intended_direction="sales")
 
     def test_select_accounts_prefers_deep_rate_specific_chart_accounts(self) -> None:
         accounts = [
@@ -4498,7 +5457,14 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.selected_customer_account, "120.46141426750")
         self.assertEqual(result.suggested_counterparty_account, "120.46141426750")
         self.assertEqual(
-            result.draft_lines,
+            tuple(
+                {
+                    key: line[key]
+                    for key in ("account_code", "description", "debit", "credit", "tax_rate")
+                    if key in line
+                }
+                for line in result.draft_lines
+            ),
             (
                 {"account_code": "120.46141426750", "description": "", "debit": "27000.00", "credit": "0.00"},
                 {"account_code": "600.01.010", "description": "Yuzde 10 Satislar", "debit": "0.00", "credit": "9090.91"},
@@ -4718,9 +5684,17 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.draft_entry_type, "mixed_vat_purchase")
         self.assertEqual(result.draft_quality, "mixed_vat_purchase_ready")
         self.assertEqual(
-            result.draft_lines,
+            tuple(
+                {
+                    key: line[key]
+                    for key in ("account_code", "description", "debit", "credit", "tax_rate")
+                    if key in line
+                }
+                for line in result.draft_lines
+            ),
             (
-                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "23257.58", "credit": "0.00"},
+                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "9090.91", "credit": "0.00"},
+                {"account_code": "153.01.001", "description": "Ticari mallar", "debit": "14166.67", "credit": "0.00"},
                 {"account_code": "191.01.010", "description": "Indirilecek KDV %10", "debit": "909.09", "credit": "0.00", "tax_rate": "10.0000"},
                 {"account_code": "191.01.020", "description": "Indirilecek KDV %20", "debit": "2833.33", "credit": "0.00", "tax_rate": "20.0000"},
                 {"account_code": "320.01", "description": "Tedarikci A", "debit": "0.00", "credit": "27000.00"},
@@ -5326,13 +6300,711 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True),
         )
 
-        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            profile,
+            product_classifier=classifier,
+            processing_mode="ai_assisted_draft",
+            intended_direction="purchase",
+        )
 
         self.assertTrue(result.ai_classification_used)
         self.assertEqual(result.product_category, "isitme_cihazi")
         self.assertEqual(result.selected_expense_account, "153.01")
         self.assertEqual(result.draft_lines[0]["account_code"], "153.01")
         self.assertEqual(result.export_status, "review_required")
+
+    def test_vat_group_default_materializes_one_account_for_all_lines(self) -> None:
+        try:
+            from app.domain.vat_accounting_groups import (
+                VatAccountingGroup,
+                VatGroupAccountDecision,
+                materialize_group_line_decisions,
+            )
+        except ImportError:
+            self.fail("vat accounting group domain is missing")
+
+        from app.domain.canonical_invoices import CanonicalInvoiceLine
+
+        group = VatAccountingGroup(
+            vat_group_id="KDV|S|20|",
+            rate="20",
+            tax_scheme_code="KDV",
+            tax_category_code="S",
+            exemption_reason_code="",
+            taxable_amount=Decimal("10000.00"),
+            tax_amount=Decimal("2000.00"),
+            gross_amount=Decimal("12000.00"),
+            lines=(
+                CanonicalInvoiceLine(description="Pil", canonical_line_id="line-1"),
+                CanonicalInvoiceLine(description="Aksesuar", canonical_line_id="line-2"),
+                CanonicalInvoiceLine(description="Kalıp", canonical_line_id="line-3"),
+            ),
+        )
+        decision = VatGroupAccountDecision(
+            vat_group_id=group.vat_group_id,
+            selected_account_code="153.01.002",
+            selected_account_name="Pil ve aksesuarlar",
+            covered_line_ids=group.line_ids,
+            decision_origin="accepted_ai",
+            reason="Aynı KDV grubunun varsayılan stok hesabı.",
+            possible_exception_line_ids=("line-3",),
+        )
+
+        results = materialize_group_line_decisions(
+            group=group,
+            decision=decision,
+            confirmed_exceptions={},
+        )
+
+        self.assertEqual({item["account_code"] for item in results}, {"153.01.002"})
+        self.assertEqual({item["decision_origin"] for item in results}, {"vat_group_default"})
+        self.assertEqual(
+            {item["possible_exception"] for item in results if item["canonical_line_id"] == "line-3"},
+            {True},
+        )
+
+    def test_vat_grouped_purchase_entry_keeps_group_and_line_allocations(self) -> None:
+        from app.domain.canonical_invoices import CanonicalInvoiceLine
+        from app.domain.vat_accounting_groups import (
+            VatAccountingGroup,
+            VatGroupAccountDecision,
+            build_vat_grouped_invoice_entry,
+        )
+
+        group = VatAccountingGroup(
+            vat_group_id="KDV|S|20|",
+            rate="20",
+            tax_scheme_code="KDV",
+            tax_category_code="S",
+            exemption_reason_code="",
+            taxable_amount=Decimal("10000.00"),
+            tax_amount=Decimal("2000.00"),
+            gross_amount=Decimal("12000.00"),
+            lines=(
+                CanonicalInvoiceLine(
+                    description="Pil",
+                    taxable_amount=Decimal("2000.00"),
+                    tax_amount=Decimal("400.00"),
+                    gross_amount=Decimal("2400.00"),
+                    canonical_line_id="line-1",
+                ),
+                CanonicalInvoiceLine(
+                    description="Aksesuar",
+                    taxable_amount=Decimal("3000.00"),
+                    tax_amount=Decimal("600.00"),
+                    gross_amount=Decimal("3600.00"),
+                    canonical_line_id="line-2",
+                ),
+                CanonicalInvoiceLine(
+                    description="Kalip",
+                    taxable_amount=Decimal("5000.00"),
+                    tax_amount=Decimal("1000.00"),
+                    gross_amount=Decimal("6000.00"),
+                    canonical_line_id="line-3",
+                ),
+            ),
+        )
+        decision = VatGroupAccountDecision(
+            vat_group_id=group.vat_group_id,
+            selected_account_code="153.01.002",
+            selected_account_name="Pil ve aksesuarlar",
+            covered_line_ids=group.line_ids,
+            decision_origin="accepted_ai",
+            reason="Ayni KDV grubu.",
+        )
+
+        entry = build_vat_grouped_invoice_entry(
+            entry_date="2026-07-31",
+            direction="purchase",
+            groups=(group,),
+            decisions=(decision,),
+            vat_accounts={group.vat_group_id: "191.01.020"},
+            counterparty_account="320.01.001",
+        )
+
+        self.assertEqual(
+            [
+                (line.account_code, line.debit, line.credit)
+                for line in entry.lines
+            ],
+            [
+                ("153.01.002", Decimal("10000.00"), Decimal("0.00")),
+                ("191.01.020", Decimal("2000.00"), Decimal("0.00")),
+                ("320.01.001", Decimal("0.00"), Decimal("12000.00")),
+            ],
+        )
+        self.assertEqual(entry.lines[0].vat_group_id, group.vat_group_id)
+        self.assertEqual(entry.lines[0].contributing_line_ids, group.line_ids)
+        self.assertEqual(entry.lines[1].vat_group_id, group.vat_group_id)
+        self.assertEqual(entry.lines[2].vat_group_id, "")
+        self.assertTrue(entry.is_balanced)
+
+    def test_vat_grouped_sales_keeps_zero_one_and_twenty_percent_roles_distinct(self) -> None:
+        from app.domain.canonical_invoices import CanonicalInvoiceLine
+        from app.domain.vat_accounting_groups import (
+            VatAccountingGroup,
+            VatGroupAccountDecision,
+            build_vat_grouped_invoice_entry,
+        )
+
+        def group(rate: str, net: str, tax: str, gross: str, line_id: str) -> VatAccountingGroup:
+            vat_group_id = f"KDV|S|{rate}|"
+            return VatAccountingGroup(
+                vat_group_id=vat_group_id,
+                rate=rate,
+                tax_scheme_code="KDV",
+                tax_category_code="S",
+                exemption_reason_code="",
+                taxable_amount=Decimal(net),
+                tax_amount=Decimal(tax),
+                gross_amount=Decimal(gross),
+                lines=(
+                    CanonicalInvoiceLine(
+                        description=f"Gida KDV %{rate}",
+                        taxable_amount=Decimal(net),
+                        tax_amount=Decimal(tax),
+                        gross_amount=Decimal(gross),
+                        canonical_line_id=line_id,
+                    ),
+                ),
+            )
+
+        groups = (
+            group("0", "50.00", "0.00", "50.00", "line-zero"),
+            group("1", "100.00", "1.00", "101.00", "line-one"),
+            group("20", "200.00", "40.00", "240.00", "line-twenty"),
+        )
+        decisions = tuple(
+            VatGroupAccountDecision(
+                vat_group_id=item.vat_group_id,
+                selected_account_code={
+                    "0": "600.00.3065",
+                    "1": "600.01.001",
+                    "20": "600.01.020",
+                }[item.rate],
+                selected_account_name=f"Gida satis KDV %{item.rate}",
+                covered_line_ids=item.line_ids,
+                decision_origin="accepted_ai",
+                reason="Kaynak KDV grubu.",
+            )
+            for item in groups
+        )
+
+        entry = build_vat_grouped_invoice_entry(
+            entry_date="2026-07-31",
+            direction="sales",
+            groups=groups,
+            decisions=decisions,
+            vat_accounts={
+                "KDV|S|1|": "391.01.001",
+                "KDV|S|20|": "391.01.020",
+            },
+            counterparty_account="120.01.001",
+        )
+
+        self.assertEqual(
+            [(line.account_code, line.debit, line.credit) for line in entry.lines],
+            [
+                ("600.00.3065", Decimal("0.00"), Decimal("50.00")),
+                ("600.01.001", Decimal("0.00"), Decimal("100.00")),
+                ("391.01.001", Decimal("0.00"), Decimal("1.00")),
+                ("600.01.020", Decimal("0.00"), Decimal("200.00")),
+                ("391.01.020", Decimal("0.00"), Decimal("40.00")),
+                ("120.01.001", Decimal("391.00"), Decimal("0.00")),
+            ],
+        )
+        self.assertNotIn("391.00", [line.account_code for line in entry.lines])
+        self.assertEqual(entry.lines[0].vat_group_id, "KDV|S|0|")
+        self.assertEqual(entry.lines[1].vat_group_id, "KDV|S|1|")
+        self.assertEqual(entry.lines[3].vat_group_id, "KDV|S|20|")
+        self.assertTrue(entry.is_balanced)
+
+    def test_vat_group_materialization_applies_only_confirmed_line_exception(self) -> None:
+        from app.domain.canonical_invoices import CanonicalInvoiceLine
+        from app.domain.vat_accounting_groups import (
+            VatAccountingGroup,
+            VatGroupAccountDecision,
+            materialize_group_line_decisions,
+        )
+
+        group = VatAccountingGroup(
+            vat_group_id="KDV|S|20|",
+            rate="20",
+            tax_scheme_code="KDV",
+            tax_category_code="S",
+            exemption_reason_code="",
+            taxable_amount=Decimal("10000.00"),
+            tax_amount=Decimal("2000.00"),
+            gross_amount=Decimal("12000.00"),
+            lines=(
+                CanonicalInvoiceLine(description="Pil", canonical_line_id="line-1"),
+                CanonicalInvoiceLine(description="Kalıp", canonical_line_id="line-2"),
+            ),
+        )
+        decision = VatGroupAccountDecision(
+            vat_group_id=group.vat_group_id,
+            selected_account_code="153.01.002",
+            selected_account_name="Pil ve aksesuarlar",
+            covered_line_ids=group.line_ids,
+            decision_origin="accepted_ai",
+            reason="Grup hesabı.",
+            possible_exception_line_ids=("line-2",),
+        )
+
+        results = materialize_group_line_decisions(
+            group=group,
+            decision=decision,
+            confirmed_exceptions={"line-2": "770.01.005"},
+        )
+
+        self.assertEqual(
+            [(item["account_code"], item["decision_origin"]) for item in results],
+            [
+                ("153.01.002", "vat_group_default"),
+                ("770.01.005", "confirmed_line_exception"),
+            ],
+        )
+
+    def test_confirmed_line_authority_overrides_group_default_without_dropping_other_lines(self) -> None:
+        from app.domain.invoice_ai_gate import (
+            AcceptedSemanticAttemptRef,
+            LineAccountAuthority,
+            SemanticAccountAuthoritySet,
+        )
+        from app.domain.matching_simulation import _combine_authorities
+
+        confirmed = SemanticAccountAuthoritySet(
+            line_authorities=(
+                LineAccountAuthority(
+                    canonical_line_id="line-2",
+                    account_code="770.01.005",
+                    semantic_role="expense",
+                    source="verified_rule",
+                    source_id="rule-1:1",
+                ),
+            ),
+        )
+        group_default = SemanticAccountAuthoritySet(
+            line_authorities=(
+                LineAccountAuthority(
+                    canonical_line_id="line-1",
+                    account_code="153.01.002",
+                    semantic_role="semantic_account",
+                    source="accepted_ai",
+                    source_id="attempt-1",
+                ),
+                LineAccountAuthority(
+                    canonical_line_id="line-2",
+                    account_code="153.01.002",
+                    semantic_role="semantic_account",
+                    source="accepted_ai",
+                    source_id="attempt-1",
+                ),
+            ),
+            accepted_attempt=AcceptedSemanticAttemptRef("attempt-1"),
+        )
+
+        combined = _combine_authorities(confirmed, group_default)
+
+        self.assertEqual(
+            {
+                item.canonical_line_id: (item.account_code, item.source)
+                for item in combined.line_authorities
+            },
+            {
+                "line-1": ("153.01.002", "accepted_ai"),
+                "line-2": ("770.01.005", "verified_rule"),
+            },
+        )
+
+    def test_account_roles_keep_net_vat_and_counterparty_candidates_separate(self) -> None:
+        from app.domain.vat_accounting_groups import account_roles_for
+
+        self.assertEqual(
+            account_roles_for("purchase"),
+            {
+                "net": ("153", "7", "25"),
+                "vat": ("191",),
+                "counterparty": ("320",),
+            },
+        )
+        self.assertEqual(
+            account_roles_for("sales"),
+            {
+                "net": ("600",),
+                "vat": ("391",),
+                "counterparty": ("120",),
+            },
+        )
+
+    def test_build_vat_accounting_groups_preserves_canonical_membership_and_amounts(self) -> None:
+        from app.domain.canonical_invoices import CanonicalInvoice, CanonicalInvoiceLine, CanonicalVatSummaryLine
+        try:
+            from app.domain.vat_accounting_groups import build_vat_accounting_groups
+        except ImportError:
+            self.fail("VAT accounting group builder is missing")
+
+        invoice = CanonicalInvoice(
+            source="ubl_xml",
+            line_items=(
+                CanonicalInvoiceLine(
+                    description="Pil",
+                    canonical_line_id="line-1",
+                    vat_group_id="KDV|S|20|",
+                ),
+                CanonicalInvoiceLine(
+                    description="Aksesuar",
+                    canonical_line_id="line-2",
+                    vat_group_id="KDV|S|20|",
+                ),
+                CanonicalInvoiceLine(
+                    description="Muaf hizmet",
+                    canonical_line_id="line-3",
+                    vat_group_id="KDV|E|0|3065",
+                ),
+            ),
+            vat_summary=(
+                CanonicalVatSummaryLine(
+                    rate="20",
+                    taxable_amount="10000.00",
+                    tax_amount="2000.00",
+                    tax_scheme_code="KDV",
+                    tax_category_code="S",
+                    vat_group_id="KDV|S|20|",
+                    contributing_line_ids=("line-1", "line-2"),
+                ),
+                CanonicalVatSummaryLine(
+                    rate="0",
+                    taxable_amount="500.00",
+                    tax_amount="0.00",
+                    tax_scheme_code="KDV",
+                    tax_category_code="E",
+                    exemption_reason_code="3065",
+                    vat_group_id="KDV|E|0|3065",
+                    contributing_line_ids=("line-3",),
+                ),
+            ),
+        )
+
+        groups = build_vat_accounting_groups(invoice)
+
+        self.assertEqual([group.vat_group_id for group in groups], ["KDV|S|20|", "KDV|E|0|3065"])
+        self.assertEqual(groups[0].line_ids, ("line-1", "line-2"))
+        self.assertEqual(groups[0].taxable_amount, Decimal("10000.00"))
+        self.assertEqual(groups[0].gross_amount, Decimal("12000.00"))
+        self.assertEqual(groups[1].line_ids, ("line-3",))
+
+    def test_vat_group_account_request_contains_one_group_and_real_candidates(self) -> None:
+        from app.domain.ai_classification import (
+            AiCandidateStrategy,
+            AiClassificationContext,
+            AiClassificationRequest,
+        )
+
+        try:
+            context = AiClassificationContext(
+                client_activity="İşitme cihazı satışı ve servisi",
+                accounting_direction="purchase",
+                account_candidates=("153.01.001", "153.01.002"),
+                account_candidate_details=(
+                    {"code": "153.01.001", "name": "İşitme cihazları"},
+                    {"code": "153.01.002", "name": "Pil ve aksesuarlar"},
+                ),
+                invoice_counterparty={"title": "Pil Tedarik A.Ş.", "tax_id": "1234567890"},
+                canonical_lines=(
+                    {"canonical_line_id": "line-1", "description": "Pil"},
+                    {"canonical_line_id": "line-2", "description": "Aksesuar"},
+                    {"canonical_line_id": "line-3", "description": "Kalıp"},
+                ),
+                vat_group={
+                    "vat_group_id": "KDV|S|20|",
+                    "rate": "20",
+                    "taxable_amount": "10000.00",
+                    "line_ids": ("line-1", "line-2", "line-3"),
+                },
+                candidate_strategy=AiCandidateStrategy(stage="vat_group_account"),
+            )
+        except TypeError:
+            self.fail("AiClassificationContext does not support a VAT-group request")
+
+        payload = AiClassificationRequest(
+            raw_line="Pil | Aksesuar | Kalıp",
+            supplier_hint="Pil Tedarik A.Ş.",
+            allowed_categories=("stok",),
+            max_input_chars=320,
+            context=context,
+        ).to_schema_payload()
+
+        self.assertEqual(payload["stage"], "vat_group_account")
+        self.assertEqual(payload["direction"], "purchase")
+        self.assertEqual(payload["vat_group"]["vat_group_id"], "KDV|S|20|")
+        self.assertEqual(payload["vat_group"]["line_ids"], ["line-1", "line-2", "line-3"])
+        self.assertEqual(payload["vat_group"]["line_descriptions"], ["Pil", "Aksesuar", "Kalıp"])
+        self.assertEqual(
+            payload["output_schema"]["properties"]["selected_account_code"]["enum"],
+            ["153.01.001", "153.01.002"],
+        )
+        self.assertEqual(
+            payload["output_schema"]["properties"]["possible_exception_line_ids"]["items"]["enum"],
+            ["line-1", "line-2", "line-3"],
+        )
+        self.assertNotIn("line_decisions", payload["output_schema"]["properties"])
+
+    def test_vat_group_provider_result_materializes_homogeneous_line_decisions(self) -> None:
+        from app.domain.ai_classification import (
+            AiCandidateStrategy,
+            AiClassificationContext,
+            AiClassificationPolicy,
+            StaticFirstClassifier,
+        )
+
+        class VatGroupProvider:
+            provider_name = "fake_group_provider"
+            product_classification_prompt_version = "vat-group-test-v1"
+            model = "fake-model"
+
+            def classify_product(self, request: object) -> dict[str, object]:
+                return {
+                    "selected_account_code": "153.01.002",
+                    "confidence": 82,
+                    "reason": "Grubun baskın ekonomik anlamı pil ve aksesuardır.",
+                    "possible_exception_line_ids": ["line-3"],
+                    "needs_research": False,
+                    "research_query": "",
+                }
+
+        context = AiClassificationContext(
+            client_activity="İşitme cihazı satışı ve servisi",
+            accounting_direction="purchase",
+            account_candidates=("153.01.001", "153.01.002"),
+            account_candidate_details=(
+                {"code": "153.01.001", "name": "İşitme cihazları"},
+                {"code": "153.01.002", "name": "Pil ve aksesuarlar"},
+            ),
+            canonical_lines=(
+                {"canonical_line_id": "line-1", "description": "Pil"},
+                {"canonical_line_id": "line-2", "description": "Aksesuar"},
+                {"canonical_line_id": "line-3", "description": "Kalıp"},
+            ),
+            vat_group={
+                "vat_group_id": "KDV|S|20|",
+                "rate": "20",
+                "taxable_amount": "10000.00",
+                "line_ids": ("line-1", "line-2", "line-3"),
+            },
+            candidate_strategy=AiCandidateStrategy(stage="vat_group_account"),
+        )
+
+        result = StaticFirstClassifier(
+            provider=VatGroupProvider(),
+            policy=AiClassificationPolicy(
+                enabled=True,
+                static_confidence_threshold=101,
+                max_provider_calls=1,
+            ),
+        ).classify("Pil | Aksesuar | Kalıp", context=context)
+
+        self.assertTrue(result.ai_used)
+        self.assertTrue(result.accepted_semantic_attempt_id)
+        self.assertEqual(
+            {item["suggested_account_code"] for item in result.line_decisions},
+            {"153.01.002"},
+        )
+        self.assertEqual(
+            [item["canonical_line_id"] for item in result.line_decisions if item["possible_exception"]],
+            ["line-3"],
+        )
+
+    def test_simulation_selects_one_real_net_account_per_vat_group(self) -> None:
+        from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClassifier
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+
+        lines = (
+            CanonicalInvoiceLine(
+                description="Pil",
+                canonical_line_id="line-1",
+                source_position="xml:1",
+                taxable_amount="2000.00",
+                vat_rate="20",
+                tax_amount="400.00",
+                gross_amount="2400.00",
+                tax_scheme_code="KDV",
+                tax_category_code="S",
+                vat_group_id="KDV|S|20|",
+            ),
+            CanonicalInvoiceLine(
+                description="Aksesuar",
+                canonical_line_id="line-2",
+                source_position="xml:2",
+                taxable_amount="3000.00",
+                vat_rate="20",
+                tax_amount="600.00",
+                gross_amount="3600.00",
+                tax_scheme_code="KDV",
+                tax_category_code="S",
+                vat_group_id="KDV|S|20|",
+            ),
+            CanonicalInvoiceLine(
+                description="Kalıp",
+                canonical_line_id="line-3",
+                source_position="xml:3",
+                taxable_amount="5000.00",
+                vat_rate="20",
+                tax_amount="1000.00",
+                gross_amount="6000.00",
+                tax_scheme_code="KDV",
+                tax_category_code="S",
+                vat_group_id="KDV|S|20|",
+            ),
+        )
+        canonical = with_validation(
+            CanonicalInvoice(
+                source="ubl_xml",
+                line_items=lines,
+                vat_summary=(
+                    CanonicalVatSummaryLine(
+                        rate="20",
+                        taxable_amount="10000.00",
+                        tax_amount="2000.00",
+                        tax_scheme_code="KDV",
+                        tax_category_code="S",
+                        vat_group_id="KDV|S|20|",
+                        contributing_line_ids=("line-1", "line-2", "line-3"),
+                    ),
+                ),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="10000.00",
+                    vat_total="2000.00",
+                    tax_inclusive_total="12000.00",
+                    payable_total="12000.00",
+                ),
+            )
+        )
+        invoice = ParsedInvoice(
+            file_name="grouped.xml",
+            provider_hint="Pil Tedarik A.Ş.",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1000,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000005",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("20",),
+            goods_services_total="10000.00",
+            vat_total="2000.00",
+            special_tax_total="",
+            tax_inclusive_total="12000.00",
+            payable_total="12000.00",
+            risk_flags=(),
+            suggested_route="journal_candidate",
+            parse_notes=(),
+            line_items=("Pil", "Aksesuar", "Kalıp"),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="770.01.001",
+            purchase_vat_account="191.01.020",
+            supplier_account="320.01.001",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01.002",
+            account_candidates={
+                "purchase_stock": (
+                    {"code": "153.01.001", "name": "İşitme cihazları", "reason": ""},
+                    {"code": "153.01.002", "name": "Pil ve aksesuarlar", "reason": ""},
+                ),
+            },
+            account_names={"153.01.002": "Pil ve aksesuarlar"},
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="İşitme Merkezi",
+            tax_id="1234567890",
+            activity_description="İşitme cihazı satışı ve servisi",
+            workplace_addresses=("İstanbul",),
+            has_chart_accounts=True,
+        )
+
+        class GroupProvider:
+            provider_name = "fake_group_provider"
+            product_classification_prompt_version = "vat-group-test-v1"
+            model = "fake-model"
+
+            def __init__(self) -> None:
+                self.stages: list[str] = []
+                self.exception_line_id = ""
+                self.candidate_codes: tuple[str, ...] = ()
+
+            def classify_product(self, request: object) -> dict[str, object]:
+                self.stages.append(request.context.candidate_strategy.stage)
+                self.exception_line_id = str(request.context.vat_group["line_ids"][-1])
+                self.candidate_codes = request.context.account_candidates
+                return {
+                    "selected_account_code": "153.01.002",
+                    "confidence": 80,
+                    "reason": "Aynı gruptaki satırlar stok niteliğinde.",
+                    "possible_exception_line_ids": [self.exception_line_id],
+                    "needs_research": False,
+                    "research_query": "",
+                }
+
+        provider = GroupProvider()
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            profile,
+            product_classifier=StaticFirstClassifier(
+                provider=provider,
+                policy=AiClassificationPolicy(
+                    enabled=True,
+                    static_confidence_threshold=101,
+                    max_provider_calls=1,
+                ),
+            ),
+            processing_mode="ai_assisted_draft",
+            intended_direction="purchase",
+        )
+
+        self.assertEqual(provider.stages, ["vat_group_account"])
+        self.assertEqual(
+            set(provider.candidate_codes),
+            {"153.01.001", "153.01.002"},
+        )
+        self.assertEqual({item["account_code"] for item in result.line_decisions}, {"153.01.002"})
+        self.assertEqual({item["decision_origin"] for item in result.line_decisions}, {"vat_group_default"})
+        self.assertEqual(
+            [item["canonical_line_id"] for item in result.line_decisions if item["possible_exception"]],
+            [provider.exception_line_id],
+        )
+        self.assertEqual(
+            [
+                (line["account_code"], line["debit"], line["credit"])
+                for line in result.draft_lines
+            ],
+            [
+                ("153.01.002", "10000.00", "0.00"),
+                ("191.01.020", "2000.00", "0.00"),
+                ("320.01.001", "0.00", "12000.00"),
+            ],
+        )
+        self.assertEqual(
+            result.draft_lines[0]["contributing_line_ids"],
+            [item["canonical_line_id"] for item in result.line_decisions],
+        )
+        self.assertEqual(result.draft_lines[1]["vat_group_id"], "KDV|S|20|")
+        self.assertTrue(result.is_balanced)
 
     def test_simulation_batches_canonical_line_decisions_and_builds_grouped_journal(self) -> None:
         from app.domain.ai_classification import AiClassificationResult
@@ -5400,28 +7072,35 @@ class Phase0DomainTests(unittest.TestCase):
                 stage = context.candidate_strategy.stage
                 self.stages.append(stage)
                 line_decisions = ()
-                if stage == "line_batch":
-                    line_decisions = (
+                selected_account = ""
+                if stage == "vat_group_account":
+                    selected_account = "153.01" if context.vat_group["rate"] == "20" else "760.01"
+                    line_decisions = tuple(
                         {
-                            "canonical_line_id": canonical.line_items[0].canonical_line_id,
-                            "suggested_account_code": "153.01", "product_identity": "Isitme cihazi",
-                            "reason": "Satilacak cihaz stogu.", "needs_research": False, "research_query": "",
-                        },
-                        {
-                            "canonical_line_id": canonical.line_items[1].canonical_line_id,
-                            "suggested_account_code": "760.01", "product_identity": "Bakim hizmeti",
-                            "reason": "Bakim gideri.", "needs_research": False, "research_query": "",
-                        },
+                            "canonical_line_id": line["canonical_line_id"],
+                            "suggested_account_code": selected_account,
+                            "product_identity": line["description"],
+                            "reason": "KDV grubu için tek net hesap.",
+                            "needs_research": False,
+                            "research_query": "",
+                            "vat_group_id": context.vat_group["vat_group_id"],
+                            "possible_exception": False,
+                        }
+                        for line in context.canonical_lines
                     )
                 response = {
-                    "suggested_account_code": "153.01",
+                    "suggested_account_code": selected_account,
                     "needs_research": False,
                     "line_decisions": list(line_decisions),
                 }
+                attempt_id = f"batch-aware-{context.vat_group.get('rate', 'none')}"
                 attempt = serialize_semantic_decision_attempt(
-                    attempt_id="batch-aware-attempt",
+                    attempt_id=attempt_id,
                     stage="initial_account_decision",
-                    canonical_line_ids=(line.canonical_line_id for line in canonical.line_items),
+                    canonical_line_ids=(
+                        line["canonical_line_id"]
+                        for line in context.canonical_lines
+                    ),
                     prompt_version="test-batch-v1",
                     provider="fake_llm",
                     model="fake-batch-model",
@@ -5429,24 +7108,24 @@ class Phase0DomainTests(unittest.TestCase):
                     candidate_counterparty_codes=context.counterparty_candidates,
                     validated_response=response,
                     validation_errors=(),
-                    accepted=stage == "line_batch",
+                    accepted=stage == "vat_group_account",
                 )
                 return AiClassificationResult(
                     classification=ProductClassification(
                         raw_line=raw_line, category="isitme_cihazi", confidence=90,
                         evidence=("ai_schema_validated",),
                     ),
-                    ai_used=stage == "line_batch", provider="fake_llm", suggested_account_code="153.01",
-                    skipped_reason="" if stage == "line_batch" else "ai_provider_error",
+                    ai_used=stage == "vat_group_account", provider="fake_llm", suggested_account_code=selected_account,
+                    skipped_reason="" if stage == "vat_group_account" else "ai_provider_error",
                     product_identity="Cihaz ve bakim", line_decisions=line_decisions,
                     semantic_attempts=(attempt,),
-                    accepted_semantic_attempt_id="batch-aware-attempt" if stage == "line_batch" else "",
+                    accepted_semantic_attempt_id=attempt_id if stage == "vat_group_account" else "",
                 )
 
         classifier = BatchAwareClassifier()
         result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier)
 
-        self.assertEqual(classifier.stages, ["line_batch"])
+        self.assertEqual(classifier.stages, ["vat_group_account", "vat_group_account"])
         self.assertEqual(
             [decision["account_code"] for decision in result.line_decisions],
             ["153.01", "760.01"],
@@ -5455,6 +7134,128 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(result.is_balanced)
         self.assertTrue(result.ai_classification_used)
         self.assertNotIn("line_decision_journal_incomplete", result.review_reason_codes)
+
+    def test_incomplete_canonical_line_allocation_preserves_balanced_gross_review_draft(self) -> None:
+        from app.domain.canonical_invoices import (
+            CanonicalInvoice,
+            CanonicalInvoiceLine,
+            CanonicalInvoiceTotals,
+            CanonicalVatSummaryLine,
+            with_validation,
+        )
+
+        canonical = with_validation(
+            CanonicalInvoice(
+                source="ubl_xml",
+                line_items=(
+                    CanonicalInvoiceLine(
+                        description="Cihaz",
+                        source_position="xml:InvoiceLine[1]",
+                        taxable_amount="100.00",
+                        vat_rate="20",
+                        tax_amount="20.00",
+                        gross_amount="120.00",
+                    ),
+                    CanonicalInvoiceLine(
+                        description="Servis",
+                        source_position="xml:InvoiceLine[2]",
+                        taxable_amount="50.00",
+                        vat_rate="",
+                        tax_amount="",
+                        gross_amount="",
+                    ),
+                ),
+                vat_summary=(
+                    CanonicalVatSummaryLine(
+                        rate="20",
+                        taxable_amount="150.00",
+                        tax_amount="20.00",
+                    ),
+                ),
+                totals=CanonicalInvoiceTotals(
+                    goods_services_total="150.00",
+                    vat_total="20.00",
+                    special_tax_total="0.00",
+                    tax_inclusive_total="170.00",
+                    payable_total="170.00",
+                ),
+            )
+        )
+        invoice = ParsedInvoice(
+            file_name="line-tax-missing.xml",
+            provider_hint="Medikal Tedarik",
+            page_count=1,
+            text_extractable=True,
+            extracted_char_count=1200,
+            scenario="TEMELFATURA",
+            invoice_type="ALIS",
+            invoice_no="ABC2026000000002",
+            ettn="",
+            issue_date="01.05.2026",
+            tax_ids=(),
+            vat_rates=("0", "20"),
+            goods_services_total="150.00",
+            vat_total="20.00",
+            special_tax_total="",
+            tax_inclusive_total="170.00",
+            payable_total="170.00",
+            risk_flags=(),
+            suggested_route="review_queue",
+            parse_notes=(),
+            line_items=("Cihaz", "Servis"),
+            canonical_invoice=canonical,
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx",
+            expense_account="760.01",
+            purchase_vat_account="191.20",
+            supplier_account="320.01",
+            bank_account="102.01",
+            selection_notes=(),
+            stock_account="153.01",
+            account_candidates={
+                "purchase_stock": (
+                    {"code": "153.01", "name": "Cihaz stogu", "reason": ""},
+                ),
+                "purchase_expense": (
+                    {"code": "760.01", "name": "Servis gideri", "reason": ""},
+                ),
+            },
+        )
+        profile = ClientProfile(
+            client_id="client-1",
+            title="Isitme Merkezi",
+            tax_id="1234567890",
+            activity_description="Isitme cihazi satis ve servis",
+            workplace_addresses=("Istanbul",),
+            has_chart_accounts=True,
+        )
+
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            profile,
+            product_classifier=AcceptedSemanticAccountClassifier(
+                "153.01",
+                category="isitme_cihazi",
+                line_account_codes=("153.01", "760.01"),
+            ),
+            processing_mode="ai_assisted_draft",
+        )
+
+        self.assertEqual(result.export_status, "review_required")
+        self.assertEqual(result.draft_quality, "gross_balanced_needs_vat_split")
+        self.assertTrue(result.is_balanced)
+        self.assertEqual(len(result.draft_lines), 2)
+        self.assertIn("line_decision_journal_incomplete", result.review_reason_codes)
+        self.assertEqual(
+            [decision["account_code"] for decision in result.line_decisions],
+            ["153.01", "760.01"],
+        )
+        self.assertEqual(
+            len({decision["canonical_line_id"] for decision in result.line_decisions}),
+            2,
+        )
 
     def test_generic_yurtici_line_uses_ai_real_kargo_account(self) -> None:
         invoice = ParsedInvoice(
@@ -6813,7 +8614,8 @@ class Phase0DomainTests(unittest.TestCase):
                 "product_identity": "Belirsiz hizmet",
                 "needs_research": False,
                 "research_query": "",
-            }
+            },
+            register_suggested_candidate=False,
         )
         classifier = StaticFirstClassifier(
             provider=provider,
@@ -7084,19 +8886,23 @@ class Phase0DomainTests(unittest.TestCase):
 
         self.assertEqual(len(provider.requests), 2)
         self.assertEqual(provider.requests[0].context.candidate_strategy.stage, "family_select")
-        self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "final_account")
+        self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "vat_group_account")
         final_payload = provider.requests[1].to_schema_payload()
-        self.assertIn("153.01.001", final_payload["account_candidates"])
-        self.assertIn("253.01.001", final_payload["account_candidates"])
-        self.assertNotIn("760.03.001", final_payload["account_candidates"])
-        self.assertIn("320.1640731289", final_payload["counterparty_candidates"])
+        final_candidate_codes = {
+            candidate["code"]
+            for candidate in final_payload["account_candidates"]
+        }
+        self.assertIn("153.01.001", final_candidate_codes)
+        self.assertIn("253.01.001", final_candidate_codes)
+        self.assertNotIn("760.03.001", final_candidate_codes)
+        self.assertEqual(final_payload["counterparty"]["counterparty_tax_id"], "1640731289")
         self.assertEqual(result.ai_candidate_strategy, "two_stage")
         self.assertEqual(result.ai_selected_account_families, ("153", "25"))
         self.assertEqual(result.ai_suggested_account_code, "153.01.001")
         self.assertEqual(result.ai_suggested_counterparty_code, "320.1640731289")
         self.assertEqual(result.selected_expense_account, "153.01.001")
         self.assertEqual(result.ai_stage_evidence[0]["ai_stage"], "family_select")
-        self.assertEqual(result.ai_stage_evidence[1]["ai_stage"], "final_account")
+        self.assertEqual(result.ai_stage_evidence[1]["ai_stage"], "vat_group_account")
 
     def test_family_stage_includes_all_plausible_direction_families_with_examples(self) -> None:
         invoice = ParsedInvoice(
@@ -7298,7 +9104,10 @@ class Phase0DomainTests(unittest.TestCase):
 
         final_payload = provider.requests[1].to_schema_payload()
         self.assertEqual(len(final_payload["account_candidates"]), 130)
-        self.assertIn("153.01.130", final_payload["account_candidates"])
+        self.assertIn(
+            "153.01.130",
+            {candidate["code"] for candidate in final_payload["account_candidates"]},
+        )
         self.assertEqual(result.ai_suggested_account_code, "153.01.130")
 
     def test_large_counterparty_list_uses_dedicated_all_candidate_stage(self) -> None:
@@ -7402,10 +9211,10 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertIn("320.1640731289", counterparty_payload["counterparty_candidates"])
         self.assertEqual(result.ai_suggested_counterparty_code, "320.999")
         self.assertEqual(result.ai_stage_evidence[-1]["ai_stage"], "counterparty_resolve")
-        self.assertEqual([record["ai_stage"] for record in result.ai_account_stage_evidence], ["final_account"])
+        self.assertEqual([record["ai_stage"] for record in result.ai_account_stage_evidence], ["vat_group_account"])
         self.assertEqual([record["ai_stage"] for record in result.ai_counterparty_stage_evidence], ["counterparty_resolve"])
 
-    def test_uncertain_direction_keeps_purchase_and_sales_account_candidates_visible(self) -> None:
+    def test_explicit_purchase_intake_filters_sales_candidates(self) -> None:
         invoice = ParsedInvoice(
             file_name="uncertain-direction.pdf",
             provider_hint="BELIRSIZ TEDARIKCI",
@@ -7476,14 +9285,25 @@ class Phase0DomainTests(unittest.TestCase):
             policy=AiClassificationPolicy(enabled=True, static_confidence_threshold=101, single_stage_account_limit=40),
         )
 
-        result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            profile,
+            product_classifier=classifier,
+            processing_mode="ai_assisted_draft",
+            intended_direction="purchase",
+        )
 
         payload = provider.requests[0].to_schema_payload()
-        self.assertTrue(payload["direction_uncertainty"])
-        self.assertIn("153.01.001", payload["account_candidates"])
-        self.assertIn("600.01.020", payload["account_candidates"])
-        self.assertTrue(result.direction_uncertainty)
-        self.assertEqual(result.ai_suggested_account_code, "600.01.020")
+        self.assertFalse(payload["direction_uncertainty"])
+        account_candidate_codes = {
+            candidate["code"]
+            for candidate in payload["account_candidates"]
+        }
+        self.assertIn("153.01.001", account_candidate_codes)
+        self.assertNotIn("600.01.020", account_candidate_codes)
+        self.assertFalse(result.direction_uncertainty)
+        self.assertEqual(result.ai_suggested_account_code, "")
 
     def test_counterparty_resolution_sends_all_120_candidates_for_sales(self) -> None:
         invoice = ParsedInvoice(
@@ -7814,6 +9634,7 @@ class Phase0DomainTests(unittest.TestCase):
                 [invoice],
                 profile,
                 AcceptedSemanticAccountClassifier("600.20"),
+                intended_direction="sales",
             )
         result = run.invoice_results[0]
 
@@ -7951,7 +9772,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(result.export_status, "review_required")
         self.assertIn("onboarding_missing_chart_accounts", result.review_reason_codes)
 
-    def test_matching_simulation_keeps_zero_amount_invoice_in_review(self) -> None:
+    def test_matching_simulation_suggests_no_posting_for_zero_amount_invoice(self) -> None:
         invoice = ParsedInvoice(
             file_name="zero.pdf",
             provider_hint="Aposkal",
@@ -7984,11 +9805,18 @@ class Phase0DomainTests(unittest.TestCase):
             selection_notes=(),
         )
 
-        result = simulate_mechanical_invoice(invoice, selection, _task3_profile())
+        result = simulate_mechanical_invoice(
+            invoice,
+            selection,
+            _task3_profile(),
+            intended_direction="purchase",
+        )
 
-        self.assertEqual(result.simulated_status, "review_required")
-        self.assertEqual(result.draft_quality, "no_positive_amount")
+        self.assertEqual(result.simulated_status, "no_posting_suggested")
+        self.assertEqual(result.draft_quality, "no_posting_suggested")
         self.assertEqual(result.draft_lines, ())
+        self.assertIn("zero_payable_no_posting", result.review_reason_codes)
+        self.assertIn("sifir", result.export_gate_reason.lower())
 
     def test_client_onboarding_requires_profile_and_chart_accounts(self) -> None:
         profile = ClientProfile(

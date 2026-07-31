@@ -9,6 +9,9 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 | Faz 1 | done | Dogru kimlik, yon tespiti ve musavir gerekcesi | TCKN/VKN ayrimi, fatura yonu, iade dislama, UI yon bazli panel |
 | Faz 2 | done | Hesap plani, KDV ve cari onerisi | 600/391, 153 veya 7xx/191, %0/3065, yeni 120/320 cari onerisi |
 | Faz 3 | done | Ortak bilgi havuzu ve operasyonel gorunurluk | AI research query, explicit AI research istegi, global cache ve Tavily siniri baglandi |
+| Faz 4 | done | Research sonucu ile fis kararini yeniden kurma | Dusuk guven export'u acmaz, ama dengeli review taslagi korunur |
+| Faz 5 | done | Karisik KDV satir ayrimi | Cihaz %0/3065 kalir, aksesuar/pil satiri KDV'li kalabilir |
+| Faz 6 | revise | Dogal dil musavir kural adayi | UI'da tek `Karar notu`; backend eski alanlari geriye uyumluluk icin kabul eder |
 
 ## 2026-07-20 PDF Discovery ve Gorev Bazli AI Yurutme
 
@@ -20,11 +23,42 @@ Bu dokuman fatura yonu, hesap plani secimi ve musavir gerekcesi isini repo icind
 - AI parasal hesap, KDV mutabakati veya fis dengelemesi yapmaz; yalniz belgede
   gordugu alanlari ve satir anlamini dondurur.
 - Provider sirasi goreve gore degisir, fakat yalniz base chain'de tanimli
-  provider'lar kullanilir. Gercek 50-fatura kalite/latency benchmark'i ve
-  image-only PDF OCR kabul kaniti halen aciktir.
-| Faz 4 | done | Research sonucu ile fis kararini yeniden kurma | Dusuk guven export'u acmaz, ama dengeli review taslagi korunur |
-| Faz 5 | done | Karisik KDV satir ayrimi | Cihaz %0/3065 kalir, aksesuar/pil satiri KDV'li kalabilir |
-| Faz 6 | revise | Dogal dil musavir kural adayi | UI'da tek `Karar notu`; backend eski alanlari geriye uyumluluk icin kabul eder |
+  provider'lar kullanilir. Gercek 50-fatura kalite/latency benchmark'i aciktir.
+  Image-only PDF OCR bu tarihte acik bir adaydi; 2026-07-31 karariyla ilk pilot
+  diliminin disina alindi.
+
+## 2026-07-31 KDV Grubu Bazli Fis Taslagi
+
+Durum: Kabul edilmis tasarim; uygulama henuz tamamlanmadi.
+
+- UBL/XML normal canonical kaynak; text-readable PDF nadir manuel fallback.
+  Image-only/taranmis PDF OCR bu pilot diliminin disinda.
+- Normal fatura intake'i mutlaka `purchase_invoice` veya `sales_invoice`
+  tasir. QNB gelen alis, QNB giden ayri satis akisidir; portal ve private
+  manifest yonu acik verir. Exact XML supplier/customer VKN eslesmesi
+  catismali intake etiketinden ustundur ve catismayi review kaniti olarak
+  korur.
+- Canonical KDV grubu `tax scheme + tax category + rate + exemption code`
+  anahtariyla kurulur. Her grup matrah, KDV, brut ve contributing
+  `canonical_line_id` listesini tasir.
+- Bir fatura icinde ayni KDV grubundaki satirlar varsayilan olarak tek gercek
+  net hesaba gider. Model kararsizligi veya farkli satir kelimeleri grubu
+  bolmez. Exact musavir-onayli istisna grubu bolebilir; ilk yeni AI istisna
+  sinyali focused review olarak kalir.
+- Alista AI grubun gercek stok/gider/sabit kiymet detay hesabini, satista
+  gercek gelir detay hesabini secer. Kaynak KDV bilgisi ayri olarak `191/391`,
+  cari kimligi ayri olarak `320/120` tarafini baglar.
+- Desteklenen text PDF, her beyan edilen KDV grubu icin en az bir
+  source-positioned aciklanabilir satir bulunmadan basarili sayilmaz. Targeted
+  deterministic recovery ve source-grounded AI discovery calisir; kalici eksik
+  satir teknik `line-missing` hatasidir, normal bos review sonucu degildir.
+- UBL onizleme satirlarin KDV grubunu ve her grup icin matrah/KDV/brut/satir
+  toplamlarini gosterir. UBL ve orijinal PDF yaninda ayni kaynak-bagli fis
+  taslagi kullanilir.
+- Tasarim:
+  `docs/superpowers/specs/2026-07-31-vat-grouped-invoice-draft-design.md`.
+- Uygulama plani:
+  `docs/superpowers/plans/2026-07-31-vat-grouped-invoice-draft-repair.md`.
 | Faz 7 | done | Portal karar zinciri gorunurlugu | Fis satirlari onde; urun kimligi, NACE/faaliyet, research ve cari aday izi alt akis oldu |
 | Faz 8 | next | Cok mukellefli gercek belge matrisi | Canli deneme ve private sample matrix ile genisletilecek |
 

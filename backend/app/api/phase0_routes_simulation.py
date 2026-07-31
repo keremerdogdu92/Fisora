@@ -63,6 +63,7 @@ def simulation_invoice(payload: SimulationPayload) -> dict[str, object]:
         counterparty,
         static_first_classifier_from_payload(payload.ai_policy),
         payload.processing_mode,
+        intended_direction=payload.intake_category,
     )
     result = apply_learning_rules(result, [learned_rule_from_payload(rule) for rule in payload.learning_rules])
     data = asdict(result)

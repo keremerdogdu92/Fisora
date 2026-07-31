@@ -148,6 +148,17 @@ never authoritative. Amounts, VAT reconciliation and journal balance remain
 deterministic responsibilities. Image-only/scanned PDF OCR is a separate
 capability and is not implied by text-PDF discovery.
 
+For the first invoice pilot, image-only/scanned invoice OCR is outside scope.
+UBL/XML is the normal source and text-readable PDF is an uncommon manual
+fallback. A supported text PDF does not complete successfully while a declared
+VAT group lacks at least one explainable, source-positioned canonical line.
+Fisero first retries targeted deterministic row recovery, then source-grounded
+AI discovery for the exact missing group, and reruns deterministic
+reconciliation. Persistent absence is a technical `line-missing` extraction
+failure and protected-corpus acceptance failure; it is not converted into a
+seller-name-only accounting decision, an empty review result, or a normal
+low-confidence draft.
+
 ### Compact AI chart and counterparty context
 
 Status: Accepted
@@ -213,10 +224,48 @@ Status: Accepted
   aggregates compatible results. Aggregation is allowed only when account,
   semantic accounting meaning, direction, and tax treatment match. The journal
   line retains the contributing canonical-line IDs and allocated amounts.
+- Within one invoice, lines with the same canonical VAT identity default to one
+  semantic net-account decision. Canonical VAT identity comprises tax
+  scheme/type, tax category, rate, and exemption reason code when present; rate
+  alone is insufficient, especially for zero/exempt behavior. Model uncertainty
+  or wording variation does not split the default group. A matching
+  accountant-confirmed exception may split an exact line; a first-seen possible
+  exception remains focused review evidence until the accountant confirms its
+  treatment.
+- The group decision is materialized back to every contributing
+  `canonical_line_id` with its decision origin. Grouped journal presentation
+  therefore reduces repetitive classification without allowing the first line
+  to silently stand in for untracked source lines.
+- For purchases, AI selects the real net-side stock, expense, or fixed-asset
+  detail account for the group; for sales, AI selects the real revenue detail
+  account. Source VAT identity and direction separately constrain the usable
+  `191`/`391` account, while counterparty identity separately resolves or
+  proposes the `320`/`120` account. Deterministic code never invents a semantic
+  net account.
 - Line-level account coverage and mapping integrity are first-pilot quality
   gates. A balanced journal is not considered correct when a source line is
   missing, duplicated, shifted to another line, or absorbed into an unrelated
   account.
+
+### VAT-group evidence and invoice preview
+
+Status: Accepted
+
+- UBL/XML preview renders every source line with a textual VAT-group label, an
+  always-visible VAT-distribution table, and existing document totals. Each VAT
+  group shows source tax identity, taxable base, VAT amount, gross group total,
+  and contributing source-line numbers.
+- Source-line group labels and VAT-distribution rows are mutually linkable and
+  keyboard accessible. The relationship is never communicated by color alone.
+- `KDV grubu` is source-tax evidence, not an accounting-account label. The
+  adjacent journal draft separately shows the selected real group account and
+  retains VAT-group and canonical-line allocation evidence.
+- PDF remains the original source preview; UBL is rendered locally from the
+  canonical XML. Both use the same accountant-facing draft surface and
+  source-to-journal explanation.
+- Canonical IDs, UBL paths, declared-versus-calculated arithmetic, and provider
+  trace remain progressive technical detail. Only affected groups show a
+  reconciliation warning.
 
 An exact buyer VKN/TCKN mismatch against the current client creates a narrow
 identity warning, not a semantic escape hatch. When the identifier exactly

@@ -70,6 +70,7 @@ class AiClassificationContext:
     invoice_counterparty: dict[str, Any] = field(default_factory=dict)
     account_family_candidates: tuple[dict[str, Any], ...] = ()
     canonical_lines: tuple[dict[str, Any], ...] = ()
+    vat_group: dict[str, Any] = field(default_factory=dict)
     candidate_strategy: AiCandidateStrategy = field(default_factory=AiCandidateStrategy)
     account_candidate_limit: int = 40
     counterparty_candidate_limit: int = 80
@@ -89,6 +90,8 @@ class AiClassificationRequest:
     context: AiClassificationContext = AiClassificationContext()
 
     def to_schema_payload(self) -> dict[str, object]:
+        if self.context.candidate_strategy.stage == "vat_group_account":
+            return self._to_vat_group_account_payload()
         if self.context.semantic_stage in {"research_synthesis", "account_correction"}:
             payload = self._to_line_batch_payload()
             payload.update(
@@ -162,6 +165,64 @@ class AiClassificationRequest:
                     "needs_research": {"type": "boolean"},
                     "research_query": {"type": "string", "maxLength": 160},
                 },
+                "additionalProperties": False,
+            },
+        }
+
+    def _to_vat_group_account_payload(self) -> dict[str, object]:
+        account_candidates = tuple(
+            dict(candidate)
+            for candidate in self.context.account_candidate_details[: max(self.context.account_candidate_details_limit, 0)]
+            if str(candidate.get("code") or "") in set(self.context.account_candidates)
+        )
+        candidate_codes = tuple(str(candidate.get("code") or "") for candidate in account_candidates)
+        requested_line_ids = tuple(
+            str(line_id)
+            for line_id in self.context.vat_group.get("line_ids", ())
+            if str(line_id)
+        )
+        lines_by_id = {
+            str(line.get("canonical_line_id") or ""): line
+            for line in self.context.canonical_lines
+            if str(line.get("canonical_line_id") or "")
+        }
+        line_descriptions = tuple(
+            str(lines_by_id.get(line_id, {}).get("description") or "")[: self.max_input_chars]
+            for line_id in requested_line_ids
+        )
+        vat_group = {
+            "vat_group_id": str(self.context.vat_group.get("vat_group_id") or ""),
+            "rate": str(self.context.vat_group.get("rate") or ""),
+            "taxable_amount": str(self.context.vat_group.get("taxable_amount") or ""),
+            "line_ids": list(requested_line_ids),
+            "line_descriptions": list(line_descriptions),
+        }
+        properties = {
+            "selected_account_code": {"type": "string", "enum": list(candidate_codes)},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+            "reason": {"type": "string", "maxLength": 240},
+            "possible_exception_line_ids": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(requested_line_ids)},
+                "maxItems": len(requested_line_ids),
+            },
+            "needs_research": {"type": "boolean"},
+            "research_query": {"type": "string", "maxLength": 160},
+        }
+        return {
+            "stage": "vat_group_account",
+            "direction": self.context.accounting_direction,
+            "direction_confidence": self.context.direction_confidence,
+            "direction_evidence": list(self.context.direction_evidence),
+            "direction_uncertainty": self.context.direction_uncertainty,
+            "vat_group": vat_group,
+            "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
+            "counterparty": dict(self.context.invoice_counterparty),
+            "account_candidates": list(account_candidates),
+            "output_schema": {
+                "type": "object",
+                "properties": properties,
+                "required": list(properties),
                 "additionalProperties": False,
             },
         }
@@ -905,7 +966,7 @@ def _semantic_attempt_record(
     )
     accepted = (
         accepted_result is not None
-        and candidate_stage in {"final_account", "line_batch"}
+        and candidate_stage in {"final_account", "line_batch", "vat_group_account"}
         and not accepted_result.needs_research
         and not line_research_pending
     )
@@ -1082,7 +1143,108 @@ def _validated_line_decisions(
     return tuple(by_id[line_id] for line_id in expected_ids)
 
 
+def _validate_vat_group_provider_payload(
+    payload: dict[str, Any],
+    request: AiClassificationRequest,
+) -> AiProviderClassification | None:
+    selected_account_code = _validated_suggestion(
+        payload.get("selected_account_code") or payload.get("suggested_account_code"),
+        request.context.account_candidates,
+    )
+    if not selected_account_code:
+        raw_line_decisions = payload.get("line_decisions")
+        if isinstance(raw_line_decisions, list):
+            legacy_codes = {
+                _validated_suggestion(
+                    item.get("suggested_account_code"),
+                    request.context.account_candidates,
+                )
+                for item in raw_line_decisions
+                if isinstance(item, Mapping)
+            }
+            legacy_codes.discard("")
+            if len(legacy_codes) == 1:
+                selected_account_code = next(iter(legacy_codes))
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        confidence = int(payload.get("confidence", -1))
+    except (TypeError, ValueError):
+        return None
+    line_ids = tuple(
+        str(line_id)
+        for line_id in request.context.vat_group.get("line_ids", ())
+        if str(line_id)
+    )
+    raw_exceptions = payload.get("possible_exception_line_ids", [])
+    if not isinstance(raw_exceptions, list):
+        return None
+    exception_ids = tuple(str(line_id) for line_id in raw_exceptions if str(line_id))
+    needs_research = bool(payload.get("needs_research"))
+    if (
+        (not selected_account_code and not needs_research)
+        or not reason
+        or confidence < 0
+        or confidence > 100
+        or not line_ids
+        or len(exception_ids) != len(set(exception_ids))
+        or not set(exception_ids).issubset(set(line_ids))
+    ):
+        return None
+    possible_exceptions = set(exception_ids)
+    category = str(payload.get("category") or "bilinmeyen").strip()
+    if category not in request.allowed_categories:
+        return None
+    evidence = (
+        _limited_strings(payload.get("evidence") or [], limit=5)
+        if isinstance(payload.get("evidence"), list)
+        else ()
+    )
+    risk_flags = (
+        _limited_strings(payload.get("risk_flags") or [], limit=8)
+        if isinstance(payload.get("risk_flags"), list)
+        else ()
+    )
+    product_identity = str(payload.get("product_identity") or "").strip()[:160]
+    research_query = str(payload.get("research_query") or "").strip()[:160]
+    line_decisions = tuple(
+        {
+            "canonical_line_id": line_id,
+            "category": category,
+            "confidence": confidence,
+            "product_identity": product_identity,
+            "suggested_account_code": selected_account_code,
+            "reason": reason[:240],
+            "evidence": (*evidence, "vat_group_account"),
+            "needs_research": needs_research,
+            "research_query": research_query,
+            "risk_flags": risk_flags,
+            "vat_group_id": str(request.context.vat_group.get("vat_group_id") or ""),
+            "possible_exception": line_id in possible_exceptions,
+        }
+        for line_id in line_ids
+    )
+    return AiProviderClassification(
+        category=category,
+        confidence=confidence,
+        reason=reason[:240],
+        evidence=(*evidence, "vat_group_account"),
+        suggested_account_code=selected_account_code,
+        suggested_counterparty_code=_validated_suggestion(
+            payload.get("suggested_counterparty_code"),
+            request.context.counterparty_candidates,
+        ),
+        risk_flags=risk_flags,
+        account_reason=str(payload.get("account_reason") or reason).strip()[:240],
+        product_identity=product_identity,
+        needs_research=needs_research,
+        research_query=research_query,
+        line_decisions=line_decisions,
+    )
+
+
 def _validate_provider_payload(payload: dict[str, Any], request: AiClassificationRequest) -> AiProviderClassification | None:
+    if request.context.candidate_strategy.stage == "vat_group_account":
+        return _validate_vat_group_provider_payload(payload, request)
     category = str(payload.get("category", "")).strip()
     if category not in request.allowed_categories:
         return None
@@ -1134,7 +1296,14 @@ def _provider_validation_errors(
     if result is None:
         errors.append("invalid_schema")
     allowed = set(request.context.account_candidates)
-    attempted = str(payload.get("suggested_account_code") or "").strip()
+    attempted = str(
+        (
+            payload.get("selected_account_code") or payload.get("suggested_account_code")
+            if request.context.candidate_strategy.stage == "vat_group_account"
+            else payload.get("suggested_account_code")
+        )
+        or ""
+    ).strip()
     if attempted and attempted not in allowed:
         errors.append("selected_account_not_in_candidates")
     for decision in payload.get("line_decisions") or ():

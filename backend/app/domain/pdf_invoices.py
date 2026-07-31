@@ -24,9 +24,56 @@ from app.domain.canonical_invoices import (
     with_validation,
 )
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
-from app.domain.invoice_lines import InvoiceLine, extract_invoice_lines_from_text, invoice_line_hints
+from app.domain.invoice_lines import (
+    InvoiceLine,
+    extract_invoice_lines_from_pages,
+    extract_invoice_lines_from_text,
+    invoice_line_hints,
+    parse_invoice_money,
+)
 from app.domain.pdf_invoice_boundaries import PdfPageText, detect_multiple_invoice_identities
 from app.domain.vat_splits import VatSplitLine, extract_pdf_vat_split
+
+
+@dataclass(frozen=True)
+class PdfCanonicalExtractionOutcome:
+    invoice: CanonicalInvoice
+    missing_vat_group_ids: tuple[str, ...] = ()
+    attempts: tuple[str, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        return not self.missing_vat_group_ids
+
+
+class SupportedPdfExtractionError(ValueError):
+    reason_code = "line-missing"
+
+    def __init__(self, missing_vat_group_ids: tuple[str, ...]) -> None:
+        self.missing_vat_group_ids = missing_vat_group_ids
+        super().__init__(
+            "line-missing: supported text PDF has unreconciled VAT groups: "
+            + ", ".join(missing_vat_group_ids)
+        )
+
+
+def _pdf_canonical_extraction_outcome(
+    invoice: CanonicalInvoice,
+    *,
+    attempts: tuple[str, ...] = (),
+) -> PdfCanonicalExtractionOutcome:
+    missing_vat_group_ids = tuple(
+        dict.fromkeys(
+            evidence.removeprefix("vat_group:")
+            for evidence in invoice.validation.evidence
+            if evidence.startswith("vat_group:")
+        )
+    )
+    return PdfCanonicalExtractionOutcome(
+        invoice=invoice,
+        missing_vat_group_ids=missing_vat_group_ids,
+        attempts=attempts,
+    )
 
 
 DATE_RE = re.compile(r"(?<!\d)([0-3]?\d)\s*[./-]\s*([01]?\d)\s*[./-]\s*(20\d{2})(?!\d)")
@@ -42,6 +89,9 @@ VAT_RATE_RE = re.compile(
 )
 VAT_PERCENT_RE = re.compile(r"%\s*(0|1|8|10|18|20)(?:[,.]0+)?\b")
 AMOUNT_RE = re.compile(r"(-?\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|-?\d+(?:,\d{2}))")
+PDF_LINE_MONEY_RE = re.compile(
+    r"(?<![%\d])-?(?:\d{1,3}(?:[.\s]\d{3})+(?:,\d{1,2})?|\d+[,.]\d{1,2})(?!\d)"
+)
 
 
 TOTAL_LABELS = {
@@ -676,6 +726,164 @@ def build_pdf_canonical_invoice(
     return with_validation(invoice)
 
 
+def _recover_single_declared_pdf_vat_group(
+    lines: tuple[InvoiceLine, ...],
+    vat_split_lines: tuple[VatSplitLine, ...],
+) -> tuple[InvoiceLine, ...]:
+    if len(vat_split_lines) != 1:
+        return lines
+    declared = vat_split_lines[0]
+    try:
+        declared_rate = Decimal(declared.rate)
+    except (InvalidOperation, ValueError):
+        return lines
+
+    recovered: list[InvoiceLine] = []
+    for line in lines:
+        if line.vat_rate or not line.taxable_amount:
+            recovered.append(line)
+            continue
+        try:
+            taxable = parse_invoice_money(line.taxable_amount)
+        except ValueError:
+            recovered.append(line)
+            continue
+        tax = (taxable * declared_rate / Decimal("100")).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        recovered.append(
+            replace(
+                line,
+                vat_rate=f"{declared_rate.normalize():f}",
+                tax_amount=format_decimal(tax),
+                gross_amount=format_decimal(taxable + tax),
+            )
+        )
+    return tuple(recovered)
+
+
+def _money_values_from_pdf_text(value: str) -> tuple[Decimal, ...]:
+    parsed: list[Decimal] = []
+    for candidate in PDF_LINE_MONEY_RE.findall(value):
+        try:
+            parsed.append(parse_invoice_money(candidate))
+        except ValueError:
+            continue
+    return tuple(parsed)
+
+
+def recover_missing_pdf_group_lines(
+    *,
+    pages: tuple[PdfPageText, ...],
+    lines: tuple[InvoiceLine, ...],
+    vat_split_lines: tuple[VatSplitLine, ...],
+) -> tuple[InvoiceLine, ...]:
+    qualified = tuple(
+        line
+        for line in lines
+        if line.source_position and line.vat_rate and line.taxable_amount
+    )
+    if len(vat_split_lines) != 1:
+        return qualified
+
+    declared = vat_split_lines[0]
+    try:
+        declared_rate = Decimal(declared.rate)
+        declared_taxable = parse_invoice_money(declared.taxable_amount)
+        declared_tax = parse_invoice_money(declared.tax_amount)
+    except (InvalidOperation, ValueError):
+        return qualified
+
+    covered_taxable = Decimal("0.00")
+    for line in qualified:
+        try:
+            if Decimal(line.vat_rate) == declared_rate:
+                covered_taxable += parse_invoice_money(line.taxable_amount)
+        except (InvalidOperation, ValueError):
+            continue
+    if covered_taxable == declared_taxable:
+        return qualified
+    if covered_taxable:
+        return qualified
+
+    page_rows = tuple(
+        (
+            page.page_no,
+            tuple(
+                normalize_spaces(row)
+                for row in page.text.splitlines()
+                if normalize_spaces(row)
+            ),
+        )
+        for page in pages
+    )
+    evidence: tuple[int, int, str] | None = None
+    for page_no, rows in page_rows:
+        for index, row in enumerate(rows):
+            normalized = normalize_for_search(row)
+            values = _money_values_from_pdf_text(row)
+            next_values = (
+                _money_values_from_pdf_text(rows[index + 1])
+                if index + 1 < len(rows)
+                else ()
+            )
+            if "matrah" in normalized and declared_taxable in (*values, *next_values):
+                evidence = (
+                    page_no,
+                    index + 1,
+                    f"KDV matrahı (%{declared.rate}) - toplu kaynak satırı",
+                )
+                break
+        if evidence:
+            break
+
+    # Some supported layouts provide one declared KDV group and put the
+    # matching taxable amount directly below a meaningful service label.
+    # This fallback is considered only when no explicit matrah row exists.
+    if not evidence:
+        for page_no, rows in page_rows:
+            for index, row in enumerate(rows):
+                normalized = normalize_for_search(row)
+                next_values = (
+                    _money_values_from_pdf_text(rows[index + 1])
+                    if index + 1 < len(rows)
+                    else ()
+                )
+                if index + 1 >= len(rows) or declared_taxable not in next_values:
+                    continue
+                if any(
+                    token in normalized
+                    for token in ("kdv", "vergi", "matrah", "toplam", "odenecek", "ödenecek")
+                ):
+                    continue
+                if len(row) < 5 or any(character.isdigit() for character in row):
+                    continue
+                evidence = (page_no, index + 1, row[:120])
+                break
+            if evidence:
+                break
+
+    if not evidence:
+        return qualified
+    page_no, line_no, description = evidence
+    gross = declared_taxable + declared_tax
+    return (
+        *qualified,
+        InvoiceLine(
+            raw_text=description,
+            description=description,
+            amount_hint=format_decimal(gross),
+            source=f"pdf:page:{page_no}:text:line:{line_no}",
+            source_position=f"pdf:page:{page_no}:text:line:{line_no}",
+            vat_rate=f"{declared_rate.normalize():f}",
+            taxable_amount=format_decimal(declared_taxable),
+            tax_amount=format_decimal(declared_tax),
+            gross_amount=format_decimal(gross),
+        ),
+    )
+
+
 def _pdf_canonical_ai_payload(
     *,
     canonical_invoice: CanonicalInvoice,
@@ -1003,6 +1211,54 @@ def _apply_deterministic_canonical_arithmetic(
     return with_validation(reconciled)
 
 
+def _merge_source_grounded_partial_recovery(
+    deterministic: CanonicalInvoice,
+    candidate: CanonicalInvoice,
+) -> CanonicalInvoice | None:
+    deterministic_missing = set(
+        _pdf_canonical_extraction_outcome(deterministic).missing_vat_group_ids
+    )
+    candidate_missing = set(
+        _pdf_canonical_extraction_outcome(candidate).missing_vat_group_ids
+    )
+    recovered_group_ids = deterministic_missing - candidate_missing
+    if not recovered_group_ids:
+        return None
+
+    existing_positions = {
+        line.source_position.casefold()
+        for line in deterministic.line_items
+        if line.source_position
+    }
+    recovered_lines = tuple(
+        line
+        for line in candidate.line_items
+        if line.vat_group_id in recovered_group_ids
+        and line.source_position
+        and line.source_position.casefold() not in existing_positions
+    )
+    if not recovered_lines:
+        return None
+
+    return with_validation(
+        replace(
+            deterministic,
+            line_items=(*deterministic.line_items, *recovered_lines),
+            ai_used=True,
+            extraction_notes=tuple(
+                dict.fromkeys(
+                    (
+                        *deterministic.extraction_notes,
+                        *candidate.extraction_notes,
+                        "canonical_ai_used",
+                        "canonical_ai_partial_recovery_used",
+                    )
+                )
+            ),
+        )
+    )
+
+
 def _maybe_complete_canonical_with_ai(
     *,
     provider: object | None,
@@ -1090,6 +1346,15 @@ def _maybe_complete_canonical_with_ai(
                 ),
             )
     candidate = _apply_deterministic_canonical_arithmetic(candidate, deterministic)
+    if mode == "discovery" and deterministic.vat_summary:
+        candidate = with_validation(
+            replace(
+                candidate,
+                header=deterministic.header,
+                vat_summary=deterministic.vat_summary,
+                totals=deterministic.totals,
+            )
+        )
     if candidate.validation.status == "valid":
         return replace(
             candidate,
@@ -1106,6 +1371,13 @@ def _maybe_complete_canonical_with_ai(
                 )
             ),
         )
+    partial_recovery = (
+        _merge_source_grounded_partial_recovery(deterministic, candidate)
+        if mode == "discovery"
+        else None
+    )
+    if partial_recovery is not None:
+        return partial_recovery
     return replace(
         deterministic,
         extraction_notes=tuple(
@@ -1201,7 +1473,14 @@ def parse_pdf_invoice(
         "payable_total": payable_total,
     }
     route, route_notes = build_route(edge_summary.risk_flags, parsed_identity)
-    line_item_details = extract_invoice_lines_from_text(text)
+    line_item_details = recover_missing_pdf_group_lines(
+        pages=pages,
+        lines=_recover_single_declared_pdf_vat_group(
+            extract_invoice_lines_from_pages(pages, max_lines=200),
+            vat_split.lines,
+        ),
+        vat_split_lines=vat_split.lines,
+    )
     line_items = invoice_line_hints(line_item_details)
     issuer_title, issuer_tax_id, recipient_title, recipient_tax_id = extract_pdf_party_details_from_text(text)
     invoice_type = extract_invoice_type(text)
@@ -1234,6 +1513,15 @@ def parse_pdf_invoice(
         vat_split=vat_split,
         client_identity=client_identity,
     )
+    canonical_outcome = _pdf_canonical_extraction_outcome(
+        canonical_invoice,
+        attempts=(
+            "deterministic",
+            *(("source_grounded_ai",) if canonical_invoice.ai_used else ()),
+        ),
+    )
+    if not canonical_outcome.complete:
+        raise SupportedPdfExtractionError(canonical_outcome.missing_vat_group_ids)
     return ParsedInvoice(
         file_name=path.name,
         provider_hint=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,

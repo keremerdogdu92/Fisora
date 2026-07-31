@@ -170,6 +170,7 @@ class LearnedPostingRulePayload(BaseModel):
 
 class SimulationPayload(BaseModel):
     invoice: InvoicePayload
+    intake_category: Literal["purchase_invoice", "sales_invoice"]
     account_selection: AccountSelectionPayload = Field(default_factory=AccountSelectionPayload)
     client: ClientProfilePayload | None = None
     chart_accounts: list[ChartAccountPayload] = Field(default_factory=list)

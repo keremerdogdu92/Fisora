@@ -138,7 +138,14 @@ def run_synthetic_pilot(
     results: list[SimulatedInvoiceResult] = []
     for invoice in invoices:
         counterparty = match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
-        result = simulate_invoice(invoice, selection, profile, counterparty, classifier)
+        result = simulate_invoice(
+            invoice,
+            selection,
+            profile,
+            counterparty,
+            classifier,
+            intended_direction="purchase_invoice",
+        )
         results.append(result)
         store.save_simulation_result(
             client_id=profile.client_id,

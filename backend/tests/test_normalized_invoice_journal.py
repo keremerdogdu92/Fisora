@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
+from decimal import Decimal
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -19,6 +22,7 @@ from app.domain.pdf_invoices import _bind_ai_payload_to_deterministic_lines
 from app.domain.canonical_invoices import (
     CanonicalInvoice,
     CanonicalInvoiceLine,
+    canonical_invoice_from_ai_payload,
     ensure_stable_line_ids,
     with_validation,
     validate_line_decision_coverage,
@@ -367,6 +371,7 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
         canonical_lines = [
             {
                 "canonical_line_id": "line-a",
+                "vat_group_id": "KDV|S|20|",
                 "taxable_amount": "100.00",
                 "vat_rate": "20",
                 "tax_amount": "20.00",
@@ -374,6 +379,7 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
             },
             {
                 "canonical_line_id": "line-b",
+                "vat_group_id": "KDV|S|10|",
                 "taxable_amount": "50.00",
                 "vat_rate": "10",
                 "tax_amount": "5.00",
@@ -391,8 +397,16 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
             canonical_lines=canonical_lines,
             draft_lines=draft_lines,
             line_decisions=[
-                {"canonical_line_id": "line-a", "account_code": "770.01"},
-                {"canonical_line_id": "line-b", "account_code": "770.01"},
+                {
+                    "canonical_line_id": "line-a",
+                    "account_code": "770.01",
+                    "decision_origin": "vat_group_default",
+                },
+                {
+                    "canonical_line_id": "line-b",
+                    "account_code": "770.01",
+                    "decision_origin": "vat_group_default",
+                },
             ],
         )
 
@@ -400,6 +414,10 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
         self.assertEqual(len(plan), 6)
         self.assertEqual(coverage["missing_components"], [])
         self.assertEqual(coverage["unallocated_journal_lines"], [])
+        self.assertEqual(plan[0]["vat_group_id"], "KDV|S|20|")
+        self.assertEqual(plan[0]["component"], "net")
+        self.assertEqual(plan[0]["allocated_amount"], Decimal("100.00"))
+        self.assertEqual(plan[0]["decision_origin"], "vat_group_default")
 
     def test_phase2_allocation_rejects_account_or_vat_rate_mismatch(self) -> None:
         canonical_lines = [
@@ -436,6 +454,7 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
                 taxable_amount="100.00",
                 vat_rate="20",
                 tax_amount="20.00",
+                vat_group_id="KDV|S|20|",
             ),
             CanonicalInvoiceLine(
                 description="Nakliye",
@@ -444,6 +463,7 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
                 taxable_amount="50.00",
                 vat_rate="20",
                 tax_amount="10.00",
+                vat_group_id="KDV|S|20|",
             ),
         )
         selection = AccountSelection(
@@ -463,8 +483,16 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
             ),
             canonical_items=canonical_items,
             line_decisions=[
-                {"canonical_line_id": "line-stock", "account_code": "153.01"},
-                {"canonical_line_id": "line-freight", "account_code": "770.01"},
+                {
+                    "canonical_line_id": "line-stock",
+                    "account_code": "153.01",
+                    "decision_origin": "confirmed_exception",
+                },
+                {
+                    "canonical_line_id": "line-freight",
+                    "account_code": "770.01",
+                    "decision_origin": "vat_group_default",
+                },
             ],
             selection=selection,
             direction="purchase",
@@ -482,6 +510,11 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
                 ("320.01", "0.00", "180.00"),
             ],
         )
+        self.assertEqual(entry.lines[0].vat_group_id, "KDV|S|20|")
+        self.assertEqual(entry.lines[0].contributing_line_ids, ("line-stock",))
+        self.assertEqual(entry.lines[1].contributing_line_ids, ("line-freight",))
+        self.assertEqual(entry.lines[2].vat_group_id, "KDV|S|20|")
+        self.assertEqual(entry.lines[2].contributing_line_ids, ("line-stock", "line-freight"))
 
     def test_phase2_taxpayer_identity_is_tenant_scoped(self) -> None:
         tenant_a = tenant_uuid("office-a")
@@ -531,6 +564,34 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
             _canonical_lines({"canonical_invoice": {"line_items": ({"description": "Hizmet"},)}}),
             [{"description": "Hizmet"}],
         )
+
+    def test_legacy_canonical_payload_remains_readable_and_json_serializable(self) -> None:
+        legacy_payload = {
+            "line_items": [
+                {
+                    "description": "Bakim hizmeti",
+                    "source_position": "xml:InvoiceLine[1]",
+                    "taxable_amount": "100.00",
+                    "vat_rate": "20",
+                    "tax_amount": "20.00",
+                    "gross_amount": "120.00",
+                }
+            ],
+            "vat_summary": [{"rate": "20", "taxable_amount": "100.00", "tax_amount": "20.00"}],
+            "totals": {"goods_services_total": "100.00", "vat_total": "20.00", "payable_total": "120.00"},
+        }
+
+        canonical = canonical_invoice_from_ai_payload(legacy_payload)
+        serialized = asdict(canonical)
+
+        self.assertEqual(serialized["line_items"][0]["description"], "Bakim hizmeti")
+        self.assertEqual(serialized["line_items"][0]["tax_scheme_code"], "")
+        self.assertEqual(serialized["vat_summary"][0]["tax_category_code"], "")
+        self.assertEqual(
+            _canonical_lines({"canonical_invoice": serialized}),
+            list(serialized["line_items"]),
+        )
+        self.assertIsInstance(json.dumps(serialized), str)
 
     def test_purchase_invoice_runs_source_to_approved_export_and_reopen(self) -> None:
         repository = FakeNormalizedRepository()

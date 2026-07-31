@@ -48,6 +48,15 @@ test("journal totals keep dot-decimal amounts as decimals", () => {
   assert.doesNotMatch(reviewPanels, /replace\(\/\\\\\\.\/g, ""\)/);
 });
 
+test("journal rows expose compact vat-group and source-line evidence", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /vatGroupEvidenceText/);
+  assert.match(reviewPanels, /Kaynak: KDV/);
+  assert.match(reviewPanels, /Fatura satırları/);
+  assert.match(reviewPanels, /contributing_line_ids/);
+});
+
 test("review history includes a collapsed ai trace panel with wrapped json", () => {
   const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
   const styles = readFileSync(join(__dirname, "styles.css"), "utf8");
@@ -55,6 +64,7 @@ test("review history includes a collapsed ai trace panel with wrapped json", () 
   assert.match(reviewPanels, /AiTracePanel/);
   assert.match(reviewPanels, /AI karar izi/);
   assert.match(reviewPanels, /JsonTraceBlock/);
+  assert.match(reviewPanels, /Kabul edilen satır hesapları/);
   assert.match(styles, /\.ai-trace-panel/);
   assert.match(styles, /overflow-wrap:\s*anywhere/);
   assert.match(styles, /white-space:\s*pre-wrap/);

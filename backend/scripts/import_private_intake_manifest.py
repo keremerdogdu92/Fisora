@@ -135,6 +135,11 @@ def import_manifest(
         postgres_dsn=postgres_dsn,
     )
     profile = _client_profile(client_id=client_id, client_name=client_name, tax_id=tax_id, activity=activity)
+    store.upsert_client(
+        client_id=client_id,
+        profile=profile,
+        onboarding=_onboarding(profile, has_chart_accounts=False),
+    )
     imported_documents = []
     skipped_rows = []
     chart_account_count = 0

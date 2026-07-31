@@ -965,7 +965,7 @@ export-list eligibility. If later approved, commit as
 - Produces: exactly 35 purchase and 15 sales source records, 44 populated drafts,
   six explained no-posting suggestions, and accountant reference outcomes.
 
-- [ ] **Step 1: Add a manifest preflight command/test**
+- [x] **Step 1: Add a manifest preflight command/test**
 
 Preflight must fail before mutation unless:
 
@@ -981,7 +981,7 @@ xml_party_direction_conflict_count = 0
 PDF party identity warnings may remain visible when intake direction is explicit;
 XML exact party conflicts must be corrected before import.
 
-- [ ] **Step 2: Prepare corrected ignored manifest**
+- [x] **Step 2: Prepare corrected ignored manifest**
 
 Add `intake_category` to every invoice row. Keep real names, tax IDs, paths, and
 source bytes outside Git.

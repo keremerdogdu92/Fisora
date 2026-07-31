@@ -851,7 +851,20 @@ def _validate_semantic_attempt_graph(attempts: list[dict[str, Any]]) -> None:
         if item.get("accepted") is True and not str(item.get("superseded_by_attempt_id") or "")
     ]
     if len(accepted_unsuperseded) > 1:
-        raise ValueError("multiple accepted unsuperseded semantic attempts")
+        accepted_line_ids: set[str] = set()
+        for item in accepted_unsuperseded:
+            line_ids = {
+                str(line_id)
+                for line_id in item.get("canonical_line_ids") or ()
+                if str(line_id)
+            }
+            if (
+                str(item.get("stage") or "") != "vat_group_account"
+                or not line_ids
+                or accepted_line_ids.intersection(line_ids)
+            ):
+                raise ValueError("multiple accepted unsuperseded semantic attempts")
+            accepted_line_ids.update(line_ids)
 
 
 def merge_semantic_attempts(*histories: Iterable[Mapping[str, Any]] | None) -> list[dict[str, Any]]:

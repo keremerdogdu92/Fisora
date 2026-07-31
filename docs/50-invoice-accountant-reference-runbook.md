@@ -8,10 +8,13 @@ This runbook defines local preflight and ordinary authenticated intake. It does 
 python backend/scripts/prepare_reference_corpus_admission.py `
   --manifest private_samples/reference_corpus_manifest.json `
   --source-root private_samples/real_pilot `
-  --output private_samples/reference_corpus_preflight.json
+  --output private_samples/reference_corpus_preflight.json `
+  --corrected-manifest-output private_samples/reference_corpus_manifest.corrected.json
 ```
 
-The manifest must contain exactly 35 purchase and 15 sales invoices, unique SHA-256 values, valid `YYYY-MM` periods, supported invoice document types, and paths contained by the source root. Preflight writes only a safe count/hash summary below the ignored `private_samples` directory.
+The manifest must contain exactly 35 purchase and 15 sales invoices, unique SHA-256 values, valid `YYYY-MM` periods, supported invoice document types, and paths contained by the source root. The corrected ignored manifest adds explicit `purchase_invoice` / `sales_invoice` intake categories and the inferred client identity needed to verify XML supplier/customer direction. Preflight must report zero missing directions, duplicate hashes, and XML party-direction conflicts before any import.
+
+The preflight and corrected manifest remain under ignored `private_samples`; they may contain private paths or identity evidence and must never be committed.
 
 ## Ordinary intake and review
 

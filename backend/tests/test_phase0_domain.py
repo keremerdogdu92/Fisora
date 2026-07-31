@@ -10423,6 +10423,35 @@ TOPLAM: 1200.00"""
                 }
             )
 
+    def test_semantic_attempt_history_allows_disjoint_vat_group_authorities(self) -> None:
+        first = serialize_semantic_decision_attempt(
+            attempt_id="vat-group-1",
+            stage="vat_group_account",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            candidate_account_codes=("153.01",),
+            validated_response={"suggested_account_code": "153.01"},
+            accepted=True,
+        )
+        second = serialize_semantic_decision_attempt(
+            attempt_id="vat-group-2",
+            stage="vat_group_account",
+            canonical_line_ids=("line-2",),
+            prompt_version="semantic-v1",
+            provider="fake_llm",
+            model="fake-model",
+            candidate_account_codes=("770.01",),
+            validated_response={"suggested_account_code": "770.01"},
+            accepted=True,
+        )
+
+        self.assertEqual(
+            [item["attempt_id"] for item in merge_semantic_attempts((first, second))],
+            ["vat-group-1", "vat-group-2"],
+        )
+
     def test_research_cannot_create_second_authority_after_initial_decision_is_accepted(self) -> None:
         from app.workflows.document_processing import _rebuild_result_with_research
 

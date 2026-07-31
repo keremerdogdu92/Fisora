@@ -2889,6 +2889,74 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertEqual(workspace["documents"][0]["result"]["statement_lines"][0]["transaction_type"], "tax_payment")
         self.assertEqual(workspace["operation_events"][-1]["event_type"], "private_intake_imported")
 
+    def test_private_intake_creates_client_before_replacing_postgres_chart_accounts(self) -> None:
+        class ForeignKeyAwareStore:
+            def __init__(self) -> None:
+                self.client_exists = False
+                self.calls: list[str] = []
+
+            def upsert_client(self, **_kwargs: object) -> None:
+                self.calls.append("upsert_client")
+                self.client_exists = True
+
+            def replace_chart_accounts(self, **_kwargs: object) -> None:
+                self.calls.append("replace_chart_accounts")
+                if not self.client_exists:
+                    raise AssertionError("client must exist before chart accounts")
+
+            def record_operation_event(self, **_kwargs: object) -> None:
+                self.calls.append("record_operation_event")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            source_dir = base / "pilot"
+            source_dir.mkdir()
+            (source_dir / "chart.csv").write_text(
+                "account_code,account_name,is_detail_account\n"
+                "102.01,Banka,true\n",
+                encoding="utf-8",
+            )
+            manifest_path = base / "manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "source_dir": str(source_dir),
+                        "files": [
+                            {
+                                "relative_path": "chart.csv",
+                                "file_name": "chart.csv",
+                                "extension": ".csv",
+                                "document_kind": "chart_accounts",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = ForeignKeyAwareStore()
+
+            with patch(
+                "backend.scripts.import_private_intake_manifest.build_workflow_store",
+                return_value=store,
+            ):
+                import_manifest(
+                    manifest_path=manifest_path,
+                    source_dir=None,
+                    document_storage_path=base / "documents",
+                    output_path=base / "summary.json",
+                    client_id="client-1",
+                    client_name="Pilot",
+                    tax_id="1111111111",
+                    activity="genel isletme",
+                    store_backend="postgres",
+                    postgres_dsn="postgresql://test",
+                )
+
+        self.assertLess(
+            store.calls.index("upsert_client"),
+            store.calls.index("replace_chart_accounts"),
+        )
+
     def test_store_factory_selects_json_and_requires_postgres_dsn(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = build_workflow_store(store_backend="json", json_path=Path(temp_dir) / "store.json")

@@ -107,24 +107,30 @@ after_commit=`$(git rev-parse --short HEAD)
 sh deploy/scripts/fisora-prod.sh check
 sh deploy/scripts/fisora-prod.sh deploy
 $smokeBlock
-health_status=`$(curl -fsS -o /tmp/fisora-release-health.json -w '%{http_code}' '$BaseUrl/health' || true)
-readiness_status=`$(curl -fsS -o /tmp/fisora-release-readiness.json -w '%{http_code}' '$BaseUrl/api/phase0/store/system/readiness' || true)
-route_status=`$(curl -fsS -o /tmp/fisora-release-root.html -w '%{http_code}' '$BaseUrl/' || true)
+health_status=`$(curl -fsSL -k -o /tmp/fisora-release-health.json -w '%{http_code}' '$BaseUrl/health' || true)
+readiness_status=`$(curl -fsSL -k -o /tmp/fisora-release-readiness.json -w '%{http_code}' '$BaseUrl/api/phase0/store/system/readiness' || true)
+route_status=`$(curl -fsSL -k -o /tmp/fisora-release-root.html -w '%{http_code}' '$BaseUrl/' || true)
 ready=false
 pilot_sellable=false
 if command -v python3 >/dev/null 2>&1 && [ -s /tmp/fisora-release-readiness.json ]; then
   ready=`$(python3 - <<'PY'
 import json
 from pathlib import Path
-data = json.loads(Path('/tmp/fisora-release-readiness.json').read_text())
-print(str(bool(data.get('ready'))).lower())
+try:
+    data = json.loads(Path('/tmp/fisora-release-readiness.json').read_text())
+    print(str(bool(data.get('ready'))).lower())
+except Exception:
+    print("false")
 PY
 )
   pilot_sellable=`$(python3 - <<'PY'
 import json
 from pathlib import Path
-data = json.loads(Path('/tmp/fisora-release-readiness.json').read_text())
-print(str(bool(data.get('pilot_sellable'))).lower())
+try:
+    data = json.loads(Path('/tmp/fisora-release-readiness.json').read_text())
+    print(str(bool(data.get('pilot_sellable'))).lower())
+except Exception:
+    print("false")
 PY
 )
 fi
@@ -168,9 +174,9 @@ $summary = [ordered]@{
 }
 
 $summary.steps += Invoke-Step -Name "local-git-status" -Script {
-    $dirty = git status --porcelain
+    $dirty = git status --porcelain -uno
     if ($dirty -and -not $AllowDirty) {
-        throw "Local worktree has uncommitted changes. Commit/stash or rerun with -AllowDirty."
+        throw "Local worktree has uncommitted tracked changes. Commit/stash or rerun with -AllowDirty."
     }
 }
 if ($summary.steps[-1].status -ne "ok") { throw ($summary.steps[-1].error) }

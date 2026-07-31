@@ -1,5 +1,14 @@
 # Current Handoff
 
+### 2026-07-31 VAT-grouped invoice draft repair ve corpus admission gelistirmeleri (canli)
+
+- `main` runtime release commit'i `4a748e2` canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`4a748e2`).
+- Docker servisleri (`backend`, `frontend`, `postgres`, `redis`, `qnb-scheduler`, `worker`) başarıyla başlatıldı ve `healthy` durumda.
+- Canlı doğrulama: HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`).
+- Yayınlanan değişiklikler: KDV gruplamalı alış faturaları taslak fiş hattında tutar dağıtımı düzeltildi, referans corpus kabul betikleri ve testleri güncellendi.
+- Preflight ve release öncesi backend `721` test, frontend `169` test, Next.js production build ve `git diff --check` başarıyla tamamlandı.
+
 ### 2026-07-30 accountant review UI repair and live quality audit (live)
 
 - `main` runtime release commit `1dec1e3` is live on

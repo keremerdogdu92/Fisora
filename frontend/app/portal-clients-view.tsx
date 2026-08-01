@@ -266,17 +266,8 @@ export function ClientManagementView({
                   value={portalUserIdDraft}
                 />
                 <button onClick={onCreateInvite} type="button">Davet linki oluştur</button>
-                <input
-                  aria-label="Portal şifresi"
-                  onChange={(event) => setPortalPassword(event.target.value)}
-                  placeholder="Geçici şifre"
-                  type="password"
-                  value={portalPassword}
-                />
-                <button className="primary" onClick={onSetPassword} type="button">Şifre kur</button>
-                <button className="primary" onClick={onUpdatePortalAccess} type="button">Üyelik güncelle</button>
               </div>
-              {!selectedClient?.portalUserId ? <small className="blocked-reason">Önce portal üyeliği oluşturun.</small> : null}
+              <small>Mükellef davet linkinden kendi şifresini belirler.</small>
               {clientPortalOpenStatus ? <p className="decision-status">{clientPortalOpenStatus}</p> : null}
               {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
               {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
@@ -486,8 +477,7 @@ function NewClientStepper({
 }) {
   const identityReady = Boolean(draft.title.trim() && (draft.vkn.trim() || draft.tckn.trim() || draft.taxId.trim()) && draft.activityDescription.trim());
   const chartReady = draft.chartAccounts.length > 0;
-  const accessReady = Boolean(draft.portalUserId.trim() && portalPassword.trim());
-  const canComplete = identityReady && chartReady && accessReady;
+  const canComplete = identityReady && chartReady;
   const [taxCertificatePreviewUrl, setTaxCertificatePreviewUrl] = useState("");
   const taxCertificateIsImage = Boolean(taxCertificateFile?.type?.startsWith("image/"));
   const [taxCertificateSlow, setTaxCertificateSlow] = useState(false);
@@ -520,13 +510,13 @@ function NewClientStepper({
           <span>Yeni mükellef</span>
           <strong>İlerlemeli kayıt</strong>
         </div>
-        <small>{canComplete ? "Tamamlanmaya hazır" : "Vergi levhası, hesap planı ve portal erişimi gerekli"}</small>
+        <small>{canComplete ? "Tamamlanmaya hazır" : "Vergi levhası ve hesap planı gerekli"}</small>
       </div>
 
       <div className="onboarding-steps" aria-label="Yeni mükellef adımları">
         <span className={identityReady ? "done" : "active"}>1 Vergi levhası</span>
         <span className={chartReady ? "done" : identityReady ? "active" : ""}>2 Hesap planı</span>
-        <span className={accessReady ? "done" : chartReady ? "active" : ""}>3 Portal erişimi</span>
+        <span className={chartReady ? "active" : ""}>3 Portal erişimi (opsiyonel)</span>
       </div>
 
       <section className="client-onboarding-steps" aria-label="Mükellef onboarding adımları">
@@ -627,29 +617,12 @@ function NewClientStepper({
         {!identityReady ? <small className="blocked-reason">Önce vergi levhası yükleyin.</small> : null}
         </article>
 
-        <article className={`client-step ${accessReady ? "onboarding-step done" : chartReady ? "onboarding-step active" : "onboarding-step locked"}`}>
+        <article className={`client-step ${chartReady ? "onboarding-step active" : "onboarding-step locked"}`}>
         <div>
           <span>3. Portal erişimi</span>
-          <strong>Mükellef kullanıcı adı ve geçici şifre</strong>
+          <strong>İsteğe bağlı davet</strong>
         </div>
-        <div className="onboarding-fields">
-          <input
-            aria-label="Mükellef e-posta / giriş kullanıcı adı"
-            disabled={!chartReady}
-            onChange={(event) => setDraft({ ...draft, portalUserId: event.target.value })}
-            placeholder="E-posta / kullanıcı adı"
-            value={draft.portalUserId}
-          />
-          <input
-            aria-label="Geçici şifre"
-            disabled={!chartReady}
-            onChange={(event) => setPortalPassword(event.target.value)}
-            placeholder="Geçici şifre"
-            type="password"
-            value={portalPassword}
-          />
-        </div>
-        {!chartReady ? <small className="blocked-reason">Önce hesap planı yükleyin.</small> : null}
+        <small>{chartReady ? "Mükellefi oluşturduktan sonra davet linki gönderilebilir; şifreyi mükellef belirler." : "Önce hesap planı yükleyin."}</small>
         </article>
       </section>
 

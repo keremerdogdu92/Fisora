@@ -85,7 +85,7 @@ function buildClientOnboardingPackagePayload({
 } = {}) {
   const normalizedTitle = String(title || "").trim();
   const normalizedClientId = String(clientId || slugifyClientId(normalizedTitle) || "yeni-mukellef").trim();
-  const normalizedPortalUserId = String(portalUserId || `${normalizedClientId}-user`).trim();
+  const normalizedPortalUserId = String(portalUserId || "").trim();
   const normalizedChartAccounts = Array.isArray(chartAccounts) ? chartAccounts : [];
   const normalizedTckn = String(tckn || "").trim();
   const normalizedVkn = String(vkn || "").trim();
@@ -111,14 +111,14 @@ function buildClientOnboardingPackagePayload({
       has_chart_accounts: normalizedChartAccounts.length > 0,
     },
     chart_accounts: normalizedChartAccounts,
-    portal_users: [
-      {
-        user_id: normalizedPortalUserId,
-        display_name: String(portalDisplayName || normalizedTitle || normalizedPortalUserId).trim(),
-        role: "client_user",
-        allowed_client_ids: [normalizedClientId],
-      },
-    ],
+    portal_users: normalizedPortalUserId
+      ? [{
+          user_id: normalizedPortalUserId,
+          display_name: String(portalDisplayName || normalizedTitle || normalizedPortalUserId).trim(),
+          role: "client_user",
+          allowed_client_ids: [normalizedClientId],
+        }]
+      : [],
   };
 }
 

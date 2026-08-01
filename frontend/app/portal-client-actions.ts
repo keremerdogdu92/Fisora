@@ -184,10 +184,6 @@ export async function createNewClientAction({
     setNewClientStatus("Devam etmek için hesap planı yükleyin.");
     return;
   }
-  if (!newClientDraft.portalUserId.trim() || !portalPassword.trim()) {
-    setNewClientStatus("Portal kullanıcı adı ve geçici şifre gerekli.");
-    return;
-  }
   if (newClientDraft.naceCode.trim() && (newClientNaceResearchPending || !newClientNaceResearchProfile) && !newClientNaceResearchWarningAccepted) {
     setNewClientNaceResearchWarningAccepted(true);
     setNewClientStatus("NACE araştırması henüz tamamlanmadı. Kontrol edip devam etmek istiyorsanız Mükellefi oluştur düğmesine tekrar basın.");
@@ -234,13 +230,6 @@ export async function createNewClientAction({
         certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
       }
     }
-    await setBackendPortalPassword({
-      apiBaseUrl,
-      userId: payload.portal_users[0]?.user_id || newClientDraft.portalUserId,
-      password: portalPassword,
-      sessionToken: session?.sessionToken,
-      userHeader: actingUserId,
-    });
     setNewClientDraft(emptyNewClientDraft());
     setNewClientChartAccountsFile(null);
     setNewClientNaceResearchProfile(null);
@@ -457,19 +446,21 @@ export async function uploadChartAccountsAction({
 
 export async function createInviteForSelectedClientAction({
   loginUserId,
+  portalUserIdDraft = "",
   refreshBackendPilotData,
   selectedClient,
   session,
   setInviteStatus,
 }: {
   loginUserId: string;
+  portalUserIdDraft?: string;
   refreshBackendPilotData: () => Promise<boolean>;
   selectedClient?: PilotClient;
   session: LocalSession | null;
   setInviteStatus: (status: string) => void;
 }) {
   if (!selectedClient) return;
-  const userId = selectedClient.portalUserId || `${selectedClient.clientId}-user`;
+  const userId = portalUserIdDraft.trim() || selectedClient.portalUserId || `${selectedClient.clientId}-user`;
   const inviteEmail = userId.includes("@") ? userId : "";
   setInviteStatus(`${userId} için davet linki hazırlanıyor...`);
   try {

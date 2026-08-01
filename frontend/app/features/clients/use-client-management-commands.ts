@@ -150,6 +150,7 @@ export function useClientManagementCommands({
   const createInviteForSelectedClient = () => {
     void createInviteForSelectedClientAction({
       loginUserId,
+      portalUserIdDraft,
       refreshBackendPilotData,
       selectedClient,
       session,

@@ -180,16 +180,19 @@ test("buildClientOnboardingPackagePayload builds a backend onboarding package", 
         has_chart_accounts: false,
       },
       chart_accounts: [],
-      portal_users: [
-        {
-          user_id: "yeni-isitme-merkezi-user",
-          display_name: "Yeni İşitme Kullanıcısı",
-          role: "client_user",
-          allowed_client_ids: ["yeni-isitme-merkezi"],
-        },
-      ],
+      portal_users: [],
     },
   );
+});
+
+test("buildClientOnboardingPackagePayload does not create a portal user without a portal identity", () => {
+  const payload = buildClientOnboardingPackagePayload({
+    clientId: "client-without-portal",
+    title: "Portal Olmadan Mükellef",
+    vkn: "1234567890",
+  });
+
+  assert.deepEqual(payload.portal_users, []);
 });
 
 test("buildClientOnboardingPackagePayload preserves extracted workplace addresses", () => {

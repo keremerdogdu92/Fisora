@@ -76,6 +76,7 @@ def review_rule_interpretation_request(
             "selected_revenue_account": str(result.get("selected_revenue_account") or ""),
             "selected_supplier_account": str(result.get("selected_supplier_account") or ""),
             "selected_customer_account": str(result.get("selected_customer_account") or ""),
+            "utility_context": dict(event.get("utility_context") or {}),
         },
         "output_schema": REVIEW_RULE_INTERPRETATION_SCHEMA,
     }

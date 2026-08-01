@@ -19,6 +19,8 @@ from app.domain.canonical_invoices import (
     with_validation,
 )
 from app.domain.pdf_invoices import ParsedInvoice
+from app.domain.provider_directory import resolve_provider_profile
+from app.domain.utility_invoice_markers import detect_utility_invoice_markers
 
 
 TAX_ID_RE = re.compile(r"^\d{10,11}$")
@@ -477,8 +479,18 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
     xml_text = ET.tostring(root, encoding="unicode")
     supplier = _party_details(root, "AccountingSupplierParty")
     customer = _party_details(root, "AccountingCustomerParty")
+    provider_match = resolve_provider_profile(
+        supplier_tax_id=supplier.tax_id,
+        supplier_title=supplier.title,
+        source="xml",
+    )
     invoice_type_code = _first_text(root, ("InvoiceTypeCode",))
     canonical_invoice = build_xml_canonical_invoice(root)
+    utility_exception_markers = detect_utility_invoice_markers(
+        service_profile=provider_match.service_profile,
+        source="xml",
+        line_descriptions=tuple(line.description for line in canonical_invoice.line_items),
+    )
     return ParsedInvoice(
         file_name=path.name,
         provider_hint=_provider_hint(root),
@@ -508,4 +520,10 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         invoice_type_code=invoice_type_code,
         is_return_invoice=invoice_type_code.upper() in {"IADE", "\u0130ADE", "RETURN"},
         canonical_invoice=canonical_invoice,
+        provider_id=provider_match.provider_id,
+        service_profile=provider_match.service_profile,
+        provider_match_kind=provider_match.match_kind,
+        provider_match_reason=provider_match.reason_code,
+        provider_directory_version=provider_match.directory_version,
+        utility_exception_markers=utility_exception_markers,
     )

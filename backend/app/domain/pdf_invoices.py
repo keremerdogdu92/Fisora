@@ -23,6 +23,7 @@ from app.domain.canonical_invoices import (
     validate_line_decision_coverage,
     with_validation,
 )
+from app.domain.provider_directory import resolve_provider_profile
 from app.domain.invoice_edge_cases import summarize_invoice_edge_cases
 from app.domain.invoice_lines import (
     InvoiceLine,
@@ -173,6 +174,12 @@ class ParsedInvoice:
     vat_split_lines: tuple[VatSplitLine, ...] = ()
     vat_split_evidence: tuple[str, ...] = ()
     canonical_invoice: CanonicalInvoice | None = None
+    provider_id: str = ""
+    service_profile: str = ""
+    provider_match_kind: str = ""
+    provider_match_reason: str = ""
+    provider_directory_version: int = 0
+    utility_exception_markers: tuple[str, ...] = ()
 
 
 def extract_pdf_pages(path: Path) -> tuple[tuple[PdfPageText, ...], tuple[str, ...]]:
@@ -1522,9 +1529,15 @@ def parse_pdf_invoice(
     )
     if not canonical_outcome.complete:
         raise SupportedPdfExtractionError(canonical_outcome.missing_vat_group_ids)
+    provider_title = issuer_title or extract_seller_hint(text) or edge_summary.provider_hint
+    provider_match = resolve_provider_profile(
+        supplier_tax_id=issuer_tax_id,
+        supplier_title=provider_title,
+        source="pdf",
+    )
     return ParsedInvoice(
         file_name=path.name,
-        provider_hint=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,
+        provider_hint=provider_title,
         page_count=page_count,
         text_extractable=len(stripped_text) >= 100,
         extracted_char_count=len(stripped_text),
@@ -1545,7 +1558,7 @@ def parse_pdf_invoice(
         parse_notes=tuple(dict.fromkeys((*extraction_notes, *route_notes, *payable_notes))),
         line_items=line_items,
         line_item_details=line_item_details,
-        issuer_title=issuer_title or extract_seller_hint(text) or edge_summary.provider_hint,
+        issuer_title=provider_title,
         issuer_tax_id=issuer_tax_id,
         recipient_title=recipient_title,
         recipient_tax_id=recipient_tax_id,
@@ -1555,6 +1568,11 @@ def parse_pdf_invoice(
         vat_split_lines=vat_split.lines,
         vat_split_evidence=vat_split.evidence,
         canonical_invoice=canonical_invoice,
+        provider_id=provider_match.provider_id,
+        service_profile=provider_match.service_profile,
+        provider_match_kind=provider_match.match_kind,
+        provider_match_reason=provider_match.reason_code,
+        provider_directory_version=provider_match.directory_version,
     )
 
 

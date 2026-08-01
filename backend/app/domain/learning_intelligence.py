@@ -155,6 +155,16 @@ def enrich_learning_event(
     counterparty_tax_id = _digits_only(result.get("counterparty_tax_id") or "")
     counterparty_title = str(result.get("counterparty_title") or result.get("provider_hint") or "").strip()
     counterparty_identity_key = str(result.get("counterparty_identity_key") or "").strip()
+    stored_document_type = str((document or {}).get("document_type") or "").strip().lower()
+    utility_context = {
+        "provider_id": str(result.get("provider_id") or "").strip(),
+        "provider_title": str(result.get("provider_hint") or "").strip(),
+        "provider_match_kind": str(result.get("provider_match_kind") or "").strip(),
+        "service_profile": str(result.get("service_profile") or "").strip(),
+        "source": "xml" if stored_document_type == "einvoice_xml" else "pdf",
+        "marker_patterns": [str(item) for item in result.get("utility_exception_markers") or [] if str(item)],
+        "direction": str(result.get("accounting_direction") or "").strip(),
+    }
     enriched.update(
         {
             "client_id": client_id,
@@ -175,6 +185,7 @@ def enrich_learning_event(
             "counterparty_tax_id": counterparty_tax_id,
             "counterparty_title": counterparty_title,
             "counterparty_identity_key": counterparty_identity_key,
+            "utility_context": utility_context,
             "posting_signature": _posting_signature(
                 nace_code=nace_code,
                 category=str(event.get("category") or decision.get("category") or result.get("product_category") or ""),

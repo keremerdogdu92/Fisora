@@ -259,6 +259,7 @@ def _serializable_simulation(
         direction=direction if direction in {"purchase", "sales"} else "purchase",
         invoice_mode=invoice_mode,
         counterparty_tax_id=counterparty_tax_id,
+        service_profile=str(getattr(invoice, "service_profile", "") or ""),
         canonical_lines=canonical_lines,
         account_selection=selection,
     )
@@ -589,6 +590,20 @@ def _accountant_summary(result: dict[str, Any]) -> str:
         return "AI hesap karari tamamlanamadi; duzeltme gerekli ve fis taslagi olusturulmadi."
     if result.get("draft_lines"):
         if result.get("is_balanced"):
+            markers = set(result.get("utility_exception_markers") or [])
+            if "utility_installment_line" in markers:
+                return "Taksitli hizmet/cihaz satırı görüldü; fiş taslağı hazır, bu istisnayı bir kez kontrol et."
+            if "utility_device_line" in markers:
+                return "Açık cihaz satırı görüldü; fiş taslağı hazır, bu istisnayı bir kez kontrol et."
+            service_label = {
+                "gsm_communication": "GSM iletişim",
+                "fixed_internet": "Sabit internet",
+                "electricity": "Elektrik",
+                "water": "Su",
+                "natural_gas": "Doğalgaz",
+            }.get(str(result.get("service_profile") or ""))
+            if service_label:
+                return f"{service_label} gideri için fiş taslağı hazır. Müşavir onayından sonra çıktı listesine alınabilir."
             return "Fis taslagi hazir. Musavir kontrolunden sonra cikti listesine alinabilir."
         return "Fis taslagi var ancak borc/alacak dengesi musavir kontrolu istiyor."
     if "ai_provider_error" in set(result.get("ai_risk_flags") or []):
@@ -617,6 +632,11 @@ def _technical_details(result: dict[str, Any]) -> dict[str, object]:
         "direction_uncertainty": bool(result.get("direction_uncertainty")),
         "static_fallback_account": str(result.get("static_fallback_account") or ""),
         "static_fallback_suppressed": bool(result.get("static_fallback_suppressed")),
+        "provider_id": str(result.get("provider_id") or ""),
+        "service_profile": str(result.get("service_profile") or ""),
+        "provider_match_kind": str(result.get("provider_match_kind") or ""),
+        "provider_directory_version": int(result.get("provider_directory_version") or 0),
+        "utility_exception_markers": list(result.get("utility_exception_markers") or []),
     }
 
 

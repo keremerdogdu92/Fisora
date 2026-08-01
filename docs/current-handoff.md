@@ -1,5 +1,13 @@
 # Current Handoff
 
+### 2026-08-01 accountant-first client onboarding frontend değişiklikleri yayını (canlı)
+
+- `main` runtime release commit'i `4e83de8` (feat commit `8012955` dahil) canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`4e83de8`).
+- Canlı doğrulama: HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`).
+- Yayınlanan değişiklikler: Mükellef oluşturma ve onboarding akışında geçici şifre zorunluluğu kaldırıldı (`portal-clients-view.tsx`, `use-client-management-commands.ts`, `portal-client-actions.ts`, `upload-api.js`, `upload-api.test.cjs`), mükellef davet linki ve mükellefin kendi şifresini belirleme akışı birincil hale getirildi.
+- Sürüm öncesi backend `737` test, frontend `170` test, Next.js production build ve `git diff --check` başarıyla tamamlandı.
+
 ### 2026-08-01 accountant-first client onboarding dokümantasyonu yayını (canlı)
 
 - `main` runtime release commit'i `1c51239` canlıya alındı.

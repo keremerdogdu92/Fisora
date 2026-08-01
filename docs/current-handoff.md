@@ -1,5 +1,13 @@
 # Current Handoff
 
+### 2026-08-01 accountant-first client onboarding dokümantasyonu yayını (canlı)
+
+- `main` runtime release commit'i `1c51239` canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`1c51239`).
+- Canlı doğrulama: HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`).
+- Yayınlanan değişiklikler: Müşavir odaklı mükellef onboarding tasarım şartnamesi (`2026-08-01-accountant-first-client-onboarding-design.md`) ve uygulama planı (`2026-08-01-accountant-first-client-onboarding.md`) repoya eklendi ve canlıya dağıtıldı.
+- Preflight ve release öncesi backend `737` test, frontend `169` test, Next.js production build ve `git diff --check` başarıyla tamamlandı.
+
 ### 2026-08-01 utility provider fast lane ve ogrenme kurallari entegrasyonu (canli)
 
 - `main` runtime release commit'i `3816d93` canlıya alındı.

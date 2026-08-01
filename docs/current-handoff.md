@@ -1,5 +1,14 @@
 # Current Handoff
 
+### 2026-08-01 reference corpus pilot script ve design QA raporu yayını (canlı)
+
+- `main` runtime release commit'i `8009ffc` canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`8009ffc`).
+- Docker servisleri ve web sunucusu başarıyla aktif durumda.
+- Canlı doğrulama: HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`).
+- Yayınlanan değişiklikler: İzole referans korpus pilot betiği (`run_reference_corpus_pilot.py`) ve Müşavir Çalışma Alanı Design QA inceleme raporu (`design-qa.md`) repoya eklendi ve canlıya dağıtıldı.
+- Sürüm öncesi backend `721` test, frontend `169` test, Next.js production build ve `git diff --check` başarıyla tamamlandı.
+
 ### 2026-07-31 VAT-grouped invoice draft repair ve corpus admission gelistirmeleri (canli)
 
 - `main` runtime release commit'i `4a748e2` canlıya alındı.

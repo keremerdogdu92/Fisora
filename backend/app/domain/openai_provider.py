@@ -82,6 +82,8 @@ def classification_instructions_for(request: AiClassificationRequest) -> str:
     return (
         "Her canonical fatura satiri icin mukellefin gercek hesap planindaki en uygun gercek hesabi sec. "
         "Satir kaniti, belge yonu, faaliyet/NACE, dogrulanmis kurallar ve verilen adaylari birlikte degerlendir. "
+        "invoice_counterparty.service_profile doluysa, bu dogrulanmis saglayici hizmet profilidir; uygun hesap "
+        "adayini secmende guclu kanittir ama hesap kodu veya KDV kuralini kendi basina yaratmaz. "
         "Verilmeyen hesap kodu uretme; her canonical_line_id icin tam karar ve kisa gerekce don. "
         "Canonical tutar veya KDV degerlerini degistirme; gerekirse research iste."
     )

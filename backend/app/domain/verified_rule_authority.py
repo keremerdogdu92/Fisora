@@ -8,7 +8,7 @@ import unicodedata
 from app.domain.invoice_ai_gate import VerifiedRuleAuthorityV1
 
 
-RuleScope = Literal["client_counterparty", "client_phrase", "office_semantic"]
+RuleScope = Literal["client_counterparty", "client_service_profile", "client_phrase", "office_semantic"]
 RuleDirection = Literal["purchase", "sales"]
 InvoiceMode = Literal["ordinary", "return"]
 LineMatchMode = Literal["all_lines", "normalized_terms_all"]
@@ -29,6 +29,7 @@ class VerifiedRuleRecordV1:
     direction: RuleDirection
     invoice_mode: InvoiceMode
     counterparty_tax_id: str
+    service_profile: str
     line_match_mode: LineMatchMode
     normalized_terms: tuple[str, ...]
     semantic_role: str
@@ -49,6 +50,7 @@ class VerifiedRuleRecordV1:
             direction=str(value.get("direction") or ""),  # type: ignore[arg-type]
             invoice_mode=str(value.get("invoice_mode") or ""),  # type: ignore[arg-type]
             counterparty_tax_id=_digits(value.get("counterparty_tax_id")),
+            service_profile=str(value.get("service_profile") or "").strip(),
             line_match_mode=str(value.get("line_match_mode") or "all_lines"),  # type: ignore[arg-type]
             normalized_terms=tuple(_normalize_text(term) for term in value.get("normalized_terms") or () if _normalize_text(term)),
             semantic_role=str(value.get("semantic_role") or ""),
@@ -84,6 +86,7 @@ def compile_verified_rule_authorities(
     direction: RuleDirection,
     invoice_mode: InvoiceMode,
     counterparty_tax_id: str,
+    service_profile: str = "",
     canonical_lines: Iterable[Any],
     account_selection: Any,
 ) -> CompiledVerifiedRuleAuthorities:
@@ -98,7 +101,7 @@ def compile_verified_rule_authorities(
     candidates: list[tuple[int, VerifiedRuleRecordV1, tuple[str, ...]]] = []
     for raw_rule in rules:
         rule = raw_rule if isinstance(raw_rule, VerifiedRuleRecordV1) else VerifiedRuleRecordV1.from_mapping(raw_rule)
-        if not _rule_matches(rule, client_id, direction, invoice_mode, normalized_vkn, lines):
+        if not _rule_matches(rule, client_id, direction, invoice_mode, normalized_vkn, service_profile, lines):
             continue
         if not _chart_account_is_valid(rule, direction, account_selection):
             continue
@@ -149,6 +152,7 @@ def _rule_matches(
     direction: str,
     invoice_mode: str,
     counterparty_tax_id: str,
+    service_profile: str,
     lines: tuple[dict[str, Any], ...],
 ) -> bool:
     if rule.status != "active" or rule.version < 1 or not rule.rule_id or not rule.rule_key:
@@ -159,7 +163,11 @@ def _rule_matches(
         return False
     if rule.scope == "client_counterparty" and (not rule.counterparty_tax_id or rule.counterparty_tax_id != counterparty_tax_id):
         return False
-    if rule.scope not in {"client_counterparty", "client_phrase", "office_semantic"}:
+    if rule.scope == "client_service_profile" and (
+        not rule.service_profile or rule.service_profile != str(service_profile or "").strip()
+    ):
+        return False
+    if rule.scope not in {"client_counterparty", "client_service_profile", "client_phrase", "office_semantic"}:
         return False
     if rule.line_match_mode == "all_lines":
         return True
@@ -227,7 +235,7 @@ def _line_text(line: Mapping[str, Any]) -> str:
 
 
 def _priority(scope: str) -> int:
-    return {"client_counterparty": 300, "client_phrase": 200, "office_semantic": 100}.get(scope, 0)
+    return {"client_counterparty": 300, "client_service_profile": 200, "client_phrase": 100, "office_semantic": 50}.get(scope, 0)
 
 
 def _digits(value: Any) -> str:

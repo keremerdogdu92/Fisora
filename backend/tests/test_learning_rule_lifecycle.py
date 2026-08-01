@@ -156,6 +156,64 @@ class LearningRuleLifecycleTests(unittest.TestCase):
         self.assertIsInstance(authorities[0], VerifiedRuleAuthorityV1)
         self.assertEqual(authorities.conflicts, ())
 
+    def test_approved_service_profile_rule_compiles_only_for_that_profile(self) -> None:
+        profile_rule = _record(
+            scope="client_service_profile",
+            counterparty_tax_id="",
+            service_profile="gsm_communication",
+        )
+        common = {
+            "client_id": "firma-1",
+            "direction": "purchase",
+            "invoice_mode": "ordinary",
+            "counterparty_tax_id": "9250353261",
+            "canonical_lines": ({"canonical_line_id": "line-1", "description": "Aylik hat kullanimi"},),
+            "account_selection": _account_selection(),
+        }
+
+        matched = compile_verified_rule_authorities(
+            rules=(profile_rule,), service_profile="gsm_communication", **common
+        )
+        unmatched = compile_verified_rule_authorities(
+            rules=(profile_rule,), service_profile="electricity", **common
+        )
+
+        self.assertEqual(matched[0].account_code, "770.03.001")
+        self.assertEqual(unmatched, ())
+
+    def test_provider_specific_rule_wins_over_service_profile_rule(self) -> None:
+        profile_rule = _record(
+            rule_id="profile-rule",
+            scope="client_service_profile",
+            counterparty_tax_id="",
+            service_profile="gsm_communication",
+        )
+        provider_rule = _record(rule_id="provider-rule", account_code="770.03.002")
+        selection = _account_selection()
+        selection.account_candidates["purchase_expense"] = (
+            *selection.account_candidates["purchase_expense"],
+            {
+                "code": "770.03.002",
+                "is_active": True,
+                "is_detail_account": True,
+                "direction": "purchase",
+                "semantic_roles": ["expense"],
+            },
+        )
+
+        matched = compile_verified_rule_authorities(
+            rules=(profile_rule, provider_rule),
+            client_id="firma-1",
+            direction="purchase",
+            invoice_mode="ordinary",
+            counterparty_tax_id="1234567890",
+            service_profile="gsm_communication",
+            canonical_lines=({"canonical_line_id": "line-1", "description": "Aylik hat kullanimi"},),
+            account_selection=selection,
+        )
+
+        self.assertEqual(matched[0].account_code, "770.03.002")
+
     def test_compiler_rejects_scope_and_provenance_mismatches(self) -> None:
         cases = (
             ("wrong client", {"client_id": "firma-2"}),

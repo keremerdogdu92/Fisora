@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from app.domain.ai_classification import AiCandidateStrategy, AiClassificationContext, AiClassificationPolicy, AiClassificationResult, ProductClassifier, StaticFirstClassifier
+from app.domain.utility_invoice_markers import utility_exception_requires_review
 from app.domain.business_relevance import (
     BusinessRelevance,
     ClientProfile,
@@ -189,6 +190,11 @@ class SimulatedInvoiceResult:
     canonical_validation_reasons: tuple[str, ...] = ()
     canonical_extraction_notes: tuple[str, ...] = ()
     canonical_extraction_ai_used: bool = False
+    provider_id: str = ""
+    service_profile: str = ""
+    provider_match_kind: str = ""
+    provider_directory_version: int = 0
+    utility_exception_markers: tuple[str, ...] = ()
     line_decisions: tuple[dict[str, object], ...] = ()
     line_decision_coverage: dict[str, object] = field(default_factory=dict)
     decision_narrative: dict[str, object] = field(default_factory=dict)
@@ -940,6 +946,11 @@ def _counterparty_invoice_payload(
         "recipient_title": str(getattr(invoice, "recipient_title", "") or "").strip(),
         "recipient_tax_id": str(getattr(invoice, "recipient_tax_id", "") or "").strip(),
         "provider_hint": invoice.provider_hint,
+        "provider_id": str(getattr(invoice, "provider_id", "") or "").strip(),
+        "service_profile": str(getattr(invoice, "service_profile", "") or "").strip(),
+        "provider_match_kind": str(getattr(invoice, "provider_match_kind", "") or "").strip(),
+        "provider_match_reason": str(getattr(invoice, "provider_match_reason", "") or "").strip(),
+        "provider_directory_version": int(getattr(invoice, "provider_directory_version", 0) or 0),
         "normalized_title_tokens": list(_normalized_title_tokens(counterparty_title)),
         "raw_title_candidates": [
             value
@@ -2466,7 +2477,15 @@ def simulate_invoice(
     verified_rule_authorities: tuple[VerifiedRuleAuthorityV1, ...] = (),
 ) -> SimulatedInvoiceResult:
     mode = _normalize_processing_mode(processing_mode)
-    reasons = tuple(dict.fromkeys((*invoice.risk_flags, *invoice.parse_notes)))
+    reasons = tuple(
+        dict.fromkeys(
+            (
+                *invoice.risk_flags,
+                *invoice.parse_notes,
+                *tuple(getattr(invoice, "utility_exception_markers", ()) or ()),
+            )
+        )
+    )
     amount = _decimal_or_none(invoice.payable_total)
     entry: JournalEntry | None = None
     draft_quality = "none"
@@ -2829,6 +2848,15 @@ def simulate_invoice(
             direction=direction,
         )
     semantic_authority = _combine_authorities(verified_authority, accepted_ai_authority)
+    canonical_line_ids = tuple(
+        str(getattr(item, "canonical_line_id", "") or "") for item in canonical_items
+    )
+    utility_exception_markers = tuple(getattr(invoice, "utility_exception_markers", ()) or ())
+    if not utility_exception_requires_review(
+        utility_exception_markers,
+        has_profile_authority=verified_authority.exactly_covers(canonical_line_ids),
+    ):
+        reasons = tuple(reason for reason in reasons if reason not in set(utility_exception_markers))
     authority_by_line = semantic_authority.account_by_line()
     ai_decision_by_line = {
         str(item.get("canonical_line_id") or ""): item
@@ -3165,9 +3193,7 @@ def simulate_invoice(
             draft_quality = "gross_balanced_needs_vat_split"
         status = "review_required"
 
-    authority_complete = semantic_authority.exactly_covers(tuple(
-        str(getattr(item, "canonical_line_id", "") or "") for item in canonical_items
-    ))
+    authority_complete = semantic_authority.exactly_covers(canonical_line_ids)
     if (
         status != "no_posting_suggested"
         and authority_complete
@@ -3424,6 +3450,11 @@ def simulate_invoice(
         canonical_validation_reasons=canonical_validation_reasons,
         canonical_extraction_notes=canonical_extraction_notes,
         canonical_extraction_ai_used=canonical_extraction_ai_used,
+        provider_id=str(getattr(invoice, "provider_id", "") or ""),
+        service_profile=str(getattr(invoice, "service_profile", "") or ""),
+        provider_match_kind=str(getattr(invoice, "provider_match_kind", "") or ""),
+        provider_directory_version=int(getattr(invoice, "provider_directory_version", 0) or 0),
+        utility_exception_markers=tuple(getattr(invoice, "utility_exception_markers", ()) or ()),
         line_decisions=tuple(structured_line_decisions),
         line_decision_coverage=asdict(line_coverage),
         decision_narrative=decision_narrative,

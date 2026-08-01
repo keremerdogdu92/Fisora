@@ -1,0 +1,1157 @@
+{
+  "version": 3,
+  "providers": [
+    {
+      "provider_id": "vodafone_tr",
+      "service_profile": "gsm_communication",
+      "tax_ids": [
+        "9250353261"
+      ],
+      "titles": [
+        "Vodafone Telekomünikasyon A.Ş.",
+        "Vodafone Telekomunikasyon A.S."
+      ],
+      "source": "verified_ubl_and_official_title"
+    },
+    {
+      "provider_id": "tt_mobil",
+      "service_profile": "gsm_communication",
+      "tax_ids": [
+        "8590380323"
+      ],
+      "titles": [
+        "TT Mobil İletişim Hizmetleri A.Ş.",
+        "TT Mobil Iletisim Hizmetleri A.S."
+      ],
+      "source": "official_subscriber_contract"
+    },
+    {
+      "provider_id": "turkcell",
+      "service_profile": "gsm_communication",
+      "tax_ids": [
+        "8770013406"
+      ],
+      "titles": [
+        "Turkcell İletişim Hizmetleri A.Ş.",
+        "Turkcell Iletisim Hizmetleri A.S."
+      ],
+      "source": "curated_telecom_catalog"
+    },
+    {
+      "provider_id": "turk_telekom",
+      "service_profile": "fixed_internet",
+      "tax_ids": [
+        "8760052205"
+      ],
+      "titles": [
+        "Türk Telekomünikasyon A.Ş.",
+        "Turk Telekomunikasyon A.S.",
+        "Türk Telekom"
+      ],
+      "source": "curated_telecom_catalog"
+    },
+    {
+      "provider_id": "ttnet_tr",
+      "service_profile": "fixed_internet",
+      "tax_ids": [
+        "8590491872"
+      ],
+      "titles": [
+        "TTNET Anonim Şirketi",
+        "TTNET ANONIM SIRKETI"
+      ],
+      "source": "verified_ubl_and_official_title"
+    },
+    {
+      "provider_id": "vodafone_net",
+      "service_profile": "fixed_internet",
+      "tax_ids": [
+        "9250391491"
+      ],
+      "titles": [
+        "Vodafone Net İletişim Hizmetleri A.Ş.",
+        "Vodafone Net Iletisim Hizmetleri A.S."
+      ],
+      "source": "curated_telecom_catalog"
+    },
+    {
+      "provider_id": "turknet",
+      "service_profile": "fixed_internet",
+      "tax_ids": [
+        "7350150917"
+      ],
+      "titles": [
+        "Turknet İletişim Hizmetleri A.Ş.",
+        "Turknet Iletisim Hizmetleri A.S.",
+        "TurkNet"
+      ],
+      "source": "curated_telecom_catalog"
+    },
+    {
+      "provider_id": "millenicom",
+      "service_profile": "fixed_internet",
+      "tax_ids": [
+        "6220529517"
+      ],
+      "titles": [
+        "Millenicom Telekomünikasyon Hizmetleri A.Ş.",
+        "Millenicom Telekomunikasyon Hizmetleri A.S."
+      ],
+      "source": "curated_telecom_catalog"
+    },
+    {
+      "provider_id": "turksat_kablo",
+      "service_profile": "fixed_internet",
+      "tax_ids": [
+        "8810263772"
+      ],
+      "titles": [
+        "Türksat Uydu Haberleşme Kablo TV ve İşletme A.Ş.",
+        "Turksat Uydu Haberlesme Kablo TV ve Isletme A.S.",
+        "KabloNet"
+      ],
+      "source": "curated_telecom_catalog"
+    },
+    {
+      "provider_id": "enerjisa_istanbul_anadolu",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "4810577635"
+      ],
+      "titles": [
+        "Enerjisa İstanbul Anadolu Yakası Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "verified_ubl_and_official_title"
+    },
+    {
+      "provider_id": "enerjisa_baskent",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "3350432123"
+      ],
+      "titles": [
+        "Enerjisa Başkent Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "enerjisa_toroslar",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "3350427851"
+      ],
+      "titles": [
+        "Enerjisa Toroslar Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "ck_bogazici",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "1790617537"
+      ],
+      "titles": [
+        "CK Boğaziçi Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "ck_akdeniz",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "0210560445"
+      ],
+      "titles": [
+        "CK Akdeniz Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "ck_camilbel",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "2280756691"
+      ],
+      "titles": [
+        "CK Çamlıbel Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "aydem",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "1090418874"
+      ],
+      "titles": [
+        "Aydem Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "gediz",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "3900519465"
+      ],
+      "titles": [
+        "Gediz Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "uludag",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "8880327852"
+      ],
+      "titles": [
+        "Uludağ Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "sepas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "7400413312"
+      ],
+      "titles": [
+        "Sakarya Elektrik Perakende Satış A.Ş.",
+        "SEPAŞ"
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "trepas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "8590574185"
+      ],
+      "titles": [
+        "Trakya Elektrik Perakende Satış A.Ş.",
+        "TREPAŞ"
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "oepsas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "6480597129"
+      ],
+      "titles": [
+        "Osmangazi Elektrik Perakende Satış A.Ş.",
+        "OEPSAŞ"
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "depsas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "2950368442"
+      ],
+      "titles": [
+        "Dicle Elektrik Perakende Satış A.Ş.",
+        "DEPSAŞ"
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "vepsas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "8830347477"
+      ],
+      "titles": [
+        "Vangölü Elektrik Perakende Satış A.Ş.",
+        "VEPSAŞ"
+      ],
+      "source": "official_title_and_corrected_vkn"
+    },
+    {
+      "provider_id": "yepas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "9770473872"
+      ],
+      "titles": [
+        "Yeşilırmak Elektrik Perakende Satış A.Ş.",
+        "YEPAŞ"
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "aras",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "3090349887"
+      ],
+      "titles": [
+        "Aras Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "kepsas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "5400392536"
+      ],
+      "titles": [
+        "Kayseri Elektrik Perakende Satış A.Ş.",
+        "KEPSAŞ"
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "aksa_firat",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "3860449714"
+      ],
+      "titles": [
+        "Aksa Fırat Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "aksa_coruh",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "2610392696"
+      ],
+      "titles": [
+        "Aksa Çoruh Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "akedas",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "0230311459"
+      ],
+      "titles": [
+        "AKEDAŞ Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "aksa_elektrik",
+      "service_profile": "electricity",
+      "tax_ids": [
+        "0340243918"
+      ],
+      "titles": [
+        "Aksa Elektrik Perakende Satış A.Ş."
+      ],
+      "source": "curated_electricity_catalog"
+    },
+    {
+      "provider_id": "epdk_gas_0080692232",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0080692232"
+      ],
+      "titles": [
+        "AKSA AFYON DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0090044633",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0090044633"
+      ],
+      "titles": [
+        "AKSA SAKARYA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320280622",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320280622"
+      ],
+      "titles": [
+        "AKMERCAN BATIKAR DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320282712",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320282712"
+      ],
+      "titles": [
+        "AKMERCAN MUĞLA DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320284870",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320284870"
+      ],
+      "titles": [
+        "AKMERCAN MARDİN DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320284993",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320284993"
+      ],
+      "titles": [
+        "AKMERCAN SİNOP DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320286410",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320286410"
+      ],
+      "titles": [
+        "AKMERCAN GEPA DOĞAL GAZ DAĞITIM SAN. VE TİC. A.Ş."
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320286629",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320286629"
+      ],
+      "titles": [
+        "AKMERCAN ADIYAMAN DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320286652",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320286652"
+      ],
+      "titles": [
+        "AKMERCAN DELTA DOĞALGAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320291705",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320291705"
+      ],
+      "titles": [
+        "AKMERCAN TUNCELİ DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320292747",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320292747"
+      ],
+      "titles": [
+        "AKMERCAN HAKKARİ ŞIRNAK DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0320292901",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0320292901"
+      ],
+      "titles": [
+        "AKMERCAN ARTVİN DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0340362913",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0340362913"
+      ],
+      "titles": [
+        "AKSA ÇUKUROVA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0340388719",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0340388719"
+      ],
+      "titles": [
+        "AKSA ŞANLIURFA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0680522352",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0680522352"
+      ],
+      "titles": [
+        "AKSA AĞRI DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_0741215923",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "0741215923"
+      ],
+      "titles": [
+        "ARH BİNGÖL DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1150817545",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1150817545"
+      ],
+      "titles": [
+        "ENERYA AYDIN GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1310063405",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1310063405"
+      ],
+      "titles": [
+        "BAHÇEŞEHİR GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1370273699",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1370273699"
+      ],
+      "titles": [
+        "AKSA BALIKESİR DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1400256118",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1400256118"
+      ],
+      "titles": [
+        "AKSA BANDIRMA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1480394682",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1480394682"
+      ],
+      "titles": [
+        "BAŞKENT DOĞALGAZ DAĞITIM GAYRİMENKUL YATIRIM ORTAKLIĞI ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1700264805",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1700264805"
+      ],
+      "titles": [
+        "AKSA BİLECİK BOLU DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_1910319839",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "1910319839"
+      ],
+      "titles": [
+        "BURSA ŞEHİRİÇİ DOĞAL GAZ DAĞITIM TİCARET VE TAAH. ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_2290366146",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "2290366146"
+      ],
+      "titles": [
+        "AKSA ÇANAKKALE DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_2570492848",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "2570492848"
+      ],
+      "titles": [
+        "TOROSGAZ KÜTAHYA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_2620262492",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "2620262492"
+      ],
+      "titles": [
+        "ÇORUM DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3010541103",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3010541103"
+      ],
+      "titles": [
+        "DİYARBAKIR DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3020515699",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3020515699"
+      ],
+      "titles": [
+        "DOĞUGAZ BİTLİS MUŞ DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3230368811",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3230368811"
+      ],
+      "titles": [
+        "ENERYA AKSARAY GAZ DAĞITIM A.Ş."
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3230369351",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3230369351"
+      ],
+      "titles": [
+        "AKSA DÜZCE EREĞLİ DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3300450664",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3300450664"
+      ],
+      "titles": [
+        "AKSA ELAZIĞ DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3770409644",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3770409644"
+      ],
+      "titles": [
+        "ENERYA ERZİNCAN GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3800307997",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3800307997"
+      ],
+      "titles": [
+        "ESGAZ ESKİŞEHİR ŞEHİRİÇİ DOĞAL GAZ DAĞITIM TİCARET VE TAAH. ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3890452544",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3890452544"
+      ],
+      "titles": [
+        "ENERYA KONYA GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3890607989",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3890607989"
+      ],
+      "titles": [
+        "GAZDAŞ GAZİANTEP DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_3910252505",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "3910252505"
+      ],
+      "titles": [
+        "AKSA GEMLİK DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_4250218507",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "4250218507"
+      ],
+      "titles": [
+        "AKSA GÜMÜŞHANE BAYBURT DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_4640371279",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "4640371279"
+      ],
+      "titles": [
+        "KAYSERİGAZ KAYSERİ DOĞALGAZ DAĞITIM PAZARLAMA VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_4700022607",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "4700022607"
+      ],
+      "titles": [
+        "İGDAŞ İSTANBUL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_4830039664",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "4830039664"
+      ],
+      "titles": [
+        "İZGAZ İZMİT GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_4840589217",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "4840589217"
+      ],
+      "titles": [
+        "İZMİR DOĞALGAZ DAĞITIM TİCARET VE TAAHHÜT ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5090581620",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5090581620"
+      ],
+      "titles": [
+        "AKSA KARADENİZ DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5180477769",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5180477769"
+      ],
+      "titles": [
+        "ENERYA KARAMAN GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5240504623",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5240504623"
+      ],
+      "titles": [
+        "KARGAZ DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5240530968",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5240530968"
+      ],
+      "titles": [
+        "DOĞUGAZ KARS ARDAHAN DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5440539554",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5440539554"
+      ],
+      "titles": [
+        "ENERYA DENİZLİ GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5570477043",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5570477043"
+      ],
+      "titles": [
+        "KIRGAZ KIRIKKALE-KIRŞEHİR DOĞAL GAZ DAĞITIM PAZ. VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_5600569515",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "5600569515"
+      ],
+      "titles": [
+        "KIZILCAHAMAM DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6120480892",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6120480892"
+      ],
+      "titles": [
+        "AKSA MANİSA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6120490729",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6120490729"
+      ],
+      "titles": [
+        "ARMADAŞ ARSAN MARAŞ DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6121745344",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6121745344"
+      ],
+      "titles": [
+        "MARMARA YALOVA GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6121745378",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6121745378"
+      ],
+      "titles": [
+        "MARMARA ÇORLU GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6240364164",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6240364164"
+      ],
+      "titles": [
+        "AKSA MUSTAFAKEMALPAŞA SUSURLUK KARACABEY DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6310372737",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6310372737"
+      ],
+      "titles": [
+        "ENERYA EREĞLİ GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6310455709",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6310455709"
+      ],
+      "titles": [
+        "ENERYA KAPADOKYA GAZ DAĞITIM A.Ş."
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6410291952",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6410291952"
+      ],
+      "titles": [
+        "ENERYA ANTALYA GAZ DAĞITIM A.Ş."
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_6450332343",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "6450332343"
+      ],
+      "titles": [
+        "AKSA ORDU GİRESUN DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7200361395",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7200361395"
+      ],
+      "titles": [
+        "PALGAZ DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7200364398",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7200364398"
+      ],
+      "titles": [
+        "PALEN ENERJİ DOĞAL GAZ DAĞITIM END. VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7230341904",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7230341904"
+      ],
+      "titles": [
+        "AKSA MALATYA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7320572942",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7320572942"
+      ],
+      "titles": [
+        "POLGAZ POLATLI DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7420311080",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7420311080"
+      ],
+      "titles": [
+        "SAMGAZ DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7590464802",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7590464802"
+      ],
+      "titles": [
+        "SELÇUK DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7620282910",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7620282910"
+      ],
+      "titles": [
+        "DOĞUGAZ IĞDIR DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7700385430",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7700385430"
+      ],
+      "titles": [
+        "AKSA SİİRT BATMAN DOĞALGAZ DAĞITIM A.Ş."
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7710241587",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7710241587"
+      ],
+      "titles": [
+        "AKSA SİVAS DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_7870296491",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "7870296491"
+      ],
+      "titles": [
+        "SÜRMELİ DOĞAL GAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_8151154680",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "8151154680"
+      ],
+      "titles": [
+        "T DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_8460422450",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "8460422450"
+      ],
+      "titles": [
+        "AKSA TOKAT AMASYA DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_8560340210",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "8560340210"
+      ],
+      "titles": [
+        "TOROSGAZ ISPARTA BURDUR DOĞALGAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_8590473102",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "8590473102"
+      ],
+      "titles": [
+        "TRAKYA BÖLGESİ DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_8850317725",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "8850317725"
+      ],
+      "titles": [
+        "UDAŞ UŞAK DOĞALGAZ DAĞITIM SANAYİ VE TİCARET ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    },
+    {
+      "provider_id": "epdk_gas_9220646562",
+      "service_profile": "natural_gas",
+      "tax_ids": [
+        "9220646562"
+      ],
+      "titles": [
+        "AKSA VAN DOĞAL GAZ DAĞITIM ANONİM ŞİRKETİ"
+      ],
+      "source": "epdk_active_distribution_license"
+    }
+  ]
+}

@@ -1,5 +1,14 @@
 # Current Handoff
 
+### 2026-08-01 utility provider fast lane ve ogrenme kurallari entegrasyonu (canli)
+
+- `main` runtime release commit'i `3816d93` canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`3816d93`).
+- Izole yan çalışma ağacı (`codex/utility-provider-fast-lane`) `main` dalına sorunsuz birleştirildi ve yan worktree/dal temizlendi.
+- Canlı doğrulama: HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`).
+- Yayınlanan değişiklikler: Dağıtıcı kurum/abonelik faturaları hızlı şeridi (`provider_directory.v1.json`, `utility_invoice_markers.py`, `provider_directory.py`), hızlı KDV/muhasebe eşleme mantığı ve ilgili 16 yeni backend testi `main` dalına dahil edildi.
+- Preflight ve release öncesi backend `737` test, frontend `169` test, Next.js production build ve `git diff --check` başarıyla tamamlandı.
+
 ### 2026-08-01 reference corpus pilot script ve design QA raporu yayını (canlı)
 
 - `main` runtime release commit'i `8009ffc` canlıya alındı.

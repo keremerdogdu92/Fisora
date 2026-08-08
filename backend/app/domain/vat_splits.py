@@ -164,10 +164,10 @@ def _extract_summary_values(text: str) -> tuple[dict[str, dict[str, Decimal]], d
             amount = _parse_money(" ".join(raw_lines[index + 1 : index + 9]), pick="max")
         if amount is None and "fatura tutari" in normalized:
             amount = _parse_money(" ".join(raw_lines[index + 1 : index + 8]), pick="max")
-        if amount is None:
-            amount = _parse_money(" ".join(raw_lines[index + 1 : index + 4]), pick="first")
         if amount is None and "katma deger vergisi" in normalized:
             amount = _parse_money(" ".join(raw_lines[max(0, index - 3) : index]), pick="last")
+        if amount is None:
+            amount = _parse_money(" ".join(raw_lines[index + 1 : index + 4]), pick="first")
         if amount is None:
             continue
 

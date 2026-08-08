@@ -21,6 +21,435 @@ Bu dokuman mukellef olusturmadan fatura taslaginin onaya gelmesine kadar sistemi
 5. Ogrenme AI'i azaltir, denetimi kaldirmaz.
    Musavirin onaylari ve duzeltmeleri ayni cari, ayni urun/hizmet, ayni hesap mantigi icin sonraki onerileri guclendirir. Tek bir karar kalici otomasyon icin yeterli sayilmamalidir; tekrarli ve tutarli onaylar yuksek guvenli ogrenme haline gelince AI/research maliyeti azaltilabilir.
 
+## PDF extraction redesign: kabul edilen kararlar (2026-08-05)
+
+> **Tarihsel not / superseded (2026-08-07):** Bu bolumdeki eski
+> `pdfplumber-only` prompt, kapali ilk schema ve onceki benchmark modeli artik
+> guncel test sozlesmesi degildir. Guncel A/B/C giris modlari, prompt, schema,
+> dogruluk katmanlari ve yeni corpus kararlari
+> [`pdf-ai-extraction-benchmark-contract.md`](pdf-ai-extraction-benchmark-contract.md)
+> belgesinde kanoniktir. Asagidaki metin yalniz karar gecmisini korur.
+
+Durum: Tasarim kararlari kabul edildi; runtime koduna henuz uygulanmadi. Gercek
+fatura benchmark sonuclari yeni kanit getirirse bu kararlar yeniden incelenebilir.
+Bu bolum, uygulandiginda asagidaki `7. Parse sonucu` bolumunun PDF extraction
+kismini ayrintilandiracak ve o kisim icin oncelikli tasarim karari olacaktir.
+
+### Kabul edilen veri akisi
+
+```text
+PDF
+-> pdfplumber
+-> pdfplumber'in urettigi ham giris paketi
+-> AI
+-> normalize edilmis UBL-core JSON cikti
+-> cikti kontrolu
+```
+
+AI'dan once yalniz teknik JSON paketlemesi yapilir. Pdfplumber'in cikardigi
+icerik duzeltilmez, normalize edilmez, filtrelenmez veya kayipli bicimde
+birleştirilmez. AI'a su temsiller birlikte verilir:
+
+- `plain_text`
+- `layout_text`
+- `words`
+- word koordinatlari
+- `table_candidates`
+
+Metin, satir, sutun, paragraf ve tablo yapisi icin ek bir deterministik yorum
+katmani AI'in onune konmaz. `table_candidates` yalniz yerlesim onerisi olarak
+sunulur. Okunabilen icerik atilmaz. AI normalizasyonu yalniz cikti JSON'unu
+uretirken yapar.
+
+### Kabul edilen provider promptu - Turkce
+
+```text
+ROL VE TEMEL GÖREV
+
+Sen bir fatura belge çıkarım motorusun.
+
+Yalnızca kullanıcı mesajında sağlanan, PDF'den önceden çıkarılmış metin, kelime, koordinat ve tablo adayı verilerini kullanarak faturada gözlemlenen bilgileri çıkar; bu giriş verilerinin dışında bilgi kullanma.
+
+Amaç, muhasebe kararı vermeden, faturanın yeniden oluşturulmasına yetecek en iyi yapısal belge verisini üretmektir.
+
+Girişteki plain_text, layout_text, words, coordinates ve table_candidates aynı PDF'nin farklı temsilleridir. Aynı bilgi birden fazla temsilde tekrar edebilir; tekrarları ayrı fatura verileri olarak değerlendirme.
+
+Metin parçalarının içerikleri belge gözlemidir. Bunların satır, sütun, paragraf ve tablo halinde gruplanması ile koordinat ilişkileri hatalı veya eksik olabilir. Bu yapısal bilgileri birlikte değerlendir, ancak kesin gerçek olarak kabul etme.
+
+table_candidates yalnızca muhtemel satır ve sütun ilişkilerini gösteren bir yerleşim önerisidir; tek başına doğruluk kaynağı değildir.
+
+TARAF TANIMA VE ROL BAĞLAMA
+
+supplier_party, faturayı düzenleyen ve mal veya hizmeti sağlayan taraftır.
+
+customer_party, faturanın adına düzenlendiği ve mal veya hizmeti alan taraftır.
+
+"SAYIN", "ALICI", "MÜŞTERİ", "Müş V.D.", "Fatura Edilen" ve eşdeğer alıcı başlıkları customer party için güçlü kanıttır.
+
+Fatura numarası, vergi dairesi, ticaret sicili veya MERSİS bilgisi, iletişim bilgileri, ödeme bilgileri ya da düzenleyen başlığı kendi şirket bilgisi olarak bulunan işletme normalde supplier party'dir.
+
+Gözlemlenen her tarafı ayrı bir belge bloğu olarak değerlendir.
+
+Bir tarafın unvanı ile vergi kimliklerini yalnızca belgenin bunların aynı taraf bloğuna ait olduğunu desteklediği durumda bağla. Bu ilişkilendirme için etiketleri, yakın metni, hizalamayı, koordinatları, vergi dairesini, adresi, ticaret sicili veya MERSİS bağlamını birlikte değerlendir.
+
+Bir vergi kimliğini yalnızca en açık veya açıkça "VKN", "TCKN" ya da "Vergi No" etiketi taşıyan değer olduğu için supplier_party altına yerleştirme. Önce kimliğin gözlemlenen hangi taraf bloğuna ait olduğunu belirle.
+
+Şirket ve vergi dairesi bloğunda bulunan 10 haneli bir sayı, ayrı bir "VKN" etiketi bulunmasa bile o şirketin VKN'si olabilir. Açıkça gözlemlenen 11 haneli TCKN, içinde bulunduğu kişi veya taraf bloğuyla ilişkilendirilmelidir.
+
+Bir taraf bloğundaki unvanı başka bir taraf bloğundaki vergi kimliğiyle birleştirme.
+
+Hem supplier hem customer kimlikleri bulunuyorsa her kimliği en iyi desteklenen taraf bloğuna yerleştir. Başka bir kimliğin etiketi daha açık olduğu için daha az belirgin etiketli kimliği göz ardı etme.
+
+Aynı vergi kimliğini yalnızca plain_text, layout_text, words veya table_candidates içinde tekrarlandığı için hem supplier_party hem customer_party altına yerleştirme. Bunlar aynı belge gözleminin tekrarlanan temsilleridir.
+
+İlişkilendirme tamamen kesin değilse yine en iyi desteklenen taraf bağlamasını döndür ve belirsizliği warnings içinde açıkla. Etiketi daha açık olduğu için kimliği diğer tarafa taşıma.
+
+Belgede açıkça bulunmayan bir değeri dış bilgiden tahmin etme, uydurma veya başka alanlardan hesaplayarak doldurma.
+
+Kullanılabilir kaynak gözlemleri bulunduğunda, işi tamamlamak yerine null, review_required veya başarısız bir heuristic'i kolay bir kaçış yolu olarak kullanma.
+
+Bir alan için yalnızca kullanılabilir hiçbir kaynak gözlemi bulunmuyorsa null kullan.
+
+Çözümlenemeyen bir alan, ilgisiz alanların çıkarılmasını veya taslak hazırlanmasını durdurmamalıdır.
+
+Bir alanla ilişkili bir veya daha fazla olası değer giriş verisinde bulunuyorsa, yalnızca yerleşim, okuma sırası veya tablo ilişkisindeki belirsizlik nedeniyle null döndürme. Mevcut temsilleri birlikte değerlendirerek belge içindeki en iyi desteklenen değeri çıkar.
+
+Seçilen değer tamamen kesin değilse yine en iyi desteklenen değeri döndür ve belirsizliği çıktıdaki warning yapısında açıkla.
+```
+
+### Accepted provider prompt - English
+
+```text
+ROLE AND PRIMARY TASK
+
+You are an invoice document extraction engine.
+
+Use only the text, word, coordinate, and table-candidate data previously extracted from the PDF and provided in the user message to extract the information observed in the invoice. Do not use information outside this input data.
+
+The objective is to produce the best structured document data sufficient to reconstruct the invoice, without making accounting decisions.
+
+The plain_text, layout_text, words, coordinates, and table_candidates in the input are different representations of the same PDF. The same information may appear in multiple representations; do not treat these repetitions as separate invoice data.
+
+The contents of the text fragments are document observations. Their grouping into lines, columns, paragraphs, and tables, as well as their coordinate relationships, may be incorrect or incomplete. Evaluate this structural information together, but do not treat it as definitive truth.
+
+table_candidates only suggests possible row and column relationships; it is not an independent source of truth.
+
+PARTY IDENTIFICATION AND ROLE BINDING
+
+supplier_party is the party that issued the invoice and supplied the goods or services.
+
+customer_party is the party to whom the invoice was issued and who received or purchased the goods or services.
+
+Turkish labels such as "SAYIN", "ALICI", "MÜŞTERİ", "Müş V.D.", "Fatura Edilen" and equivalent recipient headings are strong evidence for the customer party.
+
+The business whose invoice number, tax office, trade registry or MERSIS information, contact information, payment details, or issuer header appears as its own company information is normally the supplier party.
+
+Treat each observed party as a separate document block.
+
+Bind a party name and its tax identifiers only when the document supports that they belong to the same party block. Use labels, nearby text, alignment, coordinates, tax office, address, trade registry or MERSIS context together for this association.
+
+Do not attach a tax identifier to supplier_party merely because it is the clearest or the only value explicitly labelled "VKN", "TCKN" or "Vergi No". First determine which observed party block the identifier belongs to.
+
+A 10-digit number located in a company and tax-office block may be that company's VKN even when the separate "VKN" label is absent. A clearly observed 11-digit TCKN must be associated with the person or party block in which it appears.
+
+Do not combine the name from one party block with a tax identifier from another party block.
+
+When both supplier and customer identifiers are present, assign each identifier to the best-supported party block. Do not discard the less prominently labelled identifier solely because another identifier has a clearer label.
+
+Do not place the same tax identifier under both supplier_party and customer_party merely because it is repeated in plain_text, layout_text, words or table_candidates. These are repeated representations of the same document observation.
+
+If the association is not completely certain, still return the best-supported party binding and describe the uncertainty in warnings. Do not move an identifier to the other party merely because its label is more explicit.
+
+Do not estimate or invent a value that is not explicitly present in the document, and do not fill it by calculating it from other fields.
+
+When usable source observations exist, do not use null, review_required, or a failed heuristic as an easy fallback instead of completing the work.
+
+Use null only when no usable source observation exists for that field.
+
+An unresolved field should not stop unrelated extraction or draft preparation.
+
+If the input contains one or more possible values related to a field, do not return null solely because of uncertainty in layout, reading order, or table relationships. Evaluate the available representations together and extract the best-supported value from the document.
+
+If the selected value is not completely certain, still return the best-supported value and describe the uncertainty in the output warning structure.
+```
+
+### Kabul edilen cikti omurgasi: UBL-core projection
+
+UBL, alan isimlendirme kaynagi, hiyerarsi omurgasi ve yeni alan ekleme kontrol
+listesi olarak kullanilir. AI'dan tam UBL XML veya UBL'nin butun opsiyonel
+alanlari istenmez. PDF ve XML ciktilarinin ayni semantik yapida bulusabilecegi,
+AI icin sadelestirilmis JSON hedeflenir.
+
+```json
+{
+  "invoice": {
+    "header": {
+      "invoice_number": null,
+      "uuid": null,
+      "issue_date": null,
+      "issue_time": null,
+      "due_date": null,
+      "invoice_type_code": null,
+      "profile_id": null,
+      "tax_point_date": null,
+      "document_currency_code": null,
+      "tax_currency_code": null,
+      "buyer_reference": null,
+      "notes": []
+    },
+    "invoice_periods": [],
+    "document_references": {
+      "order_reference": null,
+      "billing_references": [],
+      "despatch_document_references": [],
+      "receipt_document_references": [],
+      "contract_document_references": [],
+      "additional_document_references": []
+    },
+    "supplier_party": {
+      "name": null,
+      "tax_identifiers": []
+    },
+    "customer_party": {
+      "name": null,
+      "tax_identifiers": []
+    },
+    "payee_party": null,
+    "delivery": [],
+    "payment_means": [],
+    "payment_terms": [],
+    "exchange_rates": [],
+    "allowance_charges": [],
+    "vat_breakdown": [],
+    "withholding_tax_totals": [],
+    "totals": {
+      "tax_exclusive_amount": null,
+      "vat_amount": null,
+      "tax_inclusive_amount": null,
+      "payable_amount": null
+    },
+    "invoice_lines": []
+  },
+  "warnings": []
+}
+```
+
+Serbest `additional_fields` veya modelin kendi anahtarlarini uretebildigi bir
+nesne acilmaz. Yeni bir alan ihtiyaci gercek corpus veya benchmark kanitiyla
+ciktiginda once UBL karsiligi aranir. `Note`, `InvoicePeriod`,
+`BillingReference`, `ContractDocumentReference` veya
+`AdditionalDocumentReference` gibi tanimli yapiya oturuyorsa oraya eklenir.
+Oturmuyorsa adi ve anlami belirli yeni nullable alan schema'ya bilincli olarak
+eklenir. Ham pdfplumber girdisi korundugu icin eski belgeler yeni schema ile
+yeniden islenebilir.
+
+### Kabul edilen ortak JSON deger kurallari
+
+```text
+Metinler          -> string | null
+Tarihler          -> YYYY-MM-DD biciminde string | null
+Saatler           -> HH:MM:SS biciminde string | null
+Parasal degerler  -> decimal string | null
+Miktarlar         -> decimal string | null
+Oranlar           -> decimal string | null
+Boolean alanlar   -> true | false | null
+Tekil nesneler    -> object | null
+Coklu alanlar     -> array; deger yoksa []
+```
+
+- Bos string `""` kullanilmaz.
+- Binlik ayirici kullanilmaz; ondalik ayirici noktadir.
+- Para simgesi parasal degerin icine yazilmaz.
+- `1.250,50 TL` cikti JSON'unda tutar olarak `"1250.50"`, para birimi olarak
+  `"TRY"` olur.
+- `%20` oran olarak `"20"` olur.
+- Belgede gercekten sifir olan deger sifir olarak doner; eksik deger `null`
+  olur.
+- Schema anahtarlari cevapta bulunur. Eksik tekil deger `null`, eksik coklu
+  deger `[]` olur.
+- Raw pdfplumber girdisi normalize edilmis JSON'un yerine gecmez ve ayrica
+  korunur.
+
+### Kabul edilen yon belirleme sozlesmesi
+
+QNB’den gelen belgelerde fatura yönünün kesin kaynağı QNB gelen/giden kanalıdır. UBL taraf kimlikleri yalnızca tutarlılık amacıyla değerlendirilebilir ve QNB’nin bildirdiği yönü değiştirmez.
+
+QNB dışındaki PDF ve doğrudan yüklenen UBL belgelerinde yön, mükellefin VKN veya TCKN’sinin `supplier_party` ve `customer_party` ile tam eşleştirilmesiyle deterministik olarak belirlenir. Mükellef satıcıyla eşleşirse satış, alıcıyla eşleşirse alış yönü seçilir. Yalnızca mükellefin tek tarafta eşleşmesi yeterlidir; karşı tarafın ayrıca doğrulanması gerekmez.
+
+PDF’de AI yön seçmez. AI yalnızca belgede gözlemlediği satıcı, alıcı ve bunların VKN/TCKN bilgilerini JSON alanlarına yerleştirir. Yön kararı bu JSON üzerinden program tarafından verilir.
+
+QNB dışındaki yüklemelerde kullanıcının seçtiği alış/satış bölümü destekleyici yön bilgisidir. VKN/TCKN eşleşmesiyle çelişirse tam kimlik eşleşmesi esas alınır ve çelişki belirtilir. Hiçbir taraf eşleşmezse veya iki taraf birden eşleşirse yükleme bölümündeki yön kullanılır ve kimlik eşleşmesinin çözülemediği belirtilir.
+
+Yön belirlemek için bulanık unvan, adres, vergi dairesi veya çok alanlı puanlama kullanılmaz. Önce gerçek fatura testlerinde tam VKN/TCKN eşleşmesinin başarısı ölçülür; ihtiyaç ancak test kanıtıyla ortaya çıkarsa yöntem genişletilir.
+
+### Kabul edilen minimum supplier/customer Party yapisi
+
+`supplier_party` ve `customer_party` ayni yapidadir:
+
+```json
+{
+  "name": "Örnek Teknoloji A.Ş.",
+  "tax_identifiers": [
+    {
+      "scheme_id": "VKN",
+      "value": "1234567890"
+    }
+  ]
+}
+```
+
+- `name`, belgede bulunan en uygun tam şirket unvanı veya kişi adıdır.
+- `tax_identifiers` yalnızca gözlemlenen VKN/TCKN değerlerini içerir.
+- `scheme_id`, `"VKN"`, `"TCKN"` veya tür belirlenemiyorsa `null` olur.
+- `value`, baştaki sıfırlar korunarak, boşluk ve ayraçları kaldırılmış rakam dizisidir.
+- Aynı kimlik belgede tekrarlanıyorsa JSON'da bir kez bulunur.
+- Kimlik bulunmuyorsa `tax_identifiers: []`; isim bulunmuyorsa `name: null` olur.
+- Yön için unvan kullanılmaz; yalnız tam `value` eşleşmesi kullanılır.
+- Birden fazla vergi kimliği gözlemi varsa değerler kaybedilmez. Yön eşleştirmesi puanlama yapmadan mükellef VKN/TCKN'sini `tax_identifiers[].value` içinde tam olarak arar.
+- Adres, vergi dairesi, MERSİS ve iletişim bilgileri bu minimum yön çekirdeğine dahil edilmez. Gerçek testler ihtiyaç gösterirse Party şeması genişletilir.
+
+### Kabul edilen minimum satir, KDV dagilimi ve toplam yapisi
+
+```json
+{
+  "supplier_party": {
+    "name": "Satıcı Firma A.Ş.",
+    "tax_identifiers": [
+      {
+        "scheme_id": "VKN",
+        "value": "1111111111"
+      }
+    ]
+  },
+  "customer_party": {
+    "name": "Alıcı Firma Ltd. Şti.",
+    "tax_identifiers": [
+      {
+        "scheme_id": "VKN",
+        "value": "2222222222"
+      }
+    ]
+  },
+  "invoice_lines": [
+    {
+      "description": "Yazılım hizmet bedeli",
+      "quantity": "2",
+      "unit": "Adet",
+      "unit_price": "500.00",
+      "tax_exclusive_amount": "1000.00",
+      "vat_rate": "20",
+      "vat_amount": "200.00",
+      "tax_inclusive_amount": "1200.00"
+    }
+  ],
+  "vat_breakdown": [
+    {
+      "vat_rate": "20",
+      "tax_exclusive_amount": "1000.00",
+      "vat_amount": "200.00",
+      "tax_inclusive_amount": "1200.00"
+    }
+  ],
+  "totals": {
+    "tax_exclusive_amount": "1000.00",
+    "vat_amount": "200.00",
+    "tax_inclusive_amount": "1200.00",
+    "payable_amount": "1200.00"
+  }
+}
+```
+
+- `invoice_lines`, her ürün veya hizmet satırını ve satırın kendi KDV bilgisini ayrı tutar.
+- `vat_breakdown`, her KDV oranının KDV hariç tutarını, KDV tutarını ve KDV dahil tutarını ayrı kayıt olarak tutar.
+- `totals.tax_exclusive_amount`, faturanın toplam KDV hariç tutarıdır.
+- `totals.vat_amount`, faturadaki toplam KDV'dir.
+- `totals.tax_inclusive_amount`, faturanın toplam KDV dahil tutarıdır.
+- `totals.payable_amount`, gerçek ödenecek tutardır. Tevkifat, iskonto, yuvarlama veya önceki ödeme nedeniyle `tax_inclusive_amount` değerinden farklı olabilir.
+- Faturadaki satırlar birleştirilmez veya toplulaştırılmaz. Aynı açıklamaya sahip iki satır iki ayrı JSON satırı olarak kalır.
+- Bir satırdaki bazı alanlar eksikse satır atılmaz; bulunan alanlar doldurulur, bulunmayanlar `null` olur.
+- AI yalnızca belgede açıkça bulunan değerleri doldurur. Belgede KDV dahil satır veya oran grubu toplamı yazmıyorsa AI bunu diğer alanlardan hesaplamaz; ilgili alan `null` olur. Hesaplama ve karşılaştırma AI sonrası kontrol aşamasında ayrıca kararlaştırılır.
+
+### Kabul edilen pdfplumber giris paketi
+
+```json
+{
+  "pdfplumber_package": {
+    "page_count": 1,
+    "pages": [
+      {
+        "page_number": 1,
+        "width": 595.28,
+        "height": 841.89,
+        "plain_text": "FATURA\nSatıcı Firma A.Ş.\nVKN: 1111111111...",
+        "layout_text": "FATURA\n\nSatıcı Firma A.Ş.              Alıcı Firma Ltd...\nVKN: 1111111111                VKN: 2222222222...",
+        "words": [
+          {
+            "word_id": "p1_w0001",
+            "text": "FATURA",
+            "x0": 245.12,
+            "top": 35.4,
+            "x1": 298.7,
+            "bottom": 47.2,
+            "doctop": 35.4
+          }
+        ],
+        "table_candidates": [
+          {
+            "table_id": "p1_t0001",
+            "bbox": [40.2, 260.1, 555.4, 520.8],
+            "rows": [
+              ["Açıklama", "Miktar", "Birim Fiyat", "KDV", "Tutar"],
+              ["Yazılım hizmeti", "2 Adet", "500,00", "%20", "1.000,00"]
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+- Her sayfa kendi `plain_text`, `layout_text`, `words` ve `table_candidates` verisini taşır.
+- Sayfa ve kelime sırası pdfplumber'ın verdiği haliyle korunur.
+- Metin düzeltilmez, birleştirilmez, filtrelenmez veya normalize edilmez.
+- Koordinatlar pdfplumber'ın verdiği değerlerdir.
+- `word_id` yalnızca teknik paketleme kimliğidir. Şimdilik AI çıktısından bu kimliği geri istemiyoruz.
+- `table_candidates.rows` yalnızca pdfplumber'ın bulduğu muhtemel tablo düzenidir; doğruluk kaynağı değildir.
+- Tablo bulunamazsa `table_candidates: []` olur; sayfanın diğer içeriği yine gönderilir.
+- PDF dosyasının kendisi veya sayfa görseli AI'a gönderilmez.
+- Herhangi bir temsilde tekrar eden metin silinmez; AI bunların aynı belgenin farklı temsilleri olduğunu prompttan bilir.
+
+### Kabul edilen ilk benchmark modeli ve inference ayarlari
+
+İlk benchmark, mevcut sistemdeki provider/model seçenekleri kullanılarak yapılır. İlk koşu NVIDIA üzerindeki `openai/gpt-oss-120b` modeliyle başlar. Bu seçim kalıcı üretim modeli kararı değildir; aynı pdfplumber paketi, prompt ve JSON şeması içerideki diğer modellerle de karşılaştırılabilir.
+
+```text
+model               = openai/gpt-oss-120b
+provider            = NVIDIA
+temperature         = 0
+top_p               = 1
+max_output_tokens   = 8192
+timeout_seconds     = 120
+response_format     = json_object
+stream              = false
+retry                = 0
+```
+
+- JSON şeması ve kabul edilen prompt isteğin içinde aynen gönderilir.
+- İlk koşuda retry yapılmaz; provider'ın gerçek hata ve süre oranı ölçülür.
+- Hız, doğruluk veya JSON uyumu yetersizse aynı giriş ve çıktı sözleşmesi değiştirilmeden mevcut diğer model/provider seçenekleri karşılaştırılır.
+
+### Henuz karara baglanmayanlar
+
+- `payee_party` alt alanlari ve benchmark sonucuna gore gerekebilecek ek Party alanlari
+- `allowance_charges` ve `withholding_tax_totals` ayrintilari
+- `delivery`, `payment_means`, `payment_terms` ve `exchange_rates` ayrintilari
+- `warnings` nesnesinin tam schema'si
+- evidence/word-ref stratejisinin benchmark sonrasi secimi
+- yetkili gercek PDF corpus'u, ground truth ve benchmark metrikleri
+- AI ciktisindan sonraki kontrol mantigi
+- en son incelenecek gorsel insan kontrolu
+
 ## Uctan uca akis
 
 ### 1. Mukellef olusturma

@@ -55,18 +55,19 @@ class ChartAccountPayload(BaseModel):
 
 class AccountSelectionPayload(BaseModel):
     chart_file_name: str = "api"
-    expense_account: str = "770.01"
-    purchase_vat_account: str = "191.01"
-    supplier_account: str = "320.01"
-    bank_account: str = "102.01"
+    expense_account: str = ""
+    purchase_vat_account: str = ""
+    supplier_account: str = ""
+    bank_account: str = ""
     selection_notes: list[str] = Field(default_factory=list)
-    revenue_account: str = "600.01"
-    zero_vat_revenue_account: str = "600.00.3065"
-    sales_vat_account: str = "391.01"
-    customer_account: str = "120.01"
+    revenue_account: str = ""
+    zero_vat_revenue_account: str = ""
+    sales_vat_account: str = ""
+    customer_account: str = ""
     next_customer_account: str = ""
     next_supplier_account: str = ""
-    stock_account: str = "153.01"
+    stock_account: str = ""
+    non_deductible_account: str = ""
     account_candidates: dict[str, object] = Field(default_factory=dict)
 
 

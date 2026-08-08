@@ -10,6 +10,7 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+from app.domain.matching_simulation import _accountant_action_hint
 from app.domain.utility_invoice_markers import detect_utility_invoice_markers, utility_exception_requires_review
 
 
@@ -41,9 +42,21 @@ class UtilityInvoiceMarkerTests(unittest.TestCase):
             (),
         )
 
-    def test_approved_service_rule_stops_repeat_exception_review(self) -> None:
-        self.assertTrue(utility_exception_requires_review(("utility_device_line",), has_profile_authority=False))
+    def test_device_and_installment_markers_are_informational_not_review_blockers(self) -> None:
+        self.assertFalse(utility_exception_requires_review(("utility_device_line",), has_profile_authority=False))
         self.assertFalse(utility_exception_requires_review(("utility_device_line",), has_profile_authority=True))
+
+    def test_zero_payable_action_explains_no_posting_to_accountant(self) -> None:
+        hint = _accountant_action_hint(
+            export_status="review_required",
+            blockers=("zero_payable_no_posting",),
+            draft_lines=(),
+        )
+
+        self.assertEqual(
+            hint,
+            "Ödenecek tutar 0,00 TL; fatura tamamen indirimle kapandığı için yevmiye kaydı oluşturulmayacak.",
+        )
 
 
 if __name__ == "__main__":

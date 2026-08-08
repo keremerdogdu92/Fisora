@@ -39,4 +39,8 @@ def utility_exception_requires_review(
     *,
     has_profile_authority: bool,
 ) -> bool:
-    return bool(tuple(markers)) and not has_profile_authority
+    # Device and installment rows remain visible evidence, but the accepted
+    # utility policy posts them with the related phone/internet expense. They
+    # are therefore informational markers, not review blockers.
+    del markers, has_profile_authority
+    return False

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any, Mapping
 
 import httpx
 
-from app.domain.ai_capacity import normalize_cerebras_rate_limit_headers, normalize_groq_rate_limit_headers
+from app.domain.ai_capacity import normalize_cerebras_rate_limit_headers, normalize_groq_rate_limit_headers, utc_now
 from app.domain.ai_classification import AiClassificationRequest
 from app.domain.canonical_invoices import CanonicalExtractionRequest
 from app.domain.review_rule_interpretation import REVIEW_RULE_INTERPRETATION_SCHEMA
@@ -21,6 +22,10 @@ CLOUDFLARE_CHAT_COMPLETIONS_URL_TEMPLATE = (
     "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1/chat/completions"
 )
 SAMBANOVA_CHAT_COMPLETIONS_URL = "https://api.sambanova.ai/v1/chat/completions"
+XKIRO_CHAT_COMPLETIONS_URL = "https://api.xkiro.com/v1/chat/completions"
+GEMINI_GENERATE_CONTENT_URL_TEMPLATE = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
 DEFAULT_COMPARISON_MODEL = "gpt-5.4-nano"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
@@ -30,6 +35,8 @@ DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
 DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
 DEFAULT_CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-120b"
 DEFAULT_SAMBANOVA_MODEL = "gpt-oss-120b"
+DEFAULT_XKIRO_MODEL = "anthropic/claude-opus-4.8"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 PRODUCT_CLASSIFICATION_PROMPT_VERSION = "invoice-semantic-decision-v1"
 
 
@@ -70,7 +77,8 @@ def classification_instructions_for(request: AiClassificationRequest) -> str:
         return (
             "Faturadaki karsi tarafi yalniz verilen gercek cari adaylariyla eslestir. "
             "VKN/TCKN, unvan ve dogrulanmis baglari birlikte kullan. "
-            "Uygun cari yoksa yeni cari ihtiyacini belirt; cari kodu uydurma."
+            "Uygun cari yoksa selected_counterparty_code alanini bos birak, needs_research=true don ve yeni cari "
+            "ihtiyacini belirt; cari kodu uydurma."
         )
     if stage == "vat_group_account":
         return (
@@ -78,6 +86,14 @@ def classification_instructions_for(request: AiClassificationRequest) -> str:
             "yon-filtreli net hesap adaylarindan bir hesap sec. Farkli satir anlatimi veya dusuk guven grubu "
             "kendiliginden bolmez; yalniz muhtemel istisna satir kimliklerini inceleme kaniti olarak belirt. "
             "Canonical kimlikleri, grup uyeligini, tutarlari veya KDV degerlerini degistirme."
+        )
+    if stage == "invoice_account":
+        return (
+            "Dogrulanmis utility hizmet profilini, canonical fatura satirlarini ve mukellefin gercek hesap "
+            "adaylarini birlikte degerlendir. Faturanin ortak hizmet gideri hesabini yalniz verilen adaylardan "
+            "bir kez sec. KDV, OIV ve diger vergi bilesenlerinin hesaplarini uydurma; tutarlari veya canonical "
+            "kimlikleri degistirme. Gercek bir satir farkli hesap gerektirebilir gorunuyorsa yalniz o satirin "
+            "canonical_line_id degerini possible_exception_line_ids alaninda belirt."
         )
     return (
         "Her canonical fatura satiri icin mukellefin gercek hesap planindaki en uygun gercek hesabi sec. "
@@ -380,6 +396,154 @@ class ChatCompletionsAccountingProvider:
             self.last_capacity_snapshot = normalize_cerebras_rate_limit_headers(dict(getattr(response, "headers", {}) or {}))
 
 
+class GeminiAccountingProvider:
+    """Native Gemini generateContent adapter with inline-PDF structured output."""
+
+    provider_name = "gemini"
+    product_classification_prompt_version = PRODUCT_CLASSIFICATION_PROMPT_VERSION
+    product_classification_instructions = OpenAiAccountingProvider.product_classification_instructions
+    canonical_extraction_instructions = OpenAiAccountingProvider.canonical_extraction_instructions
+    statement_suggestion_instructions = ChatCompletionsAccountingProvider.statement_suggestion_instructions
+    review_rule_interpretation_instructions = OpenAiAccountingProvider.review_rule_interpretation_instructions
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = DEFAULT_GEMINI_MODEL,
+        generate_content_url: str = "",
+        http_client: Any | None = None,
+        timeout_seconds: float = 60.0,
+        max_output_tokens: int = 16384,
+        max_inline_pdf_bytes: int = 50_000_000,
+    ) -> None:
+        if not api_key.strip():
+            raise ValueError("GEMINI_API_KEY is required when FISORA_AI_PROVIDER=gemini")
+        self.api_key = api_key.strip()
+        self.model = model.strip() or DEFAULT_GEMINI_MODEL
+        self.generate_content_url = generate_content_url.strip() or GEMINI_GENERATE_CONTENT_URL_TEMPLATE.format(
+            model=self.model
+        )
+        self.http_client = http_client or httpx.Client()
+        self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max_output_tokens
+        self.max_inline_pdf_bytes = max_inline_pdf_bytes
+        self.last_capacity_snapshot: dict[str, object] = {}
+
+    def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
+        payload = request.to_schema_payload()
+        instructions = classification_instructions_for(request)
+        self.last_product_classification_instructions = instructions
+        return self._post_structured_json(
+            schema_name="fisora_invoice_ai_draft",
+            instructions=instructions,
+            user_payload=_provider_user_payload(payload),
+            schema=payload["output_schema"],
+        )
+
+    def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
+        payload = request.to_schema_payload()
+        user_payload = _provider_user_payload(payload, exclude_instructions=True)
+        if request.document_bytes:
+            user_payload.pop("document_text", None)
+        return self._post_structured_json(
+            schema_name="fisora_invoice_canonical_extraction",
+            instructions=canonical_extraction_instructions_for(request),
+            user_payload=user_payload,
+            schema=payload["output_schema"],
+            document_bytes=request.document_bytes,
+            document_mime_type=request.document_mime_type,
+        )
+
+    def suggest_statement_line(self, request: StatementAiSuggestionRequest) -> dict[str, Any]:
+        payload = request.to_schema_payload()
+        return self._post_structured_json(
+            schema_name="fisora_statement_ai_suggestion",
+            instructions=self.statement_suggestion_instructions,
+            user_payload=_provider_user_payload(payload),
+            schema=payload["output_schema"],
+        )
+
+    def interpret_review_rule(self, request: Mapping[str, object]) -> dict[str, Any]:
+        payload = dict(request)
+        return self._post_structured_json(
+            schema_name="fisora_review_rule_interpretation",
+            instructions=self.review_rule_interpretation_instructions,
+            user_payload=_provider_user_payload(payload),
+            schema=REVIEW_RULE_INTERPRETATION_SCHEMA,
+        )
+
+    def _post_structured_json(
+        self,
+        *,
+        schema_name: str,
+        instructions: str,
+        user_payload: Mapping[str, object],
+        schema: Mapping[str, object],
+        document_bytes: bytes = b"",
+        document_mime_type: str = "",
+    ) -> dict[str, Any]:
+        parts: list[dict[str, object]] = []
+        if document_bytes:
+            if len(document_bytes) > self.max_inline_pdf_bytes:
+                raise ValueError(
+                    f"Gemini inline PDF exceeds {self.max_inline_pdf_bytes} bytes"
+                )
+            if document_mime_type != "application/pdf":
+                raise ValueError("Gemini native document input must use application/pdf")
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": document_mime_type,
+                        "data": base64.b64encode(document_bytes).decode("ascii"),
+                    }
+                }
+            )
+        parts.append(
+            {
+                "text": (
+                    "Yalnizca verilen schema ile uyumlu gecerli JSON obje don. "
+                    f"Schema adi: {schema_name}. "
+                    f"Girdi: {json.dumps(user_payload, ensure_ascii=False)}"
+                )
+            }
+        )
+        request_payload = {
+            "systemInstruction": {"parts": [{"text": instructions}]},
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": dict(schema),
+                "temperature": 0.2,
+                "topP": 1,
+                "maxOutputTokens": self.max_output_tokens,
+            },
+        }
+        response = self.http_client.post(
+            self.generate_content_url,
+            headers={
+                "x-goog-api-key": self.api_key,
+                "Content-Type": "application/json",
+            },
+            json=request_payload,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        response_payload = response.json()
+        usage = response_payload.get("usageMetadata") if isinstance(response_payload, Mapping) else {}
+        usage = usage if isinstance(usage, Mapping) else {}
+        self.last_capacity_snapshot = {
+            "source": "response_body",
+            "usage": {
+                "prompt_tokens": int(usage.get("promptTokenCount") or 0),
+                "candidate_tokens": int(usage.get("candidatesTokenCount") or 0),
+                "total_tokens": int(usage.get("totalTokenCount") or 0),
+            },
+            "last_checked_at": utc_now(),
+        }
+        return _extract_gemini_json_response(response_payload)
+
+
 class FallbackAccountingProvider:
     """Try multiple accounting providers before reporting a provider failure."""
 
@@ -525,6 +689,26 @@ def _extract_chat_completion_json_response(payload: Mapping[str, Any]) -> dict[s
     if not isinstance(content, str) or not content.strip():
         raise ValueError("Chat completion message did not contain JSON text")
     return _loads_object(_strip_json_fence(content))
+
+
+def _extract_gemini_json_response(payload: Mapping[str, Any]) -> dict[str, Any]:
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("Gemini response did not contain candidates")
+    first = candidates[0]
+    content = first.get("content") if isinstance(first, Mapping) else None
+    parts = content.get("parts") if isinstance(content, Mapping) else None
+    if not isinstance(parts, list):
+        raise ValueError("Gemini candidate did not contain content parts")
+    chunks = [
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, Mapping) and isinstance(part.get("text"), str)
+    ]
+    raw = "".join(chunks).strip()
+    if not raw:
+        raise ValueError("Gemini response did not contain JSON text")
+    return _loads_object(_strip_json_fence(raw))
 
 
 def _strip_json_fence(raw: str) -> str:

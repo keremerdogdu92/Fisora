@@ -54,6 +54,19 @@ class FakeProductProvider:
 
     def classify_product(self, request: object) -> dict[str, object]:
         self.requests.append(request)
+        context = getattr(request, "context", None)
+        strategy = getattr(context, "candidate_strategy", None)
+        if getattr(strategy, "stage", "") == "counterparty_resolve":
+            candidates = tuple(getattr(context, "counterparty_candidates", ()) or ())
+            suggested = str(self.response.get("suggested_counterparty_code") or "")
+            selected = suggested if suggested in candidates else ""
+            return {
+                "selected_counterparty_code": selected,
+                "confidence": int(self.response.get("confidence") or 0),
+                "reason": str(self.response.get("reason") or "Test cari kararı."),
+                "needs_research": not bool(selected),
+                "research_query": "" if selected else "Testte gerçek cari eşleşmesi bulunamadı.",
+            }
         return self.response
 
 
@@ -67,13 +80,16 @@ class RaisingProductProvider:
 class WorkflowStoreTests(unittest.TestCase):
     def test_no_posting_result_stays_distinct_from_manual_draft(self) -> None:
         result = {
-            "simulated_status": "no_posting_suggested",
+            "simulated_status": "no_posting",
             "export_gate_reason": "Kaynak fatura iptal; muhasebe kaydi onerilmez.",
             "draft_lines": [],
         }
 
-        self.assertEqual(_draft_status(result), "no_posting_suggested")
+        self.assertEqual(_draft_status(result), "no_posting")
         self.assertEqual(_accountant_summary(result), result["export_gate_reason"])
+
+    def test_draft_status_normalizes_legacy_no_posting_value(self) -> None:
+        self.assertEqual(_draft_status({"simulated_status": "no_posting_suggested"}), "no_posting")
 
     def test_private_intake_manifest_requires_invoice_direction(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -338,6 +354,37 @@ class WorkflowStoreTests(unittest.TestCase):
             provider.providers[0].chat_completions_url,
             "https://integrate.api.nvidia.com/v1/chat/completions",
         )
+
+    def test_ai_runtime_uses_xkiro_first_for_canonical_pdf_extraction(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER_CHAIN": "nvidia,xkiro,groq",
+                "NVIDIA_API_KEY": "nvapi-test-secret",
+                "XKIRO_API_KEY": "xkiro-test-secret",
+                "GROQ_API_KEY": "gsk-test",
+                "FISORA_XKIRO_MODEL": "anthropic/claude-opus-4.8",
+            }
+        )
+
+        provider = runtime["canonical_extraction_provider"]
+
+        self.assertEqual(provider.provider_name, "xkiro>nvidia>groq")
+        self.assertEqual(provider.providers[0].model, "anthropic/claude-opus-4.8")
+        self.assertEqual(provider.providers[0].chat_completions_url, "https://api.xkiro.com/v1/chat/completions")
+        self.assertEqual(provider.providers[0].timeout_seconds, 60.0)
+        self.assertEqual(provider.providers[0].max_tokens, 1024)
+
+    def test_ai_runtime_uses_xkiro_catalog_model_by_default(self) -> None:
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER_CHAIN": "xkiro",
+                "XKIRO_API_KEY": "xkiro-test-secret",
+            }
+        )
+
+        provider = runtime["canonical_extraction_provider"]
+
+        self.assertEqual(provider.model, "anthropic/claude-opus-4.8")
 
     def test_ai_runtime_from_env_builds_cloudflare_and_sambanova_providers(self) -> None:
         runtime = build_ai_runtime_from_env(
@@ -2127,6 +2174,29 @@ class WorkflowStoreTests(unittest.TestCase):
                 },
                 onboarding={"is_ready": True, "missing_fields": []},
             )
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {
+                        "raw_account_code": "770.01",
+                        "normalized_account_code": "770.01",
+                        "account_name": "Genel gider",
+                        "is_detail_account": True,
+                    },
+                    {
+                        "raw_account_code": "191.01",
+                        "normalized_account_code": "191.01",
+                        "account_name": "İndirilecek KDV",
+                        "is_detail_account": True,
+                    },
+                    {
+                        "raw_account_code": "320.01",
+                        "normalized_account_code": "320.01",
+                        "account_name": "Medikal Tedarik",
+                        "is_detail_account": True,
+                    },
+                ],
+            )
             uploaded = store.save_uploaded_document(
                 client_id="client-1",
                 document={
@@ -2293,7 +2363,7 @@ class WorkflowStoreTests(unittest.TestCase):
 
             process_queued_documents(store, product_classifier=classifier)
 
-        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(len(provider.requests), 2)
         payload = provider.requests[0].to_schema_payload()
         self.assertEqual(payload["nace_research_summary"], "Isitme cihazi satis faaliyetini kapsar.")
         self.assertIn("hearing_aid", payload["activity_tags"])

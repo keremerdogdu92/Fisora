@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
@@ -11,9 +11,14 @@ from app.domain.canonical_invoices import (
     CanonicalInvoice,
     CanonicalInvoiceHeader,
     CanonicalInvoiceLine,
+    CanonicalInvoiceValidation,
+    CanonicalMonetaryComponent,
     CanonicalInvoiceParty,
+    CanonicalTaxComponent,
     CanonicalInvoiceTotals,
     CanonicalVatSummaryLine,
+    normalize_monetary_component,
+    normalize_tax_component,
     _normalized_decimal_text,
     canonical_vat_group_id,
     with_validation,
@@ -25,6 +30,7 @@ from app.domain.utility_invoice_markers import detect_utility_invoice_markers
 
 TAX_ID_RE = re.compile(r"^\d{10,11}$")
 GENERIC_TAX_SCHEME_NAMES = {"KDV", "VAT", "KATMA DEGER VERGISI"}
+VAT_TAX_TYPE_CODES = {"0015", "KDV"}
 CANCELLATION_MARKERS = ("IPTAL", "CANCELLED", "CANCELED")
 
 
@@ -240,9 +246,12 @@ def _tax_ids(root: ET.Element) -> tuple[str, ...]:
 def _vat_rates(root: ET.Element) -> tuple[str, ...]:
     rates: set[str] = set()
     for element in root.iter():
-        if _local_name(element.tag) != "Percent":
+        if _local_name(element.tag) != "TaxSubtotal":
             continue
-        value = _text(element).replace(",", ".")
+        identity = _tax_identity(element)
+        if not _is_vat_tax_scheme(identity["tax_scheme_code"]):
+            continue
+        value = identity["vat_rate"].replace(",", ".")
         try:
             percent = Decimal(value)
         except InvalidOperation:
@@ -289,12 +298,84 @@ def _tax_identity(element: ET.Element) -> dict[str, str]:
         }
 
     scheme = _first_descendant(category, "TaxScheme")
+    tax_subtotal = _first_descendant(element, "TaxSubtotal")
     return {
         "tax_scheme_code": _first_text_under(scheme, ("TaxTypeCode", "ID")) if scheme is not None else "",
         "tax_category_code": _first_direct_text(category, "ID"),
-        "vat_rate": _first_text_under(category, ("Percent",)),
+        "vat_rate": (
+            _first_text_under(category, ("Percent",))
+            or _first_direct_text(tax_subtotal, "Percent")
+            or _first_direct_text(element, "Percent")
+        ),
         "exemption_reason_code": _first_text_under(category, ("TaxExemptionReasonCode",)),
     }
+
+
+def _is_vat_tax_scheme(tax_scheme_code: str) -> bool:
+    return not tax_scheme_code.strip() or tax_scheme_code.strip().upper() in VAT_TAX_TYPE_CODES
+
+
+def _tax_subtotal_amounts(root: ET.Element) -> tuple[str, str]:
+    vat_total = Decimal("0.00")
+    special_tax_total = Decimal("0.00")
+    has_vat = False
+    has_special = False
+    tax_totals = _direct_children(root, "TaxTotal")
+    for tax_total in tax_totals:
+        for subtotal in (element for element in tax_total.iter() if _local_name(element.tag) == "TaxSubtotal"):
+            identity = _tax_identity(subtotal)
+            amount = _decimal_text(_first_text_under(subtotal, ("TaxAmount",)))
+            if not amount:
+                continue
+            if _is_vat_tax_scheme(identity["tax_scheme_code"]):
+                vat_total += Decimal(amount)
+                has_vat = True
+            else:
+                special_tax_total += Decimal(amount)
+                has_special = True
+    return (
+        f"{vat_total:.2f}" if has_vat else "",
+        f"{special_tax_total:.2f}" if has_special else "",
+    )
+
+
+def _canonical_tax_components(root: ET.Element) -> tuple[CanonicalTaxComponent, ...]:
+    components: list[CanonicalTaxComponent] = []
+    for tax_total in _direct_children(root, "TaxTotal"):
+        for index, subtotal in enumerate(
+            (element for element in tax_total.iter() if _local_name(element.tag) == "TaxSubtotal"),
+            start=1,
+        ):
+            identity = _tax_identity(subtotal)
+            scheme = _first_descendant(subtotal, "TaxScheme")
+            label = _first_text_under(scheme, ("Name",)) if scheme is not None else ""
+            position = f"xml:TaxSubtotal[{index}]"
+            components.append(
+                normalize_tax_component(
+                    source_label=label,
+                    source_code=identity["tax_scheme_code"],
+                    rate=identity["vat_rate"],
+                    taxable_amount=_first_amount_under(subtotal, ("TaxableAmount",)),
+                    tax_amount=_first_amount_under(subtotal, ("TaxAmount",)),
+                    source_position=position,
+                    evidence=(position,),
+                )
+            )
+    return tuple(components)
+
+
+def _canonical_monetary_components(
+    lines: tuple[CanonicalInvoiceLine, ...],
+) -> tuple[CanonicalMonetaryComponent, ...]:
+    return tuple(
+        normalize_monetary_component(
+            source_label=line.description,
+            source_amount=line.taxable_amount,
+            source_position=line.source_position,
+            evidence=line.evidence,
+        )
+        for line in lines
+    )
 
 
 def _canonical_invoice_lines(root: ET.Element, *, max_lines: int = 100) -> tuple[CanonicalInvoiceLine, ...]:
@@ -361,6 +442,8 @@ def _canonical_vat_summary(root: ET.Element) -> tuple[CanonicalVatSummaryLine, .
             start=1,
         ):
             tax_identity = _tax_identity(subtotal)
+            if not _is_vat_tax_scheme(tax_identity["tax_scheme_code"]):
+                continue
             summary.append(
                 CanonicalVatSummaryLine(
                     rate=_normalized_decimal_text(tax_identity["vat_rate"]),
@@ -376,6 +459,85 @@ def _canonical_vat_summary(root: ET.Element) -> tuple[CanonicalVatSummaryLine, .
     return tuple(line for line in summary if line.rate or line.taxable_amount or line.tax_amount)
 
 
+def _assign_single_header_vat_group_to_lines(
+    lines: tuple[CanonicalInvoiceLine, ...],
+    vat_summary: tuple[CanonicalVatSummaryLine, ...],
+    *,
+    special_tax_total: str,
+) -> tuple[CanonicalInvoiceLine, ...]:
+    """Allocate one explicitly declared header VAT group across source lines.
+
+    This is valid only when the source establishes that every line belongs to
+    the sole VAT group. A declared non-VAT utility tax may be included in that
+    group's VAT base; it stays a header-level utility-cost component rather
+    than being invented as a separate source line.
+    """
+    if len(vat_summary) != 1 or not lines or any(line.vat_rate for line in lines):
+        return lines
+    summary = vat_summary[0]
+    try:
+        taxable_amounts = [Decimal(line.taxable_amount) for line in lines]
+        declared_taxable = Decimal(summary.taxable_amount)
+        declared_tax = Decimal(summary.tax_amount)
+        special_tax = Decimal(special_tax_total or "0")
+    except (InvalidOperation, ValueError):
+        return lines
+    source_taxable = sum(taxable_amounts, Decimal("0.00"))
+    if declared_taxable <= Decimal("0.00") or source_taxable not in {
+        declared_taxable,
+        declared_taxable - special_tax,
+    }:
+        return lines
+    allocated_taxes: list[Decimal] = []
+    allocated_so_far = Decimal("0.00")
+    for index, taxable_amount in enumerate(taxable_amounts):
+        if index == len(taxable_amounts) - 1:
+            tax_amount = declared_tax - allocated_so_far
+        else:
+            tax_amount = (declared_tax * taxable_amount / declared_taxable).quantize(Decimal("0.01"))
+            allocated_so_far += tax_amount
+        allocated_taxes.append(tax_amount)
+    return tuple(
+        replace(
+            line,
+            vat_rate=summary.rate,
+            tax_amount=f"{tax_amount:.2f}",
+            gross_amount=_format_sum(line.taxable_amount, f"{tax_amount:.2f}"),
+            tax_scheme_code=summary.tax_scheme_code,
+            tax_category_code=summary.tax_category_code,
+            exemption_reason_code=summary.exemption_reason_code,
+            vat_group_id=summary.vat_group_id,
+            evidence=(*line.evidence, "xml:TaxSubtotal[header-pro-rata]"),
+        )
+        for line, tax_amount in zip(lines, allocated_taxes, strict=True)
+    )
+
+
+def _complete_single_header_vat_taxable(
+    lines: tuple[CanonicalInvoiceLine, ...],
+    vat_summary: tuple[CanonicalVatSummaryLine, ...],
+) -> tuple[CanonicalVatSummaryLine, ...]:
+    if len(vat_summary) != 1 or not lines or vat_summary[0].taxable_amount:
+        return vat_summary
+    summary = vat_summary[0]
+    try:
+        source_taxable = sum((Decimal(line.taxable_amount) for line in lines), Decimal("0.00"))
+        declared_tax = Decimal(summary.tax_amount)
+        rate = Decimal(summary.rate)
+    except (InvalidOperation, ValueError):
+        return vat_summary
+    expected_tax = (source_taxable * rate / Decimal("100")).quantize(Decimal("0.01"))
+    if source_taxable <= 0 or abs(expected_tax - declared_tax) > Decimal("0.05"):
+        return vat_summary
+    return (
+        replace(
+            summary,
+            taxable_amount=f"{source_taxable:.2f}",
+            evidence=(*summary.evidence, "xml:TaxSubtotal[taxable-derived-from-lines]"),
+        ),
+    )
+
+
 def build_xml_canonical_invoice(root: ET.Element) -> CanonicalInvoice:
     supplier = _party_details(root, "AccountingSupplierParty")
     customer = _party_details(root, "AccountingCustomerParty")
@@ -388,6 +550,35 @@ def build_xml_canonical_invoice(root: ET.Element) -> CanonicalInvoice:
         if billing_reference is not None
         else None
     )
+    vat_total, special_tax_total = _tax_subtotal_amounts(root)
+    tax_components = _canonical_tax_components(root)
+    line_items = _canonical_invoice_lines(root)
+    vat_summary = _canonical_vat_summary(root)
+    vat_summary = _complete_single_header_vat_taxable(line_items, vat_summary)
+    if len(line_items) == 1 and not line_items[0].vat_rate and len(vat_summary) == 1:
+        line = line_items[0]
+        vat = vat_summary[0]
+        gross = _format_sum(line.taxable_amount, vat.tax_amount)
+        line_items = (
+            replace(
+                line,
+                vat_rate=vat.rate,
+                tax_amount=vat.tax_amount,
+                gross_amount=gross,
+                tax_scheme_code=vat.tax_scheme_code,
+                tax_category_code=vat.tax_category_code,
+                exemption_reason_code=vat.exemption_reason_code,
+                vat_group_id=vat.vat_group_id,
+                evidence=(*line.evidence, "xml:TaxSubtotal[header-single-line]"),
+            ),
+        )
+    else:
+        line_items = _assign_single_header_vat_group_to_lines(
+            line_items,
+            vat_summary,
+            special_tax_total=special_tax_total,
+        )
+    monetary_components = _canonical_monetary_components(line_items)
     invoice = CanonicalInvoice(
         source="xml",
         supplier_party=CanonicalInvoiceParty(
@@ -422,17 +613,71 @@ def build_xml_canonical_invoice(root: ET.Element) -> CanonicalInvoice:
             ),
             evidence=("xml:InvoiceHeader",),
         ),
-        line_items=_canonical_invoice_lines(root),
-        vat_summary=_canonical_vat_summary(root),
+        line_items=line_items,
+        vat_summary=vat_summary,
+        tax_components=tax_components,
+        monetary_components=monetary_components,
         totals=CanonicalInvoiceTotals(
-            goods_services_total=_first_amount_under(legal_totals, ("LineExtensionAmount",)),
-            vat_total=_first_amount(root, ("TaxAmount",)),
+            goods_services_total=(
+                _first_amount_under(legal_totals, ("TaxExclusiveAmount",))
+                or _first_amount_under(legal_totals, ("LineExtensionAmount",))
+            ),
+            allowance_total=_first_amount_under(legal_totals, ("AllowanceTotalAmount",)),
+            vat_total=vat_total or _first_amount(root, ("TaxAmount",)),
+            special_tax_total=special_tax_total,
             tax_inclusive_total=_first_amount_under(legal_totals, ("TaxInclusiveAmount",)),
             payable_total=_first_amount_under(legal_totals, ("PayableAmount",)),
             evidence=("xml:LegalMonetaryTotal",),
         ),
     )
     return with_validation(invoice)
+
+
+UTILITY_HEADER_GROUNDED_LINE_REASONS = frozenset(
+    {
+        "line_vat_rate_missing",
+        "line_tax_amount_missing",
+        "line_total_mismatch",
+        "vat_total_mismatch",
+        "vat_summary_taxable_mismatch",
+        "vat_summary_tax_mismatch",
+        "vat_group_lines_missing",
+        "vat_group_unexpected_lines",
+        "vat_group_taxable_mismatch",
+        "vat_group_tax_mismatch",
+        "line_gross_total_mismatch",
+    }
+)
+
+
+def _mark_header_grounded_utility_partial(
+    invoice: CanonicalInvoice,
+    *,
+    service_profile: str,
+) -> CanonicalInvoice:
+    reasons = set(invoice.validation.reason_codes)
+    if (
+        not service_profile
+        or invoice.validation.status != "invalid"
+        or not reasons
+        or not reasons.issubset(UTILITY_HEADER_GROUNDED_LINE_REASONS)
+        or not invoice.supplier_party.tax_id
+        or not invoice.customer_party.tax_id
+        or not invoice.totals.payable_total
+        or not invoice.totals.vat_total
+        or not invoice.tax_components
+        or not any((_decimal_text(line.taxable_amount) or "0") != "0.00" for line in invoice.line_items)
+    ):
+        return invoice
+    return replace(
+        invoice,
+        validation=CanonicalInvoiceValidation(
+            status="partial_valid",
+            reason_codes=invoice.validation.reason_codes,
+            evidence=(*invoice.validation.evidence, "xml:utility-header-grounded"),
+        ),
+        extraction_notes=tuple(dict.fromkeys((*invoice.extraction_notes, "utility_header_grounded_partial"))),
+    )
 
 
 def parse_xml_invoice(path: Path) -> ParsedInvoice:
@@ -486,6 +731,10 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
     )
     invoice_type_code = _first_text(root, ("InvoiceTypeCode",))
     canonical_invoice = build_xml_canonical_invoice(root)
+    canonical_invoice = _mark_header_grounded_utility_partial(
+        canonical_invoice,
+        service_profile=provider_match.service_profile,
+    )
     utility_exception_markers = detect_utility_invoice_markers(
         service_profile=provider_match.service_profile,
         source="xml",
@@ -504,11 +753,11 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         issue_date=issue_date,
         tax_ids=_tax_ids(root),
         vat_rates=_vat_rates(root),
-        goods_services_total=_first_amount(root, ("LineExtensionAmount",)),
-        vat_total=_first_amount(root, ("TaxAmount",)),
-        special_tax_total="",
-        tax_inclusive_total=_first_amount(root, ("TaxInclusiveAmount",)),
-        payable_total=payable_total,
+        goods_services_total=canonical_invoice.totals.goods_services_total,
+        vat_total=canonical_invoice.totals.vat_total,
+        special_tax_total=canonical_invoice.totals.special_tax_total,
+        tax_inclusive_total=canonical_invoice.totals.tax_inclusive_total,
+        payable_total=canonical_invoice.totals.payable_total or payable_total,
         risk_flags=cancellation_risk_flags,
         suggested_route=route,
         parse_notes=tuple(notes),
@@ -526,4 +775,6 @@ def parse_xml_invoice(path: Path) -> ParsedInvoice:
         provider_match_reason=provider_match.reason_code,
         provider_directory_version=provider_match.directory_version,
         utility_exception_markers=utility_exception_markers,
+        tax_components=canonical_invoice.tax_components,
+        monetary_components=canonical_invoice.monetary_components,
     )

@@ -37,16 +37,21 @@ from app.domain.openai_provider import (
     CLOUDFLARE_CHAT_COMPLETIONS_URL_TEMPLATE,
     DEFAULT_CEREBRAS_MODEL,
     DEFAULT_CLOUDFLARE_MODEL,
+    DEFAULT_GEMINI_MODEL,
     DEFAULT_GROQ_MODEL,
     DEFAULT_NVIDIA_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_MODEL,
     DEFAULT_SAMBANOVA_MODEL,
+    DEFAULT_XKIRO_MODEL,
+    GEMINI_GENERATE_CONTENT_URL_TEMPLATE,
     NVIDIA_CHAT_COMPLETIONS_URL,
     OPENROUTER_CHAT_COMPLETIONS_URL,
     SAMBANOVA_CHAT_COMPLETIONS_URL,
+    XKIRO_CHAT_COMPLETIONS_URL,
     ChatCompletionsAccountingProvider,
     FallbackAccountingProvider,
+    GeminiAccountingProvider,
     GroqAccountingProvider,
     OpenAiAccountingProvider,
     TaskRoutingAccountingProvider,
@@ -350,6 +355,17 @@ def _verified_rule_authority_digest(authorities: tuple[object, ...]) -> str:
 
 
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
+    if provider_name == "gemini":
+        model = source.get("FISORA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        return GeminiAccountingProvider(
+            api_key=source.get("GEMINI_API_KEY", ""),
+            model=model,
+            generate_content_url=source.get("FISORA_GEMINI_GENERATE_CONTENT_URL", "")
+            or GEMINI_GENERATE_CONTENT_URL_TEMPLATE.format(model=model),
+            timeout_seconds=float(source.get("FISORA_GEMINI_TIMEOUT_SECONDS", "60")),
+            max_output_tokens=int(source.get("FISORA_GEMINI_MAX_OUTPUT_TOKENS", "16384")),
+            max_inline_pdf_bytes=int(source.get("FISORA_GEMINI_MAX_INLINE_PDF_BYTES", "50000000")),
+        )
     if provider_name == "nvidia":
         return ChatCompletionsAccountingProvider(
             api_key=source.get("NVIDIA_API_KEY", ""),
@@ -412,6 +428,19 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
             provider_name="sambanova",
             key_name="SAMBANOVA_API_KEY",
         )
+    if provider_name == "xkiro":
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("XKIRO_API_KEY", ""),
+            model=source.get("FISORA_XKIRO_MODEL", DEFAULT_XKIRO_MODEL),
+            chat_completions_url=source.get(
+                "FISORA_XKIRO_CHAT_COMPLETIONS_URL",
+                XKIRO_CHAT_COMPLETIONS_URL,
+            ),
+            provider_name="xkiro",
+            key_name="XKIRO_API_KEY",
+            timeout_seconds=float(source.get("FISORA_XKIRO_TIMEOUT_SECONDS", "60")),
+            max_tokens=int(source.get("FISORA_XKIRO_MAX_TOKENS", "1024")),
+        )
     return OpenAiAccountingProvider(
         api_key=source.get("OPENAI_API_KEY", ""),
         model=source.get("FISORA_OPENAI_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL)),
@@ -419,6 +448,7 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
 
 
 SUPPORTED_ACCOUNTING_PROVIDERS = {
+    "gemini",
     "openai",
     "groq",
     "openrouter",
@@ -426,6 +456,7 @@ SUPPORTED_ACCOUNTING_PROVIDERS = {
     "nvidia",
     "cloudflare",
     "sambanova",
+    "xkiro",
 }
 
 
@@ -495,7 +526,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_CANONICAL_PROVIDER_CHAIN",
-            preferred_order=("nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
+            preferred_order=("gemini", "xkiro", "nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
     )
@@ -503,7 +534,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_CLASSIFICATION_PROVIDER_CHAIN",
-            preferred_order=("nvidia", "groq", "cerebras", "cloudflare", "sambanova", "openrouter", "openai"),
+            preferred_order=("gemini", "nvidia", "groq", "cerebras", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
     )
@@ -511,7 +542,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_COUNTERPARTY_PROVIDER_CHAIN",
-            preferred_order=("nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
+            preferred_order=("gemini", "nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
     )
@@ -570,8 +601,8 @@ def _ai_attention_status(result: dict[str, Any]) -> str:
 def _draft_status(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "wrong_document_type"
-    if result.get("simulated_status") == "no_posting_suggested":
-        return "no_posting_suggested"
+    if result.get("simulated_status") in {"no_posting", "no_posting_suggested"}:
+        return "no_posting"
     if attention := _ai_attention_status(result):
         return attention
     if result.get("draft_lines"):
@@ -582,7 +613,7 @@ def _draft_status(result: dict[str, Any]) -> str:
 def _accountant_summary(result: dict[str, Any]) -> str:
     if result.get("document_validation_status") == "unexpected_document":
         return "Bu dosya beklenen fatura/ekstre yapisinda gorunmuyor. Dogru belge yeniden istenmeli."
-    if result.get("simulated_status") == "no_posting_suggested":
+    if result.get("simulated_status") in {"no_posting", "no_posting_suggested"}:
         return str(result.get("export_gate_reason") or "Kaynak belge icin muhasebe kaydi onerilmiyor.")
     if _ai_attention_status(result) == "ai_retry_required":
         return "AI ajani mesgul veya karar tamamlanamadi; belge tekrar denenecek."

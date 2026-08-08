@@ -253,8 +253,8 @@ def run(
         "completed_job_count": sum(record["job_status"] == "completed" for record in records),
         "failed_job_count": sum(record["job_status"] == "failed" for record in records),
         "populated_editable_draft": sum(record["draft_line_count"] > 0 for record in records),
-        "no_posting_suggested": sum(
-            record["simulated_status"] == "no_posting_suggested"
+        "no_posting": sum(
+            record["simulated_status"] in {"no_posting", "no_posting_suggested"}
             for record in records
         ),
         "direction_mismatch": sum(

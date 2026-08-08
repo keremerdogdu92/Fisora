@@ -13,6 +13,8 @@ PROVIDER_KEY_ENV = {
     "nvidia": "NVIDIA_API_KEY",
     "cloudflare": "CLOUDFLARE_API_TOKEN",
     "sambanova": "SAMBANOVA_API_KEY",
+    "xkiro": "XKIRO_API_KEY",
+    "gemini": "GEMINI_API_KEY",
 }
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
@@ -20,6 +22,8 @@ DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
 DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
 DEFAULT_CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-120b"
 DEFAULT_SAMBANOVA_MODEL = "gpt-oss-120b"
+DEFAULT_XKIRO_MODEL = "anthropic/claude-opus-4.8"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 CAPACITY_RESERVE_PERCENT = 25
 CAPACITY_RETRY_MULTIPLIER = 2
 TAVILY_CREDITS_PER_RESEARCH = 2
@@ -132,11 +136,13 @@ def _provider_chain(env: Mapping[str, str]) -> list[str]:
     provider_name = str(env.get("FISORA_AI_PROVIDER", "")).strip().lower()
     if not chain and provider_name and provider_name != "disabled":
         chain = [provider_name]
-    supported = {"groq", "openrouter", "cerebras", "openai", "nvidia", "cloudflare", "sambanova"}
+    supported = {"groq", "openrouter", "cerebras", "openai", "nvidia", "cloudflare", "sambanova", "xkiro", "gemini"}
     return [provider for provider in chain if provider in supported]
 
 
 def _provider_model(provider: str, env: Mapping[str, str]) -> str:
+    if provider == "gemini":
+        return str(env.get("FISORA_GEMINI_MODEL") or DEFAULT_GEMINI_MODEL)
     if provider == "nvidia":
         return str(env.get("FISORA_NVIDIA_MODEL") or DEFAULT_NVIDIA_MODEL)
     if provider == "groq":
@@ -149,6 +155,8 @@ def _provider_model(provider: str, env: Mapping[str, str]) -> str:
         return str(env.get("FISORA_CLOUDFLARE_MODEL") or DEFAULT_CLOUDFLARE_MODEL)
     if provider == "sambanova":
         return str(env.get("FISORA_SAMBANOVA_MODEL") or DEFAULT_SAMBANOVA_MODEL)
+    if provider == "xkiro":
+        return str(env.get("FISORA_XKIRO_MODEL") or DEFAULT_XKIRO_MODEL)
     return str(env.get("FISORA_OPENAI_MODEL") or env.get("FISORA_AI_MODEL") or "")
 
 

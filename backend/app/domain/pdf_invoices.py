@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Mapping
 
 from app.domain.canonical_invoices import (
+    CanonicalMonetaryComponent,
+    CanonicalTaxComponent,
     CanonicalInvoice,
     CanonicalExtractionPolicy,
     CanonicalExtractionRequest,
@@ -20,6 +22,8 @@ from app.domain.canonical_invoices import (
     CanonicalInvoiceValidation,
     CanonicalVatSummaryLine,
     canonical_invoice_from_ai_payload,
+    normalize_monetary_component,
+    normalize_tax_component,
     validate_line_decision_coverage,
     with_validation,
 )
@@ -180,6 +184,8 @@ class ParsedInvoice:
     provider_match_reason: str = ""
     provider_directory_version: int = 0
     utility_exception_markers: tuple[str, ...] = ()
+    tax_components: tuple[CanonicalTaxComponent, ...] = ()
+    monetary_components: tuple[CanonicalMonetaryComponent, ...] = ()
 
 
 def extract_pdf_pages(path: Path) -> tuple[tuple[PdfPageText, ...], tuple[str, ...]]:
@@ -689,6 +695,27 @@ def build_pdf_canonical_invoice(
     ai_used: bool = False,
     extraction_notes: tuple[str, ...] = (),
 ) -> CanonicalInvoice:
+    special_tax_total = parsed_totals.get("special_tax_total", "")
+    tax_components = (
+        normalize_tax_component(
+            source_label="Belgede ayrı gösterilen özel vergi toplamı",
+            source_code="",
+            rate="",
+            taxable_amount="",
+            tax_amount=special_tax_total,
+            source_position="pdf:totals:special_tax_total",
+            evidence=("pdf_totals",),
+        ),
+    ) if special_tax_total and special_tax_total not in {"0", "0.00"} else ()
+    monetary_components = tuple(
+        normalize_monetary_component(
+            source_label=line.description,
+            source_amount=line.taxable_amount or line.amount_hint,
+            source_position=line.source_position or line.source,
+            evidence=(line.source_position or line.source,),
+        )
+        for line in line_item_details
+    )
     invoice = CanonicalInvoice(
         source="pdf_text",
         supplier_party=CanonicalInvoiceParty(
@@ -719,6 +746,8 @@ def build_pdf_canonical_invoice(
             )
             for line in vat_split_lines
         ),
+        tax_components=tax_components,
+        monetary_components=monetary_components,
         totals=CanonicalInvoiceTotals(
             goods_services_total=parsed_totals.get("goods_services_total", ""),
             vat_total=parsed_totals.get("vat_total", ""),
@@ -1271,6 +1300,8 @@ def _maybe_complete_canonical_with_ai(
     provider: object | None,
     policy: CanonicalExtractionPolicy | None,
     document_text: str,
+    document_bytes: bytes = b"",
+    document_mime_type: str = "application/pdf",
     deterministic: CanonicalInvoice,
     parsed_identity: dict[str, str],
     parsed_totals: dict[str, str],
@@ -1283,7 +1314,6 @@ def _maybe_complete_canonical_with_ai(
         provider is None
         or not effective_policy.enabled
         or effective_policy.max_provider_calls <= 0
-        or deterministic.validation.status == "valid"
     ):
         return deterministic
     extractor = getattr(provider, "extract_invoice_canonical", None)
@@ -1294,6 +1324,8 @@ def _maybe_complete_canonical_with_ai(
         payload = extractor(
             CanonicalExtractionRequest(
                 document_text=document_text,
+                document_bytes=document_bytes,
+                document_mime_type=document_mime_type,
                 deterministic_payload=_pdf_canonical_ai_payload(
                     canonical_invoice=deterministic,
                     parsed_identity=parsed_identity,
@@ -1513,6 +1545,14 @@ def parse_pdf_invoice(
         provider=canonical_extraction_provider,
         policy=canonical_extraction_policy,
         document_text=text,
+        document_bytes=(
+            path.read_bytes()
+            if canonical_extraction_provider is not None
+            and canonical_extraction_policy is not None
+            and canonical_extraction_policy.enabled
+            else b""
+        ),
+        document_mime_type="application/pdf",
         deterministic=canonical_invoice,
         parsed_identity=parsed_identity,
         parsed_totals=parsed_totals,
@@ -1573,6 +1613,8 @@ def parse_pdf_invoice(
         provider_match_kind=provider_match.match_kind,
         provider_match_reason=provider_match.reason_code,
         provider_directory_version=provider_match.directory_version,
+        tax_components=canonical_invoice.tax_components,
+        monetary_components=canonical_invoice.monetary_components,
     )
 
 

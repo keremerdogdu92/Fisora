@@ -1,7 +1,7 @@
 # Fisero Canonical Decision Register
 
 Status: Living working document
-Last updated: 2026-07-18
+Last updated: 2026-08-08
 Owners: Product owner and Fisero planning process
 
 ## Purpose
@@ -26,6 +26,45 @@ Status: Accepted
   accountant-useful draft journal entry that can be approved with little or no
   change.
 - Review is a safety mechanism, not the product goal.
+- `export_ready` is the normal target when source evidence, accounting meaning,
+  balance, and client-account authority are sufficient. A processing mode, an
+  AI-assisted decision, or a non-material source-detail gap must not by itself
+  downgrade a complete draft to `review_required`.
+- A missing evidence component blocks only the dependent action: for example,
+  unavailable line-level tax allocation blocks automatic tax allocation or
+  export, but must not discard independently supported parties, direction,
+  totals, account candidates, or a complete draft journal.
+- For electricity, natural gas, water, telecom, and similar utility invoices,
+  non-VAT consumption/communication charges and taxes are part of the related
+  utility expense. Deductible VAT remains a separate VAT posting. The tenant's
+  chart determines the account codes; Fisero carries only this accounting
+  meaning.
+- A device, connection, or installment component billed on a recurring telecom
+  invoice is included in that period's related phone or internet expense. It
+  does not cause Fisero to invent an asset or a separate asset posting, and the
+  same source component is not suppressed merely because it may recur.
+- **Pinned tax-component boundary:** every source adapter preserves explicit
+  tax observations (label/code, amount, rate, and source evidence). A common
+  normalization layer maps those observations to a canonical tax kind; one
+  application-wide accounting policy then maps that kind to an accounting
+  treatment, and the tenant chart supplies the selectable accounts. ÖİV is
+  normalized as `special_communication_tax` but its accounting treatment stays
+  `unresolved` until the controlled, source-grounded AI experiment is assessed;
+  it is not pre-labelled as KKEG. KDV and utility consumption taxes remain
+  distinct. Unknown non-VAT taxes are never silently classified by an adapter
+  or invented by AI.
+- **ÖİV experiment evidence (2026-08-08):** the controlled experiment sent two
+  real telecom UBL tax components to the configured AI chain twice, exposed
+  only source tax evidence and four real tenant-chart candidates, and included
+  no KKEG policy hint. All four responses were schema-valid but selected three
+  different accounts (`760.03.010`, `689.01`, and `770.02.001`). This is not a
+  trustworthy automatic account decision. Therefore ÖİV remains
+  `special_communication_tax/unresolved`; the rest of the invoice draft remains
+  usable and only the ÖİV account decision blocks export.
+- A fully discounted or otherwise zero-payable invoice remains visible as a
+  valid invoice with its source lines and the explicit message that its payable
+  amount is zero and no journal will be created. It is not a parser failure,
+  unsupported document, cancellation, or hidden outcome.
 - Low confidence must not cause the system to abandon the journal entry or
   fall back lazily to a generic account. The system must still prepare its best
   complete draft and explain the uncertainty.
@@ -663,14 +702,15 @@ temporarily unavailable, the system uses a special outage-only behavior:
 - Try each configured, benchmark-approved provider once in the task-specific
   ordering before declaring the attempt unavailable. Task ordering may only
   reorder providers already admitted by the configured base chain.
-- Default semantic ordering is `Groq -> Cerebras -> OpenRouter`; canonical PDF
-  extraction and counterparty resolution prefer
-  `Cerebras -> Groq -> OpenRouter`. Statement work preserves the configured
-  base ordering. Environment overrides may reorder admitted providers per task.
-- Gemini is a candidate additional provider, but a free quota alone is not an
-  admission criterion. A provider may enter the production chain only with
-  valid credentials, cost controls, structured-output compatibility, accepted
-  accounting-quality evidence, and approved data-use/retention terms.
+- Gemini is the first provider for semantic account selection, counterparty
+  resolution, statement suggestions, and canonical PDF extraction. The
+  configured existing providers remain bounded fallbacks in their established
+  task-specific order. Environment overrides may reorder admitted providers per
+  task.
+- Gemini uses its native `generateContent` contract. Canonical PDF extraction
+  sends the original PDF as `application/pdf` together with the deterministic
+  payload and structured-output schema; other accounting tasks send structured
+  text input through the same provider boundary.
 - Do not repeatedly call the same failed provider inside one interactive
   request. Provider failover must have bounded timeouts so the document is not
   held indefinitely.
@@ -1137,11 +1177,11 @@ Official research references:
   API keys through it. Every candidate is integrated directly and accepted only
   after its official terms, privacy behavior, quota, output contract, and
   accounting benchmark are verified.
-- The expanded raw-invoice candidate chain is `Groq -> Cerebras -> Cloudflare
-  Workers AI -> SambaNova -> OpenRouter ZDR allowlist`. This is a candidate pool,
-  not permission to call every provider for every document. Health-aware
-  circuit breakers skip unavailable or exhausted providers and the first valid
-  benchmark-approved result wins.
+- The expanded raw-invoice provider chain begins with `Gemini`, followed by the
+  configured direct providers and OpenRouter allowlist. This is an ordered
+  fallback pool, not permission to call every provider for every document.
+  Health-aware circuit breakers skip unavailable or exhausted providers and the
+  first schema-valid result that passes deterministic acceptance wins.
 - This candidate membership/order is accepted for benchmarking. Individual
   models and providers enter the active chain only after Section 20 admission.
 - Synthetic invoices are not used as the primary product/accounting validation
@@ -1155,40 +1195,23 @@ Official research references:
 - Free tiers are benchmark/development capacity, not a production continuity
   SLA. Published model limits change and actual project/organization limits
   must be read from each provider console.
-- Gemini is technically easy to integrate through its OpenAI-compatible API and
-  supports structured output. Under Google's current terms, Turkey does not
-  receive the EEA/Switzerland/UK unpaid-service exception. In unpaid Gemini/API
-  usage, Google may use prompts and responses to improve products, human
-  reviewers may process them, and Google explicitly says not to submit personal,
-  sensitive, or confidential information. Development status, a single
-  accountant, temporary storage in Fisero, or later deletion from Fisero does
-  not change that provider-side contract.
-- Therefore unpaid Gemini may process only synthetic data or a locally sanitized
-  accounting projection. Sanitization removes or substitutes names, VKN/TCKN,
-  MERSIS/trade-registry values, addresses, phones, emails, IBAN/payment data,
-  invoice identifiers/UUIDs, QR/signature payloads, attachments, and any free
-  text capable of re-identifying the commercial relationship. Necessary
-  accounting structure such as direction, generalized line meaning, tax rate,
-  currency, and bucketed amounts may remain only when the combination cannot
-  reasonably identify a party or real transaction.
-- Because synthetic invoices are excluded from the main validation strategy,
-  unpaid Gemini is not part of the accounting-provider benchmark or fallback
-  chain. A future optional `line semantics lab` may send only locally approved,
-  generic product/service phrases with no identifying or confidential content.
-  Its permitted tasks are abbreviation expansion, generic product-versus-service
-  classification, line normalization, and candidate public search-term
-  generation. It cannot select the final account or claim full-draft quality.
-- This optional Gemini line path is deferred. The current code can add another
-  OpenAI-compatible accounting provider cheaply, but line-only Gemini needs a
-  separate payload contract, local sensitive-data detector, rejection policy,
-  result mapping, and evidence/audit path. Groq, Cerebras, Cloudflare, and other
-  real-data-eligible providers can perform the same line task with the complete
-  accounting context, so the expected incremental value does not currently
-  justify that implementation effort.
-- An active Cloud Billing project changes Gemini API use to the paid-service
-  data contract, under which prompts/responses are not used to improve Google
-  products. It can still generate charges; budget alerts are not a guaranteed
-  hard spending cap. This option is not treated as zero-budget capacity.
+- Gemini is an active native-PDF and structured-output provider for Fisero's
+  canonical extraction, semantic account selection, counterparty resolution,
+  statement suggestion, and related accounting AI tasks. Fisero may send real
+  documents and accounting context that were obtained and authorized for Fisero
+  development or operational processing to the unpaid Gemini API.
+- This is an explicit product decision. Google's current unpaid-service terms
+  state that submitted content and generated responses may be used to improve
+  Google products and may be processed by human reviewers. This known behavior
+  is accepted for the authorized Fisero data sent through this provider.
+- Gemini provider output is source-observation or semantic input only. It cannot
+  bypass tenant authorization, immutable source evidence, canonical line
+  identity, VAT and monetary reconciliation, real chart-account candidates,
+  accountant overrides, balanced journal construction, review requirements, or
+  export gates.
+- A later move to a Cloud Project with active billing changes credential,
+  quota, cost, and provider-data handling, but does not require a different
+  accounting authority model or deterministic safety boundary.
 - OpenRouter free models are useful for development and emergency experiments,
   but their published low limits are not suitable as a dependable production
   fallback. Production routing requires an explicit model/provider allowlist

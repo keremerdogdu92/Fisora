@@ -8,7 +8,7 @@ from uuid import uuid4
 
 DEFAULT_PRICE_PER_1K_CHARS: dict[str, Decimal] = {
     "openai": Decimal("0.0010"),
-    "gemini": Decimal("0.0008"),
+    "gemini": Decimal("0.0000"),
     "groq": Decimal("0.0000"),
     "manus": Decimal("0.0012"),
     "replay_provider": Decimal("0.0000"),

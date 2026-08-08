@@ -9,11 +9,13 @@ from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
 from app.domain.openai_provider import (
     DEFAULT_CEREBRAS_MODEL,
     DEFAULT_CLOUDFLARE_MODEL,
+    DEFAULT_GEMINI_MODEL,
     DEFAULT_GROQ_MODEL,
     DEFAULT_NVIDIA_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_MODEL,
     DEFAULT_SAMBANOVA_MODEL,
+    DEFAULT_XKIRO_MODEL,
 )
 from app.domain.rate_limits import rate_limit_config
 from app.domain.qnb_readiness import qnb_readiness_payload
@@ -41,6 +43,8 @@ def _ai_provider_chain(source: Mapping[str, str]) -> list[str]:
 
 def _ai_provider_model(provider_name: str, source: Mapping[str, str]) -> str:
     configured_ai_model = source.get("FISORA_AI_MODEL", "").strip()
+    if provider_name == "gemini":
+        return source.get("FISORA_GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
     if provider_name == "nvidia":
         return source.get("FISORA_NVIDIA_MODEL", "").strip() or DEFAULT_NVIDIA_MODEL
     if provider_name == "openai":
@@ -55,6 +59,8 @@ def _ai_provider_model(provider_name: str, source: Mapping[str, str]) -> str:
         return source.get("FISORA_CLOUDFLARE_MODEL", "").strip() or DEFAULT_CLOUDFLARE_MODEL
     if provider_name == "sambanova":
         return source.get("FISORA_SAMBANOVA_MODEL", "").strip() or DEFAULT_SAMBANOVA_MODEL
+    if provider_name == "xkiro":
+        return source.get("FISORA_XKIRO_MODEL", "").strip() or DEFAULT_XKIRO_MODEL
     return configured_ai_model
 
 
@@ -67,6 +73,8 @@ def _ai_provider_key_present(provider_name: str, source: Mapping[str, str]) -> b
         "nvidia": "NVIDIA_API_KEY",
         "cloudflare": "CLOUDFLARE_API_TOKEN",
         "sambanova": "SAMBANOVA_API_KEY",
+        "xkiro": "XKIRO_API_KEY",
+        "gemini": "GEMINI_API_KEY",
     }
     key_name = key_names.get(provider_name, "")
     return bool(key_name and source.get(key_name, "").strip())
@@ -89,6 +97,8 @@ def production_readiness_payload(
         "nvidia",
         "cloudflare",
         "sambanova",
+        "xkiro",
+        "gemini",
     }
     ai_provider_chain = _ai_provider_chain(source)
     ai_provider = ">".join(ai_provider_chain) if ai_provider_chain else "disabled"
@@ -102,6 +112,7 @@ def production_readiness_payload(
     cloudflare_key_present = bool(source.get("CLOUDFLARE_API_TOKEN", "").strip())
     cloudflare_account_id_present = bool(source.get("CLOUDFLARE_ACCOUNT_ID", "").strip())
     sambanova_key_present = bool(source.get("SAMBANOVA_API_KEY", "").strip())
+    gemini_key_present = bool(source.get("GEMINI_API_KEY", "").strip())
     if not ai_provider_chain:
         ai_provider_configured = True
     else:
@@ -371,6 +382,7 @@ def production_readiness_payload(
         "ai_cloudflare_key_present": cloudflare_key_present,
         "ai_cloudflare_account_id_present": cloudflare_account_id_present,
         "ai_sambanova_key_present": sambanova_key_present,
+        "ai_gemini_key_present": gemini_key_present,
         "rate_limit": {
             "enabled": rate_limit.enabled,
             "window_seconds": rate_limit.window_seconds,

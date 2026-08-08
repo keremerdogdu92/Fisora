@@ -1833,8 +1833,16 @@ class ResearchHarnessTests(unittest.TestCase):
             if item.get("attempt_id") == result.get("accepted_semantic_attempt_id")
         )
         self.assertEqual(accepted_attempt["validated_response"]["suggested_account_code"], "770.01")
-        synthesis_request = product_provider.requests[-1]
-        initial_request = product_provider.requests[0]
+        synthesis_request = next(
+            request
+            for request in product_provider.requests
+            if request.context.semantic_stage == "research_synthesis"
+        )
+        initial_request = next(
+            request
+            for request in product_provider.requests
+            if request.context.semantic_stage == "initial_account_decision"
+        )
         self.assertEqual(synthesis_request.context.semantic_stage, "research_synthesis")
         self.assertEqual(
             [item["canonical_line_id"] for item in synthesis_request.context.canonical_lines],
@@ -1956,6 +1964,18 @@ class ResearchHarnessTests(unittest.TestCase):
             write_invoice_xml(xml_path, line_name="Helix Force 200 RI isitme cihazi", supplier_name="Medikal Tedarik")
             store = JsonWorkflowStore(Path(temp_dir) / "phase0_store.json")
             queue_invoice(store, xml_path)
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {
+                        "raw_account_code": "153.01",
+                        "normalized_account_code": "153.01",
+                        "account_name": "Ticari mallar",
+                        "is_detail_account": True,
+                        "is_active": True,
+                    }
+                ],
+            )
             product_provider = FakeProductProvider(
                 {
                     "category": "isitme_cihazi",

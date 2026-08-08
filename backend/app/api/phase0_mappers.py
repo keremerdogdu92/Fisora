@@ -89,6 +89,7 @@ def account_selection_from_payload(payload: AccountSelectionPayload) -> AccountS
         next_customer_account=payload.next_customer_account,
         next_supplier_account=payload.next_supplier_account,
         stock_account=payload.stock_account,
+        non_deductible_account=payload.non_deductible_account,
         account_candidates={
             key: tuple(value) if isinstance(value, list) else tuple()
             for key, value in payload.account_candidates.items()

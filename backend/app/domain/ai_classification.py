@@ -92,6 +92,10 @@ class AiClassificationRequest:
     def to_schema_payload(self) -> dict[str, object]:
         if self.context.candidate_strategy.stage == "vat_group_account":
             return self._to_vat_group_account_payload()
+        if self.context.candidate_strategy.stage == "invoice_account":
+            return self._to_invoice_account_payload()
+        if self.context.candidate_strategy.stage == "counterparty_resolve":
+            return self._to_counterparty_resolve_payload()
         if self.context.semantic_stage in {"research_synthesis", "account_correction"}:
             payload = self._to_line_batch_payload()
             payload.update(
@@ -105,8 +109,6 @@ class AiClassificationRequest:
             return payload
         if self.context.candidate_strategy.stage == "family_select":
             return self._to_family_select_payload()
-        if self.context.candidate_strategy.stage == "counterparty_resolve":
-            return self._to_counterparty_resolve_payload()
         if self.context.candidate_strategy.stage == "line_batch":
             return self._to_line_batch_payload()
         account_candidates = _limited_strings(self.context.account_candidates, limit=max(self.context.account_candidate_limit, 0))
@@ -218,6 +220,54 @@ class AiClassificationRequest:
             "vat_group": vat_group,
             "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
             "counterparty": dict(self.context.invoice_counterparty),
+            "account_candidates": list(account_candidates),
+            "output_schema": {
+                "type": "object",
+                "properties": properties,
+                "required": list(properties),
+                "additionalProperties": False,
+            },
+        }
+
+    def _to_invoice_account_payload(self) -> dict[str, object]:
+        account_candidates = tuple(
+            dict(candidate)
+            for candidate in self.context.account_candidate_details[: max(self.context.account_candidate_details_limit, 0)]
+            if str(candidate.get("code") or "") in set(self.context.account_candidates)
+        )
+        candidate_codes = tuple(str(candidate.get("code") or "") for candidate in account_candidates)
+        canonical_lines = tuple(
+            {
+                "canonical_line_id": str(line.get("canonical_line_id") or ""),
+                "description": str(line.get("description") or "")[: self.max_input_chars],
+                "taxable_amount": str(line.get("taxable_amount") or ""),
+                "vat_rate": str(line.get("vat_rate") or ""),
+            }
+            for line in self.context.canonical_lines
+            if str(line.get("canonical_line_id") or "")
+        )
+        line_ids = tuple(str(line["canonical_line_id"]) for line in canonical_lines)
+        properties = {
+            "selected_account_code": {"type": "string", "enum": list(candidate_codes)},
+            "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+            "reason": {"type": "string", "maxLength": 240},
+            "possible_exception_line_ids": {
+                "type": "array",
+                "items": {"type": "string", "enum": list(line_ids)},
+                "maxItems": len(line_ids),
+            },
+            "needs_research": {"type": "boolean"},
+            "research_query": {"type": "string", "maxLength": 160},
+        }
+        return {
+            "stage": "invoice_account",
+            "direction": self.context.accounting_direction,
+            "direction_confidence": self.context.direction_confidence,
+            "direction_evidence": list(self.context.direction_evidence),
+            "service_profile": str(self.context.invoice_counterparty.get("service_profile") or ""),
+            "counterparty": dict(self.context.invoice_counterparty),
+            "client_activity": self.context.client_activity[: self.max_input_chars].strip(),
+            "canonical_lines": list(canonical_lines),
             "account_candidates": list(account_candidates),
             "output_schema": {
                 "type": "object",
@@ -398,35 +448,16 @@ class AiClassificationRequest:
             "counterparty_candidates": list(counterparty_candidates),
             "counterparty_candidate_details": list(self.context.counterparty_candidate_details),
             "invoice_counterparty": self.context.invoice_counterparty,
-            "allowed_categories": list(self.allowed_categories),
             "output_schema": {
                 "type": "object",
-                "required": [
-                    "category",
-                    "confidence",
-                    "reason",
-                    "evidence",
-                    "suggested_account_code",
-                    "suggested_counterparty_code",
-                    "risk_flags",
-                    "account_reason",
-                    "product_identity",
-                    "needs_research",
-                    "research_query",
-                ],
+                "required": ["selected_counterparty_code", "confidence", "reason", "needs_research", "research_query"],
                 "properties": {
-                    "category": {"type": "string", "enum": list(self.allowed_categories)},
-                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
-                    "reason": {"type": "string", "maxLength": 240},
-                    "evidence": {"type": "array", "items": {"type": "string"}, "maxItems": 5},
-                    "suggested_account_code": {"type": "string", "enum": [""]},
-                    "suggested_counterparty_code": {
+                    "selected_counterparty_code": {
                         "type": "string",
                         "enum": ["", *counterparty_candidates],
                     },
-                    "risk_flags": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
-                    "account_reason": {"type": "string", "maxLength": 240},
-                    "product_identity": {"type": "string", "maxLength": 160},
+                    "confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+                    "reason": {"type": "string", "maxLength": 240},
                     "needs_research": {"type": "boolean"},
                     "research_query": {"type": "string", "maxLength": 160},
                 },
@@ -621,7 +652,9 @@ SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
     '''
 )
 BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
-API_KEY_VALUE_PATTERN = re.compile(r"(?i)\b(?:sk|gsk|csk|tvly|or-v1|nvapi|cfai|snapi)-[A-Za-z0-9._-]{6,}")
+API_KEY_VALUE_PATTERN = re.compile(
+    r"(?i)\b(?:(?:sk|gsk|csk|tvly|or-v1|nvapi|cfai|snapi)-[A-Za-z0-9._-]{6,}|AIza[A-Za-z0-9_-]{20,})"
+)
 XML_INVOICE_DOCUMENT_PATTERN = re.compile(
     r"(?is)<(?:[A-Za-z0-9_.-]+:)?Invoice\b[^>]*>.*?</(?:[A-Za-z0-9_.-]+:)?Invoice\s*>"
 )
@@ -979,7 +1012,7 @@ def _semantic_attempt_record(
     )
     accepted = (
         accepted_result is not None
-        and candidate_stage in {"final_account", "line_batch", "vat_group_account"}
+        and candidate_stage in {"final_account", "line_batch", "vat_group_account", "invoice_account"}
         and not accepted_result.needs_research
         and not line_research_pending
     )
@@ -1255,9 +1288,109 @@ def _validate_vat_group_provider_payload(
     )
 
 
+def _validate_invoice_account_provider_payload(
+    payload: dict[str, Any],
+    request: AiClassificationRequest,
+) -> AiProviderClassification | None:
+    selected_account_code = _validated_suggestion(
+        payload.get("selected_account_code") or payload.get("suggested_account_code"),
+        request.context.account_candidates,
+    )
+    reason = str(payload.get("reason") or "").strip()
+    try:
+        confidence = int(payload.get("confidence", -1))
+    except (TypeError, ValueError):
+        return None
+    line_ids = tuple(
+        str(line.get("canonical_line_id") or "")
+        for line in request.context.canonical_lines
+        if str(line.get("canonical_line_id") or "")
+    )
+    raw_exceptions = payload.get("possible_exception_line_ids", [])
+    if not isinstance(raw_exceptions, list):
+        return None
+    exception_ids = tuple(str(line_id) for line_id in raw_exceptions if str(line_id))
+    if (
+        not selected_account_code
+        or not reason
+        or confidence < 0
+        or confidence > 100
+        or not line_ids
+        or len(exception_ids) != len(set(exception_ids))
+        or not set(exception_ids).issubset(set(line_ids))
+    ):
+        return None
+    possible_exceptions = set(exception_ids)
+    line_decisions = tuple(
+        {
+            "canonical_line_id": line_id,
+            "category": "bilinmeyen",
+            "confidence": confidence,
+            "product_identity": "",
+            "suggested_account_code": selected_account_code,
+            "reason": reason[:240],
+            "evidence": ("invoice_account",),
+            "needs_research": bool(payload.get("needs_research")),
+            "research_query": str(payload.get("research_query") or "").strip()[:160],
+            "risk_flags": (),
+            "possible_exception": line_id in possible_exceptions,
+        }
+        for line_id in line_ids
+    )
+    return AiProviderClassification(
+        category="bilinmeyen",
+        confidence=confidence,
+        reason=reason[:240],
+        evidence=("invoice_account",),
+        suggested_account_code=selected_account_code,
+        risk_flags=(),
+        account_reason=reason[:240],
+        needs_research=bool(payload.get("needs_research")),
+        research_query=str(payload.get("research_query") or "").strip()[:160],
+        line_decisions=line_decisions,
+    )
+
+
+def _validate_counterparty_provider_payload(
+    payload: dict[str, Any],
+    request: AiClassificationRequest,
+) -> AiProviderClassification | None:
+    selected_counterparty_code = _validated_suggestion(
+        payload.get("selected_counterparty_code") or payload.get("suggested_counterparty_code"),
+        request.context.counterparty_candidates,
+    )
+    reason = str(payload.get("reason") or "").strip()
+    needs_research = bool(payload.get("needs_research"))
+    try:
+        confidence = int(payload.get("confidence", -1))
+    except (TypeError, ValueError):
+        return None
+    if (
+        (not selected_counterparty_code and not needs_research)
+        or not reason
+        or confidence < 0
+        or confidence > 100
+    ):
+        return None
+    return AiProviderClassification(
+        category="bilinmeyen",
+        confidence=confidence,
+        reason=reason[:240],
+        evidence=("counterparty_resolve",),
+        suggested_counterparty_code=selected_counterparty_code,
+        account_reason=reason[:240],
+        needs_research=needs_research,
+        research_query=str(payload.get("research_query") or "").strip()[:160],
+    )
+
+
 def _validate_provider_payload(payload: dict[str, Any], request: AiClassificationRequest) -> AiProviderClassification | None:
     if request.context.candidate_strategy.stage == "vat_group_account":
         return _validate_vat_group_provider_payload(payload, request)
+    if request.context.candidate_strategy.stage == "invoice_account":
+        return _validate_invoice_account_provider_payload(payload, request)
+    if request.context.candidate_strategy.stage == "counterparty_resolve":
+        return _validate_counterparty_provider_payload(payload, request)
     category = str(payload.get("category", "")).strip()
     if category not in request.allowed_categories:
         return None
@@ -1312,7 +1445,7 @@ def _provider_validation_errors(
     attempted = str(
         (
             payload.get("selected_account_code") or payload.get("suggested_account_code")
-            if request.context.candidate_strategy.stage == "vat_group_account"
+            if request.context.candidate_strategy.stage in {"vat_group_account", "invoice_account"}
             else payload.get("suggested_account_code")
         )
         or ""
@@ -1345,9 +1478,26 @@ class StaticFirstClassifier:
         supplier_hint: str = "",
         context: AiClassificationContext | None = None,
     ) -> AiClassificationResult:
-        static = classify_product_line(raw_line, supplier_hint)
-        estimated_chars = min(len(raw_line) + len(supplier_hint), self.policy.max_input_chars * 2)
         resolved_context = context or AiClassificationContext()
+        static = classify_product_line(raw_line, supplier_hint)
+        utility_category = {
+            "electricity": "elektrik",
+            "fixed_internet": "internet",
+            "gsm_communication": "telefon",
+            "natural_gas": "dogalgaz",
+            "water": "su",
+        }.get(str(resolved_context.invoice_counterparty.get("service_profile") or ""), "")
+        if utility_category and static.category == "bilinmeyen":
+            static = ProductClassification(
+                raw_line=raw_line,
+                category=utility_category,
+                confidence=95,
+                evidence=(
+                    *static.evidence,
+                    f"verified_service_profile:{resolved_context.invoice_counterparty.get('service_profile')}",
+                ),
+            )
+        estimated_chars = min(len(raw_line) + len(supplier_hint), self.policy.max_input_chars * 2)
 
         if (
             resolved_context.semantic_stage == "initial_account_decision"
@@ -1436,6 +1586,20 @@ class StaticFirstClassifier:
                 semantic_attempts=(semantic_attempt,),
             )
         provider_result = _validate_provider_payload(provider_payload, request)
+        if (
+            provider_result is not None
+            and resolved_context.candidate_strategy.stage == "invoice_account"
+            and static.category != "bilinmeyen"
+        ):
+            provider_result = replace(
+                provider_result,
+                category=static.category,
+                evidence=(*provider_result.evidence, *static.evidence),
+                line_decisions=tuple(
+                    {**decision, "category": static.category}
+                    for decision in provider_result.line_decisions
+                ),
+            )
         provider_name = str(getattr(self.provider, "last_provider_name", "") or self.provider.provider_name)
         validation_errors = _provider_validation_errors(provider_payload, request, provider_result)
         if validation_errors and resolved_context.semantic_stage != "account_correction":

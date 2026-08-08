@@ -133,6 +133,45 @@ def build_sales_entry(
     )
 
 
+def build_component_purchase_entry(
+    *,
+    entry_date: str,
+    service_expense_account: str,
+    service_expense_amount: Decimal,
+    vat_account: str,
+    vat_amount: Decimal,
+    separate_expenses: Iterable[tuple[str, str, Decimal]] = (),
+    supplier_account: str,
+    supplier_total: Decimal,
+    supplier_description: str = "Satici cari",
+    supplier_tax_id: str | None = None,
+    document_ref: str | None = None,
+) -> JournalEntry:
+    lines: list[JournalLine] = []
+    if service_expense_amount:
+        lines.append(JournalLine(service_expense_account, "Hizmet gideri", debit=money(service_expense_amount), document_ref=document_ref))
+    if vat_amount:
+        lines.append(JournalLine(vat_account, "Indirilecek KDV", debit=money(vat_amount), document_ref=document_ref))
+    for account_code, description, amount in separate_expenses:
+        if amount:
+            lines.append(JournalLine(account_code, description, debit=money(amount), document_ref=document_ref))
+    lines.append(
+        JournalLine(
+            supplier_account,
+            supplier_description,
+            credit=money(supplier_total),
+            counterparty_tax_id=supplier_tax_id,
+            document_ref=document_ref,
+        )
+    )
+    return JournalEntry(
+        entry_type="component_purchase",
+        entry_date=entry_date,
+        description=f"Bilesen bazli alis faturasi {document_ref or ''}".strip(),
+        lines=tuple(lines),
+    )
+
+
 def build_purchase_return_entry(
     *,
     entry_date: str,

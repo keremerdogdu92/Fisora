@@ -108,6 +108,24 @@ from app.domain.vat_splits import VatSplitLine
 from app.domain.workspace_exports import build_workspace_export_package, export_candidates_from_workspace
 
 
+def _fake_product_response_for_stage(
+    request: AiClassificationRequest,
+    response: dict[str, object],
+) -> dict[str, object]:
+    stage = request.context.candidate_strategy.stage
+    if stage == "counterparty_resolve":
+        suggested = str(response.get("suggested_counterparty_code") or "")
+        selected = suggested if suggested in request.context.counterparty_candidates else ""
+        return {
+            "selected_counterparty_code": selected,
+            "confidence": int(response.get("confidence") or 0),
+            "reason": str(response.get("reason") or "Test cari kararı."),
+            "needs_research": not bool(selected),
+            "research_query": "" if selected else "Testte gerçek cari eşleşmesi bulunamadı.",
+        }
+    return response
+
+
 class FakeProductProvider:
     provider_name = "fake_llm"
 
@@ -123,7 +141,7 @@ class FakeProductProvider:
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
         self.requests.append(request)
-        return self.response
+        return _fake_product_response_for_stage(request, self.response)
 
 
 class SequentialFakeProductProvider:
@@ -135,7 +153,7 @@ class SequentialFakeProductProvider:
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, object]:
         self.requests.append(request)
-        return self.responses.pop(0)
+        return _fake_product_response_for_stage(request, self.responses.pop(0))
 
 
 class AcceptedSemanticAccountClassifier:
@@ -739,6 +757,25 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertEqual(summary["remaining_cap_usd"], "0.010000")
         self.assertFalse(summary["cap_exceeded"])
 
+    def test_ai_usage_summary_tracks_gemini_unpaid_tier_as_zero_cost(self) -> None:
+        events = [
+            ai_usage_payload(
+                build_ai_usage_event(
+                    client_id="client-1",
+                    provider="gemini",
+                    operation="worker_ai_assisted_draft",
+                    input_chars=1200,
+                    ai_used=True,
+                )
+            )
+        ]
+
+        summary = summarize_ai_usage(events, monthly_cap_usd=Decimal("0.01"))
+
+        self.assertEqual(summary["estimated_total_cost_usd"], "0.000000")
+        self.assertEqual(summary["remaining_cap_usd"], "0.010000")
+        self.assertFalse(summary["cap_exceeded"])
+
     def test_ai_capacity_normalizes_provider_limits_without_public_plan_language(self) -> None:
         groq = normalize_groq_rate_limit_headers(
             {
@@ -855,6 +892,22 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("cfai-private-123456", str(payload))
         self.assertNotIn("account-private-123456", str(payload))
         self.assertNotIn("snapi-private-123456", str(payload))
+
+    def test_ai_capacity_reports_gemini_without_secret(self) -> None:
+        payload = ai_capacity_payload(
+            env={
+                "FISORA_AI_PROVIDER_CHAIN": "gemini,groq",
+                "FISORA_GEMINI_MODEL": "gemini-2.5-flash-lite",
+                "GEMINI_API_KEY": "AIzaSyTEST_ONLY_1234567890abcdefghijklm",
+                "GROQ_API_KEY": "gsk-test",
+            }
+        )
+
+        document_agents = [agent for agent in payload["agents"] if agent["kind"] == "document"]
+        self.assertEqual(len(document_agents), 2)
+        self.assertTrue(document_agents[0]["configured"])
+        self.assertEqual(document_agents[0]["model"], "gemini-2.5-flash-lite")
+        self.assertNotIn("AIzaSyTEST_ONLY_1234567890abcdefghijklm", str(payload))
 
     def test_ai_capacity_reserves_retry_budget_for_documents(self) -> None:
         payload = ai_capacity_payload(
@@ -1286,6 +1339,32 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(payload["ai_cloudflare_account_id_present"])
         self.assertTrue(payload["ai_sambanova_key_present"])
 
+    def test_production_readiness_accepts_gemini_first_chain(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "mock_header_required",
+                    "FISORA_AI_PROVIDER": "gemini",
+                    "FISORA_AI_PROVIDER_CHAIN": "gemini,groq",
+                    "GEMINI_API_KEY": "AIzaSyTEST_ONLY_1234567890abcdefghijklm",
+                    "GROQ_API_KEY": "gsk-test",
+                },
+            )
+
+        self.assertTrue(payload["checks"]["ai_provider_configured"])
+        self.assertEqual(payload["ai_provider"], "gemini>groq")
+        self.assertEqual(payload["ai_model"], "gemini-2.5-flash-lite > openai/gpt-oss-20b")
+        self.assertTrue(payload["ai_gemini_key_present"])
+        self.assertNotIn("ai_gemini_key_missing", payload["warnings"])
+
     def test_production_readiness_requires_cloudflare_account_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -1622,6 +1701,25 @@ class Phase0DomainTests(unittest.TestCase):
         noisy_table_header = "KDV Oranı\nKDV Tutarı\n1\nSLIM TAPER\n"
         self.assertEqual(extract_vat_rates(noisy_table_header), ())
         self.assertEqual(extract_vat_rates("KATMA DEĞER VERGİSİ(%10)\n309,09 TL"), ("10",))
+
+    def test_pdf_vat_summary_prefers_tax_amount_immediately_before_wrapped_label(self) -> None:
+        from app.domain.vat_splits import _extract_summary_values
+
+        summary, totals = _extract_summary_values(
+            "\n".join(
+                (
+                    "Mal Hizmet Toplam Tutarı 3.090,90 TL",
+                    "Hesaplanan GERÇEK USULDE",
+                    "309,09 TL",
+                    "KATMA DEĞER VERGİSİ(%10)",
+                    "Vergiler Dahil Toplam Tutar 3.399,99 TL",
+                    "Ödenecek Tutar 3.399,99 TL",
+                )
+            )
+        )
+
+        self.assertEqual(summary["10"]["tax_amount"], Decimal("309.09"))
+        self.assertEqual(totals["tax_inclusive_total"], Decimal("3399.99"))
 
     def test_textless_pdf_invoice_is_reviewed_without_ocr(self) -> None:
         from unittest.mock import patch
@@ -2211,6 +2309,7 @@ Vergiler Dahil Toplam Tutar 120,00
             bank_account="102.01",
             selection_notes=(),
             revenue_account="600.20",
+            zero_vat_revenue_account="600.00.3065",
             sales_vat_account="391.20",
             customer_account="120.01",
         )
@@ -2384,6 +2483,105 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertEqual(canonical.line_items[0].vat_rate, "20")
         self.assertEqual(canonical.vat_summary[0].taxable_amount, "1000.00")
         self.assertEqual(canonical.validation.status, "valid")
+
+    def test_xml_invoice_reads_direct_tax_subtotal_percent_and_separates_special_tax(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>UTILITY2026000000001</cbc:ID><cbc:IssueDate>2026-08-08</cbc:IssueDate>
+  <cac:TaxTotal>
+    <cbc:TaxAmount>30.00</cbc:TaxAmount>
+    <cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>20.00</cbc:TaxAmount><cbc:Percent>20</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>
+    <cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>10.00</cbc:TaxAmount><cbc:Percent>10</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>4080</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>130.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>130.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Internet hizmeti</cbc:Name></cac:Item></cac:InvoiceLine>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "utility.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+
+        canonical = invoice.canonical_invoice
+        self.assertEqual(invoice.vat_rates, ("20",))
+        self.assertEqual(invoice.vat_total, "20.00")
+        self.assertEqual(invoice.special_tax_total, "10.00")
+        self.assertEqual(canonical.totals.vat_total, "20.00")
+        self.assertEqual(canonical.totals.special_tax_total, "10.00")
+        self.assertEqual(len(canonical.vat_summary), 1)
+        self.assertEqual(canonical.vat_summary[0].rate, "20")
+        self.assertEqual(canonical.vat_summary[0].tax_scheme_code, "0015")
+        self.assertEqual(canonical.validation.status, "valid")
+
+    def test_enerjisa_utility_ubl_keeps_consumption_tax_in_the_utility_total(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        path = ROOT / "private_samples" / "real_pilot" / "firma-7" / "invoices" / "purchases" / "4810577635_AS02026001010557.xml"
+        invoice = parse_xml_invoice(path)
+
+        canonical = invoice.canonical_invoice
+        self.assertEqual(invoice.service_profile, "electricity")
+        self.assertEqual(canonical.totals.goods_services_total, "1156.23")
+        self.assertEqual(canonical.totals.special_tax_total, "14.35")
+        self.assertEqual(canonical.totals.vat_total, "117.06")
+        self.assertEqual(canonical.validation.status, "valid")
+
+    def test_sivantos_fully_discounted_ubl_is_valid_zero_payable_evidence(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        path = ROOT / "private_samples" / "real_pilot" / "firma-7" / "invoices" / "purchases" / "3210362123_SV02026000010240.xml"
+        invoice = parse_xml_invoice(path)
+
+        canonical = invoice.canonical_invoice
+        self.assertEqual(canonical.totals.goods_services_total, "0.00")
+        self.assertEqual(canonical.totals.payable_total, "0.00")
+        self.assertEqual(canonical.validation.status, "valid")
+
+    def test_xml_invoice_allocates_single_header_vat_group_to_multiple_source_lines(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>UTILITY2026000000002</cbc:ID><cbc:IssueDate>2026-08-08</cbc:IssueDate>
+  <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>20.00</cbc:TaxAmount><cbc:Percent>20</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>120.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>120.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:LineExtensionAmount>60.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Internet</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:InvoiceLine><cbc:ID>2</cbc:ID><cbc:LineExtensionAmount>40.00</cbc:LineExtensionAmount><cac:Item><cbc:Name>Modem hizmeti</cbc:Name></cac:Item></cac:InvoiceLine>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "utility-multi.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+
+        canonical = invoice.canonical_invoice
+        self.assertEqual([line.vat_rate for line in canonical.line_items], ["20", "20"])
+        self.assertEqual([line.tax_amount for line in canonical.line_items], ["12.00", "8.00"])
+        self.assertEqual(canonical.validation.status, "valid")
+
+    def test_xml_invoice_reads_line_tax_subtotal_percent_outside_tax_category(self) -> None:
+        from app.domain.xml_invoices import parse_xml_invoice
+
+        xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>UTILITY2026000000003</cbc:ID><cbc:IssueDate>2026-08-08</cbc:IssueDate>
+  <cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>20.00</cbc:TaxAmount><cbc:Percent>20</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal><cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>0.00</cbc:TaxAmount><cbc:Percent>0</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal>
+  <cac:LegalMonetaryTotal><cbc:LineExtensionAmount>200.00</cbc:LineExtensionAmount><cbc:TaxInclusiveAmount>220.00</cbc:TaxInclusiveAmount><cbc:PayableAmount>220.00</cbc:PayableAmount></cac:LegalMonetaryTotal>
+  <cac:InvoiceLine><cbc:ID>1</cbc:ID><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cac:TaxTotal><cbc:TaxAmount>20.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>20.00</cbc:TaxAmount><cbc:Percent>20</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal><cac:Item><cbc:Name>Internet</cbc:Name></cac:Item></cac:InvoiceLine>
+  <cac:InvoiceLine><cbc:ID>2</cbc:ID><cbc:LineExtensionAmount>100.00</cbc:LineExtensionAmount><cac:TaxTotal><cbc:TaxAmount>0.00</cbc:TaxAmount><cac:TaxSubtotal><cbc:TaxableAmount>100.00</cbc:TaxableAmount><cbc:TaxAmount>0.00</cbc:TaxAmount><cbc:Percent>0</cbc:Percent><cac:TaxCategory><cac:TaxScheme><cbc:TaxTypeCode>0015</cbc:TaxTypeCode></cac:TaxScheme></cac:TaxCategory></cac:TaxSubtotal></cac:TaxTotal><cac:Item><cbc:Name>Istisna</cbc:Name></cac:Item></cac:InvoiceLine>
+</Invoice>"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "utility-line-tax.xml"
+            path.write_text(xml, encoding="utf-8")
+            invoice = parse_xml_invoice(path)
+
+        lines = invoice.canonical_invoice.line_items
+        self.assertEqual([line.vat_rate for line in lines], ["20", "0"])
+        self.assertEqual([line.tax_amount for line in lines], ["20.00", "0.00"])
+        self.assertEqual(invoice.canonical_invoice.validation.status, "valid")
 
     def test_xml_invoice_preserves_vat_identity_and_group_line_links(self) -> None:
         from app.domain.xml_invoices import parse_xml_invoice
@@ -2628,8 +2826,8 @@ Vergiler Dahil Toplam Tutar 120,00
 
         result = simulate_mechanical_invoice(invoice, selection, profile, intended_direction="purchase")
 
-        self.assertEqual(result.simulated_status, "no_posting_suggested")
-        self.assertEqual(result.draft_quality, "no_posting_suggested")
+        self.assertEqual(result.simulated_status, "no_posting")
+        self.assertEqual(result.draft_quality, "no_posting")
         self.assertEqual(result.draft_lines, ())
         self.assertEqual(result.export_status, "blocked")
         self.assertIn("cancelled_invoice_visible", result.review_reason_codes)
@@ -2806,6 +3004,45 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertEqual(canonical.line_items[0].vat_rate, "10")
         self.assertEqual(canonical.vat_summary[0].rate, "10")
         self.assertEqual(canonical.validation.status, "valid")
+
+    def test_pdf_canonical_ai_observes_a_valid_deterministic_pdf(self) -> None:
+        from types import SimpleNamespace
+
+        from app.domain.canonical_invoices import CanonicalExtractionPolicy, CanonicalInvoice, CanonicalInvoiceValidation
+        from app.domain.pdf_invoices import _maybe_complete_canonical_with_ai
+
+        deterministic = CanonicalInvoice(
+            source="pdf_text",
+            validation=CanonicalInvoiceValidation(status="valid"),
+        )
+
+        class Provider:
+            calls = 0
+            request_bytes = b""
+
+            def extract_invoice_canonical(self, request: object) -> dict[str, object]:
+                self.calls += 1
+                self.request_bytes = request.document_bytes
+                raise RuntimeError("test provider response")
+
+        provider = Provider()
+        completed = _maybe_complete_canonical_with_ai(
+            provider=provider,
+            policy=CanonicalExtractionPolicy(enabled=True),
+            document_text="PDF belgesinin tam metni",
+            document_bytes=b"%PDF-1.7\nnative source\n%%EOF",
+            document_mime_type="application/pdf",
+            deterministic=deterministic,
+            parsed_identity={},
+            parsed_totals={},
+            line_item_details=(),
+            vat_split=SimpleNamespace(status="", lines=()),
+            client_identity={},
+        )
+
+        self.assertEqual(provider.calls, 1)
+        self.assertEqual(provider.request_bytes, b"%PDF-1.7\nnative source\n%%EOF")
+        self.assertIn("canonical_ai_error:RuntimeError", completed.extraction_notes)
 
     def test_pdf_canonical_ai_keeps_deterministic_source_line_identity(self) -> None:
         from types import SimpleNamespace
@@ -4224,6 +4461,9 @@ Vergiler Dahil Toplam Tutar 120,00
             supplier_account="320.01",
             bank_account="102.01",
             selection_notes=(),
+            revenue_account="600.01",
+            sales_vat_account="391.01",
+            customer_account="120.01",
         )
 
         result = simulate_mechanical_invoice(invoice, selection, _task3_profile(), intended_direction="sales")
@@ -4367,6 +4607,7 @@ Vergiler Dahil Toplam Tutar 120,00
             bank_account="102.01",
             selection_notes=(),
             revenue_account="600.20",
+            zero_vat_revenue_account="600.00.3065",
             sales_vat_account="391.20",
             customer_account="120.01",
         )
@@ -5466,7 +5707,7 @@ Vergiler Dahil Toplam Tutar 120,00
                 for line in result.draft_lines
             ),
             (
-                {"account_code": "120.46141426750", "description": "", "debit": "27000.00", "credit": "0.00"},
+                {"account_code": "120.46141426750", "description": "Alici cari", "debit": "27000.00", "credit": "0.00"},
                 {"account_code": "600.01.010", "description": "Yuzde 10 Satislar", "debit": "0.00", "credit": "9090.91"},
                 {"account_code": "600.01.020", "description": "Yuzde 20 Satislar", "debit": "0.00", "credit": "14166.67"},
                 {"account_code": "391.01.010", "description": "Yuzde 10 Hesaplanan KDV", "debit": "0.00", "credit": "909.09", "tax_rate": "10.0000"},
@@ -6128,6 +6369,7 @@ Vergiler Dahil Toplam Tutar 120,00
             bank_account="102.01",
             selection_notes=(),
             revenue_account="600.20",
+            zero_vat_revenue_account="600.00.3065",
             sales_vat_account="391.20",
             customer_account="120.01",
         )
@@ -8347,11 +8589,11 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertEqual(result.ai_product_identity, "Helix Force 200 RI isitme cihazi")
         self.assertEqual(result.product_category, "isitme_cihazi")
         self.assertIn("ai:nace_477401", result.business_relevance_evidence)
-        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.2222222222", "600.01.000"])
+        self.assertEqual([line["account_code"] for line in result.draft_lines], ["120.01", "600.01.000"])
         self.assertTrue(all(line["account_code"] != "391.20" for line in result.draft_lines))
         self.assertIn("120 borc", result.ai_account_reason)
         self.assertFalse(result.ai_research_requested)
-        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(len(provider.requests), 2)
 
     def test_ai_response_can_request_research_without_overriding_export(self) -> None:
         invoice = ParsedInvoice(
@@ -8870,6 +9112,19 @@ Vergiler Dahil Toplam Tutar 120,00
                     "needs_research": False,
                     "research_query": "",
                 },
+                {
+                    "category": "business_equipment",
+                    "confidence": 94,
+                    "reason": "VKN ve unvan gerçek BERA ODYOLOJI carisiyle eşleşiyor.",
+                    "evidence": ["issuer_title", "issuer_tax_id"],
+                    "suggested_account_code": "",
+                    "suggested_counterparty_code": "320.1640731289",
+                    "risk_flags": [],
+                    "account_reason": "Gerçek cari eşleşmesi.",
+                    "product_identity": "BERA ODYOLOJI",
+                    "needs_research": False,
+                    "research_query": "",
+                },
             ]
         )
         classifier = StaticFirstClassifier(
@@ -8884,9 +9139,10 @@ Vergiler Dahil Toplam Tutar 120,00
 
         result = simulate_mechanical_invoice(invoice, selection, profile, product_classifier=classifier, processing_mode="ai_assisted_draft")
 
-        self.assertEqual(len(provider.requests), 2)
+        self.assertEqual(len(provider.requests), 3)
         self.assertEqual(provider.requests[0].context.candidate_strategy.stage, "family_select")
         self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "vat_group_account")
+        self.assertEqual(provider.requests[2].context.candidate_strategy.stage, "counterparty_resolve")
         final_payload = provider.requests[1].to_schema_payload()
         final_candidate_codes = {
             candidate["code"]
@@ -8903,6 +9159,7 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertEqual(result.selected_expense_account, "153.01.001")
         self.assertEqual(result.ai_stage_evidence[0]["ai_stage"], "family_select")
         self.assertEqual(result.ai_stage_evidence[1]["ai_stage"], "vat_group_account")
+        self.assertEqual(result.ai_stage_evidence[2]["ai_stage"], "counterparty_resolve")
 
     def test_family_stage_includes_all_plausible_direction_families_with_examples(self) -> None:
         invoice = ParsedInvoice(
@@ -9005,9 +9262,9 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertIn("153", family_records)
         self.assertIn("25", family_records)
         self.assertIn("760", family_records)
-        self.assertIn("191", family_records)
         self.assertEqual(family_records["153"]["direction_role"], "purchase_account")
-        self.assertEqual(family_records["191"]["direction_role"], "purchase_vat")
+        self.assertNotIn("191", family_records)
+        self.assertNotIn("320", family_records)
         self.assertGreaterEqual(family_records["153"]["candidate_count"], 34)
         self.assertTrue(family_records["153"]["examples"])
 
@@ -9205,10 +9462,10 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertEqual(len(provider.requests), 2)
         self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "counterparty_resolve")
         counterparty_payload = provider.requests[1].to_schema_payload()
-        self.assertEqual(len(counterparty_payload["counterparty_candidates"]), 87)
+        self.assertEqual(len(counterparty_payload["counterparty_candidates"]), 86)
         self.assertIn("320.001", counterparty_payload["counterparty_candidates"])
         self.assertIn("320.999", counterparty_payload["counterparty_candidates"])
-        self.assertIn("320.1640731289", counterparty_payload["counterparty_candidates"])
+        self.assertNotIn("320.1640731289", counterparty_payload["counterparty_candidates"])
         self.assertEqual(result.ai_suggested_counterparty_code, "320.999")
         self.assertEqual(result.ai_stage_evidence[-1]["ai_stage"], "counterparty_resolve")
         self.assertEqual([record["ai_stage"] for record in result.ai_account_stage_evidence], ["vat_group_account"])
@@ -9401,10 +9658,10 @@ Vergiler Dahil Toplam Tutar 120,00
 
         self.assertEqual(provider.requests[1].context.candidate_strategy.stage, "counterparty_resolve")
         counterparty_payload = provider.requests[1].to_schema_payload()
-        self.assertEqual(len(counterparty_payload["counterparty_candidates"]), 87)
+        self.assertEqual(len(counterparty_payload["counterparty_candidates"]), 86)
         self.assertIn("120.001", counterparty_payload["counterparty_candidates"])
         self.assertIn("120.999", counterparty_payload["counterparty_candidates"])
-        self.assertIn("120.5555555555", counterparty_payload["counterparty_candidates"])
+        self.assertNotIn("120.5555555555", counterparty_payload["counterparty_candidates"])
         self.assertEqual(result.ai_suggested_counterparty_code, "120.999")
 
     def test_counterparty_resolution_payload_includes_titles_tokens_and_identity_evidence(self) -> None:
@@ -9508,7 +9765,7 @@ Vergiler Dahil Toplam Tutar 120,00
         details = {record["code"]: record for record in payload["counterparty_candidate_details"]}
         self.assertEqual(details["320.999"]["name"], "BERA ODYOLOJI")
         self.assertIn("title_token_overlap", details["320.999"]["evidence"])
-        self.assertIn("tax_id_suggested_new_account", details["320.1640731289"]["evidence"])
+        self.assertNotIn("320.1640731289", details)
 
     def test_ai_can_route_business_equipment_to_stock_account_for_review_draft(self) -> None:
         invoice = ParsedInvoice(
@@ -9757,6 +10014,7 @@ Vergiler Dahil Toplam Tutar 120,00
             supplier_account="320.01",
             bank_account="102.01",
             selection_notes=(),
+            stock_account="153.01",
         )
         profile = ClientProfile(
             client_id="client-1",
@@ -9812,8 +10070,8 @@ Vergiler Dahil Toplam Tutar 120,00
             intended_direction="purchase",
         )
 
-        self.assertEqual(result.simulated_status, "no_posting_suggested")
-        self.assertEqual(result.draft_quality, "no_posting_suggested")
+        self.assertEqual(result.simulated_status, "no_posting")
+        self.assertEqual(result.draft_quality, "no_posting")
         self.assertEqual(result.draft_lines, ())
         self.assertIn("zero_payable_no_posting", result.review_reason_codes)
         self.assertIn("sifir", result.export_gate_reason.lower())
@@ -10254,6 +10512,28 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertIn("support candidate 153.01", serialized)
         self.assertNotIn("cfai-private-123456", serialized)
         self.assertNotIn("snapi-private-123456", serialized)
+
+    def test_semantic_attempt_redacts_gemini_api_key_value(self) -> None:
+        api_key = "AIzaSyTEST_ONLY_1234567890abcdefghijklm"
+        attempt = serialize_semantic_decision_attempt(
+            attempt_id="attempt-gemini-credential",
+            stage="initial_account_decision",
+            canonical_line_ids=("line-1",),
+            prompt_version="semantic-v1",
+            provider="gemini",
+            model="gemini-2.5-flash-lite",
+            candidate_account_codes=("153.01",),
+            candidate_counterparty_codes=("320.01",),
+            validated_response={
+                "reason": f"Provider note {api_key} supports candidate 153.01",
+            },
+            validation_errors=(),
+            accepted=False,
+        )
+
+        serialized = str(attempt)
+        self.assertIn("supports candidate 153.01", serialized)
+        self.assertNotIn(api_key, serialized)
 
     def test_semantic_attempt_redacts_document_payload_strings_but_keeps_useful_summaries(self) -> None:
         compact_invoice = (
@@ -11342,6 +11622,128 @@ TOPLAM: 1200.00"""
         self.assertIn("fisora_invoice_canonical_extraction", request_payload["messages"][1]["content"])
         self.assertEqual(response["supplier_party"]["tax_id"], "9999999999")
 
+    def test_gemini_provider_posts_native_pdf_structured_payload(self) -> None:
+        import base64
+
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+        from app.domain.openai_provider import GeminiAccountingProvider
+
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            headers: dict[str, str] = {}
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": (
+                                            '{"supplier_party":{"title":"MEDIKAL TEDARIK","tax_id":"9999999999"},'
+                                            '"customer_party":{"title":"ORHAN ELIBOL","tax_id":"1234567890"},'
+                                            '"line_items":[],"vat_summary":[],"totals":{}}'
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ],
+                    "usageMetadata": {
+                        "promptTokenCount": 24,
+                        "candidatesTokenCount": 12,
+                        "totalTokenCount": 36,
+                    },
+                }
+
+        class FakeClient:
+            def post(self, url: str, *, headers: dict[str, str], json: dict[str, object], timeout: float) -> FakeResponse:
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["json"] = json
+                captured["timeout"] = timeout
+                return FakeResponse()
+
+        pdf_bytes = b"%PDF-1.7\nsynthetic invoice\n%%EOF"
+        provider = GeminiAccountingProvider(
+            api_key="AIza-test-key-not-real",
+            http_client=FakeClient(),
+        )
+        response = provider.extract_invoice_canonical(
+            CanonicalExtractionRequest(
+                document_text="SATICI MEDIKAL TEDARIK\nSAYIN ORHAN ELIBOL",
+                document_bytes=pdf_bytes,
+                document_mime_type="application/pdf",
+                deterministic_payload={"invoice_no": "AAA2026000000005", "line_count": 0},
+                client_identity={"title": "ORHAN ELIBOL", "tax_id": "1234567890"},
+                max_input_chars=500,
+            )
+        )
+
+        request_payload = captured["json"]
+        parts = request_payload["contents"][0]["parts"]
+        self.assertEqual(
+            captured["url"],
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
+        )
+        self.assertEqual(captured["headers"]["x-goog-api-key"], "AIza-test-key-not-real")
+        self.assertEqual(parts[0]["inline_data"]["mime_type"], "application/pdf")
+        self.assertEqual(base64.b64decode(parts[0]["inline_data"]["data"]), pdf_bytes)
+        self.assertNotIn("document_text", parts[1]["text"])
+        self.assertEqual(request_payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(
+            request_payload["generationConfig"]["responseJsonSchema"],
+            CanonicalExtractionRequest(
+                document_text="",
+                deterministic_payload={"invoice_no": "AAA2026000000005", "line_count": 0},
+            ).to_schema_payload()["output_schema"],
+        )
+        self.assertEqual(request_payload["generationConfig"]["maxOutputTokens"], 16384)
+        self.assertEqual(provider.last_capacity_snapshot["usage"]["total_tokens"], 36)
+        self.assertEqual(response["supplier_party"]["tax_id"], "9999999999")
+
+    def test_gemini_provider_rejects_oversize_inline_pdf_before_http(self) -> None:
+        from app.domain.canonical_invoices import CanonicalExtractionRequest
+        from app.domain.openai_provider import GeminiAccountingProvider
+
+        class FailIfCalledClient:
+            def post(self, *args: object, **kwargs: object) -> object:
+                raise AssertionError("HTTP must not be called for an oversize PDF")
+
+        provider = GeminiAccountingProvider(
+            api_key="AIza-test-key-not-real",
+            http_client=FailIfCalledClient(),
+            max_inline_pdf_bytes=8,
+        )
+
+        with self.assertRaisesRegex(ValueError, "Gemini inline PDF exceeds 8 bytes"):
+            provider.extract_invoice_canonical(
+                CanonicalExtractionRequest(
+                    document_text="invoice",
+                    document_bytes=b"%PDF-oversize",
+                    document_mime_type="application/pdf",
+                )
+            )
+
+    def test_gemini_native_pdf_smoke_blocks_safely_without_key(self) -> None:
+        from scripts.smoke_gemini_native_pdf import run_smoke
+
+        result = run_smoke(
+            env={
+                "GEMINI_API_KEY": "",
+                "UNRELATED_SECRET": "must-never-appear",
+            }
+        )
+
+        self.assertEqual(result["status"], "BLOCKED_MISSING_GEMINI_API_KEY")
+        self.assertEqual(result["provider"], "gemini")
+        self.assertEqual(result["model"], "gemini-2.5-flash-lite")
+        self.assertNotIn("must-never-appear", json.dumps(result))
+
     def test_classification_prompts_are_stage_specific(self) -> None:
         from app.domain.ai_classification import AiCandidateStrategy, AiClassificationContext, AiClassificationRequest
         from app.domain.openai_provider import classification_instructions_for
@@ -11391,6 +11793,29 @@ TOPLAM: 1200.00"""
         )
         self.assertEqual(groq_only["canonical_extraction_provider"].provider_name, "groq")
         self.assertEqual(groq_only["product_classifier"].provider.classification_provider.provider_name, "groq")
+
+    def test_ai_runtime_uses_gemini_first_for_every_accounting_task(self) -> None:
+        from app.domain.openai_provider import GeminiAccountingProvider
+        from app.workflows.document_processing import build_ai_runtime_from_env
+
+        runtime = build_ai_runtime_from_env(
+            {
+                "FISORA_AI_PROVIDER": "gemini",
+                "FISORA_AI_PROVIDER_CHAIN": "gemini,groq",
+                "GEMINI_API_KEY": "AIza-test-key-not-real",
+                "GROQ_API_KEY": "gsk-test",
+            }
+        )
+
+        statement = runtime["statement_ai_provider"]
+        canonical = runtime["canonical_extraction_provider"]
+        routed = runtime["product_classifier"].provider
+        self.assertEqual(statement.provider_name, "gemini>groq")
+        self.assertEqual(canonical.provider_name, "gemini>groq")
+        self.assertEqual(routed.classification_provider.provider_name, "gemini>groq")
+        self.assertEqual(routed.counterparty_provider.provider_name, "gemini>groq")
+        self.assertIsInstance(statement.providers[0], GeminiAccountingProvider)
+        self.assertEqual(statement.providers[0].model, "gemini-2.5-flash-lite")
 
     def test_task_router_uses_counterparty_chain_only_for_counterparty_stage(self) -> None:
         from types import SimpleNamespace
@@ -11613,6 +12038,11 @@ TOPLAM: 1200.00"""
             supplier_account="320.01",
             bank_account="102.01",
             selection_notes=(),
+            stock_account="153.01",
+            account_candidates={
+                "purchase_expense": ({"code": "770.01", "name": "Genel gider", "reason": "gerçek hesap"},),
+                "supplier": ({"code": "320.01", "name": "Medikal Tedarik", "reason": "gerçek cari"},),
+            },
         )
         profile = ClientProfile(
             client_id="client-1",
@@ -11648,9 +12078,9 @@ TOPLAM: 1200.00"""
         self.assertEqual(result.ai_suggested_counterparty_code, "320.01")
         self.assertEqual(result.ai_risk_flags, ("accountant_review_required",))
         self.assertIn("gider ve cari", result.ai_account_reason)
-        self.assertEqual(result.export_status, "review_required")
+        self.assertEqual(result.export_status, "export_ready")
 
-    def test_ai_assisted_draft_mode_keeps_clean_draft_in_review(self) -> None:
+    def test_ai_assisted_draft_mode_allows_clean_draft_to_be_export_ready(self) -> None:
         invoice = ParsedInvoice(
             file_name="rexton.pdf",
             provider_hint="Rexton Medikal",
@@ -11681,6 +12111,7 @@ TOPLAM: 1200.00"""
             supplier_account="320.01",
             bank_account="102.01",
             selection_notes=(),
+            stock_account="153.01",
         )
         profile = ClientProfile(
             client_id="client-1",
@@ -11699,11 +12130,11 @@ TOPLAM: 1200.00"""
         controlled = simulate_mechanical_invoice(invoice, selection, profile, counterparty, processing_mode="controlled_automation")
 
         self.assertEqual(assisted.processing_mode, "ai_assisted_draft")
-        self.assertEqual(assisted.export_status, "review_required")
-        self.assertEqual(assisted.simulated_status, "review_required")
-        self.assertIn("ai_assisted_draft_requires_accountant_approval", assisted.review_reason_codes)
+        self.assertEqual(assisted.export_status, "export_ready")
+        self.assertEqual(assisted.simulated_status, "auto_ready")
+        self.assertNotIn("ai_assisted_draft_requires_accountant_approval", assisted.review_reason_codes)
         self.assertIn("balanced_entry", assisted.deterministic_checks)
-        self.assertIn("mustavir onayi olmadan export kapali", assisted.export_gate_reason)
+        self.assertIn("export paketine alinabilir", assisted.export_gate_reason)
         self.assertEqual(controlled.export_status, "export_ready")
         self.assertEqual(controlled.simulated_status, "auto_ready")
 

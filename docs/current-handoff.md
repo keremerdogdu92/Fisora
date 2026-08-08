@@ -1,5 +1,13 @@
 # Current Handoff
 
+### 2026-08-09 tax component accounting domain ve Gemini native PDF provider yayını (canlı)
+
+- `main` runtime release commit'i `b340738` canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`b340738`).
+- Canlı doğrulama: HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`).
+- Yayınlanan değişiklikler: Vergisel bileşen muhasebeleştirme etki analiz motoru (`tax_component_accounting.py`), Gemini native PDF extraction provider entegrasyonu, UBL/XML ve PDF fatura vergi bileşenleri ayrıştırma kurgusu ve ilgili unit testler (`test_tax_components.py`) `main` dalına dahil edilip canlıya dağıtıldı.
+- Sürüm öncesi backend `776` test (23 skipped DSN-gated), frontend `170` test, Next.js production build ve `git diff --check` başarıyla tamamlandı.
+
 ### 2026-08-01 accountant-first client onboarding frontend değişiklikleri yayını (canlı)
 
 - `main` runtime release commit'i `4e83de8` (feat commit `8012955` dahil) canlıya alındı.

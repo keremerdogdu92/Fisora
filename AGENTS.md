@@ -45,6 +45,7 @@ Use project skills for structured work:
 
 - `using-superpowers`: select the applicable workflow before work starts.
 - `brainstorming`: approve design before implementation.
+- `systematic-debugging`: find root cause before proposing fixes.
 - `test-driven-development`: use RED-GREEN-REFACTOR.
 - `writing-plans`: turn approved requirements into executable tasks.
 - `executing-plans`: execute sequential or tightly coupled tasks.
@@ -52,7 +53,7 @@ Use project skills for structured work:
 - `verification-before-completion`: require fresh evidence before status claims.
 
 Use the Fisero-specific skills in Specialist Routing for domain and release
-boundaries. `systematic-debugging` will be added separately when approved.
+boundaries.
 
 ## Decision Protocol
 

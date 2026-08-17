@@ -11,6 +11,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.domain.ai_classification import merge_semantic_attempt_result, sanitize_semantic_evidence
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
+from app.domain.storage_adapters import LocalDocumentStorage
 from app.domain.portal_access import (
     PORTAL_USERS_CLIENT_ID,
     build_portal_user_record,
@@ -35,6 +36,7 @@ from app.persistence.workflow_store import (
 )
 from app.persistence.normalized_accounting_repository import NormalizedAccountingRepository
 from app.persistence.learning_rule_repository import LearningRuleRepository
+from app.persistence.document_ai_artifact_repository import PostgresDocumentAiArtifactRepository
 from app.persistence.protected_corpus_repository import (
     ProtectedCorpusConflict,
     ProtectedCorpusRepository,
@@ -125,12 +127,28 @@ class PostgresWorkflowStore:
         accounting_store_target: str | None = None,
         normalized_repository: Any | None = None,
         protected_corpus_repository: Any | None = None,
+        document_ai_artifact_repository: Any | None = None,
     ) -> None:
         if not dsn.strip():
             raise ValueError("PostgreSQL workflow store requires a database dsn")
         self.dsn = dsn
         self.tenant_key = tenant_key or os.environ.get("FISORA_TENANT_KEY", "default")
         self.tenant_id = tenant_uuid(self.tenant_key)
+        self.document_ai_artifact_repository = (
+            document_ai_artifact_repository
+            or PostgresDocumentAiArtifactRepository(
+                dsn=self.dsn,
+                storage=LocalDocumentStorage(
+                    Path(
+                        os.environ.get(
+                            "FISORA_DOCUMENT_STORAGE_PATH",
+                            "backend/data/documents",
+                        )
+                    )
+                    / ".document-ai-artifacts"
+                ),
+            )
+        )
         self._connect_factory = connect
         self.accounting_store_target = (
             accounting_store_target
@@ -145,10 +163,64 @@ class PostgresWorkflowStore:
                 tenant_id=self.tenant_id,
                 json_value=self._json,
             )
+        self.artifact_scope_repository = (
+            self.normalized_repository
+            or NormalizedAccountingRepository(
+                connect=self._connect,
+                tenant_id=self.tenant_id,
+                json_value=self._json,
+            )
+        )
         self.protected_corpus_repository = protected_corpus_repository or ProtectedCorpusRepository(
             connect=self._connect,
             tenant_id=self.tenant_id,
             json_value=self._json,
+        )
+
+    def document_ai_artifact_scope(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+    ) -> dict[str, str]:
+        if not (
+            document.get("normalized_document_id")
+            and document.get("normalized_source_file_id")
+        ):
+            normalized = self.artifact_scope_repository.store_source_document(
+                client_id=client_id,
+                document=document,
+            )
+            document.update(normalized)
+        return {
+            "tenant_id": str(self.tenant_id),
+            "taxpayer_id": str(taxpayer_uuid(self.tenant_id, client_id)),
+            "document_id": str(
+                document.get("normalized_document_id")
+                or document.get("document_id")
+                or document.get("document_ref")
+                or ""
+            ),
+            "source_file_id": str(
+                document.get("normalized_source_file_id")
+                or document.get("source_file_id")
+                or ""
+            ),
+        }
+
+    def _delete_document_ai_raw_bodies(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+    ) -> int:
+        scope = self.document_ai_artifact_scope(client_id=client_id, document=document)
+        if not scope["source_file_id"]:
+            return 0
+        return self.document_ai_artifact_repository.delete_raw_bodies_for_source(
+            tenant_id=scope["tenant_id"],
+            taxpayer_id=scope["taxpayer_id"],
+            source_file_id=scope["source_file_id"],
         )
 
     def create_protected_corpus(self, **kwargs: Any) -> dict[str, Any]:
@@ -2443,6 +2515,11 @@ class PostgresWorkflowStore:
             storage_path = Path(str(document.get("storage_path") or ""))
             if delete_files and storage_path.exists() and storage_path.is_file():
                 storage_path.unlink()
+            if delete_files:
+                self._delete_document_ai_raw_bodies(
+                    client_id=client_id,
+                    document=document,
+                )
             document["status"] = "deleted"
             document["storage_status"] = "deleted"
             document["deleted_at"] = utc_now()
@@ -2519,6 +2596,11 @@ class PostgresWorkflowStore:
                 if delete_files and storage_path.exists() and storage_path.is_file():
                     storage_path.unlink()
                     deleted_file_count += 1
+                if delete_files:
+                    self._delete_document_ai_raw_bodies(
+                        client_id=client_id,
+                        document=document,
+                    )
                 document["status"] = "deleted"
                 document["storage_status"] = "deleted"
                 document["deleted_at"] = timestamp
@@ -2572,6 +2654,10 @@ class PostgresWorkflowStore:
                         if storage_path.exists() and storage_path.is_file():
                             storage_path.unlink()
                             deleted_file_count += 1
+                        self._delete_document_ai_raw_bodies(
+                            client_id=normalized_client_id,
+                            document=uploaded,
+                        )
                     cursor.execute(
                         """
                         delete from workflow_records
@@ -2826,7 +2912,21 @@ class PostgresWorkflowStore:
                         from workflow_records
                         where tenant_id = %s
                           and record_type = 'processing_job'
-                          and payload->>'status' = 'queued'
+                          and (
+                                payload->>'status' = 'queued'
+                                or (
+                                    payload->>'status' = 'retry_wait'
+                                    and nullif(payload->>'next_attempt_at', '') is not null
+                                    and case
+                                        when pg_input_is_valid(
+                                            payload->>'next_attempt_at',
+                                            'timestamp with time zone'
+                                        ) then
+                                            (payload->>'next_attempt_at')::timestamptz <= now()
+                                        else false
+                                    end
+                                )
+                          )
                         order by payload->>'created_at' asc, created_at asc
                         limit 1
                         for update skip locked

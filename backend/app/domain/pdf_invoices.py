@@ -188,6 +188,72 @@ class ParsedInvoice:
     monetary_components: tuple[CanonicalMonetaryComponent, ...] = ()
 
 
+def parsed_invoice_from_canonical(
+    canonical: CanonicalInvoice,
+    *,
+    file_name: str,
+) -> ParsedInvoice:
+    """Adapt native-provider facts to the existing draft simulation contract."""
+
+    header = canonical.header
+    supplier = canonical.supplier_party
+    customer = canonical.customer_party
+    totals = canonical.totals
+    line_details = tuple(
+        InvoiceLine(
+            raw_text=line.description,
+            description=line.description,
+            amount_hint=line.taxable_amount or line.gross_amount,
+            source="gemini_native_pdf",
+            source_position=line.source_position,
+            vat_rate=line.vat_rate,
+            taxable_amount=line.taxable_amount,
+            tax_amount=line.tax_amount,
+            gross_amount=line.gross_amount,
+        )
+        for line in canonical.line_items
+    )
+    direction = header.document_direction if header.document_direction in {"purchase", "sales"} else "uncertain"
+    return ParsedInvoice(
+        file_name=file_name,
+        provider_hint=supplier.title,
+        page_count=1,
+        text_extractable=False,
+        extracted_char_count=0,
+        scenario=header.scenario,
+        invoice_type=header.invoice_type,
+        invoice_no=header.invoice_no,
+        ettn=header.ettn,
+        issue_date=header.issue_date,
+        tax_ids=tuple(
+            dict.fromkeys(value for value in (supplier.tax_id, customer.tax_id) if value)
+        ),
+        vat_rates=tuple(dict.fromkeys(line.rate for line in canonical.vat_summary if line.rate)),
+        goods_services_total=totals.goods_services_total,
+        vat_total=totals.vat_total,
+        special_tax_total=totals.special_tax_total,
+        tax_inclusive_total=totals.tax_inclusive_total,
+        payable_total=totals.payable_total,
+        risk_flags=tuple(canonical.extraction_notes),
+        suggested_route="accounting_draft",
+        parse_notes=tuple(canonical.extraction_notes),
+        line_items=tuple(line.description for line in canonical.line_items),
+        line_item_details=line_details,
+        issuer_title=supplier.title,
+        issuer_tax_id=supplier.tax_id,
+        recipient_title=customer.title,
+        recipient_tax_id=customer.tax_id,
+        invoice_type_code=header.invoice_type,
+        is_return_invoice=header.invoice_type.upper() in {"IADE", "RETURN"},
+        accounting_direction=direction,
+        direction_confidence=100 if direction != "uncertain" else 0,
+        direction_evidence=("gemini_native_pdf:header.document_direction",) if direction != "uncertain" else (),
+        canonical_invoice=canonical,
+        tax_components=canonical.tax_components,
+        monetary_components=canonical.monetary_components,
+    )
+
+
 def extract_pdf_pages(path: Path) -> tuple[tuple[PdfPageText, ...], tuple[str, ...]]:
     notes: list[str] = []
     try:

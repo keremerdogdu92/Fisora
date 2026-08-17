@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from app.domain.ai_classification import merge_semantic_attempt_result, sanitize_semantic_evidence
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
+from app.domain.storage_adapters import LocalDocumentStorage
 from app.domain.qnb_credentials import QnbCredentialCipher
 from app.domain.portal_access import (
     PORTAL_USERS_CLIENT_ID,
@@ -23,6 +24,7 @@ from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
     mark_export_package_downloaded,
 )
+from app.persistence.document_ai_artifact_repository import LocalDocumentAiArtifactRepository
 
 
 def utc_now() -> str:
@@ -175,7 +177,32 @@ class JsonWorkflowStore:
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
+        self.tenant_key = "default"
+        self.document_ai_artifact_repository = LocalDocumentAiArtifactRepository(
+            manifest_path=self.path.with_name(
+                f"{self.path.stem}.document-ai-artifacts.json"
+            ),
+            storage=LocalDocumentStorage(
+                self.path.parent / f"{self.path.stem}.document-ai-artifact-bodies"
+            ),
+        )
         self._lock = threading.RLock()
+
+    def _delete_document_ai_raw_bodies(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+    ) -> int:
+        document_id = str(document.get("document_id") or document.get("document_ref") or "")
+        source_file_id = str(document.get("source_file_id") or document_id)
+        if not source_file_id:
+            return 0
+        return self.document_ai_artifact_repository.delete_raw_bodies_for_source(
+            tenant_id=self.tenant_key,
+            taxpayer_id=client_id,
+            source_file_id=source_file_id,
+        )
 
     def upsert_client(self, *, client_id: str, profile: dict[str, Any], onboarding: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
@@ -1860,6 +1887,11 @@ class JsonWorkflowStore:
             storage_path = Path(str(document.get("storage_path") or ""))
             if delete_files and storage_path.exists() and storage_path.is_file():
                 storage_path.unlink()
+            if delete_files:
+                self._delete_document_ai_raw_bodies(
+                    client_id=str(document.get("client_id") or key.split(":", 1)[0]),
+                    document=document,
+                )
             document["status"] = "deleted"
             document["storage_status"] = "deleted"
             document["deleted_at"] = now
@@ -1933,6 +1965,11 @@ class JsonWorkflowStore:
                 if delete_files and storage_path.exists() and storage_path.is_file():
                     storage_path.unlink()
                     deleted_file_count += 1
+                if delete_files:
+                    self._delete_document_ai_raw_bodies(
+                        client_id=str(document.get("client_id") or key.split(":", 1)[0]),
+                        document=document,
+                    )
                 document["status"] = "deleted"
                 document["storage_status"] = "deleted"
                 document["deleted_at"] = now
@@ -1983,6 +2020,10 @@ class JsonWorkflowStore:
                 if storage_path.exists() and storage_path.is_file():
                     storage_path.unlink()
                     deleted_file_count += 1
+                self._delete_document_ai_raw_bodies(
+                    client_id=normalized_client_id,
+                    document=uploaded,
+                )
             if uploaded or processed:
                 deleted_refs.append(document_ref)
         if deleted_refs:

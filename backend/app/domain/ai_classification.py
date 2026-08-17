@@ -467,6 +467,206 @@ class AiClassificationRequest:
 
 
 @dataclass(frozen=True)
+class AccountingSelectionRequest:
+    """Compact, fact-only request for the second-stage accounting decision."""
+
+    accounting_projection: Mapping[str, object]
+    candidate_details: tuple[dict[str, Any], ...]
+    round_index: int
+    prior_rounds: tuple[dict[str, Any], ...] = ()
+    context: AiClassificationContext = field(
+        default_factory=lambda: AiClassificationContext(
+            candidate_strategy=AiCandidateStrategy(
+                mode="bounded_expansion",
+                stage="accounting_selection",
+            )
+        )
+    )
+
+    def to_schema_payload(self) -> dict[str, object]:
+        projection = dict(self.accounting_projection)
+        candidate_ids = tuple(
+            dict.fromkeys(
+                str(candidate.get("candidate_id") or candidate.get("code") or "").strip()
+                for candidate in self.candidate_details
+                if str(candidate.get("candidate_id") or candidate.get("code") or "").strip()
+            )
+        )
+        line_refs = tuple(
+            str(item.get("canonical_line_id") or "")
+            for item in projection.get("line_items") or []
+            if isinstance(item, Mapping) and str(item.get("canonical_line_id") or "")
+        )
+        vat_refs = tuple(
+            str(item.get("vat_ref") or item.get("vat_group_id") or "")
+            for item in projection.get("vat_summary") or []
+            if isinstance(item, Mapping)
+            and str(item.get("vat_ref") or item.get("vat_group_id") or "")
+        )
+        tax_refs = tuple(
+            str(item.get("tax_ref") or "")
+            for item in projection.get("tax_components") or []
+            if isinstance(item, Mapping) and str(item.get("tax_ref") or "")
+        )
+        direction = str(projection.get("document_direction") or "")
+        supplier = projection.get("supplier_party")
+        customer = projection.get("customer_party")
+        counterparty = supplier if direction != "sales" else customer
+        client_context = projection.get("client_context")
+        compact_input = {
+            "accounting_projection": projection,
+            "round_index": self.round_index,
+            "prior_rounds": list(self.prior_rounds),
+            "decision_protocol": {
+                "question": "Are the supplied real tenant candidates sufficient, or do you need a broader real candidate slice?",
+                "may_keep_provisional_selection": True,
+                "may_return_to_earlier_candidate": True,
+                "special_tax_component_type_may_request_broader_accounts": True,
+                "do_not_invent_account_or_counterparty_codes": True,
+                "return_a_choice_for_every_line_vat_group_and_special_tax": True,
+                "provisional_proposal_may_be_returned_while_requesting_more": True,
+                "new_counterparty_proposal_may_coexist_with_other_account_choices": True,
+            },
+        }
+        return {
+            "raw_line": json.dumps(compact_input, ensure_ascii=False, separators=(",", ":")),
+            "stage": "accounting_selection",
+            "semantic_stage": "accounting_selection",
+            "accounting_direction": direction,
+            "client_activity": str(
+                (client_context or {}).get("activity_description")
+                if isinstance(client_context, Mapping)
+                else ""
+            ),
+            "counterparty": dict(counterparty) if isinstance(counterparty, Mapping) else {},
+            "canonical_lines": list(projection.get("line_items") or []),
+            "account_candidates": [
+                {
+                    **dict(candidate),
+                    "candidate_id": str(candidate.get("candidate_id") or candidate.get("code") or ""),
+                    "origin_round": int(candidate.get("origin_round") or 0),
+                }
+                for candidate in self.candidate_details
+            ],
+            "candidate_strategy": {
+                "mode": "bounded_expansion",
+                "stage": "accounting_selection",
+                "account_candidate_count": len(candidate_ids),
+                "counterparty_candidate_count": 0,
+                "selected_families": [],
+            },
+            "validation_errors": [],
+            "output_schema": {
+                "type": "object",
+                "required": ["action", "candidate_set_sufficient", "proposal", "reason"],
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["finalize", "request_more_candidates"],
+                    },
+                    "candidate_set_sufficient": {"type": "boolean"},
+                    "proposal": {
+                        "type": "object",
+                        "required": [
+                            "counterparty_account",
+                            "line_accounts",
+                            "vat_accounts",
+                            "special_tax_accounts",
+                            "new_counterparty_proposal",
+                        ],
+                        "properties": {
+                            "counterparty_account": {
+                                "anyOf": [
+                                    {"type": "null"},
+                                    {
+                                        "type": "object",
+                                        "required": ["selected_candidate_id", "reason"],
+                                        "properties": {
+                                            "selected_candidate_id": {"type": "string", "enum": list(candidate_ids)},
+                                            "reason": {"type": "string", "maxLength": 240},
+                                        },
+                                        "additionalProperties": False,
+                                    },
+                                ]
+                            },
+                            "line_accounts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["line_ref", "selected_candidate_id", "reason"],
+                                    "properties": {
+                                        "line_ref": {"type": "string", "enum": list(line_refs)},
+                                        "selected_candidate_id": {"type": "string", "enum": list(candidate_ids)},
+                                        "reason": {"type": "string", "maxLength": 240},
+                                    },
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "vat_accounts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["vat_ref", "rate", "selected_candidate_id", "reason"],
+                                    "properties": {
+                                        "vat_ref": {"type": "string", "enum": list(vat_refs)},
+                                        "rate": {"type": "string"},
+                                        "selected_candidate_id": {"type": "string", "enum": list(candidate_ids)},
+                                        "reason": {"type": "string", "maxLength": 240},
+                                    },
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "special_tax_accounts": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["tax_ref", "component_type", "selected_candidate_id", "reason"],
+                                    "properties": {
+                                        "tax_ref": {"type": "string", "enum": list(tax_refs)},
+                                        "component_type": {"type": "string"},
+                                        "selected_candidate_id": {"type": "string", "enum": list(candidate_ids)},
+                                        "reason": {"type": "string", "maxLength": 240},
+                                    },
+                                    "additionalProperties": False,
+                                },
+                            },
+                            "new_counterparty_proposal": {
+                                "anyOf": [
+                                    {"type": "null"},
+                                    {
+                                        "type": "object",
+                                        "properties": {
+                                            "party_title": {"type": "string", "maxLength": 240},
+                                            "tax_id": {"type": "string", "maxLength": 32},
+                                            "direction": {"type": "string", "maxLength": 32},
+                                            "suggested_parent_family": {"type": "string", "maxLength": 32},
+                                        },
+                                        "required": ["party_title", "tax_id", "direction", "suggested_parent_family"],
+                                        "additionalProperties": False,
+                                    },
+                                ]
+                            },
+                        },
+                        "additionalProperties": False,
+                    },
+                    "request_more_candidates": {
+                        "type": "object",
+                        "properties": {
+                            "search_terms": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+                            "requested_scope": {"type": "string", "maxLength": 80},
+                            "reason": {"type": "string", "maxLength": 240},
+                        },
+                        "required": ["search_terms", "requested_scope", "reason"],
+                        "additionalProperties": False,
+                    },
+                    "reason": {"type": "string", "maxLength": 240},
+                },
+                "additionalProperties": False,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class AiProviderClassification:
     category: str
     confidence: int

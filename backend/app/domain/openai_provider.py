@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import inspect
 import json
-from typing import Any, Mapping
+import re
+from threading import Lock
+from time import monotonic, perf_counter_ns, sleep
+from typing import Any, Callable, Mapping, Sequence
 
 import httpx
 
@@ -40,6 +46,534 @@ DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 PRODUCT_CLASSIFICATION_PROMPT_VERSION = "invoice-semantic-decision-v1"
 
 
+@dataclass(frozen=True)
+class GeminiAttemptEnvelope:
+    request_body: bytes
+    response_body: bytes
+    provider: str
+    model_alias: str
+    resolved_model: str
+    http_status: int | None
+    started_at: datetime
+    finished_at: datetime
+    elapsed_ms: int
+    token_usage: dict[str, int]
+    status: str
+    error_metadata: dict[str, Any]
+
+
+class GeminiStructuredResult(dict[str, Any]):
+    """A normal mapping result with its persistable provider attempt attached."""
+
+    def __init__(self, payload: Mapping[str, Any], *, attempt: GeminiAttemptEnvelope) -> None:
+        super().__init__(payload)
+        self.attempt = attempt
+
+
+class GeminiProviderAttemptError(ValueError):
+    """Gemini transport/parse failure that retains the exact failed attempt."""
+
+    def __init__(self, message: str, *, attempt: GeminiAttemptEnvelope) -> None:
+        super().__init__(message)
+        self.attempt = attempt
+
+
+class GeminiRequestGovernor:
+    """Process-local start-rate governor shared by one reusable Gemini provider."""
+
+    def __init__(
+        self,
+        requests_per_minute: int = 0,
+        *,
+        clock: Callable[[], float] = monotonic,
+        sleeper: Callable[[float], None] = sleep,
+    ) -> None:
+        self._interval_seconds = (
+            60.0 / requests_per_minute if requests_per_minute > 0 else 0.0
+        )
+        self._clock = clock
+        self._sleeper = sleeper
+        self._lock = Lock()
+        self._next_start = 0.0
+
+    def acquire(self) -> None:
+        if self._interval_seconds <= 0:
+            return
+        with self._lock:
+            now = self._clock()
+            scheduled = max(now, self._next_start)
+            self._next_start = scheduled + self._interval_seconds
+        wait_seconds = scheduled - now
+        if wait_seconds > 0:
+            self._sleeper(wait_seconds)
+
+
+_PARTY_FACT_FIELDS = frozenset(
+    {"title", "legal_name", "tax_id", "tax_id_type", "tax_office", "address", "vkn", "tckn", "evidence"}
+)
+_HEADER_FACT_FIELDS = frozenset(
+    {
+        "invoice_no", "ettn", "issue_date", "invoice_type", "scenario", "currency_code",
+        "document_direction", "original_invoice_no", "original_invoice_date", "evidence",
+    }
+)
+_LINE_FACT_FIELDS = frozenset(
+    {
+        "canonical_line_id", "source_position", "external_line_id", "description", "quantity",
+        "unit_code", "unit_price", "unit_price_basis", "taxable_amount", "vat_rate", "tax_amount",
+        "gross_amount", "tax_scheme_code", "tax_category_code", "exemption_reason_code", "vat_group_id",
+        "observed_quantity", "observed_unit_code", "observed_unit_price", "observed_unit_price_basis",
+        "observed_taxable_amount", "observed_vat_rate", "observed_tax_amount", "observed_gross_amount",
+        "evidence",
+    }
+)
+_VAT_FACT_FIELDS = frozenset(
+    {
+        "rate", "taxable_amount", "tax_amount", "source", "source_position", "tax_scheme_code",
+        "tax_category_code", "exemption_reason_code", "vat_group_id", "contributing_line_ids",
+        "observed_rate", "observed_taxable_amount", "observed_tax_amount", "evidence",
+    }
+)
+_TAX_FACT_FIELDS = frozenset(
+    {
+        "component_type", "source_label", "source_code", "rate", "taxable_amount", "tax_amount",
+        "source_position", "canonical_tax_kind", "normalization_confidence", "accounting_treatment", "evidence",
+    }
+)
+_MONETARY_FACT_FIELDS = frozenset(
+    {
+        "source_label", "source_amount", "source_position", "canonical_component_kind",
+        "normalization_confidence", "accounting_treatment", "evidence",
+    }
+)
+_NAMED_TOTAL_FACT_FIELDS = frozenset(
+    {"source_label", "amount", "source_position", "proposed_role", "evidence"}
+)
+_TOTAL_FACT_FIELDS = frozenset(
+    {
+        "goods_services_total", "allowance_total", "vat_total", "special_tax_total", "tax_exclusive_total",
+        "tax_inclusive_total", "payable_total", "line_net_total", "line_gross_total", "currency_code",
+        "observed_goods_services_total", "observed_allowance_total", "observed_vat_total",
+        "observed_special_tax_total", "observed_tax_inclusive_total", "observed_payable_total", "evidence",
+    }
+)
+_ACCOUNT_CANDIDATE_FIELDS = frozenset(
+    {
+        "candidate_id", "code", "name", "reason", "semantic_roles", "vat_rate", "is_detail_account",
+        "is_active", "group", "family", "label", "direction_role", "groups", "candidate_count", "examples",
+        "origin_round", "vat_rates",
+        "roles", "tax_id", "tax_office",
+    }
+)
+_COUNTERPARTY_CANDIDATE_FIELDS = frozenset(
+    {
+        "candidate_id", "code", "name", "counterparty_type", "source_group", "candidate_type",
+        "normalized_name_tokens", "evidence", "origin_round",
+    }
+)
+_COUNTERPARTY_FACT_FIELDS = frozenset(
+    {
+        "title", "tax_id", "tax_id_type", "tax_office", "address", "direction", "direction_confidence",
+        "direction_evidence", "counterparty_title", "counterparty_tax_id", "issuer_title", "issuer_tax_id",
+        "recipient_title", "recipient_tax_id", "provider_hint", "provider_id", "service_profile",
+        "provider_match_kind", "provider_match_reason", "provider_directory_version", "normalized_title_tokens",
+        "raw_title_candidates", "evidence",
+    }
+)
+_CANDIDATE_STRATEGY_FIELDS = frozenset(
+    {"mode", "stage", "account_candidate_count", "counterparty_candidate_count", "selected_families"}
+)
+_RESEARCH_EVIDENCE_FIELDS = frozenset(
+    {
+        "url", "title", "source_type", "summary_tr", "accepted", "question", "canonical_line_ids", "claims",
+        "conflicts", "source_url", "source_domain", "source_kind", "evidence_summary", "confidence", "quality",
+        "raw_summary",
+    }
+)
+_PRIOR_ATTEMPT_FIELDS = frozenset(
+    {
+        "attempt_id", "stage", "canonical_line_ids", "prompt_version", "provider", "model",
+        "candidate_account_codes", "candidate_counterparty_codes", "validation_errors", "accepted",
+        "superseded_by_attempt_id",
+    }
+)
+_VALIDATED_RESPONSE_FIELDS = frozenset(
+    {
+        "category", "product_category", "confidence", "reason", "evidence", "suggested_account_code",
+        "suggested_counterparty_code", "selected_account_code", "selected_counterparty_code",
+        "selected_account_families", "risk_flags", "account_reason", "product_identity", "needs_research",
+        "research_query", "display_name", "account_treatment", "research_confidence",
+        "accounting_impact_confidence", "question", "canonical_line_ids", "conflicts", "evidence_gaps", "authority",
+    }
+)
+
+
+_OMIT_TRANSPORT_VALUE = object()
+
+
+def _transport_value(value: object) -> object:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, (list, tuple)):
+        return [
+            item
+            for item in value
+            if isinstance(item, (str, int, float, bool)) or item is None
+        ]
+    return _OMIT_TRANSPORT_VALUE
+
+
+def _allow_fields(value: object, allowed: frozenset[str]) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    safe: dict[str, object] = {}
+    for raw_field, raw_value in value.items():
+        field = str(raw_field)
+        if field not in allowed:
+            continue
+        transport_value = _transport_value(raw_value)
+        if transport_value is not _OMIT_TRANSPORT_VALUE:
+            safe[field] = transport_value
+    return safe
+
+
+def _allow_items(value: object, allowed: frozenset[str]) -> list[dict[str, object]]:
+    return [
+        _allow_fields(item, allowed)
+        for item in (value if isinstance(value, (list, tuple)) else ())
+        if isinstance(item, Mapping)
+    ]
+
+
+def _extraction_transport_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    raw = payload.get("deterministic_payload")
+    raw = raw if isinstance(raw, Mapping) else {}
+    deterministic = _allow_fields(
+        raw,
+        _HEADER_FACT_FIELDS
+        | frozenset(
+            {
+                "line_count", "validation_status", "validation_reasons", "vat_split_status", "extraction_notes"
+            }
+        ),
+    )
+    for field, allowed in (
+        ("header", _HEADER_FACT_FIELDS),
+        ("supplier_party", _PARTY_FACT_FIELDS),
+        ("customer_party", _PARTY_FACT_FIELDS),
+        ("totals", _TOTAL_FACT_FIELDS),
+        ("observed_totals", _TOTAL_FACT_FIELDS),
+    ):
+        if field in raw:
+            deterministic[field] = _allow_fields(raw.get(field), allowed)
+    for field, allowed in (
+        ("line_items", _LINE_FACT_FIELDS),
+        ("vat_summary", _VAT_FACT_FIELDS),
+        ("observed_vat_summary", _VAT_FACT_FIELDS),
+        ("tax_components", _TAX_FACT_FIELDS),
+        ("observed_tax_components", _TAX_FACT_FIELDS),
+        ("monetary_components", _MONETARY_FACT_FIELDS),
+        ("observed_monetary_components", _MONETARY_FACT_FIELDS),
+        ("observed_named_totals", _NAMED_TOTAL_FACT_FIELDS),
+    ):
+        if field in raw:
+            deterministic[field] = _allow_items(raw.get(field), allowed)
+    return {
+        "mode": str(payload.get("mode") or "repair"),
+        "deterministic_payload": deterministic,
+        "client_identity": _allow_fields(payload.get("client_identity"), _PARTY_FACT_FIELDS),
+    }
+
+
+def _safe_prior_attempt(value: object) -> dict[str, object]:
+    safe = _allow_fields(value, _PRIOR_ATTEMPT_FIELDS)
+    if isinstance(value, Mapping) and "validated_response" in value:
+        validated = _allow_fields(value.get("validated_response"), _VALIDATED_RESPONSE_FIELDS)
+        raw_validated = value.get("validated_response")
+        if isinstance(raw_validated, Mapping):
+            if "line_decisions" in raw_validated:
+                validated["line_decisions"] = _allow_items(raw_validated.get("line_decisions"), _VALIDATED_RESPONSE_FIELDS | _LINE_FACT_FIELDS)
+            if "research_evidence" in raw_validated:
+                validated["research_evidence"] = _allow_items(raw_validated.get("research_evidence"), _RESEARCH_EVIDENCE_FIELDS)
+        safe["validated_response"] = validated
+    return safe
+
+
+def _accounting_transport_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    top_level_fields = frozenset(
+        {
+            "raw_line", "supplier_hint", "client_activity", "nace_code", "nace_research_summary", "activity_tags",
+            "accounting_direction", "direction", "direction_confidence", "direction_evidence", "direction_uncertainty",
+            "stage", "service_profile", "account_candidates", "counterparty_candidates", "allowed_categories",
+            "allowed_account_families", "semantic_stage", "validation_errors",
+        }
+    )
+    safe = _allow_fields(payload, top_level_fields)
+    for field, allowed in (
+        ("candidate_strategy", _CANDIDATE_STRATEGY_FIELDS),
+        ("vat_group", _VAT_FACT_FIELDS | frozenset({"line_ids", "line_descriptions"})),
+        ("counterparty", _COUNTERPARTY_FACT_FIELDS),
+        ("invoice_counterparty", _COUNTERPARTY_FACT_FIELDS),
+    ):
+        if field in payload:
+            safe[field] = _allow_fields(payload.get(field), allowed)
+    for field, allowed in (
+        ("canonical_lines", _LINE_FACT_FIELDS),
+        ("account_candidates", _ACCOUNT_CANDIDATE_FIELDS),
+        ("account_candidate_details", _ACCOUNT_CANDIDATE_FIELDS),
+        ("counterparty_candidate_details", _COUNTERPARTY_CANDIDATE_FIELDS),
+        ("account_family_candidates", _ACCOUNT_CANDIDATE_FIELDS),
+        ("research_evidence", _RESEARCH_EVIDENCE_FIELDS),
+    ):
+        raw_value = payload.get(field)
+        if isinstance(raw_value, (list, tuple)) and all(
+            isinstance(item, Mapping) for item in raw_value
+        ):
+            safe[field] = _allow_items(raw_value, allowed)
+    if "prior_semantic_attempt" in payload:
+        safe["prior_semantic_attempt"] = _safe_prior_attempt(payload.get("prior_semantic_attempt"))
+    return safe
+
+
+_V2_FACT_IDENTITY_FIELDS = frozenset(
+    {
+        "component_id",
+        "occurrence_index",
+        "identity_ref",
+        "decision_ref",
+        "represented_by_refs",
+        "warnings",
+    }
+)
+_V2_HEADER_FACT_FIELDS = frozenset(
+    {
+        "invoice_no",
+        "ettn",
+        "issue_date",
+        "invoice_type",
+        "scenario",
+        "currency_code",
+        "document_direction",
+        "original_invoice_no",
+        "original_invoice_date",
+    }
+)
+_V2_PARTY_FACT_FIELDS = frozenset(
+    {
+        "title",
+        "legal_name",
+        "tax_id",
+        "tax_id_type",
+        "tax_office",
+        "address",
+        "vkn",
+        "tckn",
+    }
+)
+_V2_LINE_FACT_FIELDS = frozenset(
+    {
+        "canonical_line_id",
+        "description",
+        "quantity",
+        "unit_code",
+        "unit_price",
+        "unit_price_basis",
+        "taxable_amount",
+        "vat_rate",
+        "tax_amount",
+        "gross_amount",
+        "tax_scheme_code",
+        "tax_category_code",
+        "exemption_reason_code",
+        "vat_group_id",
+        "posting_amount",
+        "allocation_adjustment",
+    }
+)
+_V2_VAT_FACT_FIELDS = frozenset(
+    {
+        "rate",
+        "taxable_amount",
+        "tax_amount",
+        "tax_scheme_code",
+        "tax_category_code",
+        "exemption_reason_code",
+        "vat_group_id",
+        "contributing_line_ids",
+    }
+)
+_V2_TAX_FACT_FIELDS = frozenset(
+    {
+        "component_type",
+        "source_label",
+        "source_code",
+        "rate",
+        "taxable_amount",
+        "tax_amount",
+        "canonical_tax_kind",
+        "normalization_confidence",
+        "accounting_treatment",
+    }
+)
+_V2_MONETARY_FACT_FIELDS = frozenset(
+    {
+        "source_label",
+        "source_amount",
+        "canonical_component_kind",
+        "normalization_confidence",
+        "accounting_treatment",
+    }
+)
+_V2_TOTAL_FACT_FIELDS = frozenset(
+    {
+        "goods_services_total",
+        "allowance_total",
+        "vat_total",
+        "special_tax_total",
+        "tax_exclusive_total",
+        "tax_inclusive_total",
+        "payable_total",
+        "line_net_total",
+        "line_gross_total",
+        "currency_code",
+    }
+)
+_V2_TAX_POSTING_FIELDS = frozenset(
+    {
+        "economic_effect",
+        "posting_side",
+        "included_in_tax_total",
+        "included_in_payable",
+        "payable_membership",
+        "posting_requirement",
+        "reconciled_effect",
+    }
+)
+_V2_MONETARY_POSTING_FIELDS = frozenset(
+    {
+        "signed_effect",
+        "posting_side",
+        "included_in_line_net",
+        "included_in_tax_total",
+        "included_in_payable",
+        "payable_membership",
+        "posting_requirement",
+        "reconciled_effect",
+    }
+)
+_V2_CLIENT_CONTEXT_FIELDS = frozenset(
+    {"activity_description", "nace_code", "activity_tags"}
+)
+
+
+def _v2_projection_transport_value(raw_line: object) -> str:
+    if not isinstance(raw_line, str):
+        raise ValueError("accounting_selection_v2 raw_line must be JSON text")
+    try:
+        raw = json.loads(raw_line)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("accounting_selection_v2 raw_line must be valid JSON") from exc
+    if not isinstance(raw, Mapping):
+        raise ValueError("accounting_selection_v2 raw_line must contain a JSON object")
+    safe: dict[str, object] = {}
+    direction = _transport_value(raw.get("document_direction"))
+    if direction is not _OMIT_TRANSPORT_VALUE:
+        safe["document_direction"] = direction
+    for field, allowed in (
+        ("header", _V2_HEADER_FACT_FIELDS),
+        ("supplier_party", _V2_PARTY_FACT_FIELDS),
+        ("customer_party", _V2_PARTY_FACT_FIELDS),
+        ("totals", _V2_TOTAL_FACT_FIELDS),
+        ("client_context", _V2_CLIENT_CONTEXT_FIELDS),
+    ):
+        if field in raw:
+            safe[field] = _allow_fields(raw.get(field), allowed)
+    for field, allowed in (
+        ("line_items", _V2_LINE_FACT_FIELDS | _V2_FACT_IDENTITY_FIELDS),
+        ("vat_summary", _V2_VAT_FACT_FIELDS | _V2_FACT_IDENTITY_FIELDS),
+        (
+            "tax_components",
+            _V2_TAX_FACT_FIELDS
+            | _V2_FACT_IDENTITY_FIELDS
+            | _V2_TAX_POSTING_FIELDS,
+        ),
+        (
+            "monetary_components",
+            _V2_MONETARY_FACT_FIELDS
+            | _V2_FACT_IDENTITY_FIELDS
+            | _V2_MONETARY_POSTING_FIELDS,
+        ),
+    ):
+        if field in raw:
+            safe[field] = _allow_items(raw.get(field), allowed)
+    for field in ("warnings", "projection_warnings"):
+        if field in raw:
+            value = _transport_value(raw.get(field))
+            if value is not _OMIT_TRANSPORT_VALUE:
+                safe[field] = value
+    return json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
+
+
+def _accounting_v2_transport_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    safe = _accounting_transport_payload(payload)
+    safe["raw_line"] = _v2_projection_transport_value(payload.get("raw_line"))
+    return safe
+
+
+def _accounting_v2_cache_ready_parts(
+    *,
+    schema_name: str,
+    user_payload: Mapping[str, object],
+    schema: Mapping[str, object],
+) -> list[dict[str, object]]:
+    stable_projection = {
+        key: value
+        for key, value in user_payload.items()
+        if key not in {"candidate_strategy", "account_candidates"}
+    }
+    stable_catalog = {
+        "candidate_strategy": user_payload.get("candidate_strategy", {}),
+        "account_candidates": user_payload.get("account_candidates", []),
+    }
+    required_refs = ["counterparty"]
+    properties = schema.get("properties")
+    properties = properties if isinstance(properties, Mapping) else {}
+    decisions = properties.get("decisions")
+    decisions = decisions if isinstance(decisions, Mapping) else {}
+    items = decisions.get("items")
+    items = items if isinstance(items, Mapping) else {}
+    item_properties = items.get("properties")
+    item_properties = item_properties if isinstance(item_properties, Mapping) else {}
+    decision_ref = item_properties.get("decision_ref")
+    decision_ref = decision_ref if isinstance(decision_ref, Mapping) else {}
+    raw_refs = decision_ref.get("enum")
+    if isinstance(raw_refs, Sequence) and not isinstance(raw_refs, (str, bytes)):
+        required_refs.extend(str(value) for value in raw_refs if str(value))
+    round_contract = {
+        "schema_name": schema_name,
+        "required_decision_refs": list(dict.fromkeys(required_refs)),
+        "response_rule": "Return only one valid JSON object matching responseJsonSchema.",
+    }
+
+    def part(marker: str, value: Mapping[str, object]) -> dict[str, object]:
+        return {
+            "text": marker
+            + "\n"
+            + json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        }
+
+    return [
+        part("ACCOUNTING_V2_STABLE_PROJECTION", stable_projection),
+        part("ACCOUNTING_V2_STABLE_CANDIDATE_CATALOG", stable_catalog),
+        part("ACCOUNTING_V2_ROUND_DECISION_CONTRACT", round_contract),
+    ]
+
+
 def _provider_user_payload(
     payload: Mapping[str, Any],
     *,
@@ -66,7 +600,43 @@ def classification_instructions_for(request: AiClassificationRequest) -> str:
             "hatasini ve guncel gercek hesap adaylarini kullanarak ayni canonical_line_id icin yeni hesap sec. Genel "
             "hesaba sirf kullanilabilir oldugu icin gecme; ekonomik anlami koru."
         )
+    if semantic_stage == "treatment_clarification":
+        return (
+            "This is one targeted clarification for the required decision reference. Return a corrected full decision "
+            "for that reference, including a valid selected_treatment when the non-zero tax or monetary fact creates "
+            "a separate posting. Keep the selected account when it remains appropriate, or select only from the sent "
+            "real tenant candidates. If those candidates are insufficient, set request_more_candidates with bounded "
+            "search terms while still returning the best provisional decision. Do not invent accounts, facts, amounts, "
+            "or decision references."
+        )
     stage = str(request.context.candidate_strategy.stage or "").strip().lower()
+    if stage == "accounting_selection_v2":
+        return (
+            "This is accounting_selection_v2. Return a complete accounting proposal for the counterparty and every "
+            "required decision reference: line:<id>, vat:<id>, tax:<id> for each non-VAT tax or withholding fact, "
+            "and monetary:<id> for each accounting-relevant monetary fact. Select only sent real tenant candidates. "
+            "Report candidate sufficiency explicitly and set request_more_candidates when the sent pool is insufficient. "
+            "When requesting more candidates, still return a full provisional proposal covering the counterparty and "
+            "every required reference; a later round may select an earlier sent candidate. The maximum rounds are "
+            "controlled externally. A special-tax or withholding decision may request broader real accounts. Do not "
+            "invent account or counterparty codes, do not change amounts or canonical facts, and do not auto-create a "
+            "new counterparty; propose_new is only a reviewable suggestion. Line and VAT decisions select only an "
+            "account; selected_treatment is non-operative for them and must be empty. For an exactly zero VAT, tax, or "
+            "monetary fact use no_separate_posting. For non-VAT tax choose selected_treatment from deductible_tax, "
+            "expense_or_cost, payable_withholding, represented_in_line, or no_separate_posting. For monetary facts "
+            "choose increase_payable, reduce_payable, represented, excluded, or no_separate_posting. "
+            "Use represented only with explicit evidence that another canonical fact carries the amount, and use "
+            "excluded only with explicit exclusion evidence."
+        )
+    if stage == "accounting_selection":
+        return (
+            "Belge olgularini degistirmeden tam muhasebe teklifi don: karsi taraf hesabi, her canonical satir, "
+            "her KDV grubu ve her ozel vergi bileseni icin secim ve gerekce ver. Yalniz gonderilen gercek tenant "
+            "adaylarini kullan; hesap kodu uydurma. Aday listesinin yeterli olup olmadigina karar ver. Yetersizse "
+            "request_more_candidates iste ve o ana kadarki tam provisional teklifi koru; daha sonraki turda onceki "
+            "turlarda gonderilen adaya geri donebilirsin. Yeni cari onerisi, satir/KDV/ozel vergi secimleriyle birlikte "
+            "bulunabilir ve otomatik cari olusturma talimati degildir."
+        )
     if stage == "family_select":
         return (
             "Fatura satirinin ekonomik anlamini, belge yonunu ve mukellef faaliyetini degerlendir. "
@@ -110,6 +680,10 @@ def canonical_extraction_instructions_for(request: CanonicalExtractionRequest) -
         return (
             "Yalniz verilen PDF belge iceriginde acikca gorulen fatura alanlarini ve tum fatura satirlarini gozlemle. "
             "Belgede yazmayan degeri bos birak; parasal hesaplama veya muhasebe karari yapma. "
+            "Vergi ve parasal bilesenlerde yalniz gorunen etiket, kod, oran, matrah, tutar, konum ve kaniti don; "
+            "bir bilesenin ara toplamlara veya odenecek toplama dahil olup olmadigini tahmin etme. "
+            "Belgede gorunen her adlandirilmis toplami, genel toplam ile odenecek tutari birbirine karistirmadan, "
+            "etiketi, tutari, sayfa/konumu ve kanitiyla observed_named_totals icinde ayri ayri don. "
             "Her satirin kesin source_position degerini ver; canonical_line_id ve external_line_id alanlarini bos birak. "
             "Urun veya hizmet anlamini satici unvanindan turetme."
         )
@@ -396,6 +970,163 @@ class ChatCompletionsAccountingProvider:
             self.last_capacity_snapshot = normalize_cerebras_rate_limit_headers(dict(getattr(response, "headers", {}) or {}))
 
 
+def _post_exact_json_bytes(
+    http_client: object,
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    request_body: bytes,
+    timeout_seconds: float,
+) -> object:
+    post = getattr(http_client, "post")
+    try:
+        parameters = inspect.signature(post).parameters.values()
+        accepts_content = any(
+            parameter.name == "content" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+    except (TypeError, ValueError):
+        accepts_content = True
+    if accepts_content:
+        return post(
+            url,
+            headers=dict(headers),
+            content=request_body,
+            timeout=timeout_seconds,
+        )
+    # Compatibility for existing narrow fake clients. Production httpx always
+    # takes the exact pre-serialized bytes through the content branch above.
+    return post(
+        url,
+        headers=dict(headers),
+        json=json.loads(request_body),
+        timeout=timeout_seconds,
+    )
+
+
+def _exact_response_body(response: object) -> bytes:
+    content = getattr(response, "content", None)
+    if isinstance(content, bytes):
+        return content
+    if isinstance(content, bytearray):
+        return bytes(content)
+    text = getattr(response, "text", None)
+    if isinstance(text, str):
+        return text.encode("utf-8")
+    payload = response.json()
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _response_status(response: object) -> int:
+    raw_status = getattr(response, "status_code", None)
+    try:
+        return int(raw_status) if raw_status is not None else 200
+    except (TypeError, ValueError):
+        return 200
+
+
+def _gemini_token_usage(payload: Mapping[str, Any]) -> tuple[dict[str, int], tuple[str, ...]]:
+    usage = payload.get("usageMetadata")
+    usage = usage if isinstance(usage, Mapping) else {}
+
+    diagnostics: list[str] = []
+
+    def count(field: str) -> int:
+        value = usage.get(field)
+        if value in (None, ""):
+            return 0
+        if isinstance(value, bool):
+            diagnostics.append(f"invalid_numeric:{field}")
+            return 0
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            diagnostics.append(f"invalid_numeric:{field}")
+            return 0
+        if parsed < 0:
+            diagnostics.append(f"invalid_numeric:{field}")
+            return 0
+        return parsed
+
+    return (
+        {
+            "prompt_tokens": count("promptTokenCount"),
+            "candidate_tokens": count("candidatesTokenCount"),
+            "cached_tokens": count("cachedContentTokenCount"),
+            "thought_tokens": count("thoughtsTokenCount"),
+            "total_tokens": count("totalTokenCount"),
+        },
+        tuple(diagnostics),
+    )
+
+
+_SENSITIVE_QUERY_PATTERN = re.compile(
+    r"(?i)([?&](?:key|api[_-]?key|access[_-]?token|token)=)[^&\s]+"
+)
+_SENSITIVE_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)\b(authorization|x-goog-api-key|api[_-]?key|access[_-]?token|token)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+"
+)
+_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+
+
+def _redact_gemini_error_text(value: object, *, secret_values: tuple[str, ...]) -> str:
+    safe = str(value or "")
+    for secret in secret_values:
+        if secret:
+            safe = safe.replace(secret, "[redacted-api-key]")
+    safe = _SENSITIVE_QUERY_PATTERN.sub(lambda match: f"{match.group(1)}[redacted]", safe)
+    safe = _SENSITIVE_ASSIGNMENT_PATTERN.sub(
+        lambda match: f"{match.group(1)}=[redacted]",
+        safe,
+    )
+    return _BEARER_PATTERN.sub("Bearer [redacted]", safe)
+
+
+def _gemini_attempt(
+    *,
+    request_body: bytes,
+    response_body: bytes,
+    model_alias: str,
+    resolved_model: str,
+    http_status: int | None,
+    started_at: datetime,
+    started_clock: int,
+    token_usage: Mapping[str, int],
+    status: str,
+    error: Exception | None = None,
+    error_phase: str = "",
+    secret_values: tuple[str, ...] = (),
+    usage_diagnostics: tuple[str, ...] = (),
+) -> GeminiAttemptEnvelope:
+    finished_at = datetime.now(UTC)
+    elapsed_ms = max(0, int((perf_counter_ns() - started_clock) / 1_000_000))
+    error_metadata: dict[str, Any] = (
+        {
+            "phase": error_phase,
+            "type": type(error).__name__,
+            "message": _redact_gemini_error_text(error, secret_values=secret_values)[:500],
+        }
+        if error is not None
+        else {}
+    )
+    if usage_diagnostics:
+        error_metadata["usage_diagnostics"] = list(usage_diagnostics)
+    return GeminiAttemptEnvelope(
+        request_body=request_body,
+        response_body=response_body,
+        provider="gemini",
+        model_alias=model_alias,
+        resolved_model=resolved_model,
+        http_status=http_status,
+        started_at=started_at,
+        finished_at=finished_at,
+        elapsed_ms=elapsed_ms,
+        token_usage=dict(token_usage),
+        status=status,
+        error_metadata=error_metadata,
+    )
+
+
 class GeminiAccountingProvider:
     """Native Gemini generateContent adapter with inline-PDF structured output."""
 
@@ -416,6 +1147,8 @@ class GeminiAccountingProvider:
         timeout_seconds: float = 60.0,
         max_output_tokens: int = 16384,
         max_inline_pdf_bytes: int = 50_000_000,
+        requests_per_minute: int = 0,
+        request_governor: GeminiRequestGovernor | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("GEMINI_API_KEY is required when FISORA_AI_PROVIDER=gemini")
@@ -428,24 +1161,34 @@ class GeminiAccountingProvider:
         self.timeout_seconds = timeout_seconds
         self.max_output_tokens = max_output_tokens
         self.max_inline_pdf_bytes = max_inline_pdf_bytes
+        self.request_governor = request_governor or GeminiRequestGovernor(
+            requests_per_minute
+        )
         self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
         instructions = classification_instructions_for(request)
         self.last_product_classification_instructions = instructions
+        stage = str(payload.get("stage") or "").strip().lower()
+        user_payload = (
+            _accounting_v2_transport_payload(payload)
+            if stage == "accounting_selection_v2"
+            else _accounting_transport_payload(payload)
+        )
         return self._post_structured_json(
             schema_name="fisora_invoice_ai_draft",
             instructions=instructions,
-            user_payload=_provider_user_payload(payload),
+            user_payload=user_payload,
             schema=payload["output_schema"],
+            cache_ready_accounting_v2=stage == "accounting_selection_v2",
         )
 
     def extract_invoice_canonical(self, request: CanonicalExtractionRequest) -> dict[str, Any]:
+        if not request.document_bytes:
+            raise ValueError("Gemini invoice extraction requires native PDF bytes")
         payload = request.to_schema_payload()
-        user_payload = _provider_user_payload(payload, exclude_instructions=True)
-        if request.document_bytes:
-            user_payload.pop("document_text", None)
+        user_payload = _extraction_transport_payload(payload)
         return self._post_structured_json(
             schema_name="fisora_invoice_canonical_extraction",
             instructions=canonical_extraction_instructions_for(request),
@@ -482,6 +1225,7 @@ class GeminiAccountingProvider:
         schema: Mapping[str, object],
         document_bytes: bytes = b"",
         document_mime_type: str = "",
+        cache_ready_accounting_v2: bool = False,
     ) -> dict[str, Any]:
         parts: list[dict[str, object]] = []
         if document_bytes:
@@ -499,49 +1243,208 @@ class GeminiAccountingProvider:
                     }
                 }
             )
-        parts.append(
-            {
-                "text": (
-                    "Yalnizca verilen schema ile uyumlu gecerli JSON obje don. "
-                    f"Schema adi: {schema_name}. "
-                    f"Girdi: {json.dumps(user_payload, ensure_ascii=False)}"
+        if cache_ready_accounting_v2:
+            parts.extend(
+                _accounting_v2_cache_ready_parts(
+                    schema_name=schema_name,
+                    user_payload=user_payload,
+                    schema=schema,
                 )
-            }
-        )
+            )
+        else:
+            parts.append(
+                {
+                    "text": (
+                        "Yalnizca verilen schema ile uyumlu gecerli JSON obje don. "
+                        f"Schema adi: {schema_name}. "
+                        f"Girdi: {json.dumps(user_payload, ensure_ascii=False)}"
+                    )
+                }
+            )
+        generation_config: dict[str, object] = {
+            "responseMimeType": "application/json",
+            "responseJsonSchema": dict(schema),
+            "maxOutputTokens": self.max_output_tokens,
+        }
+        if "gemini-3.5-flash-lite" not in self.model.lower():
+            generation_config.update(
+                {
+                    "temperature": 0.2,
+                    "topP": 1,
+                }
+            )
         request_payload = {
             "systemInstruction": {"parts": [{"text": instructions}]},
             "contents": [{"role": "user", "parts": parts}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseJsonSchema": dict(schema),
-                "temperature": 0.2,
-                "topP": 1,
-                "maxOutputTokens": self.max_output_tokens,
-            },
+            "generationConfig": generation_config,
         }
-        response = self.http_client.post(
-            self.generate_content_url,
-            headers={
-                "x-goog-api-key": self.api_key,
-                "Content-Type": "application/json",
-            },
-            json=request_payload,
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
-        response_payload = response.json()
-        usage = response_payload.get("usageMetadata") if isinstance(response_payload, Mapping) else {}
-        usage = usage if isinstance(usage, Mapping) else {}
+        request_body = json.dumps(
+            request_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        started_at = datetime.now(UTC)
+        started_clock = perf_counter_ns()
+        pending_error: GeminiProviderAttemptError | None = None
+        try:
+            self.request_governor.acquire()
+            response = _post_exact_json_bytes(
+                self.http_client,
+                self.generate_content_url,
+                headers={
+                    "x-goog-api-key": self.api_key,
+                    "Content-Type": "application/json",
+                },
+                request_body=request_body,
+                timeout_seconds=self.timeout_seconds,
+            )
+        except Exception as exc:
+            attempt = _gemini_attempt(
+                request_body=request_body,
+                response_body=b"",
+                model_alias=self.model,
+                resolved_model="",
+                http_status=None,
+                started_at=started_at,
+                started_clock=started_clock,
+                token_usage={},
+                status="failed",
+                error=exc,
+                error_phase="transport",
+                secret_values=(self.api_key,),
+            )
+            pending_error = GeminiProviderAttemptError(
+                str(attempt.error_metadata.get("message") or "Gemini transport failed"),
+                attempt=attempt,
+            )
+        if pending_error is not None:
+            raise pending_error
+
+        http_status = _response_status(response)
+        pending_error = None
+        try:
+            response_body = _exact_response_body(response)
+        except Exception as exc:
+            attempt = _gemini_attempt(
+                request_body=request_body,
+                response_body=b"",
+                model_alias=self.model,
+                resolved_model="",
+                http_status=http_status,
+                started_at=started_at,
+                started_clock=started_clock,
+                token_usage={},
+                status="failed",
+                error=exc,
+                error_phase="response_capture",
+                secret_values=(self.api_key,),
+            )
+            pending_error = GeminiProviderAttemptError(
+                str(attempt.error_metadata.get("message") or "Gemini response capture failed"),
+                attempt=attempt,
+            )
+        if pending_error is not None:
+            raise pending_error
+        pending_error = None
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            attempt = _gemini_attempt(
+                request_body=request_body,
+                response_body=response_body,
+                model_alias=self.model,
+                resolved_model="",
+                http_status=http_status,
+                started_at=started_at,
+                started_clock=started_clock,
+                token_usage={},
+                status="failed",
+                error=exc,
+                error_phase="http",
+                secret_values=(self.api_key,),
+            )
+            pending_error = GeminiProviderAttemptError(
+                str(attempt.error_metadata.get("message") or "Gemini HTTP request failed"),
+                attempt=attempt,
+            )
+        if pending_error is not None:
+            raise pending_error
+
+        pending_error = None
+        response_payload: Mapping[str, Any] = {}
+        try:
+            loaded_response = json.loads(response_body.decode("utf-8"))
+            if not isinstance(loaded_response, Mapping):
+                raise ValueError("Gemini response body must be a JSON object")
+            response_payload = loaded_response
+        except Exception as exc:
+            attempt = _gemini_attempt(
+                request_body=request_body,
+                response_body=response_body,
+                model_alias=self.model,
+                resolved_model="",
+                http_status=http_status,
+                started_at=started_at,
+                started_clock=started_clock,
+                token_usage={},
+                status="failed",
+                error=exc,
+                error_phase="response_json",
+                secret_values=(self.api_key,),
+            )
+            pending_error = GeminiProviderAttemptError(
+                str(attempt.error_metadata.get("message") or "Gemini response JSON failed"),
+                attempt=attempt,
+            )
+        if pending_error is not None:
+            raise pending_error
+
+        resolved_model = str(response_payload.get("modelVersion") or "")
+        token_usage, usage_diagnostics = _gemini_token_usage(response_payload)
         self.last_capacity_snapshot = {
             "source": "response_body",
-            "usage": {
-                "prompt_tokens": int(usage.get("promptTokenCount") or 0),
-                "candidate_tokens": int(usage.get("candidatesTokenCount") or 0),
-                "total_tokens": int(usage.get("totalTokenCount") or 0),
-            },
+            "usage": dict(token_usage),
             "last_checked_at": utc_now(),
         }
-        return _extract_gemini_json_response(response_payload)
+        pending_error = None
+        parsed: dict[str, Any] = {}
+        try:
+            parsed = _extract_gemini_json_response(response_payload)
+        except Exception as exc:
+            attempt = _gemini_attempt(
+                request_body=request_body,
+                response_body=response_body,
+                model_alias=self.model,
+                resolved_model=resolved_model,
+                http_status=http_status,
+                started_at=started_at,
+                started_clock=started_clock,
+                token_usage=token_usage,
+                status="failed",
+                error=exc,
+                error_phase="structured_parse",
+                secret_values=(self.api_key,),
+                usage_diagnostics=usage_diagnostics,
+            )
+            pending_error = GeminiProviderAttemptError(
+                str(attempt.error_metadata.get("message") or "Gemini structured parse failed"),
+                attempt=attempt,
+            )
+        if pending_error is not None:
+            raise pending_error
+        attempt = _gemini_attempt(
+            request_body=request_body,
+            response_body=response_body,
+            model_alias=self.model,
+            resolved_model=resolved_model,
+            http_status=http_status,
+            started_at=started_at,
+            started_clock=started_clock,
+            token_usage=token_usage,
+            status="successful",
+            usage_diagnostics=usage_diagnostics,
+        )
+        return GeminiStructuredResult(parsed, attempt=attempt)
 
 
 class FallbackAccountingProvider:

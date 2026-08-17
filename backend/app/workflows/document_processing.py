@@ -3,13 +3,18 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from decimal import Decimal
+from hashlib import sha256
+import json
 from os import environ
 from pathlib import Path
 import re
 import time
 from typing import Any
+import unicodedata
+from uuid import uuid4
 
 from app.domain.ai_classification import (
+    AccountingSelectionRequest,
     AiClassificationContext,
     AiClassificationPolicy,
     ProductClassifier,
@@ -17,10 +22,29 @@ from app.domain.ai_classification import (
     merge_semantic_attempt_result,
     serialize_semantic_decision_attempt,
 )
+from app.domain.accounting_candidate_expansion import (
+    AccountingProposal,
+    AccountingCandidateSession,
+    CandidateIntegrityError,
+    FinalizeProposalDecision,
+    LineAccountSelection,
+    NewCounterpartyProposal,
+    ProposeNewDecision,
+    RequestMoreCandidatesDecision,
+    SelectedAccount,
+    SelectExistingDecision,
+    SpecialTaxAccountSelection,
+    VatAccountSelection,
+)
+from app.domain.accounting_projection import build_accounting_projection
 from app.domain.ai_usage import ai_usage_payload, build_ai_usage_event
 from app.domain.ai_outage import next_ai_retry, sanitize_provider_failure_evidence
 from app.domain.business_relevance import ClientProfile, ProductClassification
-from app.domain.canonical_invoices import CanonicalExtractionPolicy
+from app.domain.canonical_invoices import (
+    CanonicalExtractionPolicy,
+    CanonicalExtractionRequest,
+    canonical_invoice_from_ai_payload,
+)
 from app.domain.chart_accounts import ChartAccount, normalize_account_code
 from app.domain.counterparty_matching import match_counterparty
 from app.domain.learning_rules import apply_learning_rules, rule_from_event_payload
@@ -56,7 +80,16 @@ from app.domain.openai_provider import (
     OpenAiAccountingProvider,
     TaskRoutingAccountingProvider,
 )
-from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice
+from app.domain.document_ai_artifacts import ArtifactKind, ArtifactWrite
+from app.domain.gemini_pdf_runtime import (
+    build_gemini_pdf_runtime_from_env,
+    candidate_discovery_assignment,
+    candidate_experiment_percent_from_env,
+    gemini_pdf_v2_enabled,
+    max_accounting_provider_calls_from_env,
+    max_accounting_request_bytes_from_env,
+)
+from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice, parsed_invoice_from_canonical
 from app.domain.research_harness import (
     ResearchHarness,
     apply_research_to_result,
@@ -75,6 +108,11 @@ from app.domain.statement_journal_entries import build_statement_entry_records, 
 from app.domain.statement_lines import enrich_statement_lines_with_counterparties, parse_statement_file
 from app.domain.vat_split_learning import build_vat_split_review_record, vat_split_review_payload
 from app.domain.xml_invoices import parse_xml_invoice
+from app.workflows.gemini_invoice_pipeline import (
+    GeminiInvoicePipelineRequest,
+    run_gemini_invoice_pipeline_v2,
+)
+from app.workflows.gemini_invoice_result_adapter import to_document_processing_payload
 
 
 PARSER_BY_DOCUMENT_TYPE = {
@@ -518,6 +556,8 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         return {
             "product_classifier": None,
             "canonical_extraction_provider": None,
+            "native_pdf_extraction_provider": None,
+            "accounting_selection_provider": None,
             "canonical_extraction_policy": CanonicalExtractionPolicy(),
             "statement_ai_provider": None,
             "statement_ai_policy": StatementAiSuggestionPolicy(),
@@ -537,6 +577,11 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
             preferred_order=("gemini", "nvidia", "groq", "cerebras", "cloudflare", "sambanova", "openrouter", "openai"),
         ),
         source,
+    )
+    native_pdf_extraction_provider = (
+        _accounting_provider_from_env("gemini", source)
+        if "gemini" in _configured_provider_names(source)
+        else None
     )
     counterparty_provider = _provider_chain_from_names(
         _task_provider_names(
@@ -575,6 +620,8 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
     return {
         "product_classifier": StaticFirstClassifier(provider=semantic_provider, policy=product_policy),
         "canonical_extraction_provider": canonical_provider,
+        "native_pdf_extraction_provider": native_pdf_extraction_provider,
+        "accounting_selection_provider": native_pdf_extraction_provider,
         "canonical_extraction_policy": canonical_policy,
         "statement_ai_provider": statement_provider,
         "statement_ai_policy": statement_policy,
@@ -1228,6 +1275,1204 @@ class DocumentParseError(RuntimeError):
     """Raised only when source-document parsing itself fails."""
 
 
+class RetryableDocumentTechnicalError(DocumentParseError):
+    """A missing/transient direct-PDF prerequisite that should be retried."""
+
+
+def is_transient_persistence_error(exc: BaseException) -> bool:
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    return isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
+
+
+def _gemini_pdf_v2_eligible(
+    document: dict[str, Any],
+    job: dict[str, Any],
+) -> bool:
+    document_type = str(
+        document.get("document_type") or job.get("document_type") or ""
+    ).strip()
+    path = _stored_path(document)
+    return bool(
+        gemini_pdf_v2_enabled(environ)
+        and document_type == "invoice"
+        and path is not None
+        and path.suffix.lower() == ".pdf"
+    )
+
+
+def _document_ai_scope(
+    store: Any,
+    *,
+    client_id: str,
+    document: dict[str, Any],
+) -> dict[str, str]:
+    if hasattr(store, "document_ai_artifact_scope"):
+        return dict(
+            store.document_ai_artifact_scope(
+                client_id=client_id,
+                document=document,
+            )
+        )
+    document_id = str(
+        document.get("normalized_document_id")
+        or document.get("document_id")
+        or document.get("document_ref")
+        or ""
+    )
+    return {
+        "tenant_id": str(
+            getattr(store, "tenant_id", "")
+            or getattr(store, "tenant_key", "")
+            or "default"
+        ),
+        "taxpayer_id": client_id,
+        "document_id": document_id,
+        "source_file_id": str(
+            document.get("normalized_source_file_id")
+            or document.get("source_file_id")
+            or document_id
+        ),
+    }
+
+
+def _client_tax_id(workspace: dict[str, Any]) -> str:
+    profile = (workspace.get("client") or {}).get("profile") or {}
+    return str(
+        profile.get("tax_id")
+        or profile.get("tax_number")
+        or profile.get("vkn")
+        or profile.get("tckn")
+        or ""
+    ).strip()
+
+
+def _run_gemini_pdf_v2_for_worker(
+    *,
+    store: Any,
+    document: dict[str, Any],
+    workspace: dict[str, Any],
+    client_id: str,
+    extraction_provider: object | None,
+    accounting_provider: object | None,
+    artifact_repository: Any | None,
+    max_parallel_accounting_chunks: int = 1,
+    candidate_experiment_percent: int | None = None,
+    max_accounting_request_bytes: int | None = None,
+) -> tuple[dict[str, Any], object]:
+    path = _stored_path(document)
+    if path is None:
+        raise RetryableDocumentTechnicalError("gemini_pdf_v2_source_missing")
+    source_bytes = path.read_bytes()
+    if not source_bytes.startswith(b"%PDF"):
+        raise DocumentParseError("gemini_pdf_v2_source_is_not_pdf")
+
+    provider = extraction_provider or accounting_provider
+    if extraction_provider is None or accounting_provider is None:
+        runtime = build_gemini_pdf_runtime_from_env(environ)
+        if not runtime.available or runtime.provider is None:
+            raise RetryableDocumentTechnicalError(
+                runtime.unavailable_reason or "gemini_pdf_v2_runtime_unavailable"
+            )
+        provider = runtime.provider
+        max_parallel_accounting_chunks = runtime.max_parallel_accounting_chunks
+        candidate_experiment_percent = runtime.candidate_experiment_percent
+        max_accounting_request_bytes = runtime.max_accounting_request_bytes
+    extraction = extraction_provider or provider
+    accounting = accounting_provider or provider
+    repository = artifact_repository or getattr(
+        store, "document_ai_artifact_repository", None
+    )
+    if extraction is None or accounting is None:
+        raise RetryableDocumentTechnicalError("gemini_pdf_v2_provider_unavailable")
+    if repository is None:
+        raise RetryableDocumentTechnicalError(
+            "gemini_pdf_v2_artifact_repository_unavailable"
+        )
+
+    scope = _document_ai_scope(
+        store,
+        client_id=client_id,
+        document=document,
+    )
+    try:
+        effective_experiment_percent = (
+            candidate_experiment_percent_from_env(environ)
+            if candidate_experiment_percent is None
+            else int(candidate_experiment_percent)
+        )
+        effective_max_request_bytes = (
+            max_accounting_request_bytes_from_env(environ)
+            if max_accounting_request_bytes is None
+            else int(max_accounting_request_bytes)
+        )
+        effective_max_provider_calls = max_accounting_provider_calls_from_env(
+            environ
+        )
+        assignment = candidate_discovery_assignment(
+            taxpayer_id=scope["taxpayer_id"],
+            document_id=scope["document_id"],
+            experiment_percent=effective_experiment_percent,
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RetryableDocumentTechnicalError(
+            "gemini_pdf_v2_candidate_experiment_config_invalid"
+        ) from exc
+    profile = (workspace.get("client") or {}).get("profile") or {}
+    pipeline_result = run_gemini_invoice_pipeline_v2(
+        GeminiInvoicePipelineRequest(
+            **scope,
+            source_file_sha256=sha256(source_bytes).hexdigest(),
+            source_bytes=source_bytes,
+            workspace=workspace,
+            tenant_tax_id=_client_tax_id(workspace),
+            chart_revision=_chart_candidate_revision(workspace),
+            client_context={
+                "activity_description": str(
+                    profile.get("activity_description") or ""
+                ),
+                "nace_code": str(profile.get("nace_code") or ""),
+                "activity_tags": list(profile.get("activity_tags") or []),
+            },
+            max_parallel_accounting_chunks=max_parallel_accounting_chunks,
+            candidate_discovery_mode=assignment.mode,
+            candidate_experiment_group=assignment.group,
+            candidate_experiment_bucket=assignment.bucket,
+            candidate_experiment_percent=assignment.experiment_percent,
+            max_accounting_request_bytes=effective_max_request_bytes,
+            max_accounting_provider_calls=effective_max_provider_calls,
+        ),
+        extraction_provider=extraction,
+        accounting_provider=accounting,
+        artifact_repository=repository,
+    )
+    if pipeline_result.canonical_invoice is None:
+        warning = next(iter(pipeline_result.warnings), "document_extraction_failed")
+        raise RetryableDocumentTechnicalError(f"gemini_pdf_v2:{warning}")
+    result = dict(to_document_processing_payload(pipeline_result))
+    result["gemini_pdf_v2_used"] = True
+    result["pipeline_version"] = pipeline_result.extraction_identity.pipeline_version
+    result["ai_classification_used"] = True
+    result["ai_classification_provider"] = str(
+        getattr(provider, "provider_name", "gemini") or "gemini"
+    )
+    result["document_ai_artifact_ids"] = [
+        item.artifact_id for item in pipeline_result.artifacts
+    ]
+    return result, provider
+
+
+def _json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+
+
+def _artifact_scope(
+    *,
+    tenant_id: str,
+    taxpayer_id: str,
+    document: dict[str, Any],
+    source_sha256: str,
+) -> dict[str, str]:
+    document_id = str(
+        document.get("normalized_document_id")
+        or document.get("document_id")
+        or document.get("document_ref")
+        or ""
+    )
+    return {
+        "tenant_id": tenant_id,
+        "taxpayer_id": taxpayer_id,
+        "document_id": document_id,
+        "source_file_id": str(
+            document.get("normalized_source_file_id")
+            or document.get("source_file_id")
+            or document_id
+        ),
+        "source_file_sha256": source_sha256,
+        "pipeline_version": "gemini-two-stage-v1",
+    }
+
+
+def _append_attempt_receipt(
+    repository: Any,
+    *,
+    scope: dict[str, str],
+    stage: str,
+    attempt: Any,
+    retry_of_artifact_id: str | None = None,
+    expanded_from_receipt_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Any:
+    return repository.append(
+        ArtifactWrite(
+            **scope,
+            kind=ArtifactKind.PROVIDER_RECEIPT,
+            stage=stage,
+            status=str(getattr(attempt, "status", "failed") or "failed"),
+            provider=str(getattr(attempt, "provider", "gemini") or "gemini"),
+            model_alias=str(getattr(attempt, "model_alias", "") or ""),
+            resolved_model=str(getattr(attempt, "resolved_model", "") or ""),
+            prompt_version=(
+                "invoice-facts-v1" if stage == "document_extraction" else "accounting-selection-v1"
+            ),
+            schema_version=(
+                "canonical-invoice-v1" if stage == "document_extraction" else "accounting-proposal-v1"
+            ),
+            elapsed_ms=int(getattr(attempt, "elapsed_ms", 0) or 0),
+            http_status=getattr(attempt, "http_status", None),
+            started_at=getattr(attempt, "started_at", None),
+            finished_at=getattr(attempt, "finished_at", None),
+            token_usage=dict(getattr(attempt, "token_usage", {}) or {}),
+            error_metadata=dict(getattr(attempt, "error_metadata", {}) or {}),
+            metadata=dict(metadata or {}),
+            retry_of_artifact_id=retry_of_artifact_id,
+            expanded_from_receipt_id=expanded_from_receipt_id,
+        ),
+        request_body=bytes(getattr(attempt, "request_body", b"") or b""),
+        response_body=bytes(getattr(attempt, "response_body", b"") or b""),
+    )
+
+
+def _latest_failed_stage_receipt(
+    repository: Any,
+    *,
+    tenant_id: str,
+    taxpayer_id: str,
+    document_id: str,
+    stage: str,
+    source_file_id: str,
+    source_file_sha256: str,
+    attempt: Any | None = None,
+) -> Any | None:
+    receipts = repository.list_for_document(
+        tenant_id=tenant_id,
+        taxpayer_id=taxpayer_id,
+        document_id=document_id,
+        kind=ArtifactKind.PROVIDER_RECEIPT,
+    )
+    return next(
+        (
+            item
+            for item in reversed(receipts)
+            if item.stage == stage and item.status == "failed"
+            and item.source_file_id == source_file_id
+            and item.source_file_sha256 == source_file_sha256
+            and item.pipeline_version == "gemini-two-stage-v1"
+            and item.prompt_version == (
+                "invoice-facts-v1" if stage == "document_extraction" else "accounting-selection-v1"
+            )
+            and item.schema_version == (
+                "canonical-invoice-v1" if stage == "document_extraction" else "accounting-proposal-v1"
+            )
+            and (
+                attempt is None
+                or (
+                    item.provider == str(getattr(attempt, "provider", "") or "")
+                    and item.model_alias == str(getattr(attempt, "model_alias", "") or "")
+                    and item.resolved_model == str(getattr(attempt, "resolved_model", "") or "")
+                )
+            )
+        ),
+        None,
+    )
+
+
+def _load_previous_result_snapshot(
+    repository: Any,
+    *,
+    tenant_id: str,
+    taxpayer_id: str,
+    document_id: str,
+    source_file_id: str,
+    source_file_sha256: str,
+    chart_candidate_revision: str,
+) -> dict[str, Any] | None:
+    proposals = repository.list_for_document(
+        tenant_id=tenant_id,
+        taxpayer_id=taxpayer_id,
+        document_id=document_id,
+        kind=ArtifactKind.ACCOUNTING_PROPOSAL,
+    )
+    proposal = next(
+        (
+            item for item in reversed(proposals)
+            if item.status in {"successful", "partial"}
+            and item.source_file_id == source_file_id
+            and item.source_file_sha256 == source_file_sha256
+            and item.pipeline_version == "gemini-two-stage-v1"
+            and str(item.metadata.get("chart_candidate_revision") or "")
+            == chart_candidate_revision
+        ),
+        None,
+    )
+    if proposal is None:
+        return None
+    payload = json.loads(
+        repository.read_content(
+            tenant_id=tenant_id,
+            taxpayer_id=taxpayer_id,
+            artifact_id=proposal.artifact_id,
+        ).decode("utf-8")
+    )
+    snapshot = payload.get("result_snapshot") if isinstance(payload, dict) else None
+    return dict(snapshot) if isinstance(snapshot, dict) else None
+
+
+def _chart_candidate_revision(workspace: dict[str, Any]) -> str:
+    chart = workspace.get("chart_accounts") if isinstance(workspace.get("chart_accounts"), dict) else {}
+    explicit = str(chart.get("revision") or chart.get("updated_at") or "")
+    accounts = [
+        {
+            "code": str(item.get("normalized_account_code") or item.get("raw_account_code") or ""),
+            "name": str(item.get("account_name") or ""),
+            "tax_id": str(item.get("tax_id") or ""),
+            "active": bool(item.get("is_active", True)),
+            "detail": bool(item.get("is_detail_account", True)),
+        }
+        for item in chart.get("accounts") or []
+        if isinstance(item, dict)
+    ]
+    payload = {"explicit_revision": explicit, "accounts": sorted(accounts, key=lambda item: item["code"])}
+    return sha256(_json_bytes(payload)).hexdigest()
+
+
+def _tenant_account_candidates(
+    workspace: dict[str, Any],
+    *,
+    projection: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    accounts = (workspace.get("chart_accounts") or {}).get("accounts") or []
+    candidates: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for account in accounts:
+        if not isinstance(account, dict) or account.get("is_detail_account", True) is False:
+            continue
+        code = str(
+            account.get("normalized_account_code") or account.get("raw_account_code") or ""
+        ).strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        candidate = {
+                "candidate_id": code,
+                "code": code,
+                "name": str(account.get("account_name") or ""),
+                "tax_id": str(account.get("tax_id") or ""),
+                "tax_office": str(account.get("tax_office") or ""),
+                "family": code.split(".")[0],
+                "is_detail_account": True,
+                "is_active": True,
+                "origin_round": 0,
+            }
+        candidate["roles"] = _candidate_roles(candidate, projection or {})
+        candidates.append(candidate)
+    return candidates
+
+
+def _candidate_roles(
+    candidate: dict[str, Any],
+    projection: dict[str, Any],
+) -> list[str]:
+    code = str(candidate.get("code") or "")
+    text = _search_key(f"{code} {candidate.get('name', '')}")
+    direction = str(projection.get("document_direction") or "purchase")
+    party = projection.get("customer_party") if direction == "sales" else projection.get("supplier_party")
+    party = party if isinstance(party, dict) else {}
+    roles: list[str] = []
+    if (
+        str(candidate.get("tax_id") or "")
+        and str(candidate.get("tax_id") or "") == str(party.get("tax_id") or "")
+    ) or any(
+        token and token in text
+        for token in _search_key(party.get("title")).split()
+        if len(token) >= 4
+    ):
+        roles.append("counterparty")
+    if direction == "sales":
+        if code.startswith("6") or "satis" in text or "gelir" in text:
+            roles.append("line_revenue")
+        if code.startswith("391") or "hesaplanan kdv" in text:
+            roles.append("vat")
+        if code.startswith("120"):
+            roles.append("counterparty")
+    else:
+        if code.startswith(("15", "25", "7", "689")) or any(
+            token in text for token in ("gider", "maliyet", "demirbas")
+        ):
+            roles.append("line_expense")
+        if code.startswith("191") or "indirilecek kdv" in text:
+            roles.append("vat")
+        if code.startswith("320"):
+            roles.append("counterparty")
+    tax_text = " ".join(
+        _search_key(
+            f"{item.get('component_type', '')} {item.get('source_label', '')} "
+            f"{item.get('source_code', '')} {item.get('canonical_tax_kind', '')}"
+        )
+        for item in projection.get("tax_components") or []
+        if isinstance(item, dict)
+    )
+    if tax_text and (
+        code.startswith("360")
+        or any(token in text for token in tax_text.split() if len(token) >= 3)
+        or any(token in tax_text for token in text.split() if len(token) >= 4)
+    ):
+        roles.append("special_tax")
+    return list(dict.fromkeys(roles))
+
+
+def _initial_candidate_ids(
+    candidates: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    role_order = ("counterparty", "line_expense", "line_revenue", "vat", "special_tax")
+    ranked = sorted(
+        candidates,
+        key=lambda item: (
+            min(
+                (role_order.index(role) for role in item.get("roles") or [] if role in role_order),
+                default=len(role_order),
+            ),
+            -(
+                3 if str(item.get("code") or "").startswith("770")
+                else 2 if str(item.get("code") or "").startswith(("600", "191", "391", "320", "120", "360"))
+                else 1 if str(item.get("code") or "").startswith(("15", "25", "7"))
+                else 0
+            ),
+            str(item.get("code") or ""),
+        ),
+    )
+    selected: list[str] = []
+    for role in role_order:
+        match = next(
+            (
+                item
+                for item in ranked
+                if role in (item.get("roles") or [])
+                and str(item["candidate_id"]) not in selected
+            ),
+            None,
+        )
+        if match is not None:
+            selected.append(str(match["candidate_id"]))
+        if len(selected) >= max(limit, 0):
+            return tuple(selected)
+    for item in ranked:
+        candidate_id = str(item["candidate_id"])
+        if candidate_id not in selected:
+            selected.append(candidate_id)
+        if len(selected) >= max(limit, 0):
+            break
+    return tuple(selected)
+
+
+def _search_key(value: object) -> str:
+    folded = unicodedata.normalize("NFKD", str(value or ""))
+    return " ".join(
+        "".join(character for character in folded if not unicodedata.combining(character))
+        .casefold()
+        .split()
+    )
+
+
+def _expanded_candidate_ids(
+    all_candidates: list[dict[str, Any]],
+    *,
+    accumulated_ids: tuple[str, ...],
+    search_terms: tuple[str, ...],
+    limit: int,
+) -> tuple[str, ...]:
+    sent = set(accumulated_ids)
+    terms = tuple(_search_key(term) for term in search_terms if _search_key(term))
+    matches = [
+        str(candidate["candidate_id"])
+        for candidate in all_candidates
+        if str(candidate["candidate_id"]) not in sent
+        and terms
+        and any(
+            term in _search_key(f"{candidate.get('code', '')} {candidate.get('name', '')}")
+            for term in terms
+        )
+    ]
+    if not matches:
+        matches = [
+            str(candidate["candidate_id"])
+            for candidate in sorted(all_candidates, key=lambda item: str(item.get("code") or ""))
+            if str(candidate["candidate_id"]) not in sent
+        ]
+    return tuple(matches[: max(limit, 0)])
+
+
+def _new_counterparty_proposal(payload: object) -> NewCounterpartyProposal | None:
+    raw = payload if isinstance(payload, dict) else {}
+    if not raw:
+        return None
+    return NewCounterpartyProposal(
+        party_title=str(raw.get("party_title") or ""),
+        tax_id=str(raw.get("tax_id") or ""),
+        direction=str(raw.get("direction") or ""),
+        suggested_parent_family=str(raw.get("suggested_parent_family") or ""),
+    )
+
+
+def _full_accounting_proposal(payload: object) -> AccountingProposal:
+    raw = payload if isinstance(payload, dict) else {}
+    counterparty = raw.get("counterparty_account")
+    counterparty_account = (
+        SelectedAccount(
+            selected_candidate_id=str(counterparty.get("selected_candidate_id") or ""),
+            reason=str(counterparty.get("reason") or ""),
+        )
+        if isinstance(counterparty, dict) and counterparty.get("selected_candidate_id")
+        else None
+    )
+    return AccountingProposal(
+        counterparty_account=counterparty_account,
+        line_accounts=tuple(
+            LineAccountSelection(
+                line_ref=str(item.get("line_ref") or ""),
+                selected_candidate_id=str(item.get("selected_candidate_id") or ""),
+                reason=str(item.get("reason") or ""),
+            )
+            for item in raw.get("line_accounts") or []
+            if isinstance(item, dict) and item.get("selected_candidate_id")
+        ),
+        vat_accounts=tuple(
+            VatAccountSelection(
+                vat_ref=str(item.get("vat_ref") or ""),
+                rate=str(item.get("rate") or ""),
+                selected_candidate_id=str(item.get("selected_candidate_id") or ""),
+                reason=str(item.get("reason") or ""),
+            )
+            for item in raw.get("vat_accounts") or []
+            if isinstance(item, dict) and item.get("selected_candidate_id")
+        ),
+        special_tax_accounts=tuple(
+            SpecialTaxAccountSelection(
+                tax_ref=str(item.get("tax_ref") or ""),
+                component_type=str(item.get("component_type") or ""),
+                selected_candidate_id=str(item.get("selected_candidate_id") or ""),
+                reason=str(item.get("reason") or ""),
+            )
+            for item in raw.get("special_tax_accounts") or []
+            if isinstance(item, dict) and item.get("selected_candidate_id")
+        ),
+        new_counterparty_proposal=_new_counterparty_proposal(
+            raw.get("new_counterparty_proposal")
+        ),
+    )
+
+
+def _candidate_decision(payload: dict[str, Any]) -> object:
+    action = str(payload.get("action") or "").strip()
+    if "proposal" in payload:
+        proposal = _full_accounting_proposal(payload.get("proposal"))
+        if action == "request_more_candidates":
+            request = payload.get("request_more_candidates")
+            request = request if isinstance(request, dict) else {}
+            return RequestMoreCandidatesDecision(
+                search_terms=tuple(str(term) for term in request.get("search_terms") or () if str(term)),
+                requested_scope=str(request.get("requested_scope") or "broader_chart_slice"),
+                reason=str(request.get("reason") or payload.get("reason") or ""),
+                provisional_proposal=proposal,
+            )
+        return FinalizeProposalDecision(
+            proposal=proposal,
+            reason=str(payload.get("reason") or ""),
+        )
+    selected = str(payload.get("selected_candidate_id") or "").strip() or None
+    reason = str(payload.get("reason") or "")
+    if action == "select_existing":
+        return SelectExistingDecision(selected_candidate_id=selected or "", reason=reason)
+    if action == "propose_new":
+        raw = payload.get("new_counterparty_proposal")
+        proposal = raw if isinstance(raw, dict) else {}
+        return ProposeNewDecision(
+            proposal=NewCounterpartyProposal(
+                party_title=str(proposal.get("party_title") or ""),
+                tax_id=str(proposal.get("tax_id") or ""),
+                direction=str(proposal.get("direction") or ""),
+                suggested_parent_family=str(proposal.get("suggested_parent_family") or ""),
+            ),
+            reason=reason,
+        )
+    request = payload.get("request_more_candidates")
+    request = request if isinstance(request, dict) else {}
+    return RequestMoreCandidatesDecision(
+        search_terms=tuple(str(term) for term in request.get("search_terms") or () if str(term)),
+        requested_scope=str(request.get("requested_scope") or "broader_chart_slice"),
+        reason=str(request.get("reason") or reason),
+        provisional_candidate_id=selected,
+    )
+
+
+def _accounting_proposal_payload(session: AccountingCandidateSession) -> dict[str, Any]:
+    full_proposal = session.final_proposal or session.provisional_proposal
+    legacy_proposal = session.new_counterparty_proposal
+    return {
+        "action": session.final_action or "unresolved",
+        "proposal": asdict(full_proposal) if full_proposal is not None else None,
+        "selected_candidate_id": session.selected_candidate_id,
+        "new_counterparty_proposal": (
+            asdict(full_proposal.new_counterparty_proposal)
+            if full_proposal is not None and full_proposal.new_counterparty_proposal is not None
+            else asdict(legacy_proposal) if legacy_proposal is not None else None
+        ),
+        "accounting_call_count": session.accounting_call_count,
+        "expansion_count": session.expansion_count,
+        "selection_origin_round": min(
+            (
+                session.selection_origin_round(candidate_id)
+                for candidate_id in (
+                    full_proposal.selected_candidate_ids if full_proposal is not None else ()
+                )
+                if session.selection_origin_round(candidate_id) is not None
+            ),
+            default=(
+                session.selection_origin_round(session.selected_candidate_id)
+                if session.selected_candidate_id
+                else None
+            ),
+        ),
+        "warnings": list(session.warnings),
+        "candidate_rounds": [
+            {
+                "round_index": item.round_index,
+                "candidate_ids": list(item.candidate_ids),
+                "decision": asdict(item.decision) if item.decision is not None else None,
+            }
+            for item in session.rounds
+        ],
+    }
+
+
+def _money(value: object) -> str:
+    try:
+        return str(Decimal(str(value or "0")).quantize(Decimal("0.01")))
+    except Exception:
+        return "0.00"
+
+
+def _build_accounting_proposal_result(
+    canonical: Any,
+    *,
+    proposal: dict[str, Any],
+    warnings: list[str],
+    account_names: dict[str, str],
+) -> dict[str, Any]:
+    full = proposal.get("proposal") if isinstance(proposal.get("proposal"), dict) else {}
+    direction = str(canonical.header.document_direction or "purchase")
+    is_sales = direction == "sales"
+    line_choices = {
+        str(item.get("line_ref") or ""): item
+        for item in full.get("line_accounts") or []
+        if isinstance(item, dict)
+    }
+    vat_choices = {
+        str(item.get("vat_ref") or ""): item
+        for item in full.get("vat_accounts") or []
+        if isinstance(item, dict)
+    }
+    tax_choices = {
+        str(item.get("tax_ref") or ""): item
+        for item in full.get("special_tax_accounts") or []
+        if isinstance(item, dict)
+    }
+    legacy_selected = str(proposal.get("selected_candidate_id") or "")
+    draft_lines: list[dict[str, Any]] = []
+    selected_lines: list[str] = []
+    for line in canonical.line_items:
+        choice = line_choices.get(line.canonical_line_id, {})
+        account = str(choice.get("selected_candidate_id") or legacy_selected)
+        if account:
+            selected_lines.append(account)
+        else:
+            account = f"UNRESOLVED:line:{line.canonical_line_id}"
+            warnings.append(f"account_selection_unresolved:line:{line.canonical_line_id}")
+        amount = _money(line.taxable_amount)
+        draft_lines.append({
+            "proposal_role": "canonical_line",
+            "line_ref": line.canonical_line_id,
+            "account_code": account,
+            "description": line.description,
+            "debit": "0.00" if is_sales else amount,
+            "credit": amount if is_sales else "0.00",
+            "reason": str(choice.get("reason") or ""),
+            "canonical_line_ids": [line.canonical_line_id],
+        })
+    selected_vat: list[str] = []
+    for index, vat in enumerate(canonical.vat_summary):
+        vat_ref = vat.vat_group_id or f"vat:{index + 1}:{vat.rate}"
+        choice = vat_choices.get(vat_ref, {})
+        account = str(choice.get("selected_candidate_id") or "")
+        if account:
+            selected_vat.append(account)
+        else:
+            account = f"UNRESOLVED:vat:{vat_ref}"
+            warnings.append(f"account_selection_unresolved:vat:{vat_ref}")
+        amount = _money(vat.tax_amount)
+        draft_lines.append({
+            "proposal_role": "vat_group",
+            "vat_ref": vat_ref,
+            "vat_rate": vat.rate,
+            "account_code": account,
+            "description": f"KDV %{vat.rate}",
+            "debit": "0.00" if is_sales else amount,
+            "credit": amount if is_sales else "0.00",
+            "reason": str(choice.get("reason") or ""),
+            "canonical_line_ids": list(vat.contributing_line_ids),
+        })
+    selected_special: list[str] = []
+    for index, tax in enumerate(canonical.tax_components):
+        tax_ref = f"tax:{index + 1}:{tax.component_type}:{tax.source_code or tax.canonical_tax_kind}"
+        choice = tax_choices.get(tax_ref, {})
+        account = str(choice.get("selected_candidate_id") or "")
+        if account:
+            selected_special.append(account)
+        else:
+            account = f"UNRESOLVED:special_tax:{tax_ref}"
+            warnings.append(f"account_selection_unresolved:special_tax:{tax_ref}")
+        amount = _money(tax.tax_amount)
+        draft_lines.append({
+            "proposal_role": "special_tax",
+            "tax_ref": tax_ref,
+            "component_type": tax.component_type,
+            "source_code": tax.source_code,
+            "account_code": account,
+            "description": tax.source_label or tax.canonical_tax_kind,
+            "debit": "0.00" if is_sales else amount,
+            "credit": amount if is_sales else "0.00",
+            "reason": str(choice.get("reason") or ""),
+        })
+    counterparty_choice = full.get("counterparty_account")
+    counterparty_choice = counterparty_choice if isinstance(counterparty_choice, dict) else {}
+    counterparty = str(counterparty_choice.get("selected_candidate_id") or "")
+    new_counterparty = full.get("new_counterparty_proposal")
+    new_counterparty = new_counterparty if isinstance(new_counterparty, dict) else proposal.get("new_counterparty_proposal")
+    if not counterparty:
+        counterparty = "UNRESOLVED:counterparty"
+        warnings.append("account_selection_unresolved:counterparty")
+    payable = _money(canonical.totals.payable_total)
+    draft_lines.append({
+        "proposal_role": "counterparty",
+        "account_code": counterparty,
+        "description": canonical.customer_party.title if is_sales else canonical.supplier_party.title,
+        "debit": payable if is_sales else "0.00",
+        "credit": "0.00" if is_sales else payable,
+        "reason": str(counterparty_choice.get("reason") or ""),
+    })
+    first_line = selected_lines[0] if selected_lines else ""
+    first_vat = selected_vat[0] if selected_vat else ""
+    rationale = "; ".join(
+        f"{item.get('account_code')}: {item.get('reason')}"
+        for item in draft_lines
+        if item.get("reason")
+    )
+    resolved_counterparty = "" if counterparty.startswith("UNRESOLVED:") else counterparty
+    interpretation = rationale or "AI teklifi kismi; cozulmeyen alanlar uyari olarak korundu."
+    unresolved = ", ".join(
+        dict.fromkeys(
+            warning for warning in warnings if "unresolved" in warning or "failed" in warning
+        )
+    )
+    decision_narrative = {
+        "read_facts": {
+            "invoice_no": canonical.header.invoice_no,
+            "issue_date": canonical.header.issue_date,
+            "direction": direction,
+            "counterparty_title": canonical.customer_party.title if is_sales else canonical.supplier_party.title,
+            "counterparty_tax_id": canonical.customer_party.tax_id if is_sales else canonical.supplier_party.tax_id,
+            "line_count": str(len(canonical.line_items)),
+            "payable_total": canonical.totals.payable_total,
+            "vat_total": canonical.totals.vat_total,
+            "special_tax_total": canonical.totals.special_tax_total,
+        },
+        "invoice_product_line": canonical.line_items[0].description if canonical.line_items else "",
+        "fisora_interpretation": interpretation,
+        "business_relation": (
+            f"{direction}: {canonical.customer_party.title if is_sales else canonical.supplier_party.title}"
+        ),
+        "account_code": first_line,
+        "account_name": account_names.get(first_line, ""),
+        "counterparty_match": resolved_counterparty or (
+            str(new_counterparty.get("party_title") or "") if isinstance(new_counterparty, dict) else ""
+        ),
+        "confidence_label": "Musavir onayi gereken AI taslagi",
+        "unresolved_info": unresolved,
+    }
+    result: dict[str, Any] = {
+        "invoice_no": canonical.header.invoice_no,
+        "issue_date": canonical.header.issue_date,
+        "invoice_date": canonical.header.issue_date,
+        "currency_code": canonical.header.currency_code,
+        "invoice_type": canonical.header.invoice_type,
+        "accounting_direction": direction,
+        "direction_confidence": 100,
+        "direction_uncertainty": False,
+        "direction_evidence": list(canonical.header.evidence),
+        "supplier_title": canonical.supplier_party.title,
+        "supplier_tax_id": canonical.supplier_party.tax_id,
+        "customer_title": canonical.customer_party.title,
+        "customer_tax_id": canonical.customer_party.tax_id,
+        "counterparty_title": canonical.customer_party.title if is_sales else canonical.supplier_party.title,
+        "counterparty_tax_id": canonical.customer_party.tax_id if is_sales else canonical.supplier_party.tax_id,
+        "goods_services_total": canonical.totals.goods_services_total,
+        "vat_total": canonical.totals.vat_total,
+        "special_tax_total": canonical.totals.special_tax_total,
+        "tax_inclusive_total": canonical.totals.tax_inclusive_total,
+        "payable_total": canonical.totals.payable_total,
+        "vat_rates": [item.rate for item in canonical.vat_summary],
+        "canonical_line_count": len(canonical.line_items),
+        "canonical_validation_status": canonical.validation.status,
+        "canonical_validation_reasons": list(canonical.validation.reason_codes),
+        "canonical_extraction_ai_used": True,
+        "canonical_invoice": asdict(canonical),
+        "draft_lines": draft_lines,
+        "selected_expense_account": "" if is_sales else first_line,
+        "selected_revenue_account": first_line if is_sales else "",
+        "selected_purchase_vat_account": "" if is_sales else first_vat,
+        "selected_sales_vat_account": first_vat if is_sales else "",
+        "selected_vat_account": first_vat,
+        "selected_supplier_account": "" if is_sales else resolved_counterparty,
+        "selected_customer_account": resolved_counterparty if is_sales else "",
+        "counterparty_match_code": resolved_counterparty,
+        "selected_special_tax_accounts": selected_special,
+        "decision_narrative": decision_narrative,
+        "accountant_summary": rationale or "Belge olgularindan en iyi kullanilabilir taslak uretildi.",
+        "accountant_explanation_tr": rationale or "Eksik hesap secimleri taslagi durdurmadan isaretlendi.",
+        "counterparty_creation_suggestion": new_counterparty,
+        "suggested_counterparty_creation": new_counterparty,
+        "draft_status": "review_required",
+        "export_status": "review_required",
+        "accounting_proposal": proposal,
+    }
+    result["pipeline_warnings"] = list(dict.fromkeys(warnings))
+    for key in ("risk_flags", "parse_notes", "review_reason_codes"):
+        result[key] = list(dict.fromkeys(warnings))
+    result = _with_review_summary(result)
+    result["primary_suggestion"] = {
+        "direction": direction,
+        "counterparty_account": resolved_counterparty,
+        "account": first_line,
+        "vat_account": first_vat,
+        "special_tax_accounts": selected_special,
+        "draft_lines": draft_lines,
+        "reason": decision_narrative["fisora_interpretation"],
+        "export_gate_reason": "accountant_approval_required",
+    }
+    return result
+
+
+def run_gemini_two_stage_invoice_workflow(
+    *,
+    document: dict[str, Any],
+    job: dict[str, Any],
+    workspace: dict[str, Any],
+    tenant_id: str,
+    taxpayer_id: str,
+    extraction_provider: object,
+    accounting_provider: object,
+    artifact_repository: Any,
+    initial_candidate_limit: int = 40,
+    expansion_candidate_limit: int = 40,
+) -> dict[str, Any]:
+    """Run the V1 direct-PDF -> facts -> compact accounting pipeline."""
+
+    path = _stored_path(document)
+    if path is None:
+        raise DocumentParseError("source PDF is unavailable")
+    source_bytes = path.read_bytes()
+    source_sha = sha256(source_bytes).hexdigest()
+    scope = _artifact_scope(
+        tenant_id=tenant_id,
+        taxpayer_id=taxpayer_id,
+        document=document,
+        source_sha256=source_sha,
+    )
+    chart_candidate_revision = _chart_candidate_revision(workspace)
+    try:
+        extraction_result = extraction_provider.extract_invoice_canonical(
+            CanonicalExtractionRequest(
+                document_text="",
+                document_bytes=source_bytes,
+                document_mime_type="application/pdf",
+                deterministic_payload={},
+                client_identity=_canonical_client_identity(workspace),
+                max_input_chars=0,
+                mode="discovery",
+            )
+        )
+    except Exception as exc:
+        attempt = getattr(exc, "attempt", None)
+        if attempt is not None:
+            prior_extraction = _latest_failed_stage_receipt(
+                artifact_repository,
+                tenant_id=tenant_id,
+                taxpayer_id=taxpayer_id,
+                document_id=scope["document_id"],
+                stage="document_extraction",
+                source_file_id=scope["source_file_id"],
+                source_file_sha256=scope["source_file_sha256"],
+                attempt=attempt,
+            )
+            _append_attempt_receipt(
+                artifact_repository,
+                scope=scope,
+                stage="document_extraction",
+                attempt=attempt,
+                retry_of_artifact_id=(
+                    prior_extraction.artifact_id if prior_extraction is not None else None
+                ),
+                metadata={"chart_candidate_revision": chart_candidate_revision},
+            )
+        previous = _load_previous_result_snapshot(
+            artifact_repository,
+            tenant_id=tenant_id,
+            taxpayer_id=taxpayer_id,
+            document_id=scope["document_id"],
+            source_file_id=scope["source_file_id"],
+            source_file_sha256=scope["source_file_sha256"],
+            chart_candidate_revision=chart_candidate_revision,
+        )
+        if previous is not None:
+            warnings = list(previous.get("pipeline_warnings") or [])
+            warnings.append("document_extraction_retry_failed")
+            previous["pipeline_warnings"] = list(dict.fromkeys(warnings))
+            return previous
+        raise DocumentParseError(str(exc)) from exc
+
+    extraction_attempt = getattr(extraction_result, "attempt", None)
+    if extraction_attempt is None:
+        raise DocumentParseError("Gemini extraction result has no provider receipt")
+    prior_extraction = _latest_failed_stage_receipt(
+        artifact_repository,
+        tenant_id=tenant_id,
+        taxpayer_id=taxpayer_id,
+        document_id=scope["document_id"],
+        stage="document_extraction",
+        source_file_id=scope["source_file_id"],
+        source_file_sha256=scope["source_file_sha256"],
+        attempt=extraction_attempt,
+    )
+    extraction_receipt = _append_attempt_receipt(
+        artifact_repository,
+        scope=scope,
+        stage="document_extraction",
+        attempt=extraction_attempt,
+        retry_of_artifact_id=(
+            prior_extraction.artifact_id if prior_extraction is not None else None
+        ),
+        metadata={"chart_candidate_revision": chart_candidate_revision},
+    )
+    canonical = canonical_invoice_from_ai_payload(extraction_result)
+    canonical_artifact = artifact_repository.append(
+        ArtifactWrite(
+            **scope,
+            kind=ArtifactKind.CANONICAL_INVOICE_FORM,
+            stage="canonical_mapping",
+            status="successful",
+            parent_artifact_id=extraction_receipt.artifact_id,
+            provider_receipt_artifact_id=extraction_receipt.artifact_id,
+            mapper_version="canonical-invoice-mapper-v1",
+        ),
+        content=_json_bytes(asdict(canonical)),
+    )
+    profile = (workspace.get("client") or {}).get("profile") or {}
+    projection = build_accounting_projection(
+        canonical,
+        client_context={
+            "activity_description": str(profile.get("activity_description") or ""),
+            "nace_code": str(profile.get("nace_code") or ""),
+            "activity_tags": list(profile.get("activity_tags") or []),
+        },
+    )
+    for index, vat in enumerate(projection.get("vat_summary") or []):
+        if isinstance(vat, dict):
+            vat["vat_ref"] = str(vat.get("vat_group_id") or f"vat:{index + 1}:{vat.get('rate', '')}")
+    for index, tax in enumerate(projection.get("tax_components") or []):
+        if isinstance(tax, dict):
+            tax["tax_ref"] = (
+                f"tax:{index + 1}:{tax.get('component_type', '')}:"
+                f"{tax.get('source_code') or tax.get('canonical_tax_kind') or ''}"
+            )
+    projection_artifact = artifact_repository.append(
+        ArtifactWrite(
+            **scope,
+            kind=ArtifactKind.ACCOUNTING_INPUT_PROJECTION,
+            stage="accounting_projection",
+            status="successful",
+            parent_artifact_id=canonical_artifact.artifact_id,
+            mapper_version="accounting-projection-v1",
+        ),
+        content=_json_bytes(projection),
+    )
+
+    all_candidates = _tenant_account_candidates(workspace, projection=projection)
+    tenant_candidate_ids = tuple(str(item["candidate_id"]) for item in all_candidates)
+    initial_ids = _initial_candidate_ids(all_candidates, limit=initial_candidate_limit)
+    session = AccountingCandidateSession.start(
+        tenant_candidate_ids=tenant_candidate_ids,
+        initial_candidate_ids=initial_ids,
+    )
+    previous_accounting_receipt = None
+    authoritative_accounting_receipt = None
+    warnings = list(canonical.extraction_notes)
+    last_accounting_receipt = None
+    proposal_status = "successful"
+    while session.final_action is None:
+        current = set(session.current_candidate_ids)
+        details = tuple(
+            {
+                **candidate,
+                "origin_round": session.selection_origin_round(str(candidate["candidate_id"])) or 0,
+            }
+            for candidate in all_candidates
+            if str(candidate["candidate_id"]) in current
+        )
+        request = AccountingSelectionRequest(
+            accounting_projection=projection,
+            candidate_details=details,
+            round_index=session.accounting_call_count - 1,
+            prior_rounds=tuple(
+                {
+                    "round_index": item.round_index,
+                    "candidate_ids": list(item.candidate_ids),
+                    "decision": asdict(item.decision) if item.decision is not None else None,
+                }
+                for item in session.rounds[:-1]
+            ),
+        )
+        try:
+            accounting_result = accounting_provider.classify_product(request)
+        except Exception as exc:
+            attempt = getattr(exc, "attempt", None)
+            if attempt is not None:
+                last_accounting_receipt = _append_attempt_receipt(
+                    artifact_repository,
+                    scope=scope,
+                    stage="accounting_selection",
+                    attempt=attempt,
+                    expanded_from_receipt_id=(
+                        previous_accounting_receipt.artifact_id
+                        if previous_accounting_receipt is not None
+                        else None
+                    ),
+                    metadata={
+                        "chart_candidate_revision": chart_candidate_revision,
+                        "candidate_revision": sha256(_json_bytes(details)).hexdigest(),
+                    },
+                )
+            warnings.append("accounting_provider_failed")
+            warnings.append(f"accounting_provider_warning:{type(exc).__name__}")
+            session = session.terminalize_best_available("accounting_provider_failed")
+            proposal_status = "partial"
+            break
+        attempt = getattr(accounting_result, "attempt", None)
+        if attempt is None:
+            warnings.append("accounting_receipt_missing")
+            session = session.terminalize_best_available("accounting_receipt_missing")
+            proposal_status = "partial"
+            break
+        last_accounting_receipt = _append_attempt_receipt(
+            artifact_repository,
+            scope=scope,
+            stage="accounting_selection",
+            attempt=attempt,
+            expanded_from_receipt_id=(
+                previous_accounting_receipt.artifact_id
+                if previous_accounting_receipt is not None
+                else None
+            ),
+            metadata={
+                "chart_candidate_revision": chart_candidate_revision,
+                "candidate_revision": sha256(_json_bytes(details)).hexdigest(),
+            },
+        )
+        previous_accounting_receipt = last_accounting_receipt
+        authoritative_accounting_receipt = last_accounting_receipt
+        decision = _candidate_decision(dict(accounting_result))
+        try:
+            session = session.record_decision(decision)  # type: ignore[arg-type]
+        except CandidateIntegrityError:
+            warnings.append("accounting_candidate_integrity_warning")
+            session = session.terminalize_best_available(
+                "accounting_candidate_integrity_warning"
+            )
+            proposal_status = "partial"
+            break
+        if session.final_action is not None:
+            break
+        expansion = session.pending_expansion_request
+        if expansion is None:
+            warnings.append("candidate_expansion_request_missing")
+            break
+        expansion_ids = _expanded_candidate_ids(
+            all_candidates,
+            accumulated_ids=session.accumulated_candidate_ids,
+            search_terms=expansion.search_terms,
+            limit=expansion_candidate_limit,
+        )
+        session = session.add_expansion_candidates(expansion_ids)
+
+    warnings.extend(session.warnings)
+    proposal = _accounting_proposal_payload(session)
+    result = _build_accounting_proposal_result(
+        canonical,
+        proposal=proposal,
+        warnings=warnings,
+        account_names={
+            str(candidate["candidate_id"]): str(candidate.get("name") or "")
+            for candidate in all_candidates
+        },
+    )
+    if authoritative_accounting_receipt is None:
+        # No provider response means no typed proposal artifact. The usable
+        # draft is still returned with warnings rather than discarded.
+        return result
+    proposal_artifact_id = str(uuid4())
+    result["document_ai_artifacts"] = {
+        "extraction_receipt_id": extraction_receipt.artifact_id,
+        "canonical_invoice_form_id": canonical_artifact.artifact_id,
+        "accounting_input_projection_id": projection_artifact.artifact_id,
+        "accounting_proposal_id": proposal_artifact_id,
+    }
+    proposal_artifact = artifact_repository.append(
+        ArtifactWrite(
+            **scope,
+            kind=ArtifactKind.ACCOUNTING_PROPOSAL,
+            stage="accounting_proposal",
+            status=proposal_status,
+            artifact_id=proposal_artifact_id,
+            parent_artifact_id=projection_artifact.artifact_id,
+            provider_receipt_artifact_id=authoritative_accounting_receipt.artifact_id,
+            mapper_version="accounting-proposal-v1",
+            metadata={
+                "accounting_call_count": session.accounting_call_count,
+                "expansion_count": session.expansion_count,
+                "chart_candidate_revision": chart_candidate_revision,
+                "candidate_revision": sha256(
+                    _json_bytes(session.accumulated_candidate_ids)
+                ).hexdigest(),
+            },
+        ),
+        content=_json_bytes({"proposal": proposal, "result_snapshot": result}),
+    )
+    if proposal_artifact.artifact_id != proposal_artifact_id:
+        raise RuntimeError("accounting proposal artifact identity changed during append")
+    return result
+
+
 def build_processing_result(
     document: dict[str, Any],
     job: dict[str, Any],
@@ -1354,6 +2599,13 @@ def process_next_job_once(
     statement_ai_provider: StatementSuggestionProvider | None = None,
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
     research_runtime: dict[str, object] | None = None,
+    extraction_provider: object | None = None,
+    accounting_provider: object | None = None,
+    artifact_repository: Any | None = None,
+    max_parallel_accounting_chunks: int = 1,
+    candidate_experiment_percent: int | None = None,
+    max_accounting_request_bytes: int | None = None,
+    tenant_id: str = "",
 ) -> dict[str, Any]:
     job = store.claim_next_processing_job()
     if job is None:
@@ -1368,6 +2620,7 @@ def process_next_job_once(
     research_cache_hit = False
     nace_cache_hit = False
     failure_stage = "parse"
+    gemini_pdf_v2_selected = False
 
     def pipeline_event(step: str, status: str, message_tr: str, debug_code: str, details: dict[str, Any] | None = None) -> None:
         if not hasattr(store, "record_document_pipeline_event"):
@@ -1407,18 +2660,81 @@ def process_next_job_once(
         )
         if document is None:
             raise ValueError(f"uploaded document not found: {document_ref}")
-        runtime = (
-            {
-                "product_classifier": product_classifier,
-                "canonical_extraction_provider": None,
-                "canonical_extraction_policy": CanonicalExtractionPolicy(),
-                "statement_ai_provider": statement_ai_provider,
-                "statement_ai_policy": statement_ai_policy,
-            }
-            if product_classifier or statement_ai_provider or statement_ai_policy
-            else build_ai_runtime_from_env()
-        )
-        selected_provider = getattr(getattr(runtime["product_classifier"], "provider", None), "provider_name", "")
+        gemini_pdf_v2_selected = _gemini_pdf_v2_eligible(document, job)
+        workspace = _workspace_with_nace_research(workspace, store)
+        parse_start = time.perf_counter()
+        failure_stage = "processing"
+        runtime: dict[str, Any] = {}
+        if gemini_pdf_v2_selected:
+            pipeline_event(
+                "gemini_pdf_v2_selected",
+                "ok",
+                "Gemini native-PDF V2 belge akisi secildi.",
+                "gemini_pdf_v2_selected",
+                {"parser_fallback": False},
+            )
+            result, v2_provider = _run_gemini_pdf_v2_for_worker(
+                store=store,
+                document=document,
+                workspace=workspace,
+                client_id=client_id,
+                extraction_provider=extraction_provider,
+                accounting_provider=accounting_provider,
+                artifact_repository=artifact_repository,
+                max_parallel_accounting_chunks=max_parallel_accounting_chunks,
+                candidate_experiment_percent=candidate_experiment_percent,
+                max_accounting_request_bytes=max_accounting_request_bytes,
+            )
+            selected_provider = str(
+                getattr(v2_provider, "provider_name", "gemini") or "gemini"
+            )
+            parse_ms = _duration_ms(parse_start)
+            ai_ms = parse_ms
+            _record_ai_capacity_snapshot(store, v2_provider)
+        else:
+            runtime = (
+                {
+                    "product_classifier": product_classifier,
+                    "canonical_extraction_provider": None,
+                    "canonical_extraction_policy": CanonicalExtractionPolicy(),
+                    "statement_ai_provider": statement_ai_provider,
+                    "statement_ai_policy": statement_ai_policy,
+                }
+                if product_classifier or statement_ai_provider or statement_ai_policy
+                else build_ai_runtime_from_env()
+            )
+            selected_provider = str(
+                getattr(
+                    getattr(runtime["product_classifier"], "provider", None),
+                    "provider_name",
+                    "",
+                )
+            )
+            result = build_processing_result(
+                document,
+                job,
+                workspace,
+                product_classifier=runtime["product_classifier"],
+                canonical_extraction_provider=runtime.get(
+                    "canonical_extraction_provider"
+                ),
+                canonical_extraction_policy=runtime.get(
+                    "canonical_extraction_policy"
+                ),
+                statement_ai_provider=runtime["statement_ai_provider"],
+                statement_ai_policy=runtime["statement_ai_policy"],
+            )
+            parse_ms = _duration_ms(parse_start)
+            product_provider = getattr(
+                runtime["product_classifier"], "provider", None
+            )
+            if str(result.get("ai_classification_provider") or "") not in {
+                "",
+                "static_rules",
+            } or bool(result.get("canonical_extraction_ai_used")):
+                ai_ms = parse_ms
+            _record_ai_capacity_snapshot(store, product_provider)
+            _record_ai_capacity_snapshot(store, runtime["statement_ai_provider"])
         if selected_provider:
             pipeline_event(
                 "ai_provider_selected",
@@ -1427,27 +2743,17 @@ def process_next_job_once(
                 "ai_provider_selected",
                 {"provider": selected_provider},
             )
-        workspace = _workspace_with_nace_research(workspace, store)
-        parse_start = time.perf_counter()
-        failure_stage = "processing"
-        result = build_processing_result(
-            document,
-            job,
-            workspace,
-            product_classifier=runtime["product_classifier"],
-            canonical_extraction_provider=runtime.get("canonical_extraction_provider"),
-            canonical_extraction_policy=runtime.get("canonical_extraction_policy"),
-            statement_ai_provider=runtime["statement_ai_provider"],
-            statement_ai_policy=runtime["statement_ai_policy"],
-        )
-        parse_ms = _duration_ms(parse_start)
-        product_provider = getattr(runtime["product_classifier"], "provider", None)
-        if str(result.get("ai_classification_provider") or "") not in {"", "static_rules"} or bool(
-            result.get("canonical_extraction_ai_used")
-        ):
-            ai_ms = parse_ms
-        _record_ai_capacity_snapshot(store, product_provider)
-        _record_ai_capacity_snapshot(store, runtime["statement_ai_provider"])
+        for warning in result.get("pipeline_warnings") or []:
+            warning_code = str(warning or "").strip()
+            if not warning_code:
+                continue
+            pipeline_event(
+                "pipeline_warning",
+                "warning",
+                "Belge isleme uyarisi kaydedildi; kullanilabilir sonraki asamalar devam etti.",
+                warning_code,
+                {"warning": warning_code, "draft_retained": bool(result.get("draft_lines"))},
+            )
         pipeline_event(
             "parse_succeeded",
             "ok",
@@ -1619,7 +2925,11 @@ def process_next_job_once(
             )
         effective_research_runtime = research_runtime if research_runtime is not None else build_research_runtime_from_env(environ)
         research_document_type = str(document.get("document_type") or job.get("document_type") or "invoice")
-        if effective_research_runtime and research_document_type not in {"bank_statement", "pos_statement"}:
+        if (
+            not gemini_pdf_v2_selected
+            and effective_research_runtime
+            and research_document_type not in {"bank_statement", "pos_statement"}
+        ):
             raw_line = _research_candidate_from_result(result, document)
             should_run_research = bool(raw_line and _should_run_research_for_result(result))
             canonical_line_ids = _canonical_line_ids_for_research(result) if should_run_research else ()
@@ -1858,23 +3168,30 @@ def process_next_job_once(
             )
         return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
     except Exception as exc:  # pragma: no cover - defensive worker boundary
-        if isinstance(exc, DocumentParseError):
+        if isinstance(exc, DocumentParseError) and not gemini_pdf_v2_selected:
             failure_stage = "parse"
-        failure_event = {
-            "parse": (
-                "parser_failed",
-                "Belge parse edilemedi.",
-            ),
-            "persistence": (
-                "persistence_failed",
-                "Belge sonucu kaydedilemedi.",
-            ),
-        }.get(
-            failure_stage,
+        failure_event = (
             (
-                "processing_failed",
-                "Belge isleme tamamlanamadi.",
-            ),
+                "gemini_pdf_v2_failed",
+                "Gemini native-PDF V2 belge islemesi tamamlanamadi.",
+            )
+            if gemini_pdf_v2_selected
+            else {
+                "parse": (
+                    "parser_failed",
+                    "Belge parse edilemedi.",
+                ),
+                "persistence": (
+                    "persistence_failed",
+                    "Belge sonucu kaydedilemedi.",
+                ),
+            }.get(
+                failure_stage,
+                (
+                    "processing_failed",
+                    "Belge isleme tamamlanamadi.",
+                ),
+            )
         )
         pipeline_event(
             failure_event[0],
@@ -1893,6 +3210,35 @@ def process_next_job_once(
             "research_cache_hit": research_cache_hit,
             "nace_cache_hit": nace_cache_hit,
         }
+        if isinstance(exc, RetryableDocumentTechnicalError) or is_transient_persistence_error(exc):
+            try:
+                opened_at = datetime.fromisoformat(
+                    str(job.get("created_at") or "").replace("Z", "+00:00")
+                )
+                if opened_at.tzinfo is None:
+                    opened_at = opened_at.replace(tzinfo=UTC)
+            except ValueError:
+                opened_at = datetime.now(UTC)
+            retry = next_ai_retry(
+                step=max(int(job.get("attempt_count") or 1) - 1, 0),
+                opened_at=opened_at,
+                now=datetime.now(UTC),
+                document_id=document_ref,
+            )
+            store.update_processing_job(
+                job_id=str(job.get("id") or ""),
+                status=retry.status,
+                error_message=str(exc),
+                processing_metrics=processing_metrics,
+                next_attempt_at=retry.next_attempt_at,
+                retry_step=retry.retry_step,
+                **(
+                    {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+                    if job.get("normalized_attempt_id")
+                    else {}
+                ),
+            )
+            return {"processed_count": 1, "completed_count": 0, "failed_count": 0}
         store.update_processing_job(
             job_id=str(job.get("id") or ""),
             status="failed",
@@ -1915,6 +3261,12 @@ def process_queued_documents(
     statement_ai_provider: StatementSuggestionProvider | None = None,
     statement_ai_policy: StatementAiSuggestionPolicy | None = None,
     research_runtime: dict[str, object] | None = None,
+    extraction_provider: object | None = None,
+    accounting_provider: object | None = None,
+    artifact_repository: Any | None = None,
+    max_parallel_accounting_chunks: int = 1,
+    candidate_experiment_percent: int | None = None,
+    max_accounting_request_bytes: int | None = None,
 ) -> dict[str, Any]:
     queued_count = 0
     try:
@@ -1936,6 +3288,12 @@ def process_queued_documents(
             statement_ai_provider=statement_ai_provider,
             statement_ai_policy=statement_ai_policy,
             research_runtime=research_runtime,
+            extraction_provider=extraction_provider,
+            accounting_provider=accounting_provider,
+            artifact_repository=artifact_repository,
+            max_parallel_accounting_chunks=max_parallel_accounting_chunks,
+            candidate_experiment_percent=candidate_experiment_percent,
+            max_accounting_request_bytes=max_accounting_request_bytes,
         )
         if result["processed_count"] == 0:
             break

@@ -25,6 +25,7 @@ class RetentionService:
             "opened_warning_count": 0,
             "deleted_source_count": 0,
             "deleted_file_count": 0,
+            "deleted_raw_receipt_body_count": 0,
             "resolved_batch_count": 0,
             "warnings": [],
         }
@@ -39,10 +40,25 @@ class RetentionService:
         warnings: list[str] = []
         deleted_source_count = 0
         deleted_file_count = 0
+        deleted_raw_receipt_body_count = 0
         resolved_batch_count = 0
         for batch in batches:
             batch_warnings: list[str] = []
             for source in batch.get("sources", []):
+                artifact_repository = getattr(
+                    self.store, "document_ai_artifact_repository", None
+                )
+                if artifact_repository is not None:
+                    try:
+                        deleted_raw_receipt_body_count += int(
+                            artifact_repository.delete_raw_bodies_for_source(
+                                tenant_id=str(self.store.tenant_id),
+                                taxpayer_id=str(batch.get("taxpayer_id") or ""),
+                                source_file_id=str(source.get("source_file_id") or ""),
+                            )
+                        )
+                    except Exception:
+                        batch_warnings.append("raw_receipt_body_delete_failed")
                 path = self._validated_local_path(str(source.get("storage_path") or ""))
                 if path is None:
                     batch_warnings.append("raw_file_delete_skipped")
@@ -68,6 +84,7 @@ class RetentionService:
             "opened_warning_count": opened,
             "deleted_source_count": deleted_source_count,
             "deleted_file_count": deleted_file_count,
+            "deleted_raw_receipt_body_count": deleted_raw_receipt_body_count,
             "resolved_batch_count": resolved_batch_count,
             "warnings": sorted(set(warnings)),
         }

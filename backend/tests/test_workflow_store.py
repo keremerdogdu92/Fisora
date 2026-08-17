@@ -19,9 +19,12 @@ from app.domain.ai_classification import AiClassificationPolicy, StaticFirstClas
 from app.domain.statement_ai_suggestions import StatementAiSuggestionPolicy
 from app.domain.workspace_exports import build_workspace_export_package
 from app.persistence.postgres_workflow_store import PostgresWorkflowStore
-from app.persistence.store_factory import build_workflow_store
+from app.persistence.store_factory import (
+    ProcessLocalPostgresConnectionPool,
+    build_workflow_store,
+)
 from app.services.document_service import DocumentService
-from app.worker import worker_concurrency_from_env
+from app.worker import next_idle_delay, worker_concurrency_from_env
 from backend.scripts.import_private_intake_manifest import import_manifest
 from app.workflows.document_processing import (
     _accountant_summary,
@@ -43,6 +46,49 @@ class FakeStatementSuggestionProvider:
     def suggest_statement_line(self, request: object) -> dict[str, object]:
         self.requests.append(request)
         return self.response
+
+
+class PostgresConnectionPoolTests(unittest.TestCase):
+    def test_process_local_pool_reuses_connections_and_commits_each_lease(self) -> None:
+        created: list[object] = []
+
+        class FakeConnection:
+            closed = False
+
+            def __init__(self) -> None:
+                self.commit_count = 0
+                self.rollback_count = 0
+
+            def commit(self) -> None:
+                self.commit_count += 1
+
+            def rollback(self) -> None:
+                self.rollback_count += 1
+
+            def close(self) -> None:
+                self.closed = True
+
+        def connect() -> FakeConnection:
+            connection = FakeConnection()
+            created.append(connection)
+            return connection
+
+        pool = ProcessLocalPostgresConnectionPool(
+            connect=connect,
+            max_size=2,
+            acquire_timeout_seconds=0.1,
+        )
+
+        with pool.connection() as first:
+            pass
+        with pool.connection() as second:
+            pass
+
+        self.assertIs(first, second)
+        self.assertEqual(len(created), 1)
+        self.assertEqual(first.commit_count, 2)
+        self.assertEqual(pool.stats()["available"], 1)
+        self.assertEqual(pool.stats()["in_use"], 0)
 
 
 class FakeProductProvider:
@@ -269,6 +315,12 @@ class WorkflowStoreTests(unittest.TestCase):
 
     def test_worker_concurrency_uses_configured_positive_slot_count(self) -> None:
         self.assertEqual(worker_concurrency_from_env({"FISORA_WORKER_CONCURRENCY": "3"}), 3)
+
+    def test_worker_idle_delay_resets_after_productive_tick_and_backs_off_when_idle(self) -> None:
+        self.assertEqual(next_idle_delay(5, processed_count=1), 0)
+        self.assertEqual(next_idle_delay(0, processed_count=0), 1)
+        self.assertEqual(next_idle_delay(1, processed_count=0), 2)
+        self.assertEqual(next_idle_delay(4, processed_count=0), 5)
 
     def test_ai_runtime_from_env_builds_groq_provider_for_worker(self) -> None:
         runtime = build_ai_runtime_from_env(
@@ -1375,6 +1427,9 @@ class WorkflowStoreTests(unittest.TestCase):
         self.assertIn("for update skip locked", claim_sql)
         self.assertIn("update workflow_records", claim_sql)
         self.assertIn("returning records.client_id, records.record_key, records.payload", claim_sql)
+        self.assertIn("payload->>'status' = 'retry_wait'", claim_sql)
+        self.assertIn("payload->>'next_attempt_at'", claim_sql)
+        self.assertIn("pg_input_is_valid", claim_sql)
 
     def test_postgres_outgoing_attempt_claim_writes_attempt_and_sending_in_one_connection(self) -> None:
         executed_sql: list[str] = []

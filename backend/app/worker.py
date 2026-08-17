@@ -5,17 +5,29 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Lock
 from typing import Mapping
 
+from app.domain.gemini_pdf_runtime import (
+    GeminiPdfRuntime,
+    build_gemini_pdf_runtime_from_env,
+    gemini_pdf_v2_enabled,
+)
 from app.persistence.store_factory import build_workflow_store
 from app.services.retention_service import RetentionService
-from app.workflows.document_processing import process_queued_documents
+from app.workflows.document_processing import (
+    is_transient_persistence_error,
+    process_queued_documents,
+)
 
 
 RETENTION_INTERVAL_SECONDS = int(os.environ.get("FISORA_WORKER_RETENTION_INTERVAL_SECONDS", "86400"))
-PROCESSING_INTERVAL_SECONDS = int(os.environ.get("FISORA_WORKER_PROCESSING_INTERVAL_SECONDS", "30"))
+IDLE_MIN_SECONDS = float(os.environ.get("FISORA_WORKER_IDLE_MIN_SECONDS", "1"))
+IDLE_MAX_SECONDS = float(os.environ.get("FISORA_WORKER_IDLE_MAX_SECONDS", "5"))
 MAX_JOBS_PER_TICK = int(os.environ.get("FISORA_WORKER_MAX_JOBS_PER_TICK", "10"))
 RUN_ONCE = os.environ.get("FISORA_WORKER_RUN_ONCE", "").lower() in {"1", "true", "yes"}
+_GEMINI_RUNTIME: GeminiPdfRuntime | None = None
+_GEMINI_RUNTIME_LOCK = Lock()
 
 
 def worker_concurrency_from_env(env: Mapping[str, str] | None = None) -> int:
@@ -37,9 +49,63 @@ def run_retention_once() -> dict[str, object]:
     return store.apply_document_retention(delete_files=True)
 
 
+def _gemini_runtime_for_worker() -> GeminiPdfRuntime | None:
+    global _GEMINI_RUNTIME
+    if not gemini_pdf_v2_enabled(os.environ):
+        return None
+    if _GEMINI_RUNTIME is None:
+        with _GEMINI_RUNTIME_LOCK:
+            if _GEMINI_RUNTIME is None:
+                _GEMINI_RUNTIME = build_gemini_pdf_runtime_from_env(os.environ)
+    return _GEMINI_RUNTIME
+
+
 def run_processing_once() -> dict[str, object]:
-    store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
-    return process_queued_documents(store, max_jobs=MAX_JOBS_PER_TICK)
+    try:
+        store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
+        runtime = _gemini_runtime_for_worker()
+        provider = runtime.provider if runtime is not None and runtime.available else None
+        max_parallel_chunks = (
+            runtime.max_parallel_accounting_chunks
+            if runtime is not None and runtime.available
+            else 1
+        )
+        candidate_experiment_percent = (
+            runtime.candidate_experiment_percent
+            if runtime is not None and runtime.available
+            else None
+        )
+        max_accounting_request_bytes = (
+            runtime.max_accounting_request_bytes
+            if runtime is not None and runtime.available
+            else None
+        )
+        return process_queued_documents(
+            store,
+            max_jobs=MAX_JOBS_PER_TICK,
+            extraction_provider=provider,
+            accounting_provider=provider,
+            max_parallel_accounting_chunks=max_parallel_chunks,
+            candidate_experiment_percent=candidate_experiment_percent,
+            max_accounting_request_bytes=max_accounting_request_bytes,
+        )
+    except Exception as exc:
+        if not is_transient_persistence_error(exc):
+            raise
+        return {
+            "run_id": "processing-run-transient-database-error",
+            "queued_count": 0,
+            "processed_count": 0,
+            "completed_count": 0,
+            "failed_count": 0,
+            "current_status": "retry_wait",
+        }
+
+
+def next_idle_delay(current: float, *, processed_count: int) -> float:
+    if processed_count > 0:
+        return 0.0
+    return min(max(current * 2, IDLE_MIN_SECONDS), max(IDLE_MAX_SECONDS, IDLE_MIN_SECONDS))
 
 
 def _merge_processing_summaries(summaries: list[dict[str, object]]) -> dict[str, object]:
@@ -83,18 +149,23 @@ def run_processing_tick(*, concurrency: int | None = None) -> dict[str, object]:
 
 
 def main() -> None:
-    retention_tick = 0
+    next_retention_at = 0.0
+    idle_delay = 0.0
     concurrency = worker_concurrency_from_env()
     while True:
         processing_summary = run_processing_tick(concurrency=concurrency)
         print(f"document_processing {processing_summary}", flush=True)
-        if retention_tick == 0:
+        now = time.monotonic()
+        if now >= next_retention_at:
             retention_summary = run_retention_once()
             print(f"document_retention {retention_summary}", flush=True)
+            next_retention_at = now + max(RETENTION_INTERVAL_SECONDS, 1)
         if RUN_ONCE:
             return
-        retention_tick = (retention_tick + PROCESSING_INTERVAL_SECONDS) % RETENTION_INTERVAL_SECONDS
-        time.sleep(PROCESSING_INTERVAL_SECONDS)
+        processed_count = int(processing_summary.get("processed_count") or 0)
+        idle_delay = next_idle_delay(idle_delay, processed_count=processed_count)
+        if processed_count == 0 and idle_delay > 0:
+            time.sleep(idle_delay)
 
 
 if __name__ == "__main__":

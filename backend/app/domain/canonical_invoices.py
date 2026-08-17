@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from hashlib import sha256
+import json
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 import unicodedata
 
 
 MONEY = Decimal("0.01")
+APPROVED_TAX_COMPONENT_TYPES = frozenset({"vat", "withholding", "special_tax", "other_tax"})
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,12 @@ class CanonicalTaxComponent:
     canonical_tax_kind: str = "unknown_non_vat_tax"
     normalization_confidence: str = "unknown"
     accounting_treatment: str = "unresolved"
+    component_type: str = "other_tax"
+    component_id: str = ""
+    economic_effect: str = "unknown"
+    included_in_tax_total: str = "unknown"
+    included_in_payable: str = "unknown"
+    occurrence_index: int = 1
 
 
 @dataclass(frozen=True)
@@ -34,11 +42,22 @@ class CanonicalMonetaryComponent:
     canonical_component_kind: str = "service_charge"
     normalization_confidence: str = "unknown"
     accounting_treatment: str = "related_service_expense"
+    component_id: str = ""
+    signed_effect: str = "unknown"
+    included_in_line_net: str = "unknown"
+    included_in_tax_total: str = "unknown"
+    included_in_payable: str = "unknown"
+    occurrence_index: int = 1
 
 
 def _normalized_tax_text(value: str) -> str:
     folded = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
     return re.sub(r"\s+", " ", folded.upper()).strip()
+
+
+def _normalized_inclusion_state(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in {"yes", "no"} else "unknown"
 
 
 def normalize_tax_component(
@@ -50,10 +69,24 @@ def normalize_tax_component(
     tax_amount: str,
     source_position: str,
     evidence: tuple[str, ...] = (),
+    component_type: str = "",
+    included_in_tax_total: str = "unknown",
+    included_in_payable: str = "unknown",
 ) -> CanonicalTaxComponent:
     code = str(source_code or "").strip().upper()
     label = _normalized_tax_text(source_label)
-    if code in {"0015", "KDV", "VAT"} or label in {"KDV", "VAT", "KATMA DEGER VERGISI"}:
+    withholding_code = (
+        code in {"0003", "0004", "9015", "TEVKIFAT", "WITHHOLDING"}
+        or bool(re.fullmatch(r"6\d{2}", code))
+    )
+    withholding_label = any(token in label for token in ("TEVKIF", "WITHHOLD", "STOPAJ"))
+    vat_label = (
+        bool(re.search(r"\b(?:KDV|VAT)\b", label))
+        or "KATMA DEGER VERGISI" in label
+    )
+    if withholding_code or withholding_label:
+        kind, treatment, confidence = "withholding", "withholding_payable", "explicit"
+    elif code in {"0015", "KDV", "VAT"} or vat_label:
         kind, treatment, confidence = "vat", "deductible_vat", "explicit"
     elif code == "4080" or "OZEL ILETISIM" in label or label == "OIV":
         kind, treatment, confidence = "special_communication_tax", "unresolved", "explicit"
@@ -63,6 +96,31 @@ def normalize_tax_component(
         kind, treatment, confidence = "radio_usage_fee", "related_service_expense", "explicit"
     else:
         kind, treatment, confidence = "unknown_non_vat_tax", "unresolved", "unknown"
+    raw_component_type = re.sub(
+        r"[^a-z]+",
+        "_",
+        str(component_type or "").strip().lower(),
+    ).strip("_")
+    if kind == "vat":
+        resolved_component_type = "vat"
+    elif kind == "withholding":
+        resolved_component_type = "withholding"
+    elif kind != "unknown_non_vat_tax":
+        resolved_component_type = "special_tax"
+    elif raw_component_type:
+        resolved_component_type = (
+            raw_component_type
+            if raw_component_type in APPROVED_TAX_COMPONENT_TYPES - {"vat"}
+            else "other_tax"
+        )
+    else:
+        resolved_component_type = "other_tax"
+    if resolved_component_type == "withholding":
+        economic_effect = "reduce_payable"
+    elif resolved_component_type in {"vat", "special_tax", "other_tax"}:
+        economic_effect = "increase_tax"
+    else:
+        economic_effect = "unknown"
     return CanonicalTaxComponent(
         source_label=str(source_label or "").strip(),
         source_code=str(source_code or "").strip(),
@@ -74,6 +132,10 @@ def normalize_tax_component(
         canonical_tax_kind=kind,
         normalization_confidence=confidence,
         accounting_treatment=treatment,
+        component_type=resolved_component_type,
+        economic_effect=economic_effect,
+        included_in_tax_total=_normalized_inclusion_state(included_in_tax_total),
+        included_in_payable=_normalized_inclusion_state(included_in_payable),
     )
 
 
@@ -83,10 +145,15 @@ def normalize_monetary_component(
     source_amount: str,
     source_position: str,
     evidence: tuple[str, ...] = (),
+    included_in_line_net: str = "unknown",
+    included_in_tax_total: str = "unknown",
+    included_in_payable: str = "unknown",
 ) -> CanonicalMonetaryComponent:
     label = _normalized_tax_text(source_label)
     if any(token in label for token in ("ONCEKI AYDAN DEVIR", "ONCEKI DONEM", "GECEN DONEM", "DEVREDEN BAKIYE")):
         kind, treatment, confidence = "prior_period_balance", "exclude_current_period", "explicit"
+    elif any(token in label for token in ("SONRAKI AYA DEVIR", "SONRAKI DONEM", "GELECEK AYA DEVIR")):
+        kind, treatment, confidence = "next_period_balance", "separate_posting", "explicit"
     elif "TAKSIT" in label:
         kind, treatment, confidence = "installment_charge", "related_service_expense", "explicit"
     elif "CIHAZ" in label or "BAGLANT" in label:
@@ -97,6 +164,19 @@ def normalize_monetary_component(
         kind, treatment, confidence = "discount", "reduce_related_service_expense", "explicit"
     else:
         kind, treatment, confidence = "service_charge", "related_service_expense", "inferred"
+    amount = _decimal(source_amount)
+    if kind == "discount":
+        signed_effect = "decrease_payable"
+    elif kind == "prior_period_balance":
+        signed_effect = "informational"
+    elif kind == "next_period_balance":
+        signed_effect = "decrease_payable"
+    elif amount is not None and amount < Decimal("0.00"):
+        signed_effect = "decrease_payable"
+    elif kind in {"installment_charge", "device_connection_charge", "rounding_adjustment", "service_charge"}:
+        signed_effect = "increase_payable"
+    else:
+        signed_effect = "unknown"
     return CanonicalMonetaryComponent(
         source_label=str(source_label or "").strip(),
         source_amount=str(source_amount or "").strip(),
@@ -105,6 +185,10 @@ def normalize_monetary_component(
         canonical_component_kind=kind,
         normalization_confidence=confidence,
         accounting_treatment=treatment,
+        signed_effect=signed_effect,
+        included_in_line_net=_normalized_inclusion_state(included_in_line_net),
+        included_in_tax_total=_normalized_inclusion_state(included_in_tax_total),
+        included_in_payable=_normalized_inclusion_state(included_in_payable),
     )
 
 
@@ -115,6 +199,7 @@ class CanonicalInvoiceParty:
     tax_office: str = ""
     address: str = ""
     evidence: tuple[str, ...] = field(default_factory=tuple)
+    tax_id_type: str = ""
 
 
 @dataclass(frozen=True)
@@ -127,6 +212,8 @@ class CanonicalInvoiceHeader:
     original_invoice_no: str = ""
     original_invoice_date: str = ""
     evidence: tuple[str, ...] = field(default_factory=tuple)
+    currency_code: str = ""
+    document_direction: str = ""
 
 
 @dataclass(frozen=True)
@@ -147,6 +234,7 @@ class CanonicalInvoiceLine:
     exemption_reason_code: str = ""
     vat_group_id: str = ""
     evidence: tuple[str, ...] = field(default_factory=tuple)
+    unit_price_basis: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -170,6 +258,15 @@ class CanonicalInvoiceTotals:
     special_tax_total: str = ""
     tax_inclusive_total: str = ""
     payable_total: str = ""
+    evidence: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class CanonicalNamedTotal:
+    source_label: str
+    amount: str
+    source_position: str = ""
+    proposed_role: str = "other"
     evidence: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -200,6 +297,7 @@ class CanonicalInvoice:
     vat_summary: tuple[CanonicalVatSummaryLine, ...] = ()
     tax_components: tuple[CanonicalTaxComponent, ...] = ()
     monetary_components: tuple[CanonicalMonetaryComponent, ...] = ()
+    named_totals: tuple[CanonicalNamedTotal, ...] = ()
     totals: CanonicalInvoiceTotals = CanonicalInvoiceTotals()
     validation: CanonicalInvoiceValidation = CanonicalInvoiceValidation(status="not_validated")
     ai_used: bool = False
@@ -267,11 +365,40 @@ def canonical_extraction_output_schema(
         "properties": {
             "title": text_field,
             "tax_id": text_field,
+            "tax_id_type": text_field,
             "tax_office": text_field,
             "address": text_field,
             "evidence": evidence_field,
         },
-        "required": ["title", "tax_id", "tax_office", "address", "evidence"],
+        "required": ["title", "tax_id", "tax_id_type", "tax_office", "address", "evidence"],
+        "additionalProperties": False,
+    }
+    header_schema = {
+        "type": "object",
+        "properties": {
+            "invoice_no": text_field,
+            "ettn": text_field,
+            "issue_date": text_field,
+            "invoice_type": text_field,
+            "scenario": text_field,
+            "currency_code": text_field,
+            "document_direction": text_field,
+            "original_invoice_no": text_field,
+            "original_invoice_date": text_field,
+            "evidence": evidence_field,
+        },
+        "required": [
+            "invoice_no",
+            "ettn",
+            "issue_date",
+            "invoice_type",
+            "scenario",
+            "currency_code",
+            "document_direction",
+            "original_invoice_no",
+            "original_invoice_date",
+            "evidence",
+        ],
         "additionalProperties": False,
     }
     line_schema = {
@@ -291,10 +418,17 @@ def canonical_extraction_output_schema(
             "observed_quantity": text_field,
             "observed_unit_code": text_field,
             "observed_unit_price": text_field,
+            "observed_unit_price_basis": {
+                "type": "string",
+                "enum": ["net", "gross", "unknown"],
+            },
             "observed_taxable_amount": text_field,
             "observed_vat_rate": text_field,
             "observed_tax_amount": text_field,
             "observed_gross_amount": text_field,
+            "tax_scheme_code": text_field,
+            "tax_category_code": text_field,
+            "exemption_reason_code": text_field,
             "evidence": evidence_field,
         },
         "required": [
@@ -305,10 +439,14 @@ def canonical_extraction_output_schema(
             "observed_quantity",
             "observed_unit_code",
             "observed_unit_price",
+            "observed_unit_price_basis",
             "observed_taxable_amount",
             "observed_vat_rate",
             "observed_tax_amount",
             "observed_gross_amount",
+            "tax_scheme_code",
+            "tax_category_code",
+            "exemption_reason_code",
             "evidence",
         ],
         "additionalProperties": False,
@@ -319,14 +457,29 @@ def canonical_extraction_output_schema(
             "observed_rate": text_field,
             "observed_taxable_amount": text_field,
             "observed_tax_amount": text_field,
+            "tax_scheme_code": text_field,
+            "tax_category_code": text_field,
+            "exemption_reason_code": text_field,
             "evidence": evidence_field,
         },
-        "required": ["observed_rate", "observed_taxable_amount", "observed_tax_amount", "evidence"],
+        "required": [
+            "observed_rate",
+            "observed_taxable_amount",
+            "observed_tax_amount",
+            "tax_scheme_code",
+            "tax_category_code",
+            "exemption_reason_code",
+            "evidence",
+        ],
         "additionalProperties": False,
     }
     tax_component_schema = {
         "type": "object",
         "properties": {
+            "component_type": {
+                "type": "string",
+                "enum": ["vat", "withholding", "special_tax", "other_tax"],
+            },
             "source_label": text_field,
             "source_code": text_field,
             "rate": text_field,
@@ -335,12 +488,66 @@ def canonical_extraction_output_schema(
             "source_position": text_field,
             "evidence": evidence_field,
         },
-        "required": ["source_label", "source_code", "rate", "taxable_amount", "tax_amount", "source_position", "evidence"],
+        "required": [
+            "component_type",
+            "source_label",
+            "source_code",
+            "rate",
+            "taxable_amount",
+            "tax_amount",
+            "source_position",
+            "evidence",
+        ],
+        "additionalProperties": False,
+    }
+    monetary_component_schema = {
+        "type": "object",
+        "properties": {
+            "source_label": text_field,
+            "source_amount": text_field,
+            "source_position": text_field,
+            "evidence": evidence_field,
+        },
+        "required": [
+            "source_label",
+            "source_amount",
+            "source_position",
+            "evidence",
+        ],
+        "additionalProperties": False,
+    }
+    named_total_schema = {
+        "type": "object",
+        "properties": {
+            "source_label": text_field,
+            "amount": text_field,
+            "source_position": text_field,
+            "proposed_role": {
+                "type": "string",
+                "enum": [
+                    "goods_services_total",
+                    "vat_total",
+                    "special_tax_total",
+                    "tax_inclusive_total",
+                    "payable_total",
+                    "other",
+                ],
+            },
+            "evidence": evidence_field,
+        },
+        "required": [
+            "source_label",
+            "amount",
+            "source_position",
+            "proposed_role",
+            "evidence",
+        ],
         "additionalProperties": False,
     }
     return {
         "type": "object",
         "properties": {
+            "header": header_schema,
             "supplier_party": party_schema,
             "customer_party": party_schema,
             "line_items": {
@@ -354,10 +561,13 @@ def canonical_extraction_output_schema(
             },
             "observed_vat_summary": {"type": "array", "items": vat_schema},
             "observed_tax_components": {"type": "array", "items": tax_component_schema},
+            "observed_monetary_components": {"type": "array", "items": monetary_component_schema},
+            "observed_named_totals": {"type": "array", "items": named_total_schema},
             "observed_totals": {
                 "type": "object",
                 "properties": {
                     "observed_goods_services_total": text_field,
+                    "observed_allowance_total": text_field,
                     "observed_vat_total": text_field,
                     "observed_special_tax_total": text_field,
                     "observed_tax_inclusive_total": text_field,
@@ -366,6 +576,7 @@ def canonical_extraction_output_schema(
                 },
                 "required": [
                     "observed_goods_services_total",
+                    "observed_allowance_total",
                     "observed_vat_total",
                     "observed_special_tax_total",
                     "observed_tax_inclusive_total",
@@ -377,11 +588,14 @@ def canonical_extraction_output_schema(
             "extraction_notes": evidence_field,
         },
         "required": [
+            "header",
             "supplier_party",
             "customer_party",
             "line_items",
             "observed_vat_summary",
             "observed_tax_components",
+            "observed_monetary_components",
+            "observed_named_totals",
             "observed_totals",
             "extraction_notes",
         ],
@@ -403,7 +617,34 @@ def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _has_observed_fact(value: Mapping[str, object]) -> bool:
+    for item in value.values():
+        if isinstance(item, (list, tuple)):
+            if _strings(item):
+                return True
+        elif _string(item):
+            return True
+    return False
+
+
+def _normalized_unit_price_basis(value: object) -> str:
+    normalized = _normalized_tax_text(_string(value))
+    if normalized == "NET":
+        return "net"
+    if normalized in {"GROSS", "BRUT"}:
+        return "gross"
+    return "unknown"
+
+
+def _normalized_vat_rate(value: object) -> str:
+    raw = _string(value)
+    if raw.lower() in {"unknown", "not_observed", "n/a", "na", "null"}:
+        return ""
+    return raw
+
+
 def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> CanonicalInvoice:
+    header = _mapping(payload.get("header"))
     supplier = _mapping(payload.get("supplier_party"))
     customer = _mapping(payload.get("customer_party"))
     totals = _mapping(payload.get("observed_totals") or payload.get("totals"))
@@ -416,6 +657,9 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
             quantity=_string(line.get("observed_quantity") or line.get("quantity")),
             unit_code=_string(line.get("observed_unit_code") or line.get("unit_code")),
             unit_price=_string(line.get("observed_unit_price") or line.get("unit_price")),
+            unit_price_basis=_normalized_unit_price_basis(
+                line.get("observed_unit_price_basis") or line.get("unit_price_basis")
+            ),
             taxable_amount=_string(line.get("observed_taxable_amount") or line.get("taxable_amount")),
             vat_rate=_string(line.get("observed_vat_rate") or line.get("vat_rate")),
             tax_amount=_string(line.get("observed_tax_amount") or line.get("tax_amount")),
@@ -428,11 +672,11 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
         )
         for item in payload.get("line_items") or []
         if isinstance(item, Mapping)
-        if (line := _mapping(item)).get("description")
+        if _has_observed_fact(line := _mapping(item))
     )
     vat_summary = tuple(
         CanonicalVatSummaryLine(
-            rate=_string(line.get("observed_rate") or line.get("rate")),
+            rate=_normalized_vat_rate(line.get("observed_rate") or line.get("rate")),
             taxable_amount=_string(line.get("observed_taxable_amount") or line.get("taxable_amount")),
             tax_amount=_string(line.get("observed_tax_amount") or line.get("tax_amount")),
             tax_scheme_code=_string(line.get("tax_scheme_code")),
@@ -444,10 +688,11 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
         )
         for item in payload.get("observed_vat_summary") or payload.get("vat_summary") or []
         if isinstance(item, Mapping)
-        if (line := _mapping(item)).get("observed_rate") or line.get("rate")
+        if _has_observed_fact(line := _mapping(item))
     )
     tax_components = tuple(
         normalize_tax_component(
+            component_type=_string(item.get("component_type")),
             source_label=_string(item.get("source_label")),
             source_code=_string(item.get("source_code")),
             rate=_string(item.get("rate")),
@@ -455,24 +700,81 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
             tax_amount=_string(item.get("tax_amount")),
             source_position=_string(item.get("source_position")),
             evidence=_strings(item.get("evidence")),
+            included_in_tax_total=_string(item.get("included_in_tax_total")),
+            included_in_payable=_string(item.get("included_in_payable")),
         )
         for item in payload.get("observed_tax_components") or []
         if isinstance(item, Mapping)
     )
-    monetary_components = tuple(
+    observed_monetary_components = tuple(
         normalize_monetary_component(
-            source_label=line.description,
-            source_amount=line.taxable_amount,
-            source_position=line.source_position,
-            evidence=line.evidence,
+            source_label=_string(item.get("source_label")),
+            source_amount=_string(item.get("source_amount")),
+            source_position=_string(item.get("source_position")),
+            evidence=_strings(item.get("evidence")),
+            included_in_line_net=_string(item.get("included_in_line_net")),
+            included_in_tax_total=_string(item.get("included_in_tax_total")),
+            included_in_payable=_string(item.get("included_in_payable")),
         )
-        for line in line_items
+        for item in payload.get("observed_monetary_components") or []
+        if isinstance(item, Mapping)
     )
+    named_totals = tuple(
+        CanonicalNamedTotal(
+            source_label=_string(item.get("source_label")),
+            amount=_string(item.get("amount")),
+            source_position=_string(item.get("source_position")),
+            proposed_role=_named_total_role(item.get("proposed_role")),
+            evidence=_strings(item.get("evidence")),
+        )
+        for item in payload.get("observed_named_totals") or []
+        if isinstance(item, Mapping)
+        if _string(item.get("source_label")) and _string(item.get("amount"))
+    )
+    monetary_components = (
+        observed_monetary_components
+        if "observed_monetary_components" in payload
+        else tuple(
+            normalize_monetary_component(
+                source_label=line.description,
+                source_amount=line.taxable_amount,
+                source_position=line.source_position,
+                evidence=line.evidence,
+            )
+            for line in line_items
+        )
+    )
+    extraction_notes = list(_strings(payload.get("extraction_notes")))
+    if any(not line.description for line in line_items):
+        extraction_notes.append("line_description_missing")
+    if any(not line.rate for line in vat_summary):
+        extraction_notes.append("vat_summary_rate_missing")
+    payable_total, payable_warning = _resolve_named_payable_total(
+        named_totals,
+        legacy_payable=_string(
+            totals.get("observed_payable_total") or totals.get("payable_total")
+        ),
+    )
+    if payable_warning:
+        extraction_notes.append(payable_warning)
     invoice = CanonicalInvoice(
         source="ai_canonical",
+        header=CanonicalInvoiceHeader(
+            invoice_no=_string(header.get("invoice_no")),
+            issue_date=_string(header.get("issue_date")),
+            ettn=_string(header.get("ettn")),
+            scenario=_string(header.get("scenario")),
+            invoice_type=_string(header.get("invoice_type")),
+            original_invoice_no=_string(header.get("original_invoice_no")),
+            original_invoice_date=_string(header.get("original_invoice_date")),
+            currency_code=_string(header.get("currency_code")),
+            document_direction=_string(header.get("document_direction")),
+            evidence=_strings(header.get("evidence")),
+        ),
         supplier_party=CanonicalInvoiceParty(
             title=_string(supplier.get("title")),
             tax_id=_string(supplier.get("tax_id")),
+            tax_id_type=_string(supplier.get("tax_id_type")),
             tax_office=_string(supplier.get("tax_office")),
             address=_string(supplier.get("address")),
             evidence=_strings(supplier.get("evidence")),
@@ -480,6 +782,7 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
         customer_party=CanonicalInvoiceParty(
             title=_string(customer.get("title")),
             tax_id=_string(customer.get("tax_id")),
+            tax_id_type=_string(customer.get("tax_id_type")),
             tax_office=_string(customer.get("tax_office")),
             address=_string(customer.get("address")),
             evidence=_strings(customer.get("evidence")),
@@ -488,9 +791,13 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
         vat_summary=vat_summary,
         tax_components=tax_components,
         monetary_components=monetary_components,
+        named_totals=named_totals,
         totals=CanonicalInvoiceTotals(
             goods_services_total=_string(
                 totals.get("observed_goods_services_total") or totals.get("goods_services_total")
+            ),
+            allowance_total=_string(
+                totals.get("observed_allowance_total") or totals.get("allowance_total")
             ),
             vat_total=_string(totals.get("observed_vat_total") or totals.get("vat_total")),
             special_tax_total=_string(
@@ -499,13 +806,70 @@ def canonical_invoice_from_ai_payload(payload: Mapping[str, object]) -> Canonica
             tax_inclusive_total=_string(
                 totals.get("observed_tax_inclusive_total") or totals.get("tax_inclusive_total")
             ),
-            payable_total=_string(totals.get("observed_payable_total") or totals.get("payable_total")),
+            payable_total=payable_total,
             evidence=_strings(totals.get("evidence")),
         ),
         ai_used=True,
-        extraction_notes=_strings(payload.get("extraction_notes")),
+        extraction_notes=tuple(dict.fromkeys(extraction_notes)),
     )
     return with_validation(invoice)
+
+
+def _named_total_role(value: object) -> str:
+    role = str(value or "").strip().lower()
+    if role in {
+        "goods_services_total",
+        "vat_total",
+        "special_tax_total",
+        "tax_inclusive_total",
+        "payable_total",
+        "other",
+    }:
+        return role
+    return "other"
+
+
+def _payable_label_rank(label: object) -> int | None:
+    normalized = _normalized_tax_text(label)
+    exact_markers = (
+        "TOPLAM ODENECEK TUTAR",
+        "NET ODENECEK TUTAR",
+        "ODENECEK TUTAR",
+        "AMOUNT DUE",
+        "PAYABLE AMOUNT",
+    )
+    if any(marker in normalized for marker in exact_markers):
+        return 0
+    if "ODENECEK" in normalized or "PAYABLE" in normalized:
+        return 1
+    return None
+
+
+def _resolve_named_payable_total(
+    named_totals: tuple[CanonicalNamedTotal, ...],
+    *,
+    legacy_payable: str,
+) -> tuple[str, str]:
+    candidates = [
+        (rank, index, item)
+        for index, item in enumerate(named_totals)
+        for rank in (_payable_label_rank(item.source_label),)
+        if rank is not None
+    ]
+    if not candidates:
+        candidates = [
+            (2, index, item)
+            for index, item in enumerate(named_totals)
+            if item.proposed_role == "payable_total"
+            and _payable_label_rank(item.source_label) is not None
+        ]
+    if not candidates:
+        return legacy_payable, ""
+    best_rank = min(item[0] for item in candidates)
+    best = [item for item in candidates if item[0] == best_rank]
+    values = tuple(dict.fromkeys(item[2].amount for item in best if item[2].amount))
+    chosen = best[-1][2].amount
+    return chosen, "payable_total_ambiguous" if len(values) > 1 else ""
 
 
 def stable_canonical_line_id(
@@ -539,6 +903,57 @@ def stable_canonical_line_id(
             f"{str(taxable_amount or '').strip()}:{str(tax_amount or '').strip()}:{ordinal}"
         )
     return f"line_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _tax_component_identity(
+    component: CanonicalTaxComponent,
+    *,
+    source: str,
+) -> str:
+    fields = (
+        " ".join(str(source or "unknown").strip().lower().split()),
+        _normalized_tax_text(component.source_position),
+        _normalized_tax_text(component.source_code),
+        _normalized_tax_text(component.source_label),
+        _normalized_decimal_text(component.rate),
+        _normalized_decimal_text(component.taxable_amount),
+        _normalized_decimal_text(component.tax_amount),
+    )
+    return json.dumps(fields, ensure_ascii=True, separators=(",", ":"))
+
+
+def stable_tax_component_id(
+    component: CanonicalTaxComponent,
+    *,
+    source: str,
+    occurrence: int = 1,
+) -> str:
+    identity = f"{_tax_component_identity(component, source=source)}:occurrence:{occurrence}"
+    return f"tax_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _monetary_component_identity(
+    component: CanonicalMonetaryComponent,
+    *,
+    source: str,
+) -> str:
+    fields = (
+        " ".join(str(source or "unknown").strip().lower().split()),
+        _normalized_tax_text(component.source_position),
+        _normalized_tax_text(component.source_label),
+        _normalized_decimal_text(component.source_amount),
+    )
+    return json.dumps(fields, ensure_ascii=True, separators=(",", ":"))
+
+
+def stable_monetary_component_id(
+    component: CanonicalMonetaryComponent,
+    *,
+    source: str,
+    occurrence: int = 1,
+) -> str:
+    identity = f"{_monetary_component_identity(component, source=source)}:occurrence:{occurrence}"
+    return f"monetary_{sha256(identity.encode('utf-8')).hexdigest()[:24]}"
 
 
 def with_stable_line_id(
@@ -688,7 +1103,47 @@ def bind_canonical_lines_to_vat_summary(invoice: CanonicalInvoice) -> CanonicalI
         )
         for line in identified.vat_summary
     )
-    return replace(identified, line_items=lines, vat_summary=summary)
+    tax_occurrences: dict[str, int] = {}
+    tax_components_list: list[CanonicalTaxComponent] = []
+    for component in identified.tax_components:
+        identity = _tax_component_identity(component, source=identified.source)
+        occurrence = tax_occurrences.get(identity, 0) + 1
+        tax_occurrences[identity] = occurrence
+        tax_components_list.append(
+            replace(
+                component,
+                component_id=stable_tax_component_id(
+                    component,
+                    source=identified.source,
+                    occurrence=occurrence,
+                ),
+                occurrence_index=occurrence,
+            )
+        )
+    monetary_occurrences: dict[str, int] = {}
+    monetary_components_list: list[CanonicalMonetaryComponent] = []
+    for component in identified.monetary_components:
+        identity = _monetary_component_identity(component, source=identified.source)
+        occurrence = monetary_occurrences.get(identity, 0) + 1
+        monetary_occurrences[identity] = occurrence
+        monetary_components_list.append(
+            replace(
+                component,
+                component_id=stable_monetary_component_id(
+                    component,
+                    source=identified.source,
+                    occurrence=occurrence,
+                ),
+                occurrence_index=occurrence,
+            )
+        )
+    return replace(
+        identified,
+        line_items=lines,
+        vat_summary=summary,
+        tax_components=tuple(tax_components_list),
+        monetary_components=tuple(monetary_components_list),
+    )
 
 
 def _sum(values: list[Decimal]) -> Decimal | None:
@@ -701,6 +1156,144 @@ def _close(left: Decimal | None, right: Decimal | None) -> bool:
     if left is None or right is None:
         return True
     return abs(left - right) <= Decimal("0.05")
+
+
+def derive_line_to_vat_linkage(invoice: CanonicalInvoice) -> dict[str, object]:
+    """Derive reviewable line/VAT links without changing extracted source facts."""
+
+    identified = ensure_stable_line_ids(invoice)
+    summaries: dict[str, CanonicalVatSummaryLine] = {}
+    for summary in identified.vat_summary:
+        group_id = canonical_vat_group_id(
+            tax_scheme_code=summary.tax_scheme_code,
+            tax_category_code=summary.tax_category_code,
+            vat_rate=summary.rate,
+            exemption_reason_code=summary.exemption_reason_code,
+        )
+        summaries[group_id] = summary
+
+    links: list[dict[str, object]] = []
+    missing: list[str] = []
+    contradictions: list[str] = []
+    assigned: dict[str, list[CanonicalInvoiceLine]] = {}
+    for line in identified.line_items:
+        semantic_group = canonical_vat_group_id(
+            tax_scheme_code=line.tax_scheme_code,
+            tax_category_code=line.tax_category_code,
+            vat_rate=line.vat_rate,
+            exemption_reason_code=line.exemption_reason_code,
+        )
+        basis: list[str] = []
+        group_id = ""
+        if semantic_group in summaries and any(
+            str(value).strip()
+            for value in (
+                line.tax_scheme_code,
+                line.tax_category_code,
+                line.vat_rate,
+                line.exemption_reason_code,
+            )
+        ):
+            group_id = semantic_group
+            basis.append("semantic_vat_identity")
+        elif len(summaries) == 1:
+            group_id = next(iter(summaries))
+            basis.append("unique_vat_group")
+        elif summaries:
+            contradictions.append(f"line_vat_group_contradiction:{line.canonical_line_id}")
+        else:
+            missing.append(f"line_vat_group_missing:{line.canonical_line_id}")
+        if not group_id:
+            continue
+        summary = summaries[group_id]
+        if set(line.evidence) & set(summary.evidence):
+            basis.append("shared_source_evidence")
+        assigned.setdefault(group_id, []).append(line)
+        links.append(
+            {
+                "canonical_line_id": line.canonical_line_id,
+                "vat_group_id": group_id,
+                "status": "derived",
+                "basis": basis,
+                "source_evidence_refs": list(
+                    dict.fromkeys((*line.evidence, *summary.evidence))
+                ),
+            }
+        )
+
+    links_by_group: dict[str, list[dict[str, object]]] = {}
+    for link in links:
+        links_by_group.setdefault(str(link["vat_group_id"]), []).append(link)
+    for group_id, lines in assigned.items():
+        summary = summaries[group_id]
+        taxable_values = [_decimal(line.taxable_amount) for line in lines]
+        tax_values = [_decimal(line.tax_amount) for line in lines]
+        taxable_complete = all(value is not None for value in taxable_values)
+        tax_complete = all(value is not None for value in tax_values)
+        taxable_matches = taxable_complete and _close(
+            _sum([value for value in taxable_values if value is not None]),
+            _decimal(summary.taxable_amount),
+        )
+        tax_matches = tax_complete and _close(
+            _sum([value for value in tax_values if value is not None]),
+            _decimal(summary.tax_amount),
+        )
+        for link in links_by_group[group_id]:
+            if taxable_matches:
+                link["basis"].append("taxable_amount_reconciled")
+            if tax_matches:
+                link["basis"].append("tax_amount_reconciled")
+            if taxable_matches or tax_matches:
+                link["status"] = "derived_reconciled"
+        if taxable_complete and not taxable_matches:
+            contradictions.append(f"vat_linkage_taxable_mismatch:{group_id}")
+        if tax_complete and not tax_matches:
+            contradictions.append(f"vat_linkage_tax_mismatch:{group_id}")
+
+    if contradictions:
+        status = "factual_contradiction"
+    elif missing:
+        status = "missing_evidence"
+    elif links:
+        status = "derived_reconciled"
+    else:
+        status = "unavailable"
+    return {
+        "status": status,
+        "links": links,
+        "factual_contradictions": list(dict.fromkeys(contradictions)),
+        "missing_evidence": list(dict.fromkeys(missing)),
+    }
+
+
+def canonical_evidence_categories(
+    invoice: CanonicalInvoice,
+    linkage: Mapping[str, object] | None = None,
+) -> dict[str, list[str]]:
+    linkage = linkage or derive_line_to_vat_linkage(invoice)
+    missing = [
+        code for code in invoice.validation.reason_codes if "missing" in code
+    ]
+    contradictions = [
+        code
+        for code in invoice.validation.reason_codes
+        if code not in missing
+        and any(token in code for token in ("mismatch", "duplicate", "unexpected", "conflict"))
+    ]
+    raw_links = linkage.get("links")
+    raw_links = raw_links if isinstance(raw_links, Sequence) else ()
+    derived = [
+        f"{item.get('canonical_line_id')}->{item.get('vat_group_id')}"
+        for item in raw_links
+        if isinstance(item, Mapping)
+        and str(item.get("status") or "").startswith("derived")
+    ]
+    return {
+        "factual_contradictions": list(dict.fromkeys(contradictions)),
+        "missing_evidence": list(dict.fromkeys(missing)),
+        "derived_reconciled": list(dict.fromkeys(derived)),
+        "informational_warnings": list(dict.fromkeys(invoice.extraction_notes)),
+    }
 
 
 def _line_tax(line: CanonicalInvoiceLine) -> Decimal | None:

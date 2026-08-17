@@ -1,6 +1,19 @@
 # Current Handoff
 
-### 2026-08-09 tax component accounting domain ve Gemini native PDF provider yayını (canlı)
+### 2026-08-17 Gemini PDF V2 konsolidasyonu, PostgreSQL migrasyon 011 ve kontrollü canary aktivasyonu (canlı)
+
+- `main` runtime release commit'i `e9c376c` canlıya alındı.
+- Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`e9c376c`).
+- PostgreSQL 16 `011_gemini_two_stage_artifacts.sql` migrasyonu canlı veritabanına başarıyla uygulandı (`document_ai_artifacts` tablosu, tetikleyiciler, kısıtlar ve indeksler aktif).
+- Canlı doğrulama: HTTP/HTTPS `/health` `200` (`status: ok`), `/api/phase0/store/system/readiness` `200` (`ready=true`, `pilot_sellable=true`, `postgres_store_active=true`).
+- Tüm Docker konteynerleri (`backend`, `frontend`, `nginx`, `postgres`, `qnb-scheduler`, `redis`, `worker`) `Up` ve `healthy` durumda.
+- Gemini PDF V2 ortam değişkenleri canary modunda yapılandırıldı: `FISORA_GEMINI_PDF_V2_ENABLED=true`, `FISORA_GEMINI_V2_CANDIDATE_EXPERIMENT_PERCENT=0`, `FISORA_GEMINI_V2_MAX_PARALLEL_CHUNKS=1`, `FISORA_WORKER_CONCURRENCY=1`, `FISORA_WORKER_MAX_JOBS_PER_TICK=1`, `FISORA_GEMINI_REQUESTS_PER_MINUTE=5`.
+- Yayınlanan değişiklikler:
+  1. Ayrı commit (`10b222d`): Kalıcı ve uzlaştırılmış `AGENTS.md` ve 12 adet `.agents/skills` uzmanlık rehberi (User-Provided Content Iron Rule, codebase-memory graf araçları, test-driven-development, systematic-debugging, executing-plans vb.).
+  2. Ürün konsolidasyonu commit (`d13aa00`): İki aşamalı Gemini PDF V2 hattı, parasal bileşen mutabakat motoru (`monetary_reconciliation.py`), aday keşfi ve genişletme (`accounting_candidate_builder.py`, `accounting_candidate_expansion.py`), karar kapasitesi (`accounting_decision_capacity.py`), taslak fiş kurucu (`journal_draft_builder.py`), değişmez artifact depo motoru (`document_ai_artifact_repository.py`), PostgreSQL migrasyon 011, kapsamlı birim ve entegrasyon testleri ile 11 adet kanonik plan/şartname belgesi `main` dalına konsolide edildi.
+  3. Release wrapper düzeltmeleri (`8ec08ed`, `e9c376c`): `fisora-release.ps1` ve `run_postgres_smoke.py` UTF-8 BOM ve benzersiz belge id düzenlemeleri.
+- Sürüm öncesi yerel testler: Backend `1043` test (28 DSN-gated skipped) OK, izole PostgreSQL 16 üzerinde tüm `129` veritabanı testi OK, frontend `170` test OK, Next.js production build (12 sayfa static prerender) 0 hata, `git diff --check` 0 hata ile doğrulandı.
+
 
 - `main` runtime release commit'i `b340738` canlıya alındı.
 - Sunucu checkout'u (`/opt/fisora/app`), `origin/main` ve yerel `main` birebir eşleşti (`b340738`).

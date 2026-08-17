@@ -5,13 +5,14 @@ description: Use when an approved implementation plan contains independent tasks
 
 # Subagent-Driven Development
 
-Use fresh subagents for independent tasks while the main agent owns integration,
-scope, and final verification.
+Use fresh subagents for independent tasks. The main agent owns scope,
+integration, technical review, and final verification.
 
 ## Preconditions
 
-- The plan is approved and tasks have non-overlapping ownership.
-- Each task has exact files, acceptance criteria, and verification commands.
+- The plan is approved.
+- Tasks have exact files, non-overlapping ownership, acceptance criteria, and
+  verification commands.
 - Subagents are available.
 - No task requires an unapproved external or production action.
 
@@ -20,41 +21,29 @@ depends on unfinished work from another.
 
 ## Workflow
 
-1. Review the plan for conflicts and define file ownership.
-2. Dispatch one implementer per independent task with only the context it needs.
-3. Tell every implementer that others share the workspace, unrelated edits must
-   be preserved, and release actions are forbidden.
-4. Require `test-driven-development` and an exact test report.
-5. Inspect each task's diff and verification evidence.
-6. Send material findings back for correction and re-review.
-7. Integrate completed tasks and run whole-change verification.
-8. Use `verification-before-completion` before reporting status.
+1. Define task dependencies and exclusive file ownership.
+2. Dispatch one implementer per independent task with only required context.
+3. Require preservation of unrelated work and forbid release actions.
+4. Require `test-driven-development` and concise RED/GREEN evidence.
+5. Inspect every diff; never trust a subagent report alone.
+6. Return technical defects to the subagent and re-review without asking the
+   user to approve each task.
+7. Integrate accepted work and run whole-change verification.
+8. Apply `verification-before-completion` before reporting status.
 
-Parallel implementers are allowed only when their file ownership cannot overlap.
-Serialize tasks that share files, schemas, migrations, generated artifacts, or
-runtime state.
+Parallelize only tasks whose files and mutable state cannot overlap. Serialize
+shared files, schemas, migrations, generated artifacts, and runtime state.
 
-## Implementer report
-
-Require:
-
-- status: `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, or `BLOCKED`;
-- files changed;
-- RED and GREEN evidence;
-- regression command and result;
-- unresolved concerns.
-
-Do not trust the report alone. The main agent verifies the diff and reruns checks
-in proportion to risk.
-
-## Stop conditions
-
-Stop and return to the user only when:
+## Ask the User Only When
 
 - a missing decision materially changes the result;
 - the plan conflicts with project instructions;
+- an ownership conflict cannot be resolved safely by serialization;
 - a required external action lacks authority;
-- repeated verification cannot resolve a blocker.
+- repeated debugging and verification cannot resolve a blocker.
+
+Do not add per-task approval prompts or periodic checkpoints. Provide concise,
+non-blocking progress only when useful.
 
 Subagents and the main agent must not commit, push, deploy, create PRs, or mutate
 production. The user performs release actions manually.

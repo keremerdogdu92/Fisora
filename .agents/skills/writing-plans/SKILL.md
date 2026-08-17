@@ -5,62 +5,51 @@ description: Use when approved requirements or a specification must become a mul
 
 # Writing Plans
 
-Create an executable plan for an engineer who has not read the current session.
+Create a self-contained, executable plan for an engineer with no session
+context. Keep the plan concise; include only information needed to implement
+and verify the approved behavior.
 
 ## Workflow
 
 1. Read the approved specification and current implementation evidence.
-2. Map files to create, modify, and test, with one responsibility per unit.
-3. Split work into independently verifiable tasks.
-4. For each behavior change, use RED-GREEN-REFACTOR steps.
-5. Include exact commands and expected evidence.
-6. Self-review coverage, placeholders, paths, interfaces, and contradictions.
-7. Save material plans to
-   `docs/superpowers/plans/YYYY-MM-DD-<topic>-implementation.md` unless the user
-   chooses another location.
+2. Split independent subsystems into separate plans when useful.
+3. Map exact files and the responsibility of each changed unit.
+4. Divide work into independently verifiable tasks.
+5. Define interfaces, acceptance criteria, and verification for every task.
+6. Self-review coverage, paths, interfaces, placeholders, and contradictions.
 
-## Required plan header
+## Plan Contract
 
-```markdown
-# <Topic> Implementation Plan
+Include:
 
-**Goal:** <one observable outcome>
-**Approach:** <two or three sentences>
-**Constraints:** <approved non-scope and safety boundaries>
-**Verification:** <targeted and regression commands>
-```
-
-## Task shape
-
-Each task must contain:
-
+- goal, approach, approved constraints, and non-scope;
 - exact files;
-- protected rule or acceptance criterion;
 - interfaces consumed and produced;
+- observable acceptance criteria;
 - failing test and expected RED evidence;
 - minimal implementation step;
 - GREEN and regression commands;
-- completion evidence.
+- exact commands and expected evidence.
 
-Use checkboxes for execution tracking. Keep each task large enough to produce a
-coherent result and small enough for independent review.
+Do not reproduce full implementations. Include an exact signature, critical
+algorithm, schema, or short code snippet only when prose would leave the task
+ambiguous.
 
-## Quality rules
+## Quality Gate
 
 - No `TBD`, `TODO`, “handle errors”, “add tests”, or similar placeholders.
 - Do not invent requirements not present in the approved design.
-- Do not repeat the same code or instruction across tasks; define the interface
-  once and reference it.
 - Keep type names, function signatures, schema fields, and exact values
   consistent across tasks.
-- Use generic skill names such as `test-driven-development`,
-  `executing-plans`, and `subagent-driven-development`; do not assume an
-  external namespace.
+- Every approved requirement must map to a task and verification step.
+- Plans must not contain commit, push, deploy, PR, or production actions.
 
-## Execution handoff
+## Handoff
 
-- Independent tasks in the current session: `subagent-driven-development`.
-- Sequential or tightly coupled tasks: `executing-plans`.
+After presenting the plan, ask the user to choose:
 
-Plans must not contain commit, push, deploy, PR, or production-mutation steps.
-The user performs release actions manually.
+1. `executing-plans` for sequential or tightly coupled tasks.
+2. `subagent-driven-development` for independent tasks.
+
+Use generic skill names. Save the plan only in the project-approved location;
+otherwise keep it in the conversation. The user handles release actions.

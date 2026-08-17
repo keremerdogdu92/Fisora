@@ -5,13 +5,13 @@ description: Use when an approved implementation plan has sequential or tightly 
 
 # Executing Plans
 
-Execute an approved plan task by task with evidence checkpoints.
+Execute an approved plan sequentially in the current session.
 
 ## Preflight
 
 1. Read the complete plan and binding project instructions.
 2. Inspect the current worktree and preserve unrelated changes.
-3. Identify contradictions, missing inputs, and unsafe external effects.
+3. Identify contradictions, missing inputs, dependencies, and external effects.
 4. Create task tracking and start only when the plan is executable.
 
 An explicit user instruction to execute on the current branch authorizes local
@@ -25,10 +25,22 @@ edits there. It never authorizes release actions.
 4. Run the task's targeted verification.
 5. Inspect the diff for unintended changes.
 6. Mark the task complete only with fresh evidence.
+7. Give a concise, non-blocking progress update when useful, then continue.
 
-Continue through all tasks without repetitive “should I continue?” prompts.
-Pause only for a result-changing ambiguity, unsafe external action, unresolved
-conflict, or a blocker that cannot be solved from local evidence.
+Do not add periodic checkpoints or ask “continue?” after a fixed number of
+tasks.
+
+If a task fails, do not skip it or stack speculative fixes. Use
+`systematic-debugging`, verify the root-cause fix, then continue only when the
+task's acceptance criterion passes.
+
+## Ask the User Only When
+
+- a requirement is ambiguous;
+- the approved scope may change;
+- an architecture or product decision is required;
+- a test failure remains unresolved after systematic debugging;
+- an external action or new authority is required.
 
 ## Completion
 

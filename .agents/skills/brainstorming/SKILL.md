@@ -1,49 +1,67 @@
 ---
 name: brainstorming
-description: Use when creating a feature, component, workflow, or behavior change before implementation begins.
+description: Turn ideas into designs through dialogue before implementation
 ---
 
 # Brainstorming
 
-Turn an idea into an approved design before code changes.
+Design first, code after.
 
-## Hard gate
+## Process Flow
 
-Do not write implementation code until the design is approved. Direct user
-approval of an already-specific design satisfies this gate; do not reopen
-settled decisions without material conflicting evidence.
+1. **Explore context:** Check files, docs, recent commits
+2. **Ask questions:** One at a time, understand purpose/constraints/success
+3. **Propose approaches:** 2-3 options with trade-offs, recommend one
+4. **Present design:** In sections, get approval per section
+5. **Write spec:** Save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
+6. **Self-review:** Check placeholders, contradictions, scope
+7. **User reviews:** Ask user to review spec file
+8. **Transition:** Ask which execution approach, then invoke appropriate skill
 
-## Workflow
+## Hard Gate
 
-1. Inspect current files, documentation, and relevant recent history.
-2. Identify the user outcome, constraints, non-scope, and success criteria.
-3. Ask one focused question at a time only for result-changing unknowns.
-4. Present two or three realistic approaches with costs, risks, reversibility,
-   and a direct recommendation.
-5. Present the chosen design at the depth needed for the task.
-6. Get explicit approval.
-7. For a material design, write the approved specification to
-   `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` unless the user selects
-   another location.
-8. Self-review the specification for placeholders, contradictions, scope, and
-   ambiguity.
-9. Use `writing-plans` for implementation planning.
+**DO NOT write code until design approved.**
 
-## Design rules
+No implementation skills (frontend-design, mcp-builder, etc.) until after `writing-plans`.
 
-- Give each unit one clear responsibility and a defined interface.
-- Prefer small, independently testable boundaries.
-- Follow established project patterns.
-- Improve only code that materially affects the requested work.
-- Decompose multiple independent subsystems into separate specifications.
-- Apply YAGNI: exclude work that is not needed for the approved outcome.
+## Design Principles
 
-## Handoff
+**Isolation and clarity:**
+- Each unit: one clear purpose, well-defined interfaces
+- Can you understand/test each unit independently?
+- If file grows large, it's doing too much
 
-After specification approval, choose the execution method from task structure:
+**Existing codebases:**
+- Follow established patterns
+- Improve code you touch, don't refactor unrelated code
 
-- Mostly independent tasks in this session: `subagent-driven-development`.
-- Sequential or tightly coupled tasks: `executing-plans`.
+**Scope check:**
+- Multiple independent subsystems? Decompose into sub-projects first
+- Each sub-project gets own spec → plan → implementation cycle
 
-Do not depend on a platform-specific visual companion. Use available tools only
-when they materially improve the decision.
+## Spec Self-Review
+
+After writing spec, check:
+- [ ] Placeholders? (TBD, TODO, "fill in details") → Fix them
+- [ ] Contradictions? → Resolve
+- [ ] Scope too large? → Decompose
+- [ ] Ambiguous requirements? → Make explicit
+
+Fix issues inline, then ask user to review.
+
+## Execution Handoff
+
+After user approves spec, ask:
+
+> "Spec onaylandı. İki execution seçeneği var:
+>
+> 1. **Subagent-Driven** - Her task için fresh subagent, aralarında review
+> 2. **Inline Execution** - Bu session'da step-by-step execution
+>
+> Hangisini tercih edersin?"
+
+Then:
+- User chooses subagent → Proceed with subagent approach (if available)
+- User chooses inline → Invoke `writing-plans` skill to create detailed plan
+
+**Do NOT invoke other implementation skills directly.**

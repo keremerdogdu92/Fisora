@@ -1,58 +1,70 @@
 ---
 name: using-superpowers
-description: Use when starting work, selecting workflow skills, or deciding whether an ambiguous request needs a structured process.
+description: Check for relevant skills before starting work, ask user if unsure
 ---
 
 # Using Superpowers
 
-Check relevant skills before starting work.
+Check for relevant skills before starting work.
 
-## Always-active gates
+## Always-Active Skills
 
-Apply these whenever their condition occurs:
+These skills run automatically in every session, no explicit invoke needed:
 
-- `using-superpowers`: before work begins, select the applicable skills.
-- `verification-before-completion`: before any completion, passing, fixed, or ready claim.
+- **verification-before-completion**: Runs before any completion claim (evidence before claims)
+- **using-superpowers**: Runs before starting work (this skill)
 
-They are default behavior once available; the user does not need to name them.
+You don't invoke these. They're part of default behavior.
 
-## Use immediately
+## When to Use vs Ask
 
-Use a skill without asking when the user names it or the trigger is clear.
+**Use immediately (don't ask):**
 
-| Trigger | Skill |
-| --- | --- |
-| new feature, build, design, brainstorm | `brainstorming` |
-| bug, failure, root cause, debug | `systematic-debugging` when installed |
-| plan, decide, clarify, discuss first | `fisero-shape-plan` or `writing-plans`, according to scope |
-| commit, push, deploy, release | `fisero-release-handoff`; respect `Manual Release` in `AGENTS.md` |
-| implementation or bug fix | `test-driven-development` |
-| execute an approved plan inline | `executing-plans` |
-| execute independent plan tasks with agents | `subagent-driven-development` |
+User explicitly names skill or uses trigger keywords:
 
-## Resolve ambiguous triggers
+| Trigger Keywords | Skill |
+|-----------------|-------|
+| "yeni feature", "build", "tasarla", "brainstorm" | brainstorming |
+| "bug", "neden oldu", "fix", "debug", "sorun" | systematic-debugging |
+| "plan yap", "önce konuş", "netleştir", "karar ver" | brainstorming |
+| "TDD", "test yaz", "red-green" | test-driven-development |
 
-Ask one focused question only when the answer materially changes the workflow.
+Commit, push, deploy, and release requests follow `Manual Release` in
+`AGENTS.md`: prepare changes or evidence only; do not perform release actions.
 
-- `refactor`: use `brainstorming` for a design-level refactor; use
-  `test-driven-development` directly for a bounded behavior-preserving change.
-- `write tests`: use `brainstorming` then TDD for a new feature; use TDD directly
-  for existing behavior or a regression.
-- multi-step request with unclear outcome: ask which outcome is authoritative,
-  then select the skill.
+**Ambiguous keywords (ask user):**
 
-Do not ask merely because a skill exists. Inspect local context first when it
-can resolve the ambiguity safely.
+- **"refactor"** → Large refactoring (multiple components) = brainstorming, Small refactoring (single function) = TDD. Ask: "Büyük refactoring mi (tasarım değişikliği) yoksa küçük refactoring mi (tek fonksiyon)?"
 
-## Priority
+- **"test yaz"** → For new feature = brainstorming + TDD, For existing code = TDD directly. Ask: "Yeni feature için mi (önce tasarım) yoksa mevcut kod için mi (direkt test)?"
 
-Apply process skills before implementation skills:
+- **Unclear context** → Ask user which skill or proceed without skill
 
-1. `brainstorming` or `systematic-debugging`
-2. `writing-plans`
-3. `test-driven-development`
-4. `executing-plans` or `subagent-driven-development`
-5. `verification-before-completion`
+**Ask user first:**
+- Skill might help but value unclear
+- Multi-step change without clear trigger keyword
+- Example: "Bu değişiklik multi-step. Brainstorming skill ile tasarım yapayım mı?"
 
-Project instructions and direct user decisions override skill defaults. A skill
-never authorizes commit, push, deploy, destructive actions, or production writes.
+**Proceed without skill:**
+- Simple, single-file changes
+- User says "direkt yap", "skill kullanma"
+
+## Skill Priority
+
+When multiple skills apply, process skills come first:
+- brainstorming → sets approach
+- systematic-debugging → finds root cause
+- writing-plans → creates implementation plan
+
+Then implementation skills (TDD, verification).
+
+## Red Flags (You're Rationalizing)
+
+- "This is too simple for a skill" → Check trigger keywords or ask
+- "I'll start then maybe use skill" → Check BEFORE starting
+- "Skills are overkill" → Let user decide
+
+## Platform Note
+
+User instructions (AGENTS.md, CLAUDE.md, direct requests) override skills.
+Skip skill workflows only when user explicitly tells you to.

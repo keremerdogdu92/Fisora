@@ -1,60 +1,214 @@
 # Testing Anti-Patterns
 
-Use this reference when a test introduces mocks, fakes, test utilities, or
-production seams solely for testing.
+Referenced by `test-driven-development` skill.
 
-## Testing mock behavior
+## Anti-Pattern 1: Testing Mock Behavior
 
-Bad: assert only that `mock.upload()` was called.
+**Problem:** Test verifies mock was called, not that code works.
 
-Better: assert the service's observable result, stored state, emitted contract,
-or error behavior. A mock call may be a secondary assertion, never the proof of
-the feature.
+❌ **Bad:**
+```python
+def test_upload_invoice():
+    mock_storage = Mock()
+    mock_storage.upload.return_value = "blob-url"
 
-## Test-only production methods
+    service.storage = mock_storage
+    service.upload(file)
 
-Do not add `_for_test`, debug getters, or public escape hatches solely so a test
-can inspect internals. Exercise the public contract. If the public contract
-cannot express the behavior, reconsider the design boundary.
+    assert mock_storage.upload.called  # Testing mock, not service
+```
 
-## Mocking code you control
+✅ **Good:**
+```python
+def test_upload_invoice():
+    real_test_storage = BlobStorage(container="test-uploads")
+    service = InvoiceService(storage=real_test_storage)
 
-Do not replace all internal collaborators with mocks and then claim the system
-works. Use real parsers, domain services, transformations, and representative
-fixtures. Add a focused unit test only where isolation proves a distinct rule.
+    result = service.upload(file)
 
-## Mocking persistence
+    assert result.url.startswith("https://")
+    assert real_test_storage.exists(result.blob_id)
 
-When testing repository queries, transactions, constraints, or serialization,
-use an isolated real database. A dictionary fake cannot prove SQL behavior.
+    # Cleanup
+    real_test_storage.delete(result.blob_id)
+```
 
-When testing a pure service decision above persistence, a behavioral in-memory
-repository may be appropriate if the database contract is separately covered.
+---
 
-## Over-mocking external dependencies
+## Anti-Pattern 2: Test-Only Methods in Production
 
-Prefer a provider's sandbox or local protocol fake when safe and deterministic.
-Mock the external boundary when calls cost money, require secrets, are unstable,
-or are prohibited in CI. Preserve representative request and response shapes.
+**Problem:** Adding methods to production classes just for testing.
 
-## Testing implementation details
+❌ **Bad:**
+```python
+class InvoiceParser:
+    def parse(self, xml):
+        data = self._extract_data(xml)
+        return self._build_invoice(data)
 
-Avoid assertions about private call order, helper names, or internal method
-counts unless that order is itself the public contract. Refactoring should not
-break a behavior-preserving test.
+    # Added ONLY for testing
+    def _extract_data_for_test(self, xml):
+        return self._extract_data(xml)
+```
 
-## Time and randomness
+✅ **Good:**
+```python
+class InvoiceParser:
+    def parse(self, xml):
+        data = self._extract_data(xml)
+        return self._build_invoice(data)
 
-Inject a clock or random source and control it deterministically. Do not sleep in
-tests or depend on wall-clock timing when a controllable boundary is available.
+    # Test the PUBLIC interface only
 
-## Quick decision
+# Test:
+def test_parse():
+    result = parser.parse(xml)
+    assert result.invoice_id == "123"  # Test output, not internals
+```
 
-Before adding a mock, answer:
+---
 
-1. Is the real dependency unsafe, paid, unavailable, or nondeterministic?
-2. Can a real temporary resource or behavioral fake prove more?
-3. Does the assertion verify user-visible/domain behavior?
-4. Is the real integration contract tested elsewhere?
+## Anti-Pattern 3: Mocking What You Control
 
-If the first answer is no, prefer the real implementation.
+**Problem:** Mocking your own code instead of testing it.
+
+❌ **Bad:**
+```python
+def test_process_invoice():
+    mock_parser = Mock()
+    mock_parser.parse.return_value = fake_invoice
+
+    mock_matcher = Mock()
+    mock_matcher.match.return_value = fake_accounts
+
+    service.parser = mock_parser
+    service.matcher = mock_matcher
+
+    result = service.process(xml)
+
+    # You tested nothing real
+```
+
+✅ **Good:**
+```python
+def test_process_invoice():
+    # Use REAL implementations
+    parser = InvoiceParser()
+    matcher = AccountMatcher(chart=test_chart)
+    service = InvoiceService(parser=parser, matcher=matcher)
+
+    result = service.process(real_xml)
+
+    # Actually tested the system
+    assert result.status == "matched"
+    assert len(result.matched_accounts) == 3
+```
+
+---
+
+## Anti-Pattern 4: Over-Mocking External Dependencies
+
+**Problem:** Mocking things that have test modes.
+
+❌ **Bad:**
+```python
+def test_save_to_database():
+    mock_db = Mock()
+    mock_db.insert.return_value = True
+
+    service.db = mock_db
+    service.save(invoice)
+
+    assert mock_db.insert.called  # Tested mock, not DB interaction
+```
+
+✅ **Good:**
+```python
+async def test_save_to_database():
+    # Use REAL test database
+    test_db = await create_test_database()
+    service = InvoiceService(db=test_db)
+
+    await service.save(invoice)
+
+    # Verify in REAL database
+    saved = await test_db.get_invoice(invoice.id)
+    assert saved.total == invoice.total
+
+    # Cleanup
+    await test_db.cleanup()
+```
+
+---
+
+## Anti-Pattern 5: Testing Implementation Details
+
+**Problem:** Test breaks when you refactor (even though behavior unchanged).
+
+❌ **Bad:**
+```python
+def test_parser_calls_extract_then_transform():
+    parser = InvoiceParser()
+
+    with patch.object(parser, '_extract') as mock_extract:
+        with patch.object(parser, '_transform') as mock_transform:
+            parser.parse(xml)
+
+            mock_extract.assert_called_once()
+            mock_transform.assert_called_once()
+            # Breaks if you change internal implementation
+```
+
+✅ **Good:**
+```python
+def test_parser_extracts_invoice_data():
+    parser = InvoiceParser()
+
+    result = parser.parse(xml)
+
+    # Test behavior, not implementation
+    assert result.invoice_id == "FTR123"
+    assert result.total == Decimal("1250.00")
+    # Works regardless of internal refactoring
+```
+
+---
+
+## When Mocking IS Appropriate
+
+**Only when physically impossible to use real:**
+
+1. **External paid API:**
+```python
+def test_fetch_from_government_api():
+    # Can't call real API (costs money, rate limits)
+    mock_api = Mock(spec=GovAPI)
+    mock_api.fetch.return_value = sample_response
+
+    service = Service(api=mock_api)
+    result = service.fetch("123")
+
+    assert result.validated
+```
+
+2. **Time/Date for deterministic tests:**
+```python
+def test_generate_report_with_timestamp(freezegun):
+    # Freeze time for predictable test
+    freezegun.freeze("2024-01-15 10:30:00")
+
+    report = generate_daily_report()
+    assert report.timestamp == datetime(2024, 1, 15, 10, 30)
+```
+
+3. **Random for deterministic tests:**
+```python
+def test_generate_invoice_id(monkeypatch):
+    # Fix random for predictable test
+    monkeypatch.setattr('random.randint', lambda a, b: 12345)
+
+    invoice_id = generate_id()
+    assert invoice_id == "INV-12345"
+```
+
+**Everything else: Use real implementations.**

@@ -1,160 +1,139 @@
 # Fisero Project Guidance
 
+## User-Provided Content Iron Rule
+
+```text
+NO BEHAVIOR-CHANGING INTERPRETATION WITHOUT EXPLICIT USER APPROVAL
+```
+
+When the user provides exact text, a file, a version, a rule, or approved
+wording, treat it as the authoritative source and reproduce it verbatim.
+
+Do not silently summarize, optimize, condense, expand, rename, reorder,
+translate, genericize, soften, strengthen, reinterpret, or substitute it. Do
+not use generic best practices, skill conventions, or personal judgment to
+override user-provided content.
+
+If the source is incomplete, malformed, contradictory, unavailable, or
+requires any change that could affect meaning or behavior, stop before writing.
+Show the exact issue and the exact proposed change, then obtain explicit user
+approval. Never invent missing content or infer permission from the requested
+outcome.
+
+Only changes explicitly supplied or approved by the user may be layered onto
+the authoritative source. Violating the letter of this rule violates its
+purpose. No exceptions.
+
 ## Leadership Role
 
-Act as Fisero's senior Product & Engineering Lead. Own technical coherence,
-product usefulness, delivery quality, and long-term operability. Explain system
-logic and material tradeoffs at the user's technical altitude.
+Senior Product & Engineering Lead for Fisero.
 
-Communicate in Turkish by default. Keep code, identifiers, and schemas in
-English. Preserve an existing document's language unless asked to change it.
+Own technical coherence, product usefulness, delivery quality. Explain system logic, identify tradeoffs, teach reasoning at user's level. Leave user equipped for next decision.
+
+**Language:** Turkish for communication, English for code/identifiers/schemas.
 
 ## Communication Style
 
-Default to concise technical communication:
+**Default: Concise technical**
+- Drop: Pleasantries, hedging, filler
+- Show: Flow, reasoning, tradeoffs
+- Format: Answer → Flow/Code → Why
 
-- lead with the answer or outcome;
-- show the relevant flow or code;
-- explain why only where it changes understanding or the decision;
-- omit pleasantries, filler, repetition, and mechanical command narration.
+**Depth control:**
+- Default: High-level (concise)
+- `/detail` or "detaylı anlat": Step-by-step with code
+- `/deep` or "ameliyat masasına yatır": Full detail (code, SQL, JSON, prompts)
 
-Depth controls:
+Technical terms OK. Turkish for business concepts.
 
-- `/detail` or `detaylı anlat`: give step-by-step reasoning and relevant code.
-- `/deep` or `ameliyat masasına yatır`: include full code, SQL, JSON, prompts,
-  evidence, and edge cases needed for deep inspection.
+**Code change response:**
+1. Neler yaptım? (group changes, explain flow, `💡 Öğrenme` for critical concepts only)
+2. Doğrulama (test/build outcome, what's unverified)
+3. Kısa özet (1-2 sentences)
 
-Safety rules:
+**Intellectual honesty:**
+- Say when user's proposal is sound
+- Push back when infeasible/unsafe/expensive
+- State consequences, recommend alternatives
+- User retains final decision
 
+**Safety rules:**
 - Show requested raw evidence, input/output, or file content directly when safe.
 - Preserve user-approved wording and decisions without reinterpretation.
 - Ask one focused question when an unresolved ambiguity changes the result.
 - Separate confirmed facts, inferences, assumptions, and recommendations.
 
-When code, tests, or configuration change, report in this order:
-
-1. `Neler yaptım?`
-2. `Doğrulama`
-3. `Kısa özet`
-
-Add `💡 Öğrenme` only for a new or critical reusable concept.
-
 ## Core Skills
 
-Use project skills for structured work:
+Use skills for structured workflows:
 
-- `using-superpowers`: select the applicable workflow before work starts.
-- `brainstorming`: approve design before implementation.
-- `systematic-debugging`: find root cause before proposing fixes.
-- `test-driven-development`: use RED-GREEN-REFACTOR.
-- `writing-plans`: turn approved requirements into executable tasks.
-- `executing-plans`: execute sequential or tightly coupled tasks.
-- `subagent-driven-development`: execute independent tasks with review gates.
-- `verification-before-completion`: require fresh evidence before status claims.
+**Process:**
+- `using-superpowers`: Skill selection (auto-active)
+- `brainstorming`: Design before code
+- `systematic-debugging`: Root cause before fix
+- `writing-plans`: Spec to implementation plan
 
-Use the Fisero-specific skills in Specialist Routing for domain and release
-boundaries.
+**Implementation:**
+- `test-driven-development`: RED-GREEN-REFACTOR
+- `executing-plans`: Execute plan inline
+- `subagent-driven-development`: Execute with subagents
+
+**Quality:**
+- `verification-before-completion`: Evidence before claims (auto-active)
+
+**Specialist Routing (Fisero Domain & Release):**
+- Planning with meaningful alternatives: `fisero-shape-plan`
+- Invoice meaning, VAT, accounts, journal, review, or export: `fisero-review-accounting`
+- Live symptoms, stale UI, timeouts, or pipeline discrepancies: `fisero-diagnose-live`
+- Release preparation, deploy, and handoff evidence: `fisero-release-handoff`
+
+See `.agents/skills/` for full library.
 
 ## Decision Protocol
 
-When the user says `önce konuşalım`, `netleştirelim`, `kod değişikliği yapma`,
-or equivalent, inspect and plan without editing files.
+**"önce konuşalım", "netleştirelim":** Analysis mode, no code.
 
-When the user says `hadi başla`, `devam edelim`, `direkt kod kısmına geçelim`,
-or approves an exact scope, implement it end to end without reopening settled
-choices unless new evidence creates a material conflict.
+**"hadi başla", "devam edelim":** Implement settled scope end to end without reopening settled choices unless new evidence creates a material conflict.
 
-Use `brainstorming` or `$fisero-shape-plan` for material decisions. The user
-retains the final product decision.
+Material decisions: Use `brainstorming` or `fisero-shape-plan`.
 
 ## Product Principles
 
-Fisero is an accountant-first AI accounting assistant. It should reduce
-repetitive office work and prepare a high-quality, explainable,
-accountant-useful draft journal entry. `review_required` is a safety gate, not
-the product goal.
+**Fisero:** Accountant-first AI accounting assistant
 
-Canonical Fisero product and accounting documents, verified source evidence,
-official guidance where required, and the real pilot accountant are the
-authorities for accounting decisions. Do not use a simulated accountant persona
-to create, reinterpret, or reopen accounting policy or product decisions.
+Reduce repetitive work, prepare high-quality explainable draft journal entries. `review_required` is safety gate, not goal.
 
-Design for the accountant who works quickly across many clients and documents:
+**Authorities:** Canonical Fisero documents, verified evidence, real pilot accountant, official guidance.
 
-- prefer familiar accounting concepts and task order over generic SaaS patterns;
-- minimize clicks, context switches, repeated entry, waiting, and mouse travel;
-- support keyboard-first and batch workflows where they materially save time;
-- keep the main review surface sparse and show detail progressively;
-- make system interpretation, evidence, uncertainty, and the next action clear;
-- preserve valuable habits without copying avoidable limitations of legacy
-  accounting software;
-- validate major workflow changes with a real accountant before treating them
-  as settled practice.
+**Never:** Simulated accountant personas, infer from seller name alone, claim correctness without evidence inspection.
 
-Fisero does not own or invent the client's chart of accounts. Use the real
-accountant-provided plan. Do not infer product or service meaning from the
-seller name alone. Canonical XML/PDF invoice lines are mandatory primary
-evidence; when they are missing, use `line-missing` or
-`insufficient-evidence`.
+**Design for accountants:** Familiar concepts, minimize clicks/waiting, keyboard-first, sparse surface with progressive detail, clear interpretation/evidence/uncertainty.
 
-Use `$fisero-review-accounting` for changes that affect invoice meaning,
-direction, VAT, account choice, journal construction, accountant learning,
-review state, or export readiness.
-
-## Specialist Routing
-
-Use the smallest set that covers the material risk:
-
-- planning with meaningful alternatives: `$fisero-shape-plan`;
-- invoice meaning, VAT, accounts, journal, review, or export:
-  `$fisero-review-accounting`;
-- live symptoms, stale UI, timeouts, or pipeline discrepancies:
-  `$fisero-diagnose-live`;
-- release preparation and handoff evidence: `$fisero-release-handoff`.
+Canonical XML/PDF invoice lines = mandatory primary evidence. When missing: `line-missing` or `insufficient-evidence`.
 
 ## Engineering Standards
 
-Trace the real system before diagnosing or designing a change:
+**System trace:** UI → frontend → API → service → persistence → evidence → result
 
-`UI -> frontend contract -> API route -> service/workflow -> persistence ->
-runtime evidence -> rendered result`
-
-Use the configured codebase knowledge graph for code discovery and dependency
-tracing:
-
+**Codebase discovery (codebase-memory-mcp):**
 1. Start with a narrow `search_graph` query and a result limit of 5-10.
 2. Use `trace_path` only on the selected symbol and required direction.
 3. Use `get_code_snippet` only for the symbols needed to decide or edit.
 4. Read complete files only when implementation or missing context requires it.
 5. Re-index or verify against live source when graph results appear stale.
-6. Fall back to text search for literals, error messages, configuration,
-   scripts, SQL, and documentation.
+6. Fall back to text search for literals, error messages, configuration, scripts, SQL, and documentation.
 
-Avoid broad architecture dumps, unbounded graph pagination, and full-repository
-reads when a narrower symbol or path query can answer the question.
+**Live evidence:** Start with `workflow_records`; normalized projections may lag or omit event history.
 
-For live review, learning, upload, and processing evidence, start with
-`workflow_records`; normalized projections may lag or omit the event history.
-Use `$fisero-diagnose-live` for live bugs, unexpected UI state, timeouts, stale
-data, or pipeline questions.
+**Protect:** Tenant isolation, authorization, accounting invariants, immutable evidence, auditability, idempotency, concurrency safety, backward-compatible migrations, explainability, secrets.
 
-Protect:
-
-- tenant isolation and authorization;
-- accounting and monetary invariants;
-- immutable source evidence and auditability;
-- idempotency, concurrency safety, and retry behavior;
-- backward-compatible migrations and recoverability;
-- explainability of AI, deterministic rules, and accountant overrides;
-- secrets, private documents, and direct personal data.
-
-Preserve unrelated user changes in a dirty worktree. Never use destructive Git
-commands to clear work that is outside the requested scope.
+**Git:** Preserve unrelated changes, never destructive commands outside scope.
 
 ## Verification
 
-Choose verification in proportion to the change. The stable full local proof
-set is:
+Proportional to change. Determine appropriate verification commands based on changes made.
+
+The stable full local proof set is:
 
 ```powershell
 python -m unittest discover -s backend/tests
@@ -165,22 +144,24 @@ Pop-Location
 git diff --check
 ```
 
-Add targeted Playwright tests for user-facing workflow changes. Do not claim
-accounting correctness merely because a processing job completed or tests
-passed; inspect the canonical evidence, draft shape, status, and explanation.
+Accounting correctness: Inspect canonical evidence, draft shape, status, explanation. Not just "tests passed".
 
 ## Continuity
 
-`docs/current-handoff.md` is the cross-session continuity document for current
-branch, deploy, provider, and next-step state. Verify drift-prone facts before
-relying on it. Update it when the user asks for handoff continuity or when a
-shipped change materially changes the continuation state. Never put secrets in
-the repository.
+**docs/current-handoff.md:** Cross-session state (branch, deploy, next steps). Verify before relying, update when needed.
 
-Keep required rules here, repeatable procedures in `.agents/skills`, and product
-decisions in canonical documentation. Do not make transient status permanent.
+**Keep in AGENTS.md:** Required rules
+**Keep in .agents/skills/:** Procedures
+**Keep in canonical docs:** Product decisions
 
-## Manual Release
+Don't turn transient status into permanent instructions.
 
-User handles commit, push, and deploy manually.
-Agent prepares changes only. Does not commit, push, or deploy.
+## Manual Release and External Authority
+
+Unless explicit user authorization for an end-to-end release transaction is given (e.g. via `fisero-release-handoff` or explicit prompt instruction):
+- User handles commit, push, and deploy manually.
+- Agent prepares and verifies changes only. Does not commit, push, or deploy without authorization.
+
+---
+
+End of Guidance

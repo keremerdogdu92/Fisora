@@ -22,24 +22,24 @@ Random fixes waste time. Quick patches mask issues.
 **BEFORE proposing ANY fix:**
 
 1. **Read error messages completely**
-   - Don't skip; they contain the solution.
-   - Read the full stack trace, line numbers, and error codes.
+   - Don't skip, they contain the solution
+   - Full stack trace, line numbers, error codes
 
 2. **Reproduce consistently**
-   - Record exact steps to trigger the issue.
-   - Determine whether it happens every time or intermittently.
-   - If it is not reproducible, gather more data.
+   - Exact steps to trigger
+   - Every time or intermittent?
+   - If not reproducible → gather more data
 
 3. **Check recent changes**
-   - Inspect `git diff` and recent commits.
-   - Check dependencies and configuration changes.
-   - Compare environment differences.
+   - `git diff`, recent commits
+   - Dependencies, config changes
+   - Environment differences
 
-4. **Multi-component systems: add diagnostics**
+4. **Multi-component systems: Add diagnostics**
 
-   When the system has layers such as CI -> build -> signing or
-   API -> service -> database, add logging at each boundary first:
+   When system has layers (CI → build → signing, API → service → DB):
 
+   **Add logging at EACH boundary FIRST, then analyze:**
    ```bash
    # Layer 1: Input
    echo "=== Request: $REQUEST_ID ==="
@@ -55,112 +55,120 @@ Random fixes waste time. Quick patches mask issues.
    echo "$result"
    ```
 
-   Run once to see where it breaks, then investigate that layer.
+   Run ONCE to see WHERE it breaks, THEN investigate that layer.
 
 5. **Trace data flow backward**
 
-   Find where the bad value originates:
-   - What called this with the bad value?
-   - Keep tracing to the source.
-   - Fix at the source, not at the symptom.
+   Where does bad value originate?
+   - What called this with bad value?
+   - Keep tracing up to source
+   - Fix at source, not symptom
 
 ### Phase 2: Pattern Analysis
 
 **Find the pattern:**
 
 1. **Find working similar code**
-   - What similar path works?
-   - Compare working and broken paths.
+   - What works that's similar?
+   - Compare working vs broken
 
-2. **Compare against the reference**
-   - If implementing a pattern, read the reference completely.
-   - Do not skim.
-   - Understand it before applying it.
+2. **Compare against reference**
+   - If implementing pattern, read reference COMPLETELY
+   - Don't skim - every line
+   - Understand fully before applying
 
-3. **Identify all differences**
-   - List every difference, however small.
-   - Do not assume a difference cannot matter.
+3. **Identify ALL differences**
+   - List every difference, however small
+   - Don't assume "that can't matter"
 
 4. **Understand dependencies**
-   - What settings, configuration, or environment does this need?
+   - What does this need? (settings, config, env)
    - What assumptions does it make?
 
 ### Phase 3: Hypothesis
 
-Use the scientific method:
+**Scientific method:**
 
-1. **Form one hypothesis**
-   - State: "I think X is the root cause because Y."
-   - Be specific.
+1. **Form single hypothesis**
+   - "I think X is root cause because Y"
+   - Be specific
 
 2. **Test minimally**
-   - Make the smallest possible change.
-   - Change one variable at a time.
-   - Do not fix multiple things together.
+   - SMALLEST possible change
+   - One variable at a time
+   - Don't fix multiple things
 
 3. **Verify**
-   - Worked: continue to Phase 4.
-   - Did not work: form a new hypothesis.
-   - Do not stack fixes.
+   - Worked? → Phase 4
+   - Didn't work? → NEW hypothesis
+   - Don't stack fixes
 
-4. **When you do not know**
-   - Say: "I don't understand X."
-   - Do not pretend.
-   - Ask for help or research.
+4. **When you don't know**
+   - Say "I don't understand X"
+   - Don't pretend
+   - Ask for help or research
 
-### Phase 4: Implementation and Verification
+### Phase 4: Implementation & Verification
 
-Fix the root cause and verify it with the user:
+**Fix root cause, verify with user:**
 
-1. **Create a failing test** using `test-driven-development`.
-2. **Implement one fix** addressing the root cause from Phases 1-3.
-3. **Run tests and report results.**
-4. **Ask the user to verify. This is mandatory.**
+1. **Create failing test** (use `test-driven-development` skill)
 
-Do not assume tests passing means the problem is solved:
+2. **Implement single fix** (address root cause identified in Phase 1-3)
 
-> Tests pass ✅
->
-> Ama bu senin için çözüldü anlamına gelmeyebilir.
->
-> Şunu kontrol eder misin:
-> [Specific thing to check - exact steps, not vague]
->
-> Çözüldü mü?
+3. **Run tests, report results**
 
-Wait for the user's response.
+4. **ASK USER TO VERIFY (MANDATORY):**
 
-- User says `Evet çözüldü`: done.
-- User says `Hayır`: use the progressive detail levels below.
+   **Don't assume "tests pass" = "problem solved"**
+
+   > "Tests pass ✅
+   >
+   > Ama bu senin için çözüldü anlamına gelmeyebilir.
+   >
+   > Şunu kontrol eder misin:
+   > [Specific thing to check - exact steps, not vague]
+   >
+   > Çözüldü mü?"
+
+   **Wait for user response.**
+
+   - User says "Evet çözüldü": ✅ Done
+   - User says "Hayır": → Progressive detail levels (below)
 
 ## Progressive Detail Levels (Attempt Counter)
 
-Track failed attempts. Increase detail after every failed fix.
+Track failed attempts. Increase detail each time.
 
 ### Attempt 1 Failed
 
-When the user says the first fix did not solve the issue, respond:
+User says "çözülmedi" after first fix.
 
-> Anlıyorum, çözülmedi.
+**Response:**
+
+> "Anlıyorum, çözülmedi.
 >
 > Şu anda tam olarak ne oluyor?
-> Ne bekliyordun?
+> Ne bekliyordun?"
 
-Get brief clarification:
+**Get brief clarification:**
+- What's actually happening now
+- What should be happening
+- Any error messages or unexpected behavior
 
-- What is actually happening now?
-- What should be happening?
-- Are there errors or unexpected behavior?
-
-Then return to Phase 1 with the new information.
+**Then:** Return to Phase 1 with new information.
 
 **Counter: 1**
 
+---
+
 ### Attempt 2 Failed
 
-When the second fix also fails, respond:
+User says "çözülmedi" after second fix.
 
-> İkinci deneme de olmadı. Daha detaylı konuşalım.
+**Response:**
+
+> "İkinci deneme de olmadı. Daha detaylı konuşalım.
 >
 > **Şu anki süreç:**
 >
@@ -175,28 +183,32 @@ When the second fix also fails, respond:
 > - Test B passes ✅
 > - [Behavior X] happens
 >
-> **Senin 'çözüldü' kriterin ne?**
+> **Senin 'çözüldü' kriteri ne?**
 >
 > Ne olursa 'evet çözüldü' diyeceksin?
 >
-> Mümkünse örnek ver: `X yapınca Y olmalı, şu an Z oluyor`.
+> Mümkünse örnek ver: 'X yapınca Y olmalı, şu an Z oluyor'"
 
-Get deeper clarification:
+**Get deeper clarification:**
+- User's exact acceptance criteria
+- Example scenario (input → expected output)
+- What's the gap between expected and actual
 
-- the user's exact acceptance criteria;
-- an example scenario from input to expected output;
-- the gap between expected and actual behavior.
-
-Then return to Phase 1 with clearer success criteria.
+**Then:** Return to Phase 1 with clearer success criteria.
 
 **Counter: 2**
 
+---
+
 ### Attempt 3 Failed
 
-When the third fix fails, stop. Do not attempt fix number four.
+User says "çözülmedi" after third fix.
 
-This is not a simple bug. It is architectural, or the wrong problem is being
-solved. Enter full pipeline analysis mode:
+**STOP. Don't attempt fix #4.**
+
+This is not a simple bug. This is architectural, or we're solving the wrong problem.
+
+**FULL PIPELINE ANALYSIS MODE:**
 
 ```text
 ═══════════════════════════════════════════════════════
@@ -217,7 +229,7 @@ olduğunu bulalım.
 Örnek:
 1. PDF Input (user uploads)
 2. pdfplumber Parse (table extraction)
-3. Parse -> Structured format conversion
+3. Parse → Structured format conversion
 4. AI Prompt construction
 5. AI Service call
 6. AI Response parsing
@@ -294,7 +306,7 @@ Final result: 27% accuracy ❌
 ───────────────────────────────────────────────────────
 
 Şu anki testler sadece end-to-end bakıyor:
-✅ PDF in -> Final result out
+✅ PDF in → Final result out
 
 Ama intermediate quality'leri ölçmüyoruz:
 
@@ -309,7 +321,7 @@ Ama intermediate quality'leri ölçmüyoruz:
 
 ❌ Validation rejection analysis
    - Which rules reject most?
-   - Are rejections correct? Is data actually bad?
+   - Are rejections correct? (Is data actually bad?)
    - Format issues vs content issues
 
 ❌ Component X output quality
@@ -321,7 +333,7 @@ Ama intermediate quality'leri ölçmüyoruz:
 
 [Present investigation options]
 
-Option A: [Component X] Quality İncele
+**Option A: [Component X] Quality İncele**
 
 Nasıl:
 - [Specific approach]
@@ -339,12 +351,12 @@ Risk:
 - [What we might miss]
 
 Example:
-10 sample PDF al, pdfplumber output'unu manuel incele,
-table structure korunuyor mu ölç.
+"10 sample PDF al, pdfplumber output'unu manuel incele,
+table structure korunuyor mu ölç"
 
 ───────────────────────────────────
 
-Option B: [Component Y] Quality İncele
+**Option B: [Component Y] Quality İncele**
 
 Nasıl:
 - [Specific approach]
@@ -358,12 +370,12 @@ Risk:
 - [What could go wrong]
 
 Example:
-Validation'ı bypass et, AI raw output'u al, manuel accuracy ölç,
-browser ChatGPT ile compare et.
+"Validation'ı bypass et, AI raw output'u al, manuel accuracy ölç,
+browser ChatGPT ile compare et"
 
 ───────────────────────────────────
 
-Option C: [Component Z] Audit
+**Option C: [Component Z] Audit**
 
 Nasıl:
 - [Specific approach]
@@ -377,12 +389,12 @@ Risk:
 - [What could go wrong]
 
 Example:
-Validation rules'ları listele, her rule kaç reject yapıyor say,
-rejected samples'ları incele; gerçekten hatalı mı?
+"Validation rules'ları listele, her rule kaç reject yapıyor say,
+rejected samples'ları incele (gerçekten hatalı mı?)"
 
 ───────────────────────────────────
 
-Option D: End-to-End Comparison
+**Option D: End-to-End Comparison**
 
 Nasıl:
 - [Specific approach]
@@ -396,8 +408,8 @@ Risk:
 - [What could go wrong]
 
 Example:
-Aynı PDF'i browser ChatGPT'ye at vs bizim sisteme at,
-intermediate steps'leri compare et, nerede diverge oluyor bul.
+"Aynı PDF'i browser ChatGPT'ye at vs bizim sisteme at,
+intermediate steps'leri compare et, nerede diverge oluyor bul"
 
 ───────────────────────────────────────────────────────
 6. BENİM ÖNERİM
@@ -411,15 +423,15 @@ intermediate steps'leri compare et, nerede diverge oluyor bul.
 
 Neden:
 - En hızlı (30 dakika)
-- Hemen gösterir: AI mı kötü, validation mı sıkı?
-- Eğer AI %99 doğruysa -> validation problemi
-- Eğer AI %30 doğruysa -> parse veya prompt problemi
+- Hemen gösterir: AI mi kötü, validation mı sıkı?
+- Eğer AI %99 doğruysa → validation problemi
+- Eğer AI %30 doğruysa → parse veya prompt problemi
 - Diğer seçenekler sonraki adım olur
 
 Sonra bulgulara göre Option A, C veya D'ye geçeriz.
 
 ───────────────────────────────────────────────────────
-7. SONRAKİ ADIM
+7. SONRAKI ADIM
 ───────────────────────────────────────────────────────
 
 Nereden başlayalım?
@@ -429,14 +441,17 @@ A / B / C / D / [Farklı fikir]
 ═══════════════════════════════════════════════════════
 ```
 
-Wait for the user to choose the investigation approach. Execute the selected
-investigation, report findings, then fix based on evidence.
+**Wait for user to choose investigation approach.**
+
+**Then:** Execute chosen investigation, report findings, THEN fix based on evidence.
 
 **Counter: 3**
 
+---
+
 ## Don't Blame Downstream Components
 
-Common anti-pattern:
+**Common anti-pattern:**
 
 ```text
 Component A ✅ (our code, tests pass)
@@ -445,33 +460,37 @@ Component B ✅ (our code, tests pass)
   ↓
 Component C ❌ (external service, "bad output")
   ↓
-Conclusion: "Component C sucks" <- WRONG
+Conclusion: "Component C sucks" ← WRONG
 ```
 
-This is almost always wrong.
+**This is almost always wrong.**
 
-### Why Blaming Downstream Fails
+### Why "Blame Downstream" Fails
 
-When end-to-end fails but intermediate tests pass, the problem is usually:
+When end-to-end fails but intermediate tests pass:
 
-1. intermediate quality is not measured correctly;
-2. tests check existence, not quality;
-3. validation is too strict or too loose;
-4. bad input is sent to the external component.
+**The problem is usually:**
+1. We're not measuring intermediate quality correctly
+2. Tests check existence, not quality
+3. Validation is too strict/loose
+4. We're sending bad input to external component
 
-The problem is rarely an undocumented, sudden degradation of the external
-component.
+**The problem is rarely:**
+- External component suddenly got worse
+- External API changed (usually documented)
 
 ### Correct Investigation Approach
 
-Before blaming an external component, measure quality at every step:
+**Before blaming external component:**
+
+**Measure quality at EVERY step:**
 
 ```text
 PDF Input
   ├─ Quality: [How to verify input is good]
   ↓
 Parse
-  ├─ Output quality: [Measure THIS; don't assume success = good]
+  ├─ Output quality: [Measure THIS - don't assume "success" = good]
   ↓
 External Service Input
   ├─ Input quality: [What are we sending? Is it good?]
@@ -482,37 +501,40 @@ External Service Output
 Validation
   ├─ Pass/fail rate: [How many pass vs fail?]
   ├─ Rejection reasons: [WHY did it fail?]
-  └─ Are rejections correct? [Is the data actually bad?]
+  └─ Are rejections correct? [Is data actually bad?]
   ↓
 Final result
 ```
 
-Then compare:
+**Then compare:**
 
-- good input and good external output, but validation rejects: validation issue;
-- good input and bad external output: external service issue;
-- bad external input: parse or preparation issue.
+- External service received good input, produced good output, but validation rejects → **Validation is problem**
+- External service received good input, produced bad output → **External service is problem**
+- External service received bad input → **Our parse/preparation is problem**
 
 ### Validation Transparency
 
-When validation rejects data, do not only say `Validation failed`.
+**When validation rejects data:**
 
-Report:
+**DON'T just say:**
+> "Validation failed ❌"
 
-> Validation rejected X out of Y items (Z% reject rate).
+**DO say:**
+
+> "Validation rejected X out of Y items (Z% reject rate)
 >
 > **Rejection breakdown:**
 >
 > - Rule A: 5 rejections
->   Reason: `line_item_count_mismatch`
+>   Reason: line_item_count_mismatch
 >   Example: Expected 4 items, got 3
 >
 > - Rule B: 3 rejections
->   Reason: `decimal_precision_mismatch`
+>   Reason: decimal_precision_mismatch
 >   Example: 1250.0 vs 1250.00
 >
 > - Rule C: 2 rejections
->   Reason: `vat_group_structure_invalid`
+>   Reason: vat_group_structure_invalid
 >   Example: Expected flat list, got nested groups
 >
 > **Sample rejected item:**
@@ -528,59 +550,70 @@ Report:
 > }
 > ```
 >
-> Rejected by: Rule A (expected 3 items, schema says minimum 3).
+> Rejected by: Rule A (expected 3 items, schema says minimum 3)
 >
-> Soru: Bu rejection doğru mu? Data gerçekten hatalı mı,
-> yoksa validation çok sıkı mı?
+> **Soru:** Bu rejection doğru mu? Data gerçekten hatalı mı,
+> yoksa validation çok sıkı mı?"
 
-Inspect rejected samples with the user before concluding that AI or parsing is
-bad.
+**Then inspect rejected samples with user before concluding "AI/parse is bad".**
 
-### Browser ChatGPT Works, Our System Doesn't
+### The "Browser ChatGPT Works, Our System Doesn't" Problem
 
-Symptom:
+**Symptom:**
+- Same PDF → browser ChatGPT → %99 accuracy
+- Same PDF → our system → %30 accuracy
+- Conclusion: "Our system's AI call is broken" ← MAYBE WRONG
 
-- same PDF -> browser ChatGPT -> 99% accuracy;
-- same PDF -> our system -> 30% accuracy;
-- conclusion: our AI call is broken.
+**Before blaming AI integration:**
 
-That conclusion may be wrong. Before blaming AI integration:
+**Measure intermediate quality:**
 
-1. **Inspect what is sent to AI**
-   - Extract the exact prompt and data.
-   - Send the same prompt and data to browser ChatGPT.
-   - Verify the inputs are identical.
+1. **What are we sending to AI?**
+   - Extract the EXACT prompt + data we send
+   - Send SAME prompt + data to browser ChatGPT
+   - Compare: Same input?
 
-2. **Inspect what AI returns**
-   - Capture the raw response before validation.
-   - Measure content accuracy while ignoring format issues.
-   - Compare it with the browser response.
+2. **What does AI return?**
+   - Extract AI's raw response (before validation)
+   - Measure accuracy of raw response (ignore format issues)
+   - Compare with browser ChatGPT response
 
-3. **Inspect validation**
-   - Measure pass/fail rate and rejection reasons.
-   - Separate content failures from format failures.
+3. **What does validation do?**
+   - Pass/fail rate
+   - Rejection reasons
+   - Are rejections about CONTENT or FORMAT?
 
-Typical finding:
+**Typical finding:**
 
 ```text
-AI raw output: 98% accurate (content correct)
-After validation: 30% pass rate
-Root cause: Validation rejects 68% for format issues
-Solution: Loosen format validation or tighten the AI output specification
+AI raw output: %98 accurate (content correct)
+After validation: %30 pass rate
+Root cause: Validation rejects %68 for FORMAT issues (decimal precision,
+            structure differences, field naming)
+Solution: Loosen format validation OR tighten AI output format specification
 ```
 
-Do not jump directly to `AI integration is broken`.
+**NOT:** "AI integration is broken"
+
+---
 
 ## Integration with verification-before-completion
 
-`verification-before-completion` is always active. After implementing a fix:
+verification-before-completion is always-active. Here's how they work together:
 
-1. It identifies and runs the verification command.
-2. Systematic debugging uses that evidence:
+**After implementing fix:**
 
-   > Tests çalıştırdım:
+1. **verification-before-completion runs automatically:**
+   - Identifies verification command (pytest, npm test, etc.)
+   - Runs command
+   - Collects output
+   - Checks exit code, counts failures
+
+2. **systematic-debugging uses evidence:**
+
+   > "Tests çalıştırdım:
    >
-   > ```text
+   > ```
    > $ pytest tests/test_invoice.py -v
    > ======================== 5 passed in 1.2s ========================
    > Exit code: 0
@@ -592,56 +625,63 @@ Do not jump directly to `AI integration is broken`.
    >
    > [Specific thing to check]
    >
-   > Çözüldü mü?
+   > Çözüldü mü?"
 
-3. The user confirms or denies:
-   - `Evet`: done.
-   - `Hayır`: increase the attempt counter and progressive detail.
+3. **User confirms or denies:**
+   - "Evet" → Done ✅
+   - "Hayır" → Attempt counter increases, progressive detail
 
-Do not wait for an explicit invocation of `verification-before-completion`
-before making a completion claim.
+**You don't explicitly invoke verification-before-completion. It runs automatically before you make any claim.**
 
-## User Signals -> Immediate Action
+---
 
-These phrases mean stop and change approach:
+## User Signals → Immediate Action
 
-| User says | Meaning | Immediate action |
-| --- | --- | --- |
-| `Is that not happening?` | An assumption was not verified | Stop, run the check, and show evidence. |
-| `Will it show us...?` | Diagnostics are missing | Add boundary logging, run once, then analyze. |
-| `Stop guessing` | Fixes are being proposed without understanding | Return to Phase 1. |
-| `This isn't working` | The definition of working is unclear | Ask for exact acceptance criteria. |
-| `Try again` repeatedly | The process is looping | Count attempts; at 3, use full pipeline analysis. |
-| `Neden böyle oluyor?` repeatedly | Symptoms are being fixed | Trace data backward to the source. |
-| Silence | The user may be lost or frustrated | Summarize current state, objective, and unknowns. |
+**These phrases mean STOP EVERYTHING and change approach:**
 
-When any signal appears:
+| User Says | What It Means | Immediate Action |
+|-----------|---------------|------------------|
+| **"Is that not happening?"** | You assumed without verifying | STOP. Show evidence. Run actual command/check, show output. |
+| **"Will it show us...?"** | You should have added diagnostics | STOP. Add logging at every boundary. Run once, show results, THEN analyze. |
+| **"Stop guessing"** | Proposing fixes without understanding | STOP. Return to Phase 1. No more fixes until root cause proven. |
+| **"This isn't working"** (frustrated) | Not understanding what "working" means | STOP. Ask: "Exactly what should happen? What would make you say 'çözüldü'?" |
+| **"Try again"** (repeated) | Stuck in loop | STOP. Count attempts. If 3+, this is architectural. Full pipeline analysis. |
+| **"Neden böyle oluyor?"** (repeated) | Fixing symptoms, not cause | STOP. Return to Phase 1. Trace data flow backward to source. |
+| **Silence** (user not responding) | Lost them OR frustrated | STOP. Summarize: "Where we are + what I'm trying + what's unclear. Continue or change approach?" |
 
-1. Stop the current approach.
-2. Acknowledge the signal:
+**When you see ANY of these:**
 
-   > Fark ettim: [Which signal]. [What I did wrong].
+1. **Stop current approach immediately**
+
+2. **Acknowledge the signal:**
+
+   > "Fark ettim: [Which signal]. [What I did wrong].
    >
-   > Yaklaşımı değiştiriyorum.
+   > Yaklaşımı değiştiriyorum."
 
-3. Select the new evidence-driven approach.
-4. Present the new plan:
+3. **Change approach based on signal** (see table above)
 
-   > Yeni plan:
+4. **Get user buy-in before continuing:**
+
+   > "Yeni plan:
    >
    > 1. [What I'll do differently]
    > 2. [What output you'll see]
    > 3. [How we'll know if it worked]
    >
-   > Bu yaklaşım mantıklı mı?
+   > Bu yaklaşım mantıklı mı?"
 
-5. Wait for approval.
+5. **Wait for approval**
 
-### Proactive Checkpoint
+### Proactive Checkpoint (Before User Gets Frustrated)
 
-After Attempt 2 fails, do not wait for frustration:
+**Don't wait for user to signal frustration.**
 
-> İki farklı yaklaşım denedim, ikisi de çalışmadı:
+**After Attempt 2 fails:**
+
+Proactively checkpoint:
+
+> "İki farklı yaklaşım denedim, ikisi de çalışmadı:
 >
 > 1. [Attempt 1]: [Ne oldu]
 > 2. [Attempt 2]: [Ne oldu]
@@ -652,16 +692,17 @@ After Attempt 2 fails, do not wait for frustration:
 > - Ne olursa 'çözüldü' diyeceksin? [Acceptance criteria]
 > - Şu ana kadar ne denedim: [Summary]
 >
-> Devam etmeden önce: Doğru şeyi mi çözmeye çalışıyorum?
+> Devam etmeden önce: Doğru şeyi mi çözmeye çalışıyorum?"
 
-Wait for clarification before Attempt 3.
+**Wait for clarification BEFORE Attempt #3.**
+
+---
 
 ## Expected Behavior Confirmation
 
-Before implementing a fix for a feature that does not work, confirm expected
-behavior:
+**Before implementing fix for "feature doesn't work" issues:**
 
-> Fix yapmadan önce expected behavior'ı confirm edelim:
+> "Fix yapmadan önce expected behavior'ı confirm edelim:
 >
 > **Scenario:** [User action]
 >
@@ -679,66 +720,81 @@ behavior:
 > - Change: [What I'm modifying]
 > - So that: [New behavior]
 >
-> Bu beklentini karşılıyor mu?
+> Bu beklentini karşılıyor mu?"
 
-Wait for confirmation. If the user says no, restate the expectation and iterate
-until the user says `evet, aynen öyle`. Then implement.
+**Wait for confirmation.**
+
+**If user says "hayır, öyle değil":**
+
+> "Anladım. Beklentin şu mu: [Try to understand]"
+
+**Iterate until user says "evet, aynen öyle".**
+
+**THEN** implement.
+
+---
 
 ## Verification Checklist
 
-Before claiming the bug is fixed:
+Before claiming bug fixed:
 
-- [ ] Root cause identified, not only the symptom.
-- [ ] Regression test created with RED -> GREEN using
-      `test-driven-development`.
-- [ ] One root-cause fix applied.
-- [ ] Tests pass.
-- [ ] User was asked `Çözüldü mü?`
-- [ ] User confirmed `Evet çözüldü`.
+- [ ] **Root cause identified** (not symptom)
+- [ ] **Created regression test** (RED → GREEN via TDD skill)
+- [ ] **Single fix applied** (not multiple changes)
+- [ ] **Tests pass**
+- [ ] **Asked user "Çözüldü mü?"**
+- [ ] **User confirmed "Evet çözüldü"**
 
-If any item is unchecked, the issue is not done.
+Can't check all? Not done yet.
 
-## Red Flags
+---
 
-- `Quick fix for now`
-- `Just try X and see`
-- Adding multiple changes together
-- Skipping the test and relying on manual verification
-- `Probably X, let me fix it`
-- Proposing a fix without understanding the data flow
-- `Tests pass, so it's fixed` without user confirmation
-- `One more fix` after three attempts
-- Each fix reveals a new problem elsewhere
+## Red Flags (STOP and Follow Process)
 
-All mean: stop and follow the phases.
+- "Quick fix for now"
+- "Just try X and see"
+- "Add multiple changes"
+- "Skip test, manually verify"
+- "Probably X, let me fix"
+- "Don't fully understand but this might work"
+- Proposing solutions before tracing data flow
+- **"Tests pass, so it's fixed" (without user confirm)**
+- **"One more fix" (when tried 3+ already)**
+- **Each fix reveals new problem elsewhere**
 
-## Common Rationalizations
+**All mean: STOP. Follow process.**
+
+---
+
+## Common Rationalizations (REJECT)
 
 | Excuse | Reality |
-| --- | --- |
-| `Issue is simple; no process needed` | Simple issues still have root causes. |
-| `Emergency; no time` | Systematic investigation is faster than thrashing. |
-| `Just try this first` | The first random fix starts the wrong pattern. |
-| `Tests pass = fixed` | The user defines fixed, not the test suite. |
-| `Write the test after confirming` | Untested fixes do not prevent regressions. |
-| `Multiple fixes save time` | They hide which variable mattered. |
-| `Reference is too long` | Partial understanding produces more failures. |
-| `One more fix` after three attempts | Three failures require pipeline analysis. |
-| `External component must be bad` | Measure intermediate quality first. |
+|--------|---------|
+| "Issue simple, don't need process" | Simple has root cause. Process is fast. |
+| "Emergency, no time" | Systematic is FASTER than thrashing. |
+| "Just try this first" | First fix sets pattern. Do it right. |
+| "Tests pass = fixed" | User defines "fixed", not tests. |
+| "Write test after confirming fix" | Untested fixes don't stick. |
+| "Multiple fixes save time" | Can't isolate what worked. |
+| "Reference too long" | Partial understanding guarantees bugs. |
+| "One more fix" (after 3) | 3+ = architectural. Don't guess more. |
+| "External component must be bad" | Measure intermediate quality first. |
+
+**All mean: Follow process. No shortcuts.**
+
+---
 
 ## Integration with Other Skills
 
-Use with:
+**Use with:**
+- `test-driven-development`: Create regression test (Phase 4, Step 1)
+- `verification-before-completion`: Final verification before claiming done
 
-- `test-driven-development`: create the regression test in Phase 4.
-- `verification-before-completion`: gather fresh evidence before claiming done.
-
-Do not:
-
-- skip root cause investigation because of an emergency;
-- stack fixes without verification;
-- claim fixed without user confirmation;
-- blame external components without measuring intermediate quality.
+**Don't:**
+- Skip root cause because "emergency"
+- Stack fixes without verification
+- Claim fixed without user confirmation
+- Blame external components without measuring intermediate quality
 
 ---
 

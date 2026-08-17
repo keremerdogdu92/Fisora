@@ -48,11 +48,13 @@ def main() -> int:
                 {"raw_account_code": "360", "normalized_account_code": "360", "account_name": "Vergi Borclari", "is_detail_account": True},
             ],
         )
+        from uuid import uuid4
+        doc_id = f"smoke-bank-doc-{uuid4().hex[:8]}"
         uploaded = store.save_uploaded_document(
             client_id=client_id,
             document={
-                "document_id": "smoke-bank-doc",
-                "document_ref": "smoke-bank-doc",
+                "document_id": doc_id,
+                "document_ref": doc_id,
                 "document_type": "bank_statement",
                 "original_file_name": "smoke-bank.csv",
                 "storage_path": str(statement_path),

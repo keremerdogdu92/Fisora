@@ -81,21 +81,15 @@ Use skills for structured workflows:
 **Quality:**
 - `verification-before-completion`: Evidence before claims (auto-active)
 
-**Specialist Routing (Fisero Domain & Release):**
-- Planning with meaningful alternatives: `fisero-shape-plan`
-- Invoice meaning, VAT, accounts, journal, review, or export: `fisero-review-accounting`
-- Live symptoms, stale UI, timeouts, or pipeline discrepancies: `fisero-diagnose-live`
-- Release preparation, deploy, and handoff evidence: `fisero-release-handoff`
-
 See `.agents/skills/` for full library.
 
 ## Decision Protocol
 
-**"önce konuşalım", "netleştirelim":** Analysis mode, no code.
+**"önce konuşalım", "netleştirelim":** Analysis mode, no code
 
-**"hadi başla", "devam edelim":** Implement settled scope end to end without reopening settled choices unless new evidence creates a material conflict.
+**"hadi başla", "devam edelim":** Implement settled scope
 
-Material decisions: Use `brainstorming` or `fisero-shape-plan`.
+Material decisions: Use `brainstorming`.
 
 ## Product Principles
 
@@ -115,15 +109,9 @@ Canonical XML/PDF invoice lines = mandatory primary evidence. When missing: `lin
 
 **System trace:** UI → frontend → API → service → persistence → evidence → result
 
-**Codebase discovery (codebase-memory-mcp):**
-1. Start with a narrow `search_graph` query and a result limit of 5-10.
-2. Use `trace_path` only on the selected symbol and required direction.
-3. Use `get_code_snippet` only for the symbols needed to decide or edit.
-4. Read complete files only when implementation or missing context requires it.
-5. Re-index or verify against live source when graph results appear stale.
-6. Fall back to text search for literals, error messages, configuration, scripts, SQL, and documentation.
+**Codebase discovery:** Narrow queries, trace paths, read when needed, text search for literals/errors/config.
 
-**Live evidence:** Start with `workflow_records`; normalized projections may lag or omit event history.
+**Live evidence:** Start with `workflow_records`.
 
 **Protect:** Tenant isolation, authorization, accounting invariants, immutable evidence, auditability, idempotency, concurrency safety, backward-compatible migrations, explainability, secrets.
 
@@ -156,11 +144,10 @@ Accounting correctness: Inspect canonical evidence, draft shape, status, explana
 
 Don't turn transient status into permanent instructions.
 
-## Manual Release and External Authority
+## Manual Release
 
-Unless explicit user authorization for an end-to-end release transaction is given (e.g. via `fisero-release-handoff` or explicit prompt instruction):
-- User handles commit, push, and deploy manually.
-- Agent prepares and verifies changes only. Does not commit, push, or deploy without authorization.
+User handles commit, push, and deploy manually.
+Agent prepares changes only. Does not commit, push, or deploy.
 
 ---
 

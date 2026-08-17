@@ -1,4 +1,0 @@
-﻿interface:
-  display_name: "Fisero Yayın ve Handoff"
-  short_description: "Commit push deploy akışını tek onayla yönetir"
-  default_prompt: "Use $fisero-release-handoff to prepare and execute a verified Fisero commit, push, deploy, and handoff transaction."

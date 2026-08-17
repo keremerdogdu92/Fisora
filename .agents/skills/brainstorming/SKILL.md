@@ -54,10 +54,10 @@ Fix issues inline, then ask user to review.
 After user approves spec, ask:
 
 > "Spec onaylandı. İki execution seçeneği var:
->
+> 
 > 1. **Subagent-Driven** - Her task için fresh subagent, aralarında review
 > 2. **Inline Execution** - Bu session'da step-by-step execution
->
+> 
 > Hangisini tercih edersin?"
 
 Then:

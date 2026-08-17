@@ -36,29 +36,29 @@ Random fixes waste time. Quick patches mask issues.
    - Environment differences
 
 4. **Multi-component systems: Add diagnostics**
-
+ 
    When system has layers (CI → build → signing, API → service → DB):
-
+ 
    **Add logging at EACH boundary FIRST, then analyze:**
    ```bash
    # Layer 1: Input
    echo "=== Request: $REQUEST_ID ==="
    echo "Input data: $DATA"
-
+ 
    # Layer 2: Processing
    echo "=== Processing started ==="
    result=$(process_data "$DATA")
    echo "Result: $result"
-
+ 
    # Layer 3: Output
    echo "=== Final output ==="
    echo "$result"
    ```
-
+ 
    Run ONCE to see WHERE it breaks, THEN investigate that layer.
 
 5. **Trace data flow backward**
-
+ 
    Where does bad value originate?
    - What called this with bad value?
    - Keep tracing up to source
@@ -121,18 +121,18 @@ Random fixes waste time. Quick patches mask issues.
 4. **ASK USER TO VERIFY (MANDATORY):**
 
    **Don't assume "tests pass" = "problem solved"**
-
+ 
    > "Tests pass ✅
-   >
+   > 
    > Ama bu senin için çözüldü anlamına gelmeyebilir.
-   >
+   > 
    > Şunu kontrol eder misin:
    > [Specific thing to check - exact steps, not vague]
-   >
+   > 
    > Çözüldü mü?"
-
+ 
    **Wait for user response.**
-
+ 
    - User says "Evet çözüldü": ✅ Done
    - User says "Hayır": → Progressive detail levels (below)
 
@@ -147,7 +147,7 @@ User says "çözülmedi" after first fix.
 **Response:**
 
 > "Anlıyorum, çözülmedi.
->
+> 
 > Şu anda tam olarak ne oluyor?
 > Ne bekliyordun?"
 
@@ -169,24 +169,24 @@ User says "çözülmedi" after second fix.
 **Response:**
 
 > "İkinci deneme de olmadı. Daha detaylı konuşalım.
->
+> 
 > **Şu anki süreç:**
->
+> 
 > 1. [User/system does X]
 > 2. [Component A processes it]
 > 3. [Component B does Y]
 > 4. [Result: Z happens]
->
+> 
 > **Benim 'çözüldü' anlayışım:**
->
+> 
 > - Test A passes ✅
 > - Test B passes ✅
 > - [Behavior X] happens
->
+> 
 > **Senin 'çözüldü' kriteri ne?**
->
+> 
 > Ne olursa 'evet çözüldü' diyeceksin?
->
+> 
 > Mümkünse örnek ver: 'X yapınca Y olmalı, şu an Z oluyor'"
 
 **Get deeper clarification:**
@@ -217,7 +217,7 @@ FULL DETAY - MASAYA YATIRALIM
 
 Üç farklı fix denedim, hiçbiri çalışmadı.
 
-Şimdi tüm sistemi masaya yatırıp, gerçekten neyin yanlış
+Şimdi tüm sistemi masaya yatırıp, gerçekten neyin yanlış 
 olduğunu bulalım.
 
 ───────────────────────────────────────────────────────
@@ -522,23 +522,23 @@ Final result
 **DO say:**
 
 > "Validation rejected X out of Y items (Z% reject rate)
->
+> 
 > **Rejection breakdown:**
->
+> 
 > - Rule A: 5 rejections
 >   Reason: line_item_count_mismatch
 >   Example: Expected 4 items, got 3
->
+> 
 > - Rule B: 3 rejections
 >   Reason: decimal_precision_mismatch
 >   Example: 1250.0 vs 1250.00
->
+> 
 > - Rule C: 2 rejections
 >   Reason: vat_group_structure_invalid
 >   Example: Expected flat list, got nested groups
->
+> 
 > **Sample rejected item:**
->
+> 
 > ```json
 > {
 >   "invoice_id": "FTR123",
@@ -549,9 +549,9 @@ Final result
 >   "total": 150.0
 > }
 > ```
->
+> 
 > Rejected by: Rule A (expected 3 items, schema says minimum 3)
->
+> 
 > **Soru:** Bu rejection doğru mu? Data gerçekten hatalı mı,
 > yoksa validation çok sıkı mı?"
 
@@ -610,21 +610,21 @@ verification-before-completion is always-active. Here's how they work together:
    - Checks exit code, counts failures
 
 2. **systematic-debugging uses evidence:**
-
+ 
    > "Tests çalıştırdım:
-   >
+   > 
    > ```
    > $ pytest tests/test_invoice.py -v
    > ======================== 5 passed in 1.2s ========================
    > Exit code: 0
    > ```
-   >
+   > 
    > Evidence: Tests pass ✅
-   >
+   > 
    > Ama bu senin için çözüldü anlamına gelmeyebilir.
-   >
+   > 
    > [Specific thing to check]
-   >
+   > 
    > Çözüldü mü?"
 
 3. **User confirms or denies:**
@@ -654,21 +654,21 @@ verification-before-completion is always-active. Here's how they work together:
 1. **Stop current approach immediately**
 
 2. **Acknowledge the signal:**
-
+ 
    > "Fark ettim: [Which signal]. [What I did wrong].
-   >
+   > 
    > Yaklaşımı değiştiriyorum."
 
 3. **Change approach based on signal** (see table above)
 
 4. **Get user buy-in before continuing:**
-
+ 
    > "Yeni plan:
-   >
+   > 
    > 1. [What I'll do differently]
    > 2. [What output you'll see]
    > 3. [How we'll know if it worked]
-   >
+   > 
    > Bu yaklaşım mantıklı mı?"
 
 5. **Wait for approval**
@@ -682,16 +682,16 @@ verification-before-completion is always-active. Here's how they work together:
 Proactively checkpoint:
 
 > "İki farklı yaklaşım denedim, ikisi de çalışmadı:
->
+> 
 > 1. [Attempt 1]: [Ne oldu]
 > 2. [Attempt 2]: [Ne oldu]
->
+> 
 > Şu anki durumu netleştirelim:
->
+> 
 > - Tam olarak ne çalışmıyor? [Your understanding]
 > - Ne olursa 'çözüldü' diyeceksin? [Acceptance criteria]
 > - Şu ana kadar ne denedim: [Summary]
->
+> 
 > Devam etmeden önce: Doğru şeyi mi çözmeye çalışıyorum?"
 
 **Wait for clarification BEFORE Attempt #3.**
@@ -703,23 +703,23 @@ Proactively checkpoint:
 **Before implementing fix for "feature doesn't work" issues:**
 
 > "Fix yapmadan önce expected behavior'ı confirm edelim:
->
+> 
 > **Scenario:** [User action]
->
+> 
 > **Expected:**
 > - Step 1: [What should happen]
 > - Step 2: [What should happen]
 > - Final result: [End state]
->
+> 
 > **Current (broken):**
 > - Step 1: [What actually happens]
 > - Step 2: [What actually happens]
 > - Final result: [End state]
->
+> 
 > **My fix will:**
 > - Change: [What I'm modifying]
 > - So that: [New behavior]
->
+> 
 > Bu beklentini karşılıyor mu?"
 
 **Wait for confirmation.**

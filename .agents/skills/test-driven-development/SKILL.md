@@ -43,7 +43,7 @@ Test Layers:
    Dependencies: [Real implementations - NO MOCKS unless impossible]
    Cover: [Happy path, edge cases, errors]
    Location: [File path]
-
+ 
    Why unit: [Reasoning - fast, isolated, specific logic]
 
 2. Integration Tests
@@ -52,14 +52,14 @@ Test Layers:
    Dependencies: [Real implementations - NO MOCKS]
    Cover: [Cross-component flows, data transformation]
    Location: [File path]
-
+ 
    Why integration: [Reasoning - component interaction, real system]
 
 3. E2E Tests
    Scope: [Full user journey]
    Real system: [Everything real - NO MOCKS]
    Cover: [Actual user scenarios]
-
+ 
    Why e2e: [Reasoning - production confidence]
 
 Recommended Approach:
@@ -114,7 +114,7 @@ Hangisini tercih edersin?
 class InvoiceService:
     def __init__(self, api_client: EFaturaAPI):
         self.api = api_client
-
+  
     async def fetch(self, id: str):
         return await self.api.get(id)
 
@@ -122,7 +122,7 @@ class InvoiceService:
 def test_fetch_invoice():
     test_api = EFaturaAPI(base_url=TEST_API_URL)  # Real client, test server
     service = InvoiceService(api_client=test_api)
-
+  
     result = await service.fetch("123")
     assert result.invoice_id == "123"
 
@@ -131,7 +131,7 @@ def test_fetch_when_api_down():
     mock_api = Mock(spec=EFaturaAPI)
     mock_api.get.return_value = fake_invoice
     service = InvoiceService(api_client=mock_api)
-
+  
     result = await service.fetch("123")
     assert result == fake_invoice
 ```
@@ -165,10 +165,10 @@ def test_parse_efatura_xml_extracts_invoice_data():
     # Arrange: Real XML file
     xml_content = Path('fixtures/valid_efatura.xml').read_text()
     parser = EFaturaParser()  # Real parser, no mocks
-
+  
     # Act
     invoice = parser.parse(xml_content)
-
+  
     # Assert
     assert invoice.invoice_id == "FTR2024000123"
     assert invoice.total_amount == Decimal("1250.00")
@@ -204,7 +204,7 @@ Implement ONLY what's needed:
 ```python
 def parse(self, xml_content: str) -> Invoice:
     root = ET.fromstring(xml_content)
-
+  
     return Invoice(
         invoice_id=root.find('.//cbc:ID').text,
         total_amount=Decimal(root.find('.//cbc:TaxInclusiveAmount').text),

@@ -202,7 +202,8 @@ if (-not $SkipLocalVerify) {
 
 $tempScript = New-TemporaryFile
 try {
-    Set-Content -LiteralPath $tempScript -Value $remoteScript -Encoding UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tempScript.FullName, $remoteScript, $utf8NoBom)
     $summary.steps += Invoke-Step -Name "server-release" -Script {
         $remoteShell = if ($NoSudo) { "tr -d '\r' | sh -s" } else { "tr -d '\r' | sudo -n sh -s" }
         $sshArgs = @()

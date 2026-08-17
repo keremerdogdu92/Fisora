@@ -205,7 +205,7 @@ try {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($tempScript.FullName, $remoteScript, $utf8NoBom)
     $summary.steps += Invoke-Step -Name "server-release" -Script {
-        $remoteShell = if ($NoSudo) { "tr -d '\r' | sh -s" } else { "tr -d '\r' | sudo -n sh -s" }
+        $remoteShell = if ($NoSudo) { "sed -e '1s/^\xef\xbb\xbf//' | tr -d '\r' | sh -s" } else { "sed -e '1s/^\xef\xbb\xbf//' | tr -d '\r' | sudo -n sh -s" }
         $sshArgs = @()
         if ($SshKey) {
             $sshArgs += @("-i", $SshKey)

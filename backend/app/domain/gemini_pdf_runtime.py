@@ -5,6 +5,11 @@ import hashlib
 import math
 from typing import Callable, Mapping
 
+from app.domain.gemini_project_pool import (
+    GeminiProjectPoolProvider,
+    GeminiProjectSlotConfig,
+    gemini_project_slot_discovery_from_env,
+)
 from app.domain.openai_provider import GeminiAccountingProvider
 
 
@@ -14,7 +19,7 @@ GEMINI_PDF_V2_ENABLED_VALUES = frozenset({"1", "true", "yes", "on"})
 
 @dataclass(frozen=True)
 class GeminiPdfRuntime:
-    provider: GeminiAccountingProvider | None
+    provider: GeminiProjectPoolProvider | None
     available: bool
     max_parallel_accounting_chunks: int = 1
     candidate_experiment_percent: int = 0
@@ -71,22 +76,22 @@ def max_accounting_request_bytes_from_env(env: Mapping[str, str]) -> int:
     )
 
 
-def max_accounting_provider_calls_from_env(
-    env: Mapping[str, str],
-) -> int | None:
-    raw = str(
-        env.get("FISORA_GEMINI_V2_MAX_ACCOUNTING_PROVIDER_CALLS", "") or ""
-    ).strip()
-    return _positive_int(raw) if raw else None
-
-
 def build_gemini_pdf_runtime_from_env(
     env: Mapping[str, str],
 ) -> GeminiPdfRuntime:
     """Build the native-PDF provider without consulting the general AI chain."""
 
-    api_key = str(env.get("GEMINI_API_KEY", "") or "").strip()
-    if not api_key:
+    try:
+        discovery = gemini_project_slot_discovery_from_env(env)
+    except ValueError as error:
+        field = str(error).rsplit(": ", 1)[-1]
+        return _unavailable(f"gemini_runtime_config_invalid:{field}")
+    slot_configs = discovery.configs
+    if not slot_configs:
+        if discovery.invalid_fields:
+            return _unavailable(
+                f"gemini_runtime_config_invalid:{discovery.invalid_fields[0]}"
+            )
         return _unavailable("gemini_api_key_missing")
 
     numeric_fields: tuple[
@@ -95,8 +100,8 @@ def build_gemini_pdf_runtime_from_env(
         ("FISORA_GEMINI_TIMEOUT_SECONDS", "60", _positive_float),
         ("FISORA_GEMINI_MAX_OUTPUT_TOKENS", "16384", _positive_int),
         ("FISORA_GEMINI_MAX_INLINE_PDF_BYTES", "50000000", _positive_int),
-        ("FISORA_GEMINI_REQUESTS_PER_MINUTE", "15", _positive_int),
         ("FISORA_GEMINI_V2_MAX_PARALLEL_CHUNKS", "3", _positive_int),
+        ("FISORA_GEMINI_PROJECT_COOLDOWN_SECONDS", "60", _positive_float),
     )
     parsed: dict[str, float | int] = {}
     for field, default, parser in numeric_fields:
@@ -117,19 +122,30 @@ def build_gemini_pdf_runtime_from_env(
             "gemini_runtime_config_invalid:FISORA_GEMINI_V2_MAX_ACCOUNTING_REQUEST_BYTES"
         )
 
-    provider = GeminiAccountingProvider(
-        api_key=api_key,
-        model=str(
-            env.get("FISORA_GEMINI_PDF_V2_MODEL", DEFAULT_GEMINI_PDF_V2_MODEL)
-            or DEFAULT_GEMINI_PDF_V2_MODEL
-        ),
-        generate_content_url=str(
-            env.get("FISORA_GEMINI_GENERATE_CONTENT_URL", "") or ""
-        ),
-        timeout_seconds=float(parsed["FISORA_GEMINI_TIMEOUT_SECONDS"]),
-        max_output_tokens=int(parsed["FISORA_GEMINI_MAX_OUTPUT_TOKENS"]),
-        max_inline_pdf_bytes=int(parsed["FISORA_GEMINI_MAX_INLINE_PDF_BYTES"]),
-        requests_per_minute=int(parsed["FISORA_GEMINI_REQUESTS_PER_MINUTE"]),
+    model = str(
+        env.get("FISORA_GEMINI_PDF_V2_MODEL", DEFAULT_GEMINI_PDF_V2_MODEL)
+        or DEFAULT_GEMINI_PDF_V2_MODEL
+    )
+    generate_content_url = str(
+        env.get("FISORA_GEMINI_GENERATE_CONTENT_URL", "") or ""
+    )
+
+    def provider_factory(config: GeminiProjectSlotConfig) -> GeminiAccountingProvider:
+        return GeminiAccountingProvider(
+            api_key=config.api_key,
+            model=model,
+            generate_content_url=generate_content_url,
+            timeout_seconds=float(parsed["FISORA_GEMINI_TIMEOUT_SECONDS"]),
+            max_output_tokens=int(parsed["FISORA_GEMINI_MAX_OUTPUT_TOKENS"]),
+            max_inline_pdf_bytes=int(parsed["FISORA_GEMINI_MAX_INLINE_PDF_BYTES"]),
+            requests_per_minute=config.requests_per_minute,
+            credential_slot=config.slot_name,
+        )
+
+    provider = GeminiProjectPoolProvider(
+        slot_configs,
+        provider_factory=provider_factory,
+        cooldown_seconds=float(parsed["FISORA_GEMINI_PROJECT_COOLDOWN_SECONDS"]),
     )
     return GeminiPdfRuntime(
         provider=provider,

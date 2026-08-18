@@ -141,6 +141,16 @@ class DbMigrationTests(unittest.TestCase):
         self.assertIn("idx_processing_jobs_due_retry", sql)
         self.assertIn("uq_ai_outage_episode_open_task", sql)
 
+    def test_gemini_credential_slot_migration_is_backward_compatible(self) -> None:
+        migration = next(
+            item
+            for item in discover_migrations(ROOT / "backend" / "db" / "migrations")
+            if item.version == "012"
+        )
+        sql = migration.sql.lower()
+        self.assertIn("alter table document_ai_artifacts", sql)
+        self.assertIn("add column if not exists credential_slot text not null default ''", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -103,7 +103,13 @@ class DocumentAiArtifactPostgresTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def _write(self, kind: ArtifactKind, *, parent_artifact_id: str | None = None) -> ArtifactWrite:
+    def _write(
+        self,
+        kind: ArtifactKind,
+        *,
+        parent_artifact_id: str | None = None,
+        credential_slot: str = "",
+    ) -> ArtifactWrite:
         started_at = datetime(2026, 8, 11, 10, 0, tzinfo=UTC)
         return ArtifactWrite(
             tenant_id=self.tenant_id,
@@ -116,6 +122,7 @@ class DocumentAiArtifactPostgresTests(unittest.TestCase):
             status="successful",
             parent_artifact_id=parent_artifact_id,
             provider="gemini" if kind is ArtifactKind.PROVIDER_RECEIPT else None,
+            credential_slot=credential_slot,
             http_status=200 if kind is ArtifactKind.PROVIDER_RECEIPT else None,
             started_at=started_at if kind is ArtifactKind.PROVIDER_RECEIPT else None,
             finished_at=(started_at + timedelta(milliseconds=50))
@@ -123,6 +130,58 @@ class DocumentAiArtifactPostgresTests(unittest.TestCase):
             else None,
             pipeline_version="gemini-two-stage-v1",
         )
+
+    def test_postgres_round_trips_slot_and_reads_legacy_default(self) -> None:
+        import psycopg
+
+        receipt = self.repository.append(
+            self._write(
+                ArtifactKind.PROVIDER_RECEIPT,
+                credential_slot="GEMINI_API_KEY_SLOT_6",
+            ),
+            request_body=b'{"request":"slot"}',
+            response_body=b'{"response":"slot"}',
+        )
+        reloaded = self.repository.get(
+            tenant_id=self.tenant_id,
+            taxpayer_id=self.taxpayer_id,
+            artifact_id=receipt.artifact_id,
+        )
+        self.assertEqual(reloaded.credential_slot, "GEMINI_API_KEY_SLOT_6")
+
+        legacy_id = str(uuid4())
+        request_hash = hashlib.sha256(b"legacy-request").hexdigest()
+        response_hash = hashlib.sha256(b"legacy-response").hexdigest()
+        with psycopg.connect(POSTGRES_DSN) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    insert into document_ai_artifacts
+                        (id, tenant_id, taxpayer_id, document_id, source_file_id,
+                         artifact_kind, revision_no, stage, status, source_file_sha256,
+                         request_storage_path, request_sha256,
+                         response_storage_path, response_sha256)
+                    values (%s, %s, %s, %s, %s, 'provider_receipt', 2,
+                            'document_extraction', 'failed', %s,
+                            '/tmp/legacy-request', %s, '/tmp/legacy-response', %s)
+                    """,
+                    (
+                        legacy_id,
+                        self.tenant_id,
+                        self.taxpayer_id,
+                        self.document_id,
+                        self.source_file_id,
+                        self.source_sha256,
+                        request_hash,
+                        response_hash,
+                    ),
+                )
+        legacy = self.repository.get(
+            tenant_id=self.tenant_id,
+            taxpayer_id=self.taxpayer_id,
+            artifact_id=legacy_id,
+        )
+        self.assertEqual(legacy.credential_slot, "")
 
     def test_postgres_enforces_tenant_lineage_and_append_only_revisions(self) -> None:
         import psycopg

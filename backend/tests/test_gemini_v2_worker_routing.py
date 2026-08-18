@@ -324,6 +324,75 @@ class GeminiV2WorkerRoutingTests(unittest.TestCase):
         self.assertIn("FISORA_GEMINI_V2_CANDIDATE_EXPERIMENT_PERCENT=0", example)
         self.assertIn("FISORA_GEMINI_V2_MAX_ACCOUNTING_REQUEST_BYTES=3000000", example)
 
+    def test_production_configuration_passes_all_gemini_project_slots_to_backend_and_worker(self) -> None:
+        compose = (ROOT / "docker-compose.production.yml").read_text(encoding="utf-8")
+        example = (ROOT / "deploy" / "production.env.example").read_text(encoding="utf-8")
+
+        def service_environment(service: str) -> str:
+            lines = compose.splitlines()
+            start = lines.index(f"  {service}:")
+            environment_start = next(
+                index for index in range(start, len(lines))
+                if lines[index] == "    environment:"
+            )
+            end = next(
+                (
+                    index
+                    for index in range(environment_start + 1, len(lines))
+                    if lines[index].startswith("  ")
+                    and not lines[index].startswith("    ")
+                    and lines[index].endswith(":")
+                ),
+                len(lines),
+            )
+            return "\n".join(lines[environment_start:end])
+
+        backend_environment = service_environment("backend")
+        worker_environment = service_environment("worker")
+
+        for index in range(2, 9):
+            entry = f"GEMINI_API_KEY_{index}: ${{GEMINI_API_KEY_{index}:-}}"
+            self.assertIn(entry, backend_environment)
+            self.assertIn(entry, worker_environment)
+            self.assertIn(f"GEMINI_API_KEY_{index}=", example)
+        for index in range(1, 9):
+            entry = f"FISORA_GEMINI_REQUESTS_PER_MINUTE_{index}: ${{FISORA_GEMINI_REQUESTS_PER_MINUTE_{index}:-}}"
+            self.assertIn(entry, backend_environment)
+            self.assertIn(entry, worker_environment)
+            self.assertIn(f"FISORA_GEMINI_REQUESTS_PER_MINUTE_{index}=", example)
+        cooldown = "FISORA_GEMINI_PROJECT_COOLDOWN_SECONDS: ${FISORA_GEMINI_PROJECT_COOLDOWN_SECONDS:-60}"
+        self.assertIn(cooldown, backend_environment)
+        self.assertIn(cooldown, worker_environment)
+        self.assertIn("FISORA_GEMINI_PROJECT_COOLDOWN_SECONDS=60", example)
+
+    def test_worker_runtime_reuses_pool_when_primary_is_blank_and_secondary_is_present(self) -> None:
+        import app.worker as worker
+
+        previous_runtime = worker._GEMINI_RUNTIME
+        try:
+            worker._GEMINI_RUNTIME = None
+            with patch.dict(
+                os.environ,
+                {
+                    "FISORA_GEMINI_PDF_V2_ENABLED": "true",
+                    "GEMINI_API_KEY": "",
+                    "GEMINI_API_KEY_2": "secondary-worker-secret",
+                },
+                clear=False,
+            ):
+                first = worker._gemini_runtime_for_worker()
+                os.environ["GEMINI_API_KEY_2"] = "different-secret-after-start"
+                second = worker._gemini_runtime_for_worker()
+
+            self.assertIsNotNone(first)
+            self.assertIs(first, second)
+            assert first is not None
+            assert first.provider is not None
+            self.assertTrue(first.available)
+            self.assertEqual(first.provider.configured_credential_slots, ("GEMINI_API_KEY_SLOT_2",))
+        finally:
+            worker._GEMINI_RUNTIME = previous_runtime
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -393,3 +393,17 @@ not enable this external-test-only cap.
 - Silent parser/provider fallback.
 - Automatic accountant approval, automatic counterparty creation, commit, push,
   deploy, or production mutation.
+
+## 2026-08-18 superseding amendment: external call metering
+
+The former fixed nineteen-accounting-call control and the related twenty-call
+scheduling reservation are superseded. They are not part of the active V2
+runtime or request contract, and no replacement fixed per-document provider
+call ceiling is introduced.
+
+External verification meters actual provider calls separately for each
+configured Gemini project and stops only at operator-supplied per-project test
+budgets. Those operator budgets are accounting safeguards for a test run; they
+are not claims about Google quota facts. The finite candidate rounds, one
+targeted treatment clarification, and at most one clarification-triggered
+candidate expansion remain the structural bounds on V2 work.

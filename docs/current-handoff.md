@@ -1,5 +1,39 @@
 # Current Handoff
 
+### 2026-08-18 Gemini V2 multi-project accountant-pilot readiness: local verification
+
+Bu bölüm yalnızca mevcut yerel çalışma ağacında yapılan doğrulamayı kaydeder;
+önceki canlı yayın kayıtlarını geriye dönük olarak değiştirmez.
+
+- Gemini V2 runtime sözleşmesi 1–8 ayrı proje slotunu destekliyor; tracked
+  örnek yapılandırmada pilot modu adaptive-only ve
+  `FISORA_GEMINI_V2_CANDIDATE_EXPERIMENT_PERCENT=0`.
+- `FISORA_GEMINI_V2_MAX_ACCOUNTING_PROVIDER_CALLS` ve
+  `max_accounting_provider_calls` için backend/deploy/Compose araması temiz
+  döndü; sabit muhasebe-provider çağrı tavanı aktif değil.
+- `012_gemini_credential_slot.sql` migrasyonu hazırlanmış durumda; canlı
+  veritabanına uygulanmadı.
+- Tenant-scoped trial-output reset/requeue aracı ve force-requeue davranışı
+  hazırlandı; mevcut yüklenmiş belgeler üzerinde dry-run/apply çalıştırılmadı,
+  canlı cleanup veya requeue yapılmadı.
+- PostgreSQL koşullu doğrulama için yalnızca izole, geçici local
+  `postgres:16-alpine` konteyneri kullanıldı; mevcut/live veritabanına
+  dokunulmadı. Geçici konteyner doğrulama sonrasında kaldırıldı.
+- Fresh targeted command: 247 test, `OK` (izole PostgreSQL DSN ile 247/247,
+  skip yok).
+- Fresh full backend command: 1103 test, `OK` (`skipped=34`).
+- Fresh frontend command: 170 test geçti, 0 failed.
+- Fresh frontend production build: Next.js build exit `0`; 12 static route
+  üretildi.
+- `git diff --check`: exit `0`; yalnızca Windows CRLF dönüşüm uyarıları var.
+- Removed-call-cap `rg` kontrolü: exit `1`, eşleşme yok.
+- `git status --short` yalnızca bu planın beklenen Gemini V2 dosya değişiklikleri
+  ile korunmuş, ilgisiz dirty/untracked yolları gösteriyor; commit, push,
+  deploy veya cleanup yapılmadı.
+- Gerçek Gemini çağrısı, gerçek corpus işleme, live secret doğrulaması,
+  migration 012 uygulaması, canlı reset/requeue, release ve accountant scoring
+  yapılmadı; bunlar manuel kabul kapıları olarak kaldı.
+
 ### 2026-08-17 Gemini PDF V2 konsolidasyonu, PostgreSQL migrasyon 011 ve kontrollü canary aktivasyonu (canlı)
 
 - `main` runtime release commit'i `e9c376c` canlıya alındı.

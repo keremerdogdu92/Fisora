@@ -86,7 +86,6 @@ from app.domain.gemini_pdf_runtime import (
     candidate_discovery_assignment,
     candidate_experiment_percent_from_env,
     gemini_pdf_v2_enabled,
-    max_accounting_provider_calls_from_env,
     max_accounting_request_bytes_from_env,
 )
 from app.domain.pdf_invoices import ParsedInvoice, parse_pdf_invoice, parsed_invoice_from_canonical
@@ -1410,9 +1409,6 @@ def _run_gemini_pdf_v2_for_worker(
             if max_accounting_request_bytes is None
             else int(max_accounting_request_bytes)
         )
-        effective_max_provider_calls = max_accounting_provider_calls_from_env(
-            environ
-        )
         assignment = candidate_discovery_assignment(
             taxpayer_id=scope["taxpayer_id"],
             document_id=scope["document_id"],
@@ -1444,7 +1440,6 @@ def _run_gemini_pdf_v2_for_worker(
             candidate_experiment_bucket=assignment.bucket,
             candidate_experiment_percent=assignment.experiment_percent,
             max_accounting_request_bytes=effective_max_request_bytes,
-            max_accounting_provider_calls=effective_max_provider_calls,
         ),
         extraction_provider=extraction,
         accounting_provider=accounting,
@@ -1519,6 +1514,7 @@ def _append_attempt_receipt(
             kind=ArtifactKind.PROVIDER_RECEIPT,
             stage=stage,
             status=str(getattr(attempt, "status", "failed") or "failed"),
+            credential_slot=str(getattr(attempt, "credential_slot", "") or ""),
             provider=str(getattr(attempt, "provider", "gemini") or "gemini"),
             model_alias=str(getattr(attempt, "model_alias", "") or ""),
             resolved_model=str(getattr(attempt, "resolved_model", "") or ""),

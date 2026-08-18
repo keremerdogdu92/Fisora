@@ -552,6 +552,7 @@ class DocumentService:
                 document_type=document_type,
                 parser_kind=parser_kind_for_document_type(document_type),
                 intake_category=str(document.get("intake_category") or ""),
+                force_requeue=True,
             )
             queued_jobs.append(job)
             self.store.record_document_pipeline_event(

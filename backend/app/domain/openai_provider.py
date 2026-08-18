@@ -15,6 +15,7 @@ import httpx
 from app.domain.ai_capacity import normalize_cerebras_rate_limit_headers, normalize_groq_rate_limit_headers, utc_now
 from app.domain.ai_classification import AiClassificationRequest
 from app.domain.canonical_invoices import CanonicalExtractionRequest
+from app.domain.gemini_credential_slots import normalize_gemini_credential_slot
 from app.domain.review_rule_interpretation import REVIEW_RULE_INTERPRETATION_SCHEMA
 from app.domain.statement_ai_suggestions import StatementAiSuggestionRequest
 
@@ -60,6 +61,7 @@ class GeminiAttemptEnvelope:
     token_usage: dict[str, int]
     status: str
     error_metadata: dict[str, Any]
+    credential_slot: str = ""
 
 
 class GeminiStructuredResult(dict[str, Any]):
@@ -1097,6 +1099,7 @@ def _gemini_attempt(
     error_phase: str = "",
     secret_values: tuple[str, ...] = (),
     usage_diagnostics: tuple[str, ...] = (),
+    credential_slot: str = "",
 ) -> GeminiAttemptEnvelope:
     finished_at = datetime.now(UTC)
     elapsed_ms = max(0, int((perf_counter_ns() - started_clock) / 1_000_000))
@@ -1124,6 +1127,7 @@ def _gemini_attempt(
         token_usage=dict(token_usage),
         status=status,
         error_metadata=error_metadata,
+        credential_slot=credential_slot,
     )
 
 
@@ -1149,6 +1153,7 @@ class GeminiAccountingProvider:
         max_inline_pdf_bytes: int = 50_000_000,
         requests_per_minute: int = 0,
         request_governor: GeminiRequestGovernor | None = None,
+        credential_slot: str = "",
     ) -> None:
         if not api_key.strip():
             raise ValueError("GEMINI_API_KEY is required when FISORA_AI_PROVIDER=gemini")
@@ -1164,6 +1169,7 @@ class GeminiAccountingProvider:
         self.request_governor = request_governor or GeminiRequestGovernor(
             requests_per_minute
         )
+        self.credential_slot = normalize_gemini_credential_slot(credential_slot)
         self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
@@ -1312,6 +1318,7 @@ class GeminiAccountingProvider:
                 error=exc,
                 error_phase="transport",
                 secret_values=(self.api_key,),
+                credential_slot=self.credential_slot,
             )
             pending_error = GeminiProviderAttemptError(
                 str(attempt.error_metadata.get("message") or "Gemini transport failed"),
@@ -1338,6 +1345,7 @@ class GeminiAccountingProvider:
                 error=exc,
                 error_phase="response_capture",
                 secret_values=(self.api_key,),
+                credential_slot=self.credential_slot,
             )
             pending_error = GeminiProviderAttemptError(
                 str(attempt.error_metadata.get("message") or "Gemini response capture failed"),
@@ -1362,6 +1370,7 @@ class GeminiAccountingProvider:
                 error=exc,
                 error_phase="http",
                 secret_values=(self.api_key,),
+                credential_slot=self.credential_slot,
             )
             pending_error = GeminiProviderAttemptError(
                 str(attempt.error_metadata.get("message") or "Gemini HTTP request failed"),
@@ -1391,6 +1400,7 @@ class GeminiAccountingProvider:
                 error=exc,
                 error_phase="response_json",
                 secret_values=(self.api_key,),
+                credential_slot=self.credential_slot,
             )
             pending_error = GeminiProviderAttemptError(
                 str(attempt.error_metadata.get("message") or "Gemini response JSON failed"),
@@ -1425,6 +1435,7 @@ class GeminiAccountingProvider:
                 error_phase="structured_parse",
                 secret_values=(self.api_key,),
                 usage_diagnostics=usage_diagnostics,
+                credential_slot=self.credential_slot,
             )
             pending_error = GeminiProviderAttemptError(
                 str(attempt.error_metadata.get("message") or "Gemini structured parse failed"),
@@ -1443,6 +1454,7 @@ class GeminiAccountingProvider:
             token_usage=token_usage,
             status="successful",
             usage_diagnostics=usage_diagnostics,
+            credential_slot=self.credential_slot,
         )
         return GeminiStructuredResult(parsed, attempt=attempt)
 

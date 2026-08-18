@@ -31,6 +31,7 @@ from app.persistence.workflow_store import JsonWorkflowStore
 from app.persistence.postgres_workflow_store import PostgresWorkflowStore
 from app.workflows.document_processing import (
     DocumentParseError,
+    _append_attempt_receipt,
     process_next_job_once,
     run_gemini_two_stage_invoice_workflow,
 )
@@ -49,6 +50,7 @@ def _attempt(
     response: bytes,
     status: str = "successful",
     http_status: int | None = 200,
+    credential_slot: str = "",
 ) -> GeminiAttemptEnvelope:
     started = datetime(2026, 8, 11, 10, 0, tzinfo=UTC)
     return GeminiAttemptEnvelope(
@@ -64,6 +66,7 @@ def _attempt(
         token_usage={"prompt_tokens": 10, "candidate_tokens": 5, "total_tokens": 15},
         status=status,
         error_metadata={} if status == "successful" else {"phase": "transport"},
+        credential_slot=credential_slot,
     )
 
 
@@ -350,6 +353,35 @@ class GeminiTwoStageWorkflowTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_document_processing_receipt_builder_persists_attempt_credential_slot(self) -> None:
+        slot = "GEMINI_API_KEY_SLOT_1"
+        source_bytes = self.pdf.read_bytes()
+        source_hash = hashlib.sha256(source_bytes).hexdigest()
+        scope = {
+            "tenant_id": "tenant-1",
+            "taxpayer_id": "taxpayer-1",
+            "document_id": "document-1",
+            "source_file_id": "source-1",
+            "source_file_sha256": source_hash,
+            "pipeline_version": "gemini-two-stage-v1",
+        }
+        receipt = _append_attempt_receipt(
+            self.repository,
+            scope=scope,
+            stage="document_extraction",
+            attempt=_attempt(
+                request=b'{"request":"document-processing"}',
+                response=b'{"response":"document-processing"}',
+                credential_slot=slot,
+            ),
+        )
+        persisted = self.repository.get(
+            tenant_id="tenant-1",
+            taxpayer_id="taxpayer-1",
+            artifact_id=receipt.artifact_id,
+        )
+        self.assertEqual(persisted.credential_slot, slot)
 
     def _run(self, *, extraction, accounting, initial_candidate_limit: int = 3):
         return run_gemini_two_stage_invoice_workflow(

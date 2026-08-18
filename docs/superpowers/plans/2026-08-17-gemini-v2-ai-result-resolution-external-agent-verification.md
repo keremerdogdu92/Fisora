@@ -58,19 +58,22 @@ Gemini project without exposing credentials. Do not assume that every project
 has unused capacity. In particular, a project already near its RPM, TPM, or RPD
 limit is unavailable capacity, not a product-quality failure.
 
-Reserve `20 provider calls/document`: `1` extraction call plus a hard
-per-pipeline cap of `19` accounting-provider calls shared by ordinary candidate
-rounds and bounded treatment clarifications. The cap applies across all
-decision-capacity chunks; exhausting it leaves the remaining work partial and
-review-required. This is a conservative scheduler reservation, not measured
-usage; report actual usage only from immutable provider receipts. The
-historical `4 request/document` and `396 document` capacity claims do not apply
-to this amended implementation.
+Do not reserve a fixed number of provider calls per document. The former
+nineteen-accounting-call control and related twenty-call scheduling reservation
+are superseded and must not be enabled in the application or runner request
+contract. External verification meters actual provider calls separately for
+each configured Gemini project and stops at operator-supplied per-project test
+budgets. These budgets are test-run safeguards, not claims about Google quota
+facts. The finite candidate rounds, one targeted treatment clarification, and
+at most one clarification-triggered candidate expansion remain the structural
+bounds on V2 work.
 
-With the documented four `400`-request test budgets, the conservative capacity
-is `76`, below the `384`-document corpus. In that state stop before every real
-provider/corpus call and report `BLOCKED`. Do not lower the reservation,
-increase a configured budget, or run a subset without fresh user authority.
+Before the real corpus, preflight every configured project and record its
+operator-supplied usable test budget without exposing credentials. If the
+combined actual-budget capacity cannot cover the intended run, stop before
+provider/corpus calls and report `BLOCKED`, or run only the largest unbiased
+deterministic subset explicitly authorized for that run. Never lower a project
+budget or represent it as a Google quota fact.
 
 Use a per-project throttle based on the actual active limits. Never drive a
 project knowingly beyond its daily limit. If available capacity cannot cover

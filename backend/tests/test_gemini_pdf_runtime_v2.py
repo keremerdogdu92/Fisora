@@ -11,13 +11,14 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+import app.domain.gemini_pdf_runtime as gemini_pdf_runtime
 from app.domain.gemini_pdf_runtime import (
     build_gemini_pdf_runtime_from_env,
     candidate_discovery_assignment,
     gemini_pdf_v2_enabled,
-    max_accounting_provider_calls_from_env,
 )
-from app.domain.openai_provider import GeminiAccountingProvider, GeminiRequestGovernor
+from app.domain.gemini_project_pool import GeminiProjectPoolProvider
+from app.domain.openai_provider import GeminiRequestGovernor
 
 
 class _ObservedEnvironment(Mapping[str, str]):
@@ -41,18 +42,27 @@ class _ObservedEnvironment(Mapping[str, str]):
 
 
 class GeminiPdfRuntimeV2Tests(unittest.TestCase):
-    def test_accounting_provider_call_budget_is_optional_and_positive(self) -> None:
-        self.assertIsNone(max_accounting_provider_calls_from_env({}))
-        self.assertEqual(
-            max_accounting_provider_calls_from_env(
-                {"FISORA_GEMINI_V2_MAX_ACCOUNTING_PROVIDER_CALLS": "19"}
-            ),
-            19,
+    def test_removed_accounting_provider_call_cap_parser_is_not_exposed(self) -> None:
+        removed_parser = "_".join(("max", "accounting", "provider", "calls_from_env"))
+        self.assertFalse(
+            hasattr(gemini_pdf_runtime, removed_parser)
         )
-        with self.assertRaises(ValueError):
-            max_accounting_provider_calls_from_env(
-                {"FISORA_GEMINI_V2_MAX_ACCOUNTING_PROVIDER_CALLS": "0"}
-            )
+
+    def test_runtime_construction_does_not_read_removed_accounting_call_cap(self) -> None:
+        removed_env = "_".join(
+            ("FISORA", "GEMINI", "V2", "MAX", "ACCOUNTING", "PROVIDER", "CALLS")
+        )
+        environment = _ObservedEnvironment(
+            {
+                "GEMINI_API_KEY": "test-key",
+                removed_env: "19",
+            }
+        )
+
+        runtime = build_gemini_pdf_runtime_from_env(environment)
+
+        self.assertTrue(runtime.available)
+        self.assertNotIn(removed_env, environment.read_keys)
 
     def test_candidate_experiment_assignment_is_stable_taxpayer_scoped_and_defaults_control(self) -> None:
         control = candidate_discovery_assignment(
@@ -126,6 +136,77 @@ class GeminiPdfRuntimeV2Tests(unittest.TestCase):
         self.assertTrue(runtime.available)
         self.assertEqual("gemini-3.5-flash-lite", runtime.provider.model)
 
+    def test_runtime_accepts_non_primary_slot_and_exposes_only_opaque_pool_state(self) -> None:
+        runtime = build_gemini_pdf_runtime_from_env(
+            {
+                "GEMINI_API_KEY": "   ",
+                "GEMINI_API_KEY_2": "second-secret",
+                "GEMINI_API_KEY_4": "fourth-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE": "15",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE_2": "30",
+            }
+        )
+
+        self.assertTrue(runtime.available)
+        assert runtime.provider is not None
+        self.assertEqual(runtime.provider.configured_project_count, 2)
+        self.assertEqual(
+            runtime.provider.configured_credential_slots,
+            ("GEMINI_API_KEY_SLOT_2", "GEMINI_API_KEY_SLOT_4"),
+        )
+        self.assertIsNot(
+            runtime.provider.providers[0].request_governor,
+            runtime.provider.providers[1].request_governor,
+        )
+        rendered = repr(runtime)
+        self.assertNotIn("second-secret", rendered)
+        self.assertNotIn("fourth-secret", rendered)
+
+    def test_runtime_keeps_valid_slot_when_another_slot_override_is_invalid(self) -> None:
+        runtime = build_gemini_pdf_runtime_from_env(
+            {
+                "GEMINI_API_KEY": "primary-secret",
+                "GEMINI_API_KEY_2": "secondary-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE": "15",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE_2": "invalid-rpm-secret",
+            }
+        )
+
+        self.assertTrue(runtime.available)
+        assert runtime.provider is not None
+        self.assertEqual(runtime.provider.configured_credential_slots, ("GEMINI_API_KEY_SLOT_1",))
+
+    def test_runtime_uses_valid_override_when_shared_rpm_is_invalid(self) -> None:
+        runtime = build_gemini_pdf_runtime_from_env(
+            {
+                "GEMINI_API_KEY": "primary-secret",
+                "GEMINI_API_KEY_2": "secondary-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE": "invalid-shared-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE_2": "30",
+            }
+        )
+
+        self.assertTrue(runtime.available)
+        assert runtime.provider is not None
+        self.assertEqual(runtime.provider.configured_credential_slots, ("GEMINI_API_KEY_SLOT_2",))
+
+    def test_runtime_reports_field_specific_reason_when_all_project_slots_are_invalid(self) -> None:
+        runtime = build_gemini_pdf_runtime_from_env(
+            {
+                "GEMINI_API_KEY": "primary-secret",
+                "GEMINI_API_KEY_2": "secondary-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE": "invalid-shared-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE_1": "invalid-primary-secret",
+                "FISORA_GEMINI_REQUESTS_PER_MINUTE_2": "invalid-secondary-secret",
+            }
+        )
+
+        self.assertFalse(runtime.available)
+        self.assertEqual(
+            runtime.unavailable_reason,
+            "gemini_runtime_config_invalid:FISORA_GEMINI_REQUESTS_PER_MINUTE_1",
+        )
+
     def test_dedicated_runtime_ignores_general_provider_chain(self) -> None:
         env = _ObservedEnvironment(
             {
@@ -148,12 +229,14 @@ class GeminiPdfRuntimeV2Tests(unittest.TestCase):
         assert runtime is not None
         self.assertTrue(runtime.available)
         self.assertFalse(runtime.retryable)
-        self.assertIsInstance(runtime.provider, GeminiAccountingProvider)
-        self.assertEqual(runtime.provider.model, "gemini-v2-test-model")
-        self.assertEqual(runtime.provider.generate_content_url, "https://gemini.test/generate")
-        self.assertEqual(runtime.provider.timeout_seconds, 17.5)
-        self.assertEqual(runtime.provider.max_output_tokens, 4096)
-        self.assertEqual(runtime.provider.max_inline_pdf_bytes, 123456)
+        self.assertIsInstance(runtime.provider, GeminiProjectPoolProvider)
+        assert runtime.provider is not None
+        provider = runtime.provider.providers[0]
+        self.assertEqual(provider.model, "gemini-v2-test-model")
+        self.assertEqual(provider.generate_content_url, "https://gemini.test/generate")
+        self.assertEqual(provider.timeout_seconds, 17.5)
+        self.assertEqual(provider.max_output_tokens, 4096)
+        self.assertEqual(provider.max_inline_pdf_bytes, 123456)
         self.assertEqual(runtime.max_parallel_accounting_chunks, 4)
         self.assertNotIn("FISORA_AI_PROVIDER_CHAIN", env.read_keys)
         self.assertNotIn("FISORA_GEMINI_MODEL", env.read_keys)
@@ -187,7 +270,19 @@ class GeminiPdfRuntimeV2Tests(unittest.TestCase):
         self.assertFalse(runtime.retryable)
         self.assertEqual(runtime.unavailable_reason, "gemini_api_key_missing")
         self.assertIsNone(runtime.provider)
-        self.assertEqual(env.read_keys, ["GEMINI_API_KEY"])
+        self.assertEqual(
+            env.read_keys,
+            [
+                "GEMINI_API_KEY",
+                "GEMINI_API_KEY_2",
+                "GEMINI_API_KEY_3",
+                "GEMINI_API_KEY_4",
+                "GEMINI_API_KEY_5",
+                "GEMINI_API_KEY_6",
+                "GEMINI_API_KEY_7",
+                "GEMINI_API_KEY_8",
+            ],
+        )
         self.assertNotIn("must-not-be-read", repr(runtime))
 
     def test_malformed_numeric_config_returns_field_specific_secret_safe_state(self) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import hashlib
 import inspect
@@ -22,6 +22,7 @@ from app.workflows.gemini_invoice_pipeline import (
     GeminiInvoiceAccountingIdentity,
     GeminiInvoiceExtractionIdentity,
     GeminiInvoicePipelineRequest,
+    _append_receipt,
     run_gemini_invoice_pipeline_v2,
 )
 
@@ -40,6 +41,7 @@ class _Attempt:
     elapsed_ms: int = 1
     token_usage: dict[str, int] | None = None
     error_metadata: dict[str, object] | None = None
+    credential_slot: str = ""
 
 
 class _Result(dict):
@@ -484,7 +486,6 @@ class GeminiInvoicePipelineV2Tests(unittest.TestCase):
         max_parallel_accounting_chunks=1,
         candidate_discovery_mode="adaptive",
         max_accounting_request_bytes=3_000_000,
-        max_accounting_provider_calls=None,
     ):
         actual_source_bytes = source_bytes or self.source_bytes
         return GeminiInvoicePipelineRequest(
@@ -502,7 +503,6 @@ class GeminiInvoicePipelineV2Tests(unittest.TestCase):
             max_parallel_accounting_chunks=max_parallel_accounting_chunks,
             candidate_discovery_mode=candidate_discovery_mode,
             max_accounting_request_bytes=max_accounting_request_bytes,
-            max_accounting_provider_calls=max_accounting_provider_calls,
             prior_valid_result=prior_valid_result,
         )
 
@@ -553,6 +553,36 @@ class GeminiInvoicePipelineV2Tests(unittest.TestCase):
         self.assertTrue(accounting_receipts)
         self.assertTrue(all(item.metadata["accounting_identity"] == expected for item in accounting_receipts))
         self.assertEqual(proposal.metadata["accounting_identity"], expected)
+
+    def test_v2_receipt_builder_persists_attempt_credential_slot(self) -> None:
+        slot = "GEMINI_API_KEY_SLOT_8"
+        receipt = _append_receipt(
+            self.repository,
+            self.request(),
+            _Attempt(
+                request_body=b'{"request":"v2"}',
+                response_body=b'{"response":"v2"}',
+                status="successful",
+                credential_slot=slot,
+            ),
+            stage="document_extraction",
+            extraction_identity=GeminiInvoiceExtractionIdentity(
+                source_file_id="source-1",
+                source_file_sha256=self.source_sha,
+                provider="gemini",
+                model_alias="gemini-test",
+                resolved_model="gemini-test-resolved",
+                prompt_version="invoice-facts-v2",
+                schema_version="canonical-invoice-v2",
+                pipeline_version="gemini-two-stage-v2",
+            ),
+        )
+        persisted = self.repository.get(
+            tenant_id="tenant-1",
+            taxpayer_id="taxpayer-1",
+            artifact_id=receipt.artifact_id,
+        )
+        self.assertEqual(persisted.credential_slot, slot)
 
     def test_document_direction_is_bound_to_exact_tenant_party_not_provider_label(self) -> None:
         for expected_direction in ("purchase", "sales"):
@@ -993,6 +1023,59 @@ class GeminiInvoicePipelineV2Tests(unittest.TestCase):
         )
         self.assertNotIn("external-account", json.dumps(persisted["validation_issues"]))
 
+    def test_missing_and_unknown_decision_refs_remain_ref_scoped_without_repair_calls(self) -> None:
+        missing_ref: list[str] = []
+
+        def missing_and_unknown(request):
+            payload = _complete_proposal(request)
+            missing_ref.append(
+                next(
+                    ref
+                    for ref in request.required_decision_refs
+                    if ref.startswith("tax:")
+                )
+            )
+            payload["decisions"] = [
+                decision
+                for decision in payload["decisions"]
+                if decision["decision_ref"] != missing_ref[0]
+            ]
+            payload["decisions"].append(
+                {
+                    "decision_ref": "tax:unknown",
+                    "action": "select_existing",
+                    "selected_candidate_id": "360.01",
+                    "selected_treatment": "expense_or_cost",
+                    "reason": "unknown reference",
+                }
+            )
+            return payload
+
+        def unexpected_repair_call(request):
+            self.fail(
+                "missing or unknown decision references must not trigger a "
+                "treatment clarification repair call"
+            )
+
+        result, accounting = self.run_pipeline(
+            outcomes=[missing_and_unknown, unexpected_repair_call]
+        )
+
+        self.assertEqual(len(accounting.requests), 1)
+        self.assertEqual(
+            result.proposal.decision_for(missing_ref[0]).action,
+            "unresolved",
+        )
+        self.assertNotIn(
+            missing_ref[0], result.proposal.treatment_clarification_refs
+        )
+        issue_pairs = {
+            (issue.decision_ref, issue.code)
+            for issue in result.proposal.validation_issues
+        }
+        self.assertIn((missing_ref[0], "missing_ai_decision"), issue_pairs)
+        self.assertIn(("tax:unknown", "unexpected_ai_decision_ref"), issue_pairs)
+
     def test_later_normalized_line_decision_is_structurally_valid_not_last_valid_fallback(self) -> None:
         def later_normalized(request):
             payload = _complete_proposal(request)
@@ -1172,18 +1255,12 @@ class GeminiInvoicePipelineV2Tests(unittest.TestCase):
             [tuple(item.candidate_id for item in request.sent_candidates) for request in provider.requests],
         )
 
-    def test_accounting_provider_call_budget_bounds_multi_chunk_document(self) -> None:
-        result, provider = self.run_pipeline(
-            extraction_payload=_many_line_payload(17),
-            outcomes=[_complete_proposal, _complete_proposal],
-            max_accounting_provider_calls=2,
-            max_parallel_accounting_chunks=3,
-        )
-
-        self.assertEqual(len(provider.requests), 2)
-        self.assertEqual(len(result.candidate_rounds), 2)
-        self.assertIn("accounting_provider_call_budget_exhausted", result.warnings)
-        self.assertEqual(result.status, "partial")
+    def test_pipeline_request_rejects_removed_accounting_provider_call_cap(self) -> None:
+        with self.assertRaises(TypeError):
+            replace(
+                self.request(),
+                **{"_".join(("max", "accounting", "provider", "calls")): 19},
+            )
 
     def test_failed_first_call_does_not_reuse_prior_when_accounting_identity_changes(self) -> None:
         prior, _ = self.run_pipeline(client_context_revision="context-r1")

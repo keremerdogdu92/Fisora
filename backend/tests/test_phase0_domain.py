@@ -1365,6 +1365,86 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(payload["ai_gemini_key_present"])
         self.assertNotIn("ai_gemini_key_missing", payload["warnings"])
 
+    def test_production_readiness_reports_opaque_unique_gemini_v2_project_slots(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            (backup_path / "postgres-20260606T100000Z.sql").write_text("backup", encoding="utf-8")
+
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "GEMINI_API_KEY": "primary-secret",
+                    "GEMINI_API_KEY_2": "secondary-secret",
+                    "GEMINI_API_KEY_3": "primary-secret",
+                },
+            )
+
+        self.assertEqual(payload["gemini_project_count"], 2)
+        self.assertEqual(
+            payload["gemini_credential_slots"],
+            ["GEMINI_API_KEY_SLOT_1", "GEMINI_API_KEY_SLOT_2"],
+        )
+        rendered = repr(payload)
+        self.assertNotIn("primary-secret", rendered)
+        self.assertNotIn("secondary-secret", rendered)
+        self.assertNotIn("AIza", rendered)
+
+    def test_production_readiness_reports_secondary_v2_slot_when_primary_blank(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={"GEMINI_API_KEY": "", "GEMINI_API_KEY_2": "secondary-secret"},
+            )
+
+        self.assertEqual(payload["gemini_project_count"], 1)
+        self.assertEqual(payload["gemini_credential_slots"], ["GEMINI_API_KEY_SLOT_2"])
+        self.assertNotIn("secondary-secret", repr(payload))
+
+    def test_production_readiness_excludes_invalid_rpm_slots_and_reports_zero_when_all_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            backup_path.mkdir()
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "GEMINI_API_KEY": "primary-secret",
+                    "GEMINI_API_KEY_2": "secondary-secret",
+                    "FISORA_GEMINI_REQUESTS_PER_MINUTE": "invalid-shared-secret",
+                    "FISORA_GEMINI_REQUESTS_PER_MINUTE_1": "invalid-primary-secret",
+                    "FISORA_GEMINI_REQUESTS_PER_MINUTE_2": "30",
+                },
+            )
+            all_invalid = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "GEMINI_API_KEY": "primary-secret",
+                    "GEMINI_API_KEY_2": "secondary-secret",
+                    "FISORA_GEMINI_REQUESTS_PER_MINUTE": "invalid-shared-secret",
+                    "FISORA_GEMINI_REQUESTS_PER_MINUTE_1": "invalid-primary-secret",
+                    "FISORA_GEMINI_REQUESTS_PER_MINUTE_2": "invalid-secondary-secret",
+                },
+            )
+
+        self.assertEqual(payload["gemini_project_count"], 1)
+        self.assertEqual(payload["gemini_credential_slots"], ["GEMINI_API_KEY_SLOT_2"])
+        self.assertEqual(all_invalid["gemini_project_count"], 0)
+        self.assertEqual(all_invalid["gemini_credential_slots"], [])
+        self.assertNotIn("invalid-shared-secret", repr(all_invalid))
+
     def test_production_readiness_requires_cloudflare_account_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

@@ -71,6 +71,7 @@ class DocumentAiArtifactTests(unittest.TestCase):
         self,
         *,
         status: str = "successful",
+        credential_slot: str = "",
         retry_of_artifact_id: str | None = None,
         request_body: bytes = b'{"contents":[{"parts":[{"inline_data":"exact"}]}]}',
         response_body: bytes = b'{"candidates":[{"content":"exact"}]}',
@@ -90,6 +91,7 @@ class DocumentAiArtifactTests(unittest.TestCase):
                 stage=stage,
                 status=status,
                 provider="gemini",
+                credential_slot=credential_slot,
                 model_alias="gemini-flash-lite",
                 resolved_model="gemini-3.5-flash-lite-2026-07",
                 prompt_version="invoice-facts-v1",
@@ -111,6 +113,50 @@ class DocumentAiArtifactTests(unittest.TestCase):
             request_body=request_body,
             response_body=response_body,
         )
+
+    def test_provider_receipt_round_trips_opaque_slot_and_legacy_default(self) -> None:
+        receipt = self._receipt(credential_slot="GEMINI_API_KEY_SLOT_4")
+        reloaded = LocalDocumentAiArtifactRepository(
+            manifest_path=self.root / "document-ai-artifacts.json",
+            storage=self.storage,
+        ).get(
+            tenant_id="tenant-1",
+            taxpayer_id="client-1",
+            artifact_id=receipt.artifact_id,
+        )
+        self.assertEqual(reloaded.credential_slot, "GEMINI_API_KEY_SLOT_4")
+
+        import json
+
+        manifest = json.loads((self.root / "document-ai-artifacts.json").read_text(encoding="utf-8"))
+        manifest[0].pop("credential_slot", None)
+        (self.root / "document-ai-artifacts.json").write_text(
+            json.dumps(manifest), encoding="utf-8"
+        )
+        legacy = LocalDocumentAiArtifactRepository(
+            manifest_path=self.root / "document-ai-artifacts.json",
+            storage=self.storage,
+        ).get(
+            tenant_id="tenant-1",
+            taxpayer_id="client-1",
+            artifact_id=receipt.artifact_id,
+        )
+        self.assertEqual(legacy.credential_slot, "")
+        self.assertNotIn("AiZA-legacy-secret", json.dumps(manifest))
+
+    def test_artifact_repository_rejects_non_opaque_credential_slots(self) -> None:
+        for invalid_slot in (
+            "AIzaSyRAW-API-KEY",
+            "a" * 64,
+            "GEMINI_API_KEY_SLOT_0",
+            "GEMINI_API_KEY_SLOT_9",
+            " GEMINI_API_KEY_SLOT_1",
+            "gemini_api_key_slot_1",
+        ):
+            with self.subTest(invalid_slot=invalid_slot), self.assertRaisesRegex(
+                ValueError, "credential slot"
+            ):
+                self._receipt(credential_slot=invalid_slot)
 
     def test_provider_receipt_round_trips_exact_bytes_and_hashes(self) -> None:
         request_body = b'{"unicode":"fatura-\xc3\xb6zel","ordered":[2,1]}'

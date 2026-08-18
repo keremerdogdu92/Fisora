@@ -97,6 +97,77 @@ def _posted_user_payload(client: RecordingClient) -> dict[str, object]:
 
 
 class GeminiDirectPdfProviderTests(unittest.TestCase):
+    def test_provider_rejects_invalid_credential_slot_before_http(self) -> None:
+        for invalid_slot in (
+            "AIzaSyRAW-API-KEY",
+            "a" * 64,
+            "GEMINI_API_KEY_SLOT_0",
+            "GEMINI_API_KEY_SLOT_9",
+            " GEMINI_API_KEY_SLOT_1",
+            "gemini_api_key_slot_1",
+        ):
+            with self.subTest(invalid_slot=invalid_slot):
+                client = RecordingClient(FakeResponse(_successful_body()))
+                with self.assertRaisesRegex(ValueError, "credential slot"):
+                    GeminiAccountingProvider(
+                        api_key="AIza-test-key",
+                        credential_slot=invalid_slot,
+                        http_client=client,
+                    )
+                self.assertEqual(client.calls, [])
+
+    def test_success_and_failure_attempts_keep_opaque_slot_without_secret(self) -> None:
+        slot = "GEMINI_API_KEY_SLOT_7"
+        request = AiClassificationRequest(
+            raw_line="Iletisim hizmeti",
+            supplier_hint="Operator",
+            allowed_categories=("genel_gider",),
+            max_input_chars=200,
+        )
+
+        success = GeminiAccountingProvider(
+            api_key="AIza-success-secret",
+            credential_slot=slot,
+            http_client=RecordingClient(FakeResponse(_successful_body())),
+        ).classify_product(request)
+        self.assertEqual(success.attempt.credential_slot, slot)
+        self.assertNotIn("AIza-success-secret", repr(success.attempt))
+
+        class SecretRaisingClient:
+            def post(self, url: str, **kwargs: object) -> FakeResponse:
+                raise RuntimeError("transport failure with AiZA-transport-secret")
+
+        with self.assertRaises(Exception) as transport_context:
+            GeminiAccountingProvider(
+                api_key="AiZA-transport-secret",
+                credential_slot=slot,
+                http_client=SecretRaisingClient(),
+            ).classify_product(request)
+        transport_attempt = transport_context.exception.attempt
+        self.assertEqual(transport_attempt.credential_slot, slot)
+        self.assertNotIn("AiZA-transport-secret", repr(transport_attempt))
+
+        with self.assertRaises(Exception) as http_context:
+            GeminiAccountingProvider(
+                api_key="AiZA-http-secret",
+                credential_slot=slot,
+                http_client=RecordingClient(
+                    FakeResponse(b'{"error":{"code":429}}', status_code=429, error=RuntimeError("429"))
+                ),
+            ).classify_product(request)
+        self.assertEqual(http_context.exception.attempt.credential_slot, slot)
+        self.assertNotIn("AiZA-http-secret", repr(http_context.exception.attempt))
+
+        malformed = b'{"modelVersion":"gemini-broken","candidates":[{"content":{"parts":[{"text":"{bad"}]}}]}'
+        with self.assertRaises(Exception) as parse_context:
+            GeminiAccountingProvider(
+                api_key="AiZA-parse-secret",
+                credential_slot=slot,
+                http_client=RecordingClient(FakeResponse(malformed)),
+            ).classify_product(request)
+        self.assertEqual(parse_context.exception.attempt.credential_slot, slot)
+        self.assertNotIn("AiZA-parse-secret", repr(parse_context.exception.attempt))
+
     def test_actual_accounting_selection_preserves_candidate_roles_and_tax_metadata(self) -> None:
         output = {
             "action": "finalize",

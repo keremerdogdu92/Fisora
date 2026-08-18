@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from app.domain.auth_policy import auth_status_payload, build_auth_config
 from app.domain.export_adapters import SUPPORTED_EXPORT_ADAPTERS
+from app.domain.gemini_project_pool import gemini_project_credential_slots_from_env
 from app.domain.openai_provider import (
     DEFAULT_CEREBRAS_MODEL,
     DEFAULT_CLOUDFLARE_MODEL,
@@ -113,6 +114,7 @@ def production_readiness_payload(
     cloudflare_account_id_present = bool(source.get("CLOUDFLARE_ACCOUNT_ID", "").strip())
     sambanova_key_present = bool(source.get("SAMBANOVA_API_KEY", "").strip())
     gemini_key_present = bool(source.get("GEMINI_API_KEY", "").strip())
+    gemini_credential_slots = gemini_project_credential_slots_from_env(source)
     if not ai_provider_chain:
         ai_provider_configured = True
     else:
@@ -383,6 +385,8 @@ def production_readiness_payload(
         "ai_cloudflare_account_id_present": cloudflare_account_id_present,
         "ai_sambanova_key_present": sambanova_key_present,
         "ai_gemini_key_present": gemini_key_present,
+        "gemini_project_count": len(gemini_credential_slots),
+        "gemini_credential_slots": list(gemini_credential_slots),
         "rate_limit": {
             "enabled": rate_limit.enabled,
             "window_seconds": rate_limit.window_seconds,

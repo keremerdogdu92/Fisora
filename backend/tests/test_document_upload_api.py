@@ -22,6 +22,8 @@ except ModuleNotFoundError:
     phase0 = None
     app = None
 
+from app.services.document_service import DocumentService
+
 
 class DocumentUploadApiTests(unittest.TestCase):
     def test_invoice_upload_requires_typed_accounting_period(self) -> None:
@@ -78,6 +80,45 @@ class DocumentUploadApiTests(unittest.TestCase):
         )
         self.assertEqual(malformed_response.status_code, 400)
         self.assertEqual(malformed_response.json()["detail"], response.json()["detail"])
+
+    def test_bulk_client_reprocess_forces_existing_jobs_back_to_queue(self) -> None:
+        class Store:
+            def __init__(self) -> None:
+                self.created: list[dict[str, object]] = []
+
+            def get_workspace(self, client_id: str) -> dict[str, object]:
+                return {
+                    "uploaded_documents": [
+                        {
+                            "document_ref": "invoice-1",
+                            "document_type": "invoice_pdf",
+                            "intake_category": "purchase_invoice",
+                        }
+                    ],
+                    "onboarding_attachments": [],
+                }
+
+            def create_processing_job(self, **kwargs: object) -> dict[str, object]:
+                self.created.append(kwargs)
+                return {"id": "job-1", "status": "queued", **kwargs}
+
+            def record_document_pipeline_event(self, **kwargs: object) -> None:
+                return None
+
+        store = Store()
+        service = DocumentService(
+            store=store,
+            document_storage_path=Path("."),
+            record_operation_event=lambda **kwargs: {},
+            require_client_access=lambda **kwargs: {"allowed": True},
+        )
+        result = service.store_client_reprocess(
+            client_id="client-1",
+            user_id="accountant-1",
+        )
+        self.assertEqual(result["queued_document_count"], 1)
+        self.assertEqual(len(store.created), 1)
+        self.assertTrue(store.created[0]["force_requeue"])
 
     def test_bank_statement_can_have_empty_accounting_period(self) -> None:
         if TestClient is None or phase0 is None or app is None:

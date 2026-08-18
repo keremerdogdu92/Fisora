@@ -612,3 +612,17 @@ The implementation is ready for the external real-corpus round only when:
 The external A/B result, not implementation completion alone, decides whether
 exhaustive discovery, explicit Gemini caching, or another candidate strategy is
 adopted afterward.
+
+## 2026-08-18 superseding amendment: external call metering
+
+The former fixed nineteen-accounting-call control and the related twenty-call
+scheduling reservation are superseded. They are not part of the active V2
+runtime or request contract, and no replacement fixed per-document provider
+call ceiling is introduced.
+
+External verification meters actual provider calls separately for each
+configured Gemini project and stops only at operator-supplied per-project test
+budgets. Those operator budgets are accounting safeguards for a test run; they
+are not claims about Google quota facts. The finite candidate rounds, one
+targeted treatment clarification, and at most one clarification-triggered
+candidate expansion remain the structural bounds on V2 work.

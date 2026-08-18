@@ -5,6 +5,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from app.domain.gemini_credential_slots import normalize_gemini_credential_slot
+
 
 class ArtifactKind(str, Enum):
     PROVIDER_RECEIPT = "provider_receipt"
@@ -43,6 +45,7 @@ class ArtifactWrite:
     token_usage: dict[str, Any] = field(default_factory=dict)
     error_metadata: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    credential_slot: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,6 +86,7 @@ class DocumentAiArtifact:
     request_sha256: str | None = None
     response_storage_path: str | None = None
     response_sha256: str | None = None
+    credential_slot: str = ""
 
 
 _FORBIDDEN_FIELD_NAMES = {
@@ -123,6 +127,7 @@ def _find_secret_field(value: object) -> str | None:
 
 
 def validate_artifact_write(write: ArtifactWrite) -> None:
+    normalize_gemini_credential_slot(write.credential_slot)
     if not isinstance(write.kind, ArtifactKind):
         raise ValueError("unsupported document AI artifact kind")
     for name in (

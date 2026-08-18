@@ -128,7 +128,6 @@ class GeminiInvoicePipelineRequest:
     candidate_experiment_bucket: int = 0
     candidate_experiment_percent: int = 0
     max_accounting_request_bytes: int = 3_000_000
-    max_accounting_provider_calls: int | None = None
     accounting_identity: GeminiInvoiceAccountingIdentity = field(init=False)
 
     def __post_init__(self) -> None:
@@ -171,13 +170,6 @@ class GeminiInvoicePipelineRequest:
             raise ValueError("Gemini V2 candidate_experiment_percent must be between 0 and 100")
         if int(self.max_accounting_request_bytes) <= 0:
             raise ValueError("Gemini V2 max_accounting_request_bytes must be positive")
-        if (
-            self.max_accounting_provider_calls is not None
-            and int(self.max_accounting_provider_calls) <= 0
-        ):
-            raise ValueError(
-                "Gemini V2 max_accounting_provider_calls must be positive when set"
-            )
         object.__setattr__(self, "candidate_discovery_mode", discovery_mode)
         context_revision = str(self.client_context_revision or "").strip() or hashlib.sha256(
             _json_bytes(dict(self.client_context))
@@ -397,7 +389,6 @@ def run_gemini_invoice_pipeline_v2(
     candidate_rounds: list[GeminiInvoiceCandidateRound] = []
     sent_candidate_ids_across_calls: list[str] = []
     active_chunk_indexes = {chunk.chunk_index for chunk in capacity_plan.chunks}
-    accounting_provider_call_count = 0
 
     for round_index in range(3):
         expansion_terms: list[str] = []
@@ -408,17 +399,6 @@ def run_gemini_invoice_pipeline_v2(
             for chunk in capacity_plan.chunks
             if chunk.chunk_index in active_chunk_indexes
         )
-        if request.max_accounting_provider_calls is not None:
-            remaining_calls = (
-                int(request.max_accounting_provider_calls)
-                - accounting_provider_call_count
-            )
-            if remaining_calls <= 0:
-                warnings.append("accounting_provider_call_budget_exhausted")
-                break
-            if len(active_chunks) > remaining_calls:
-                warnings.append("accounting_provider_call_budget_exhausted")
-                active_chunks = active_chunks[:remaining_calls]
         accounting_request_details = {
             chunk.chunk_index: _bounded_accounting_request(
                 projection=projection,
@@ -439,7 +419,6 @@ def run_gemini_invoice_pipeline_v2(
         ):
             warnings.append("candidate_universe_truncated")
         call_outcomes: dict[int, tuple[object | None, Exception | None]] = {}
-        accounting_provider_call_count += len(active_chunks)
         parallelism = min(request.max_parallel_accounting_chunks, len(active_chunks))
         if parallelism > 1:
             with ThreadPoolExecutor(max_workers=parallelism) as executor:
@@ -705,13 +684,6 @@ def run_gemini_invoice_pipeline_v2(
         expanded_from_receipt_id = prior_receipt.artifact_id
 
         for clarification_attempt_index in (1, 2):
-            if (
-                request.max_accounting_provider_calls is not None
-                and accounting_provider_call_count
-                >= int(request.max_accounting_provider_calls)
-            ):
-                warnings.append("accounting_provider_call_budget_exhausted")
-                break
             attempt_round_index = clarification_round_index
             clarification_receipt: DocumentAiArtifact | None = None
             clarification_request, clarification_metadata = _bounded_accounting_request(
@@ -739,7 +711,6 @@ def run_gemini_invoice_pipeline_v2(
                 "candidate_experiment_percent": request.candidate_experiment_percent,
                 **clarification_metadata,
             }
-            accounting_provider_call_count += 1
             try:
                 raw_clarification = accounting_provider.classify_product(
                     clarification_request
@@ -1140,6 +1111,7 @@ def _append_receipt(
             kind=ArtifactKind.PROVIDER_RECEIPT,
             stage=stage,
             status=status,
+            credential_slot=str(getattr(attempt, "credential_slot", "") or ""),
             retry_of_artifact_id=retry_of_artifact_id,
             expanded_from_receipt_id=expanded_from_receipt_id,
             provider=str(getattr(attempt, "provider", "") or "gemini"),

@@ -74,6 +74,13 @@ class _FakeProvider:
             raise error
         return {"slot": self.config.slot_name}
 
+    def generate_structured_json(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("generate_structured_json", dict(kwargs)))
+        if self.error_once is not None:
+            error, self.error_once = self.error_once, None
+            raise error
+        return {"slot": self.config.slot_name}
+
 
 class GeminiProjectPoolTests(unittest.TestCase):
     def test_enumerates_one_three_seven_and_eight_unique_slots_even_when_primary_blank(self) -> None:
@@ -208,6 +215,31 @@ class GeminiProjectPoolTests(unittest.TestCase):
                 "GEMINI_API_KEY_SLOT_1",
             ],
         )
+
+    def test_structured_call_fails_over_from_unauthorized_slot(self) -> None:
+        providers: list[_FakeProvider] = []
+
+        def factory(config: GeminiProjectSlotConfig) -> _FakeProvider:
+            provider = _FakeProvider(config)
+            providers.append(provider)
+            return provider
+
+        pool = GeminiProjectPoolProvider(
+            [
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_1", "key-1", 15),
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_2", "key-2", 15),
+            ],
+            provider_factory=factory,
+        )
+        providers[0].error_once = GeminiProviderAttemptError(
+            "unauthorized", attempt=_attempt(http_status=401)
+        )
+
+        result = pool.generate_structured_json(schema_name="test")
+
+        self.assertEqual(result["slot"], "GEMINI_API_KEY_SLOT_2")
+        self.assertEqual(providers[0].calls[0][0], "generate_structured_json")
+        self.assertEqual(providers[1].calls[0][0], "generate_structured_json")
 
     def test_all_cooling_slots_select_earliest_expiry(self) -> None:
         now = {"value": 100.0}

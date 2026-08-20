@@ -134,6 +134,14 @@ def _validated_draft_lines(
     return lines, total_debit, total_credit
 
 
+def _best_effort_draft_lines(values: object) -> tuple[list[dict[str, Any]], Decimal, Decimal, str]:
+    try:
+        lines, debit, credit = _validated_draft_lines(values)
+        return lines, debit, credit, ""
+    except NormalizedAccountingError as exc:
+        return [], Decimal("0.00"), Decimal("0.00"), str(exc)
+
+
 def _allocation_component(account_code: str) -> str:
     compact = "".join(ch for ch in account_code if ch.isdigit())
     if compact.startswith(("120", "320")):
@@ -1055,17 +1063,25 @@ class NormalizedAccountingRepository:
         if len({str(line.get("canonical_line_id")) for line in lines}) != len(lines):
             raise NormalizedAccountingError("normalized invoice canonical line ids must be unique")
         raw_draft_lines = result.get("draft_lines")
-        has_draft_lines = isinstance(raw_draft_lines, (list, tuple)) and bool(raw_draft_lines)
-        if has_draft_lines:
-            draft_lines, total_debit, total_credit = _validated_draft_lines(raw_draft_lines)
-            result["is_balanced"] = True
+        raw_has_draft_lines = isinstance(raw_draft_lines, (list, tuple)) and bool(raw_draft_lines)
+        draft_validation_error = ""
+        if raw_has_draft_lines:
+            draft_lines, total_debit, total_credit, draft_validation_error = _best_effort_draft_lines(raw_draft_lines)
         else:
-            draft_lines = []
-            total_debit = Decimal("0.00")
-            total_credit = Decimal("0.00")
+            draft_lines, total_debit, total_credit = [], Decimal("0.00"), Decimal("0.00")
+        has_draft_lines = bool(draft_lines)
+        if has_draft_lines:
+            result["is_balanced"] = True
+        elif draft_validation_error:
+            result["normalized_is_balanced"] = False
+        else:
             result["is_balanced"] = False
+        if not has_draft_lines:
             result["export_status"] = "review_required"
             existing_review_reasons = list(result.get("review_reason_codes") or [])
+            if draft_validation_error:
+                existing_review_reasons.append("normalized_draft_review_required")
+                result["normalized_draft_warning"] = draft_validation_error
             canonical_validation_reasons = [
                 str(reason or "").lower()
                 for reason in result.get("canonical_validation_reasons") or []
@@ -1086,8 +1102,12 @@ class NormalizedAccountingRepository:
                     ]
                 )
             )
-        result["total_debit"] = f"{total_debit:.2f}"
-        result["total_credit"] = f"{total_credit:.2f}"
+        if draft_validation_error:
+            result["normalized_total_debit"] = f"{total_debit:.2f}"
+            result["normalized_total_credit"] = f"{total_credit:.2f}"
+        else:
+            result["total_debit"] = f"{total_debit:.2f}"
+            result["total_credit"] = f"{total_credit:.2f}"
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(

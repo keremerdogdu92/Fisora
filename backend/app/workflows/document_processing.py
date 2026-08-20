@@ -112,6 +112,14 @@ from app.workflows.gemini_invoice_pipeline import (
     run_gemini_invoice_pipeline_v2,
 )
 from app.workflows.gemini_invoice_result_adapter import to_document_processing_payload
+from app.workflows.three_stage_accounting_pipeline import (
+    PIPELINE_VERSION as THREE_STAGE_PIPELINE_VERSION,
+    READER_PROMPT_VERSION as THREE_STAGE_READER_PROMPT_VERSION,
+    PLANNER_PROMPT_VERSION as THREE_STAGE_PLANNER_PROMPT_VERSION,
+    SCHEMA_VERSION as THREE_STAGE_SCHEMA_VERSION,
+    run_three_stage_accounting_pipeline,
+    three_stage_accounting_enabled,
+)
 
 
 PARSER_BY_DOCUMENT_TYPE = {
@@ -1297,7 +1305,7 @@ def _gemini_pdf_v2_eligible(
     ).strip()
     path = _stored_path(document)
     return bool(
-        gemini_pdf_v2_enabled(environ)
+        (three_stage_accounting_enabled(environ) or gemini_pdf_v2_enabled(environ))
         and document_type == "invoice"
         and path is not None
         and path.suffix.lower() == ".pdf"
@@ -1398,6 +1406,64 @@ def _run_gemini_pdf_v2_for_worker(
         client_id=client_id,
         document=document,
     )
+    if three_stage_accounting_enabled(environ):
+        profile = (workspace.get("client") or {}).get("profile") or {}
+        source_hash = sha256(source_bytes).hexdigest()
+        try:
+            final_provider = _accounting_provider_from_env("xkiro", environ)
+        except ValueError as exc:
+            raise RetryableDocumentTechnicalError("three_stage_final_provider_unavailable") from exc
+        three_stage = run_three_stage_accounting_pipeline(
+            reader_provider=provider,
+            final_provider=final_provider,
+            source_bytes=source_bytes,
+            source_sha256=source_hash,
+            workspace=workspace,
+            tenant_tax_id=_client_tax_id(workspace),
+            expected_direction=_intake_direction(str(document.get("intake_category") or "")),
+            client_context={
+                "activity_description": str(profile.get("activity_description") or ""),
+                "nace_code": str(profile.get("nace_code") or ""),
+                "activity_tags": list(profile.get("activity_tags") or []),
+            },
+        )
+        receipt_ids: list[str] = []
+        for stage, attempt, prompt_version in (
+            ("three_stage_source_reader", three_stage.reader_attempt, THREE_STAGE_READER_PROMPT_VERSION),
+            ("three_stage_semantic_planner", three_stage.planner_attempt, THREE_STAGE_PLANNER_PROMPT_VERSION),
+        ):
+            receipt = repository.append(
+                ArtifactWrite(
+                    tenant_id=scope["tenant_id"],
+                    taxpayer_id=scope["taxpayer_id"],
+                    document_id=scope["document_id"],
+                    source_file_id=scope["source_file_id"],
+                    source_file_sha256=source_hash,
+                    kind=ArtifactKind.PROVIDER_RECEIPT,
+                    stage=stage,
+                    status=str(getattr(attempt, "status", "successful") or "successful"),
+                    pipeline_version=THREE_STAGE_PIPELINE_VERSION,
+                    provider=str(getattr(attempt, "provider", "gemini") or "gemini"),
+                    model_alias=str(getattr(attempt, "model_alias", "") or ""),
+                    resolved_model=str(getattr(attempt, "resolved_model", "") or ""),
+                    prompt_version=prompt_version,
+                    schema_version=THREE_STAGE_SCHEMA_VERSION,
+                    elapsed_ms=int(getattr(attempt, "elapsed_ms", 0) or 0),
+                    http_status=getattr(attempt, "http_status", None),
+                    started_at=getattr(attempt, "started_at", None),
+                    finished_at=getattr(attempt, "finished_at", None),
+                    token_usage=dict(getattr(attempt, "token_usage", {}) or {}),
+                    error_metadata=dict(getattr(attempt, "error_metadata", {}) or {}),
+                    credential_slot=str(getattr(attempt, "credential_slot", "") or ""),
+                ),
+                request_body=bytes(getattr(attempt, "request_body", b"") or b""),
+                response_body=bytes(getattr(attempt, "response_body", b"") or b""),
+            )
+            receipt_ids.append(receipt.artifact_id)
+        result = dict(three_stage.result)
+        result["gemini_pdf_v2_used"] = True
+        result["document_ai_artifact_ids"] = receipt_ids
+        return result, provider
     try:
         effective_experiment_percent = (
             candidate_experiment_percent_from_env(environ)

@@ -10,6 +10,22 @@ export type DraftLine = {
   contributing_line_ids?: string[];
   source_line_numbers?: number[];
   allocated_amounts?: { canonical_line_id: string; amount: string }[];
+  source_position?: string;
+  source_text?: string;
+  source_amount?: string;
+  source_amount_label?: string;
+  source_amount_basis?: string;
+  source_role?: string;
+};
+
+export type SourceReviewRow = {
+  sourcePosition: string;
+  sourceText: string;
+  description: string;
+  amount: string;
+  amountLabel: string;
+  amountBasis: "line_total_ex_tax" | "line_total_inc_tax" | "ambiguous" | "none";
+  role: "posting_candidate" | "group_or_subtotal" | "informational";
 };
 
 export type VatGroupEvidence = {
@@ -233,6 +249,7 @@ export type PilotDocument = {
   riskFlags: string[];
   chartAccounts: ChartAccountOption[];
   draftLines: DraftLine[];
+  sourceReviewRows?: SourceReviewRow[];
   lineDecisions?: Record<string, unknown>[];
   statementLines: StatementLineReview[];
   statementEntries: StatementEntryReview[];

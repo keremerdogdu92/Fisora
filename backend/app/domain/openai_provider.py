@@ -1204,6 +1204,25 @@ class GeminiAccountingProvider:
             document_mime_type=request.document_mime_type,
         )
 
+    def generate_structured_json(
+        self,
+        *,
+        schema_name: str,
+        instructions: str,
+        user_payload: Mapping[str, object],
+        schema: Mapping[str, object],
+        document_bytes: bytes = b"",
+        document_mime_type: str = "",
+    ) -> dict[str, Any]:
+        return self._post_structured_json(
+            schema_name=schema_name,
+            instructions=instructions,
+            user_payload=user_payload,
+            schema=schema,
+            document_bytes=document_bytes,
+            document_mime_type=document_mime_type,
+        )
+
     def suggest_statement_line(self, request: StatementAiSuggestionRequest) -> dict[str, Any]:
         payload = request.to_schema_payload()
         return self._post_structured_json(

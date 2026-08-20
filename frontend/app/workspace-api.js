@@ -428,6 +428,22 @@ function backendDocumentsForWorkspace(workspace, client) {
   return [...processed, ...pending];
 }
 
+function normalizeSourceReviewRows(value) {
+  return safeList(value).map((row) => {
+    const amountBasis = safeText(row?.amount_basis || row?.amountBasis, "none");
+    const role = safeText(row?.role, "informational");
+    return {
+      sourcePosition: safeText(row?.source_position || row?.sourcePosition),
+      sourceText: safeText(row?.source_text || row?.sourceText),
+      description: safeText(row?.description),
+      amount: safeText(row?.amount),
+      amountLabel: safeText(row?.amount_label || row?.amountLabel),
+      amountBasis: ["line_total_ex_tax", "line_total_inc_tax", "ambiguous", "none"].includes(amountBasis) ? amountBasis : "none",
+      role: ["posting_candidate", "group_or_subtotal", "informational"].includes(role) ? role : "informational",
+    };
+  }).filter((row) => row.sourcePosition || row.sourceText || row.description);
+}
+
 function processedBackendDocument(document, workspace, client) {
   const result = document?.result || {};
   const documentRef = safeText(document?.document_ref || result.file_name || document?.id);
@@ -519,6 +535,7 @@ function processedBackendDocument(document, workspace, client) {
     reviewReasons: safeList(document?.review_reason_codes || result.review_reason_codes).map(String),
     riskFlags: safeList(result.risk_flags).map(String),
     draftLines: safeList(result.draft_lines),
+    sourceReviewRows: normalizeSourceReviewRows(result.source_review_rows),
     lineDecisions: safeList(result.line_decisions),
     statementLines: safeList(result.statement_lines),
     statementEntries: safeList(result.statement_entries),
@@ -604,6 +621,7 @@ function pendingBackendDocument(document, workspace, client) {
     reviewReasons: [],
     riskFlags: [],
     draftLines: [],
+    sourceReviewRows: [],
     statementLines: [],
     statementEntries: [],
     statementAiSuggestions: [],

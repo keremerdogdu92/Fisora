@@ -170,6 +170,9 @@ class GeminiProjectPoolProvider:
     def extract_invoice_canonical(self, request: Any) -> dict[str, Any]:
         return self._call("extract_invoice_canonical", request)
 
+    def generate_structured_json(self, **kwargs: Any) -> dict[str, Any]:
+        return self._call_kwargs("generate_structured_json", kwargs)
+
     def _call(self, method_name: str, request: Any) -> dict[str, Any]:
         index = self._lease_slot()
         config = self._configs[index]
@@ -189,6 +192,36 @@ class GeminiProjectPoolProvider:
             with self._lock:
                 self._copy_provider_metadata(provider)
                 self._in_flight[config.slot_name] -= 1
+
+    def _call_kwargs(self, method_name: str, kwargs: Mapping[str, object]) -> dict[str, Any]:
+        last_error: GeminiProviderAttemptError | None = None
+        for attempt_index in range(len(self._configs)):
+            index = self._lease_slot()
+            config = self._configs[index]
+            provider = self._providers[index]
+            try:
+                result = getattr(provider, method_name)(**dict(kwargs))
+                self.last_provider_name = self.provider_name
+                return result
+            except GeminiProviderAttemptError as error:
+                last_error = error
+                status = error.attempt.http_status
+                if status in {401, 403, 429}:
+                    with self._lock:
+                        self._cooling_until[config.slot_name] = (
+                            float("inf") if status in {401, 403}
+                            else self._clock() + self._cooldown_seconds
+                        )
+                    if attempt_index + 1 < len(self._configs):
+                        continue
+                raise
+            finally:
+                with self._lock:
+                    self._copy_provider_metadata(provider)
+                    self._in_flight[config.slot_name] -= 1
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Gemini project pool has no callable slot")
 
     def _copy_provider_metadata(self, provider: Any) -> None:
         snapshot = getattr(provider, "last_capacity_snapshot", {})

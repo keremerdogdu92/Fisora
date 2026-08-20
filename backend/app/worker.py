@@ -19,6 +19,7 @@ from app.workflows.document_processing import (
     is_transient_persistence_error,
     process_queued_documents,
 )
+from app.workflows.three_stage_accounting_pipeline import three_stage_accounting_enabled
 
 
 RETENTION_INTERVAL_SECONDS = int(os.environ.get("FISORA_WORKER_RETENTION_INTERVAL_SECONDS", "86400"))
@@ -51,7 +52,7 @@ def run_retention_once() -> dict[str, object]:
 
 def _gemini_runtime_for_worker() -> GeminiPdfRuntime | None:
     global _GEMINI_RUNTIME
-    if not gemini_pdf_v2_enabled(os.environ):
+    if not (three_stage_accounting_enabled(os.environ) or gemini_pdf_v2_enabled(os.environ)):
         return None
     if _GEMINI_RUNTIME is None:
         with _GEMINI_RUNTIME_LOCK:

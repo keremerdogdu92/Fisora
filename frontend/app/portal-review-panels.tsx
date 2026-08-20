@@ -103,6 +103,31 @@ function blankDraftLine(): DraftLine {
   return { account_code: "", description: "", debit: "0.00", credit: "0.00" };
 }
 
+function sourceAmountBasisLabel(value: string) {
+  if (value === "line_total_ex_tax") return "vergi hariç satır toplamı";
+  if (value === "line_total_inc_tax") return "vergi dahil kaynak tutar";
+  if (value === "ambiguous") return "tutar yapısı belirsiz";
+  return "kaynak tutar";
+}
+
+function sourceReviewDraftLinesForDocument(document: PilotDocument): DraftLine[] {
+  return (document.sourceReviewRows ?? [])
+    .filter((row) => row.role === "posting_candidate")
+    .map((row) => ({
+      account_code: "",
+      description: String(row.description || row.sourceText || "").replace(/\s+/g, " ").trim(),
+      debit: "0.00",
+      credit: "0.00",
+      source_position: row.sourcePosition,
+      source_text: row.sourceText,
+      source_amount: row.amount,
+      source_amount_label: row.amountLabel,
+      source_amount_basis: row.amountBasis,
+      source_role: row.role,
+      source_line_numbers: /^\d+$/.test(row.sourcePosition.trim()) ? [Number(row.sourcePosition)] : [],
+    }));
+}
+
 function vatGroupEvidenceText(line: DraftLine) {
   const sourceLineNumbers = Array.isArray(line.source_line_numbers)
     ? line.source_line_numbers.filter((value) => Number.isInteger(value) && value > 0)
@@ -513,14 +538,24 @@ export function JournalPanel({
     );
   }
   const activeDocument = document;
-  const generatedDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
+  const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
+  const sourceReviewMode = !isStatement && Boolean(document.sourceReviewRows?.length);
+  const accountingDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
+  const sourceReviewDraftLines = sourceReviewDraftLinesForDocument(document);
+  const generatedDraftLines = sourceReviewMode ? sourceReviewDraftLines : accountingDraftLines;
   const activeDraftLines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines;
   const totals = draftTotals(activeDraftLines);
-  const needsManualDraft = !generatedDraftLines.length || document.draftStatus === "manual_draft_required";
+  const needsManualDraft = !sourceReviewMode && (!generatedDraftLines.length || document.draftStatus === "manual_draft_required");
   const invalidAccountCodes = invalidDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const newCounterpartyAccountCodes = newCounterpartyDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const hasInvalidDraftAccounts = invalidAccountCodes.length > 0;
-  const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
+  const sourceReviewNeedsAccounting = sourceReviewMode && (
+    !activeDraftLines.length ||
+    activeDraftLines.some((line) => !normalizeAccountCodeInput(line.account_code)) ||
+    activeDraftLines.every((line) => parseAmount(line.debit) === 0 && parseAmount(line.credit) === 0) ||
+    !totals.balanced
+  );
+  const blocksApproval = hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
   const pendingDirectionConflict = hasPendingDirectionConflict(document);
@@ -595,7 +630,7 @@ export function JournalPanel({
 
   function handleJournalShortcut(event: KeyboardEvent<HTMLElement>) {
     if (pendingDirectionConflict) return;
-    if (hasInvalidDraftAccounts) return;
+    if (blocksApproval) return;
     if (event.key === "F2" || (event.key === "Enter" && event.ctrlKey)) {
       event.preventDefault();
       void onApproveAndNext();
@@ -614,7 +649,7 @@ export function JournalPanel({
         <section className={`journal-status-strip ${totals.balanced ? "" : "unbalanced"}`} aria-label="Fiş durumu">
           <div className="journal-status-primary">
             <span>Fiş durumu</span>
-            <strong>{formatDraftStatus(document.draftStatus)}</strong>
+            <strong>{sourceReviewMode ? "Kaynak satırlar hazır" : formatDraftStatus(document.draftStatus)}</strong>
             <small>{directionSummary}</small>
           </div>
           <div className="journal-status-metrics" aria-label="Fiş toplamları">
@@ -639,13 +674,15 @@ export function JournalPanel({
           invalidAccountCodes={invalidAccountCodes}
           newCounterpartyAccountCodes={newCounterpartyAccountCodes}
           needsManualDraft={needsManualDraft}
+          sourceReviewMode={sourceReviewMode}
+          sourceReviewTotalCount={document.sourceReviewRows?.length ?? 0}
           onAddLine={addManualDraftLine}
           onRemoveLine={removeManualDraftLine}
           onUpdateLine={setManualDraftLine}
         />
         {!pendingDirectionConflict ? (
           <section className="journal-primary-approve" aria-label="Ana fiş kararı">
-            <button disabled={hasInvalidDraftAccounts} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
+            <button disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </section>
         ) : null}
         {isStatement ? (
@@ -895,6 +932,8 @@ function ManualDraftEditor({
   invalidAccountCodes,
   newCounterpartyAccountCodes,
   needsManualDraft,
+  sourceReviewMode,
+  sourceReviewTotalCount,
   onAddLine,
   onRemoveLine,
   onUpdateLine,
@@ -905,6 +944,8 @@ function ManualDraftEditor({
   invalidAccountCodes: string[];
   newCounterpartyAccountCodes: string[];
   needsManualDraft: boolean;
+  sourceReviewMode: boolean;
+  sourceReviewTotalCount: number;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
   onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
@@ -913,8 +954,8 @@ function ManualDraftEditor({
   const debitRefs = useRef<Array<HTMLInputElement | null>>([]);
   const creditRefs = useRef<Array<HTMLInputElement | null>>([]);
 
-  if (!needsManualDraft && !activeDraftLines.length) return null;
-  const rows = activeDraftLines.length ? activeDraftLines : [blankDraftLine(), blankDraftLine()];
+  if (!sourceReviewMode && !needsManualDraft && !activeDraftLines.length) return null;
+  const rows = activeDraftLines.length ? activeDraftLines : sourceReviewMode ? [] : [blankDraftLine(), blankDraftLine()];
 
   function focusInput(refs: MutableRefObject<Array<HTMLInputElement | null>>, index: number) {
     window.setTimeout(() => refs.current[index]?.focus(), 0);
@@ -944,11 +985,14 @@ function ManualDraftEditor({
     <section className="manual-draft-panel">
       <div className="statement-review-heading">
         <div>
-          <h3>{generatedDraftLines.length ? "Fiş satırları" : "Manuel fiş satırları"}</h3>
-          <span>{generatedDraftLines.length ? "Taslağı düzeltip onaylayabilirsiniz." : "Taslak oluşmadı; satırları girerek belgeyi tamamlayın."}</span>
+          <h3>{sourceReviewMode || generatedDraftLines.length ? "Fiş satırları" : "Manuel fiş satırları"}</h3>
+          <span>{sourceReviewMode ? `PDF'den ${generatedDraftLines.length}/${sourceReviewTotalCount} çalışma satırı hazır. Hesap ve borç/alacak kararını müşavir tamamlayabilir.` : generatedDraftLines.length ? "Taslağı düzeltip onaylayabilirsiniz." : "Taslak oluşmadı; satırları girerek belgeyi tamamlayın."}</span>
         </div>
         <button onClick={onAddLine} type="button">Satır ekle</button>
       </div>
+      {sourceReviewMode && !rows.length ? (
+        <p className="empty">PDF satırları okundu; bu belgede fişe doğrudan taşınacak sıfırdan farklı çalışma satırı yok.</p>
+      ) : null}
       <div className="table-wrap journal-ledger">
         <table>
           <thead>
@@ -991,6 +1035,13 @@ function ManualDraftEditor({
                     ref={(element) => { descriptionRefs.current[index] = element; }}
                     value={line.description}
                   />
+                  {line.source_text ? (
+                    <small className="field-notice source-review-evidence">
+                      Kaynak satır {line.source_position || index + 1}: {line.source_amount || "tutar yok"}
+                      {line.source_amount_label ? ` · ${line.source_amount_label}` : ""}
+                      {line.source_amount_basis ? ` · ${sourceAmountBasisLabel(line.source_amount_basis)}` : ""}
+                    </small>
+                  ) : null}
                   {vatGroupEvidenceText(line) ? (
                     <small className="field-notice">
                       {vatGroupEvidenceText(line)}

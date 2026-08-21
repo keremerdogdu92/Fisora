@@ -158,6 +158,7 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(result["pipeline_version"], "source-identity-tax-accountant-v3")
         self.assertEqual(result["counterparty_match_code"], "329.03")
         self.assertEqual(result["payable_total"], "1150.75")
+        self.assertEqual(result["vat_total"], "178.03")
         self.assertEqual(result["three_stage_posting_basis_amount"], "1150.66")
         self.assertEqual(result["total_debit"], "1150.66")
         self.assertEqual(result["total_credit"], "1150.66")
@@ -170,6 +171,25 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(result["source_review_rows"][1]["amount"], "23,44")
         self.assertIn("SATIR 1: İnternet", run.source_text)
         self.assertNotIn("new_counterparty_required", result["review_reason_codes"])
+
+    def test_vat_summary_ignores_tax_base_labels(self) -> None:
+        reader_payload = dict(READER)
+        reader_payload["printed_summary_lines"] = [
+            {"label": "KDV Matrahı (%0.00)", "value": "208.500,00"},
+            {"label": "KDV Matrahı (%20.00)", "value": "20.225,01"},
+            {"label": "Hesaplanan KDV (%20.00)", "value": "178,03"},
+            {"label": "ÖDENECEK TOPLAM", "value": "1.150,75"},
+        ]
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(reader_payload, PLANNER),
+            final_provider=FakeFinalProvider(FINAL),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+        self.assertEqual(run.result["vat_total"], "178.03")
 
     def test_final_cannot_take_over_counterparty_account_selection(self) -> None:
         plan = dict(PLANNER)

@@ -488,7 +488,13 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
     invoice_no = _find_labeled(header, "FATURA NO", "FATURA ID", "INVOICE NO")
     issue_date = _find_labeled(header, "FATURA TARIH", "TARIH", "ISSUE DATE")
     payable = _find_labeled(summaries, "ODENECEK TOPLAM", "ODENECEK TUTAR", "PAYABLE")
-    vat_total = _find_labeled(summaries, "KDV %", "KDV TUTAR", "VAT")
+    journal_vat_total = sum(
+        max(_money(line.get("debit")), _money(line.get("credit")))
+        for line in draft_lines
+        if str(line.get("account_code") or "").startswith(("191", "391"))
+    )
+    printed_vat_total = _find_labeled(summaries, "HESAPLANAN KDV", "KDV TUTAR", "VAT TOTAL", "VAT AMOUNT")
+    vat_total = f"{journal_vat_total:.2f}" if journal_vat_total else _money_text(printed_vat_total)
     summary = str(final_output.get("summary") or "Üç aşamalı AI muhasebe taslağı hazırlandı.")
     final_model = str(getattr(final_provider, "model", "") or "")
     return {
@@ -504,7 +510,7 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         "counterparty_title": counterparty["title"],
         "counterparty_tax_id": counterparty["tax_id"],
         "goods_services_total": "0.00",
-        "vat_total": _money_text(vat_total),
+        "vat_total": vat_total,
         "special_tax_total": "0.00",
         "tax_inclusive_total": _money_text(final_output.get("posting_basis_amount")),
         "payable_total": _money_text(payable or final_output.get("posting_basis_amount")),

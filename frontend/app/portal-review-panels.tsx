@@ -442,7 +442,12 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
             isImageMime(document.originalDocumentMimeType) ? (
               <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
             ) : canFramePreview ? (
-              <iframe className="original-document-frame" src={previewUrl} title={`${document.fileName} orijinal belge`} />
+              <iframe
+                className="original-document-frame"
+                sandbox="allow-same-origin"
+                src={previewUrl}
+                title={`${document.fileName} orijinal belge`}
+              />
             ) : (
               <div className="preview-error-panel">
                 <strong>Bu dosya tarayıcı içinde önizlenemiyor.</strong>

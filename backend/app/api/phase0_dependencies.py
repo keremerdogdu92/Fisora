@@ -151,6 +151,32 @@ def require_mock_client_access(
     return access
 
 
+def require_accountant_or_admin(
+    *,
+    user_header: str | None,
+    session_header: str | None = None,
+    session_cookie: str | None = None,
+    store_factory: StoreFactory,
+) -> dict[str, object]:
+    auth_config = build_auth_config()
+    if os.environ.get("FISORA_ENV", "").strip().lower() != "production":
+        return {"allowed": True, "role": "development_bootstrap", "user_id": ""}
+    user_id = request_user_id(
+        user_header, session_header, session_cookie, store_factory=store_factory
+    )
+    store = store_factory()
+    user = store.get_portal_user(user_id) if hasattr(store, "get_portal_user") else None
+    if not user:
+        raise HTTPException(status_code=403, detail={"allowed": False, "reason": "portal_user_not_found"})
+    role = str(user.get("role") or "").strip().lower()
+    if role not in {"accountant", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail={"allowed": False, "reason": "role_not_allowed", "allowed_roles": ["accountant", "admin"]},
+        )
+    return {"allowed": True, "role": role, "user_id": user_id}
+
+
 def password_bootstrap_enabled() -> bool:
     return os.environ.get("FISORA_AUTH_PASSWORD_BOOTSTRAP_ENABLED", "").strip().lower() in {"1", "true", "yes"}
 

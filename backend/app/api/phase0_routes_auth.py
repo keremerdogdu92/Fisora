@@ -12,6 +12,7 @@ from app.api.phase0_context import (
     default_protected_corpus_path,
     get_workflow_store,
     password_bootstrap_enabled,
+    require_accountant_or_admin,
     require_client_access,
     request_user_id,
     set_portal_session_cookie,
@@ -74,7 +75,13 @@ def _auth_email_delivery(
 
 
 @router.post("/store/portal-user")
-def store_portal_user(payload: PortalUserPayload) -> dict[str, object]:
+def store_portal_user(
+    payload: PortalUserPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     if not payload.user_id.strip():
         raise HTTPException(status_code=400, detail="user_id is required for portal user")
     try:
@@ -89,7 +96,13 @@ def store_portal_user(payload: PortalUserPayload) -> dict[str, object]:
 
 
 @router.post("/store/portal-access/check")
-def store_portal_access_check(payload: PortalAccessPayload) -> dict[str, object]:
+def store_portal_access_check(
+    payload: PortalAccessPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     if not payload.client_id.strip() or not payload.user_id.strip():
         raise HTTPException(status_code=400, detail="client_id and user_id are required")
     return get_workflow_store().verify_portal_access(client_id=payload.client_id, user_id=payload.user_id)
@@ -237,7 +250,13 @@ def store_auth_delegated_client_session(
 
 
 @router.post("/store/auth/invite")
-def store_auth_invite(payload: AuthInvitePayload) -> dict[str, object]:
+def store_auth_invite(
+    payload: AuthInvitePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     if not payload.user_id.strip():
         raise HTTPException(status_code=400, detail="user_id is required")
     store = get_workflow_store()
@@ -298,7 +317,13 @@ def store_auth_invite_accept(payload: AuthInviteAcceptPayload) -> dict[str, obje
 
 
 @router.post("/store/auth/password-reset")
-def store_auth_password_reset(payload: AuthPasswordResetPayload) -> dict[str, object]:
+def store_auth_password_reset(
+    payload: AuthPasswordResetPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     if not payload.user_id.strip():
         raise HTTPException(status_code=400, detail="user_id is required")
     token = create_auth_action_token()

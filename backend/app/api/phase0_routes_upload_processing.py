@@ -12,6 +12,7 @@ from app.api.phase0_context import (
     get_retention_service,
     request_auth_context,
     request_user_id,
+    require_accountant_or_admin,
 )
 from app.api.phase0_schemas import (
     ClientReprocessPayload,
@@ -96,7 +97,13 @@ async def store_document_upload_multipart(
 
 
 @router.post("/store/document-retention/run")
-def store_document_retention_run(payload: DocumentRetentionRunPayload) -> dict[str, object]:
+def store_document_retention_run(
+    payload: DocumentRetentionRunPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     document_service = get_document_service()
     if getattr(document_service.store, "normalized_accounting_enabled", False):
         return get_retention_service(document_service.store).run_due(
@@ -145,12 +152,23 @@ def store_document_retention_read(
 
 
 @router.post("/store/document-retention/preview")
-def store_document_retention_preview() -> dict[str, object]:
+def store_document_retention_preview(
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_document_service().store_document_retention_preview()
 
 
 @router.post("/store/document-retention/action")
-def store_document_retention_action(payload: DocumentRetentionActionPayload) -> dict[str, object]:
+def store_document_retention_action(
+    payload: DocumentRetentionActionPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_document_service().store_document_retention_action(
         document_refs=payload.document_refs,
         action=payload.action,
@@ -159,7 +177,13 @@ def store_document_retention_action(payload: DocumentRetentionActionPayload) -> 
 
 
 @router.post("/store/processing/run")
-def store_processing_run(payload: ProcessingRunPayload) -> dict[str, object]:
+def store_processing_run(
+    payload: ProcessingRunPayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_document_service().store_processing_run(max_jobs=payload.max_jobs)
 
 

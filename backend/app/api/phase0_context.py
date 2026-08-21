@@ -14,6 +14,7 @@ from app.api.phase0_dependencies import (
     request_auth_context as _request_auth_context,
     request_user_id as _request_user_id,
     require_mock_client_access,
+    require_accountant_or_admin as _require_accountant_or_admin,
     set_session_cookie,
 )
 from app.api.phase0_uploads import save_uploaded_document_with_job as _save_uploaded_document_with_job
@@ -212,6 +213,19 @@ def set_portal_session_cookie(response: Response, token: str, *, ttl_hours: int)
 
 def clear_portal_session_cookie(response: Response) -> None:
     clear_session_cookie(response, cookie_name=SESSION_COOKIE_NAME)
+
+
+def require_accountant_or_admin(
+    user_header: str | None,
+    session_header: str | None = None,
+    session_cookie: str | None = None,
+) -> dict[str, object]:
+    return _require_accountant_or_admin(
+        user_header=user_header,
+        session_header=session_header,
+        session_cookie=session_cookie,
+        store_factory=get_workflow_store,
+    )
 
 
 def require_client_access(

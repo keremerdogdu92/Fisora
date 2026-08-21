@@ -20,6 +20,10 @@ from app.workflows.document_processing import parser_kind_for_document_type, pro
 OperationRecorder = Callable[..., dict[str, object]]
 AccessChecker = Callable[..., dict[str, object]]
 
+MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
+INVOICE_SUFFIXES = {".pdf"}
+EINVOICE_XML_SUFFIXES = {".xml"}
+
 
 def file_fingerprint(path: Path) -> str:
     hasher = hashlib.sha256()
@@ -71,6 +75,14 @@ class DocumentService:
     ) -> dict[str, object]:
         if not client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required for document upload")
+        suffix = Path(file_name).suffix.lower()
+        if document_type == "invoice" and suffix not in INVOICE_SUFFIXES:
+            raise HTTPException(status_code=400, detail="invoice upload requires a PDF file")
+        if document_type == "einvoice_xml" and suffix not in EINVOICE_XML_SUFFIXES:
+            raise HTTPException(status_code=400, detail="e-invoice XML upload requires an XML file")
+        effective_size = len(content) if content is not None else int(size_bytes or 0)
+        if effective_size > MAX_DOCUMENT_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="document upload exceeds 50 MB limit")
         request_user = (request_user_id or "").strip()
         effective_user_id = uploaded_by_user_id.strip() or uploaded_by.strip() or request_user
         if request_user and effective_user_id and request_user != effective_user_id:

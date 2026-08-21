@@ -9,6 +9,7 @@ from fastapi import APIRouter, Cookie, File, Form, Header, HTTPException, Query,
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
     get_workspace_service,
+    require_accountant_or_admin,
 )
 from app.api.phase0_schemas import (
     ChartAccountsStorePayload,
@@ -34,7 +35,13 @@ def onboarding_check(payload: ClientProfilePayload) -> dict[str, object]:
 
 
 @router.post("/store/client")
-def store_client(payload: ClientProfilePayload) -> dict[str, object]:
+def store_client(
+    payload: ClientProfilePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_workspace_service().store_client(payload)
 
 
@@ -52,7 +59,13 @@ def store_clients(
 
 
 @router.post("/store/chart-accounts")
-def store_chart_accounts(payload: ChartAccountsStorePayload) -> dict[str, object]:
+def store_chart_accounts(
+    payload: ChartAccountsStorePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_workspace_service().store_chart_accounts(payload)
 
 
@@ -80,7 +93,13 @@ async def store_chart_accounts_upload(
 
 
 @router.post("/chart-accounts/parse")
-async def parse_chart_accounts_upload(file: UploadFile = File(...)) -> dict[str, object]:
+async def parse_chart_accounts_upload(
+    file: UploadFile = File(...),
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     original_name = Path(file.filename or "chart_accounts.csv").name
     content = await file.read()
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -99,6 +118,7 @@ def store_client_onboarding_package(
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_workspace_service().store_client_onboarding_package(
         payload,
         x_fisora_user_id=x_fisora_user_id,
@@ -108,7 +128,13 @@ def store_client_onboarding_package(
 
 
 @router.post("/tax-certificate/parse")
-async def parse_tax_certificate_upload(file: UploadFile = File(...)) -> dict[str, object]:
+async def parse_tax_certificate_upload(
+    file: UploadFile = File(...),
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     suffix = Path(file.filename or "tax-certificate.pdf").suffix.lower() or ".pdf"
     if suffix not in {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
         raise HTTPException(status_code=400, detail="unsupported tax certificate file type")

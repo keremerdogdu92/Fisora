@@ -568,7 +568,7 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         "ai_trace": [
             {"stage": "source_reader", "provider": str(getattr(reader_attempt, "provider", "gemini") or "gemini"), "model": str(getattr(reader_attempt, "resolved_model", "") or getattr(reader_attempt, "model_alias", "") or ""), "status": str(getattr(reader_attempt, "status", "successful") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("reader", 0))},
             {"stage": "identity_planner", "provider": str(getattr(planner_attempt, "provider", "gemini") or "gemini"), "model": str(getattr(planner_attempt, "resolved_model", "") or getattr(planner_attempt, "model_alias", "") or ""), "status": str(getattr(planner_attempt, "status", "successful") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("planner", 0))},
-            {"stage": "final_accountant", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": "successful", "elapsed_ms": int(stage_elapsed_ms.get("accountant", 0))},
+            {"stage": "final_accountant", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_stage_status") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("accountant", 0))},
         ],
     }
 
@@ -651,12 +651,25 @@ def run_three_stage_accounting_pipeline(*, reader_provider: object, final_provid
         provider=reader_provider, source_text=source_text, client=client,
         current_candidates=current_candidates, expected_direction=expected_direction,
     )
-    final_output, accountant_ms = run_final_accountant_stage(
-        provider=final_provider, source_text=source_text, semantic_plan=semantic_plan, chart_text=chart_text,
-        client=client, expected_direction=expected_direction,
-    )
+    final_started = perf_counter()
+    try:
+        final_output, accountant_ms = run_final_accountant_stage(
+            provider=final_provider, source_text=source_text, semantic_plan=semantic_plan, chart_text=chart_text,
+            client=client, expected_direction=expected_direction,
+        )
+    except Exception as exc:
+        accountant_ms = round((perf_counter() - final_started) * 1000)
+        final_output = {
+            "warnings": ["final_accountant_unavailable"],
+            "summary": "Kaynak satırlar hazır; muhasebe önerisi alınamadı.",
+            "_stage_status": "failed",
+            "_stage_error_type": type(exc).__name__,
+        }
 
-    journal_lines, composition_warnings = _compose_journal(final_output, semantic_plan, account_names)
+    if str(final_output.get("_stage_status") or "") == "failed":
+        journal_lines, composition_warnings = [], []
+    else:
+        journal_lines, composition_warnings = _compose_journal(final_output, semantic_plan, account_names)
     warnings = [
         *[str(item) for item in final_output.get("warnings") or [] if str(item).strip()],
         *composition_warnings,

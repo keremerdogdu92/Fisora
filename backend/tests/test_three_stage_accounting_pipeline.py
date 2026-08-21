@@ -201,5 +201,30 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(run.result["export_status"], "review_required")
 
 
+    def test_final_failure_preserves_source_review_rows(self) -> None:
+        class FailingFinalProvider:
+            provider_name = "xkiro"
+            model = "deepseek/deepseek-v4-flash"
+
+            def _post_structured_json(self, **kwargs: object) -> dict[str, object]:
+                raise ValueError("invalid structured output")
+
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(READER, PLANNER),
+            final_provider=FailingFinalProvider(),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+
+        self.assertEqual(run.result["source_review_row_count"], 2)
+        self.assertEqual(run.result["source_review_rows"][1]["description"], "Gecikme Bedeli")
+        self.assertEqual(run.result["draft_lines"], [])
+        self.assertIn("final_accountant_unavailable", run.result["review_reason_codes"])
+        self.assertEqual(run.result["processing_status"], "completed")
+        self.assertEqual(run.result["ai_trace"][-1]["status"], "failed")
+
 if __name__ == "__main__":
     unittest.main()

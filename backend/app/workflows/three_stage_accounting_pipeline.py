@@ -199,7 +199,10 @@ def _money(value: object) -> Decimal:
     if not text:
         return Decimal("0")
     if "," in text and "." in text:
-        text = text.replace(".", "").replace(",", ".")
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
     elif "," in text:
         text = text.replace(",", ".")
     try:

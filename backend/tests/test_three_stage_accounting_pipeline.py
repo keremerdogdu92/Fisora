@@ -8,6 +8,7 @@ import unittest
 
 from app.workflows.three_stage_accounting_pipeline import (
     _compose_journal,
+    _money,
     run_three_stage_accounting_pipeline,
     three_stage_accounting_enabled,
 )
@@ -150,6 +151,10 @@ FINAL = {
 
 
 class ThreeStageAccountingPipelineTests(unittest.TestCase):
+    def test_money_parser_supports_turkish_and_us_grouping(self) -> None:
+        self.assertEqual(str(_money("1.641,20 TRY")), "1641.20")
+        self.assertEqual(str(_money("1,641.20 TRY")), "1641.20")
+
     def test_feature_flag_is_independent(self) -> None:
         self.assertTrue(three_stage_accounting_enabled({"FISORA_THREE_STAGE_ACCOUNTING_ENABLED": "true"}))
         self.assertFalse(three_stage_accounting_enabled({"FISORA_AI_FIRST_RESCUE_ENABLED": "true"}))

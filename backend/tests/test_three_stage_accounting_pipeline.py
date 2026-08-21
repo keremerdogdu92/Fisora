@@ -58,6 +58,21 @@ class FakeFinalProvider:
         return dict(self.payload)
 
 
+class SequenceFinalProvider:
+    provider_name = "xkiro"
+    model = "anthropic/claude-opus-4.8"
+
+    def __init__(self, payloads: list[dict[str, object]]) -> None:
+        self.payloads = list(payloads)
+        self.calls: list[dict[str, object]] = []
+
+    def _post_structured_json(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(dict(kwargs))
+        if not self.payloads:
+            raise AssertionError("unexpected final provider call")
+        return dict(self.payloads.pop(0))
+
+
 def account(code: str, name: str, tax_id: str = "") -> dict[str, object]:
     return {
         "normalized_account_code": code,
@@ -225,6 +240,31 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(len(run.result["line_decision_coverage"]["missing_ids"]), 1)
         self.assertEqual(run.result["export_status"], "review_required")
 
+
+    def test_unbalanced_final_gets_one_ai_self_repair_and_uses_balanced_result(self) -> None:
+        first = dict(FINAL)
+        first["counterparty_posting"] = {"description": "Tedarikçi borcu", "debit": "0", "credit": "1100.00", "source_positions": ["1", "8"]}
+        provider = SequenceFinalProvider([first, FINAL])
+        run = run_three_stage_accounting_pipeline(reader_provider=FakeReaderPlanner(READER, PLANNER), final_provider=provider, source_bytes=b"%PDF-1.7 test", source_sha256="abc", workspace=WORKSPACE, tenant_tax_id="29021276942", expected_direction="purchase")
+        self.assertEqual(len(provider.calls), 2)
+        self.assertTrue(run.result["is_balanced"])
+        self.assertTrue(run.result["three_stage_self_repair_attempted"])
+        self.assertEqual(run.result["three_stage_self_repair_status"], "successful")
+        self.assertNotIn("draft_unbalanced", run.result["review_reason_codes"])
+        self.assertEqual(run.result["ai_trace"][-1]["stage"], "final_accountant_repair")
+        self.assertIn("repair_context", provider.calls[1]["user_payload"])
+
+    def test_unbalanced_self_repair_does_not_replace_first_draft_when_still_unbalanced(self) -> None:
+        first = dict(FINAL)
+        first["counterparty_posting"] = {"description": "Tedarikçi borcu", "debit": "0", "credit": "1100.00", "source_positions": ["1", "8"]}
+        second = dict(FINAL)
+        second["counterparty_posting"] = {"description": "Tedarikçi borcu", "debit": "0", "credit": "1125.00", "source_positions": ["1", "8"]}
+        run = run_three_stage_accounting_pipeline(reader_provider=FakeReaderPlanner(READER, PLANNER), final_provider=SequenceFinalProvider([first, second]), source_bytes=b"%PDF-1.7 test", source_sha256="abc", workspace=WORKSPACE, tenant_tax_id="29021276942", expected_direction="purchase")
+        self.assertFalse(run.result["is_balanced"])
+        self.assertEqual(run.result["total_credit"], "1100.00")
+        self.assertEqual(run.result["three_stage_self_repair_status"], "unbalanced")
+        self.assertIn("draft_unbalanced", run.result["review_reason_codes"])
+        self.assertIn("unbalanced_self_repair_unbalanced", run.result["review_reason_codes"])
 
     def test_final_failure_preserves_source_review_rows(self) -> None:
         class FailingFinalProvider:

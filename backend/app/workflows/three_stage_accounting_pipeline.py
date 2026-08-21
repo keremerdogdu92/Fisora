@@ -606,6 +606,9 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         "export_status": "review_required",
         "ai_resolution_status": "ai_retry_required" if final_failed else "",
         "ai_retry_reason": "final_accountant_unavailable" if final_failed else "",
+        "three_stage_self_repair_attempted": bool(final_output.get("_repair_attempted")),
+        "three_stage_self_repair_status": str(final_output.get("_repair_status") or ""),
+        "three_stage_self_repair_elapsed_ms": int(final_output.get("_repair_elapsed_ms") or 0),
         "pipeline_warnings": reason_codes,
         "review_reason_codes": reason_codes,
         "risk_flags": reason_codes,
@@ -634,7 +637,7 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
             {"stage": "source_reader", "provider": str(getattr(reader_attempt, "provider", "gemini") or "gemini"), "model": str(getattr(reader_attempt, "resolved_model", "") or getattr(reader_attempt, "model_alias", "") or ""), "status": str(getattr(reader_attempt, "status", "successful") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("reader", 0))},
             {"stage": "identity_planner", "provider": str(getattr(planner_attempt, "provider", "gemini") or "gemini"), "model": str(getattr(planner_attempt, "resolved_model", "") or getattr(planner_attempt, "model_alias", "") or ""), "status": str(getattr(planner_attempt, "status", "successful") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("planner", 0))},
             {"stage": "final_accountant", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_stage_status") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("accountant", 0))},
-        ],
+        ] + ([{"stage": "final_accountant_repair", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_repair_status") or "failed"), "elapsed_ms": int(final_output.get("_repair_elapsed_ms") or 0)}] if final_output.get("_repair_attempted") else []),
     }
 
 
@@ -673,16 +676,21 @@ def run_semantic_planner_stage(*, provider: object, source_text: str, client: Ma
     return dict(raw), getattr(raw, "attempt", None), elapsed_ms
 
 
-def run_final_accountant_stage(*, provider: object, source_text: str, semantic_plan: Mapping[str, object], chart_text: str, client: Mapping[str, object] | None = None, expected_direction: str = "") -> tuple[dict[str, Any], int]:
+def run_final_accountant_stage(*, provider: object, source_text: str, semantic_plan: Mapping[str, object], chart_text: str, client: Mapping[str, object] | None = None, expected_direction: str = "", repair_context: Mapping[str, object] | None = None) -> tuple[dict[str, Any], int]:
     started = perf_counter()
     final_error: Exception | None = None
+    instructions = ACCOUNTANT_INSTRUCTIONS
+    payload: dict[str, object] = {"client": dict(client or {}), "expected_direction": expected_direction, "invoice_source_text": source_text, "semantic_plan": dict(semantic_plan), "chart_accounts": chart_text}
+    if repair_context:
+        payload["repair_context"] = dict(repair_context)
+        instructions += " A previous draft was rejected because debit and credit were not equal. Re-evaluate the same source facts and return a complete corrected draft. Do not invent amounts, do not add an unsupported balancing line, and do not alter printed source totals merely to force balance."
     for final_attempt_no in range(2):
         try:
             raw = _call_structured(
                 provider,
                 schema_name="fisora_planner_owned_counterparty_accountant",
-                instructions=ACCOUNTANT_INSTRUCTIONS,
-                payload={"client": dict(client or {}), "expected_direction": expected_direction, "invoice_source_text": source_text, "semantic_plan": dict(semantic_plan), "chart_accounts": chart_text},
+                instructions=instructions,
+                payload=payload,
                 schema=ACCOUNTANT_SCHEMA,
             )
             return dict(raw), round((perf_counter() - started) * 1000)
@@ -731,16 +739,38 @@ def run_three_stage_accounting_pipeline(*, reader_provider: object, final_provid
             "_stage_error_type": type(exc).__name__,
         }
 
+    repair_ms = 0
     if str(final_output.get("_stage_status") or "") == "failed":
         journal_lines, composition_warnings = [], []
     else:
         journal_lines, composition_warnings = _compose_journal(final_output, semantic_plan, account_names)
+        debit_before_repair, credit_before_repair = _totals(journal_lines)
+        if journal_lines and debit_before_repair != credit_before_repair:
+            repair_started = perf_counter()
+            repair_status = "failed"
+            repair_context = {"computed_total_debit": f"{debit_before_repair:.2f}", "computed_total_credit": f"{credit_before_repair:.2f}", "difference": f"{abs(debit_before_repair-credit_before_repair):.2f}", "previous_draft": dict(final_output)}
+            try:
+                repaired_output, repair_ms = run_final_accountant_stage(provider=final_provider, source_text=source_text, semantic_plan=semantic_plan, chart_text=chart_text, client=client, expected_direction=expected_direction, repair_context=repair_context)
+                repaired_lines, repaired_warnings = _compose_journal(repaired_output, semantic_plan, account_names)
+                repaired_debit, repaired_credit = _totals(repaired_lines)
+                if repaired_lines and repaired_debit == repaired_credit:
+                    final_output, journal_lines, composition_warnings = repaired_output, repaired_lines, repaired_warnings
+                    repair_status = "successful"
+                else:
+                    repair_status = "unbalanced"
+            except Exception:
+                repair_ms = round((perf_counter() - repair_started) * 1000)
+            final_output["_repair_attempted"] = True
+            final_output["_repair_status"] = repair_status
+            final_output["_repair_elapsed_ms"] = repair_ms
+            if repair_status != "successful":
+                composition_warnings = [*composition_warnings, f"unbalanced_self_repair_{repair_status}"]
     warnings = [
         *[str(item) for item in final_output.get("warnings") or [] if str(item).strip()],
         *composition_warnings,
         *_row_coverage_warning(source_package, final_output),
     ]
-    stage_elapsed_ms = {"reader": reader_ms, "planner": planner_ms, "accountant": accountant_ms, "total": reader_ms + planner_ms + accountant_ms}
+    stage_elapsed_ms = {"reader": reader_ms, "planner": planner_ms, "accountant": accountant_ms, "accountant_repair": repair_ms, "total": reader_ms + planner_ms + accountant_ms + repair_ms}
     result = _compatibility_result(
         package=source_package,
         plan=semantic_plan,

@@ -169,6 +169,9 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(result["source_review_posting_candidate_count"], 1)
         self.assertEqual(result["source_review_rows"][1]["description"], "Gecikme Bedeli")
         self.assertEqual(result["source_review_rows"][1]["amount"], "23,44")
+        self.assertEqual(result["line_decision_coverage"]["status"], "valid")
+        self.assertEqual(len(result["line_decisions"]), 2)
+        self.assertTrue(all(item.get("canonical_line_id") for item in result["line_decisions"]))
         self.assertIn("SATIR 1: İnternet", run.source_text)
         self.assertNotIn("new_counterparty_required", result["review_reason_codes"])
 
@@ -218,6 +221,8 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
             expected_direction="purchase",
         )
         self.assertIn("row_coverage_incomplete", run.result["review_reason_codes"])
+        self.assertEqual(run.result["line_decision_coverage"]["status"], "invalid")
+        self.assertEqual(len(run.result["line_decision_coverage"]["missing_ids"]), 1)
         self.assertEqual(run.result["export_status"], "review_required")
 
 
@@ -243,6 +248,8 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(run.result["source_review_rows"][1]["description"], "Gecikme Bedeli")
         self.assertEqual(run.result["draft_lines"], [])
         self.assertIn("final_accountant_unavailable", run.result["review_reason_codes"])
+        self.assertEqual(run.result["ai_resolution_status"], "ai_retry_required")
+        self.assertEqual(run.result["ai_retry_reason"], "final_accountant_unavailable")
         self.assertEqual(run.result["processing_status"], "completed")
         self.assertEqual(run.result["ai_trace"][-1]["status"], "failed")
 

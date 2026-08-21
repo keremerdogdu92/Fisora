@@ -1266,18 +1266,32 @@ class NormalizedAccountingRepository:
                             "update invoice_lines set superseded_at = now() where id = %s",
                             (stale_line_id,),
                         )
-                allocation_plan, allocation_coverage = _allocation_plan(
-                    canonical_lines=lines,
-                    draft_lines=draft_lines,
-                    line_decisions=result.get("line_decisions"),
-                )
+                three_stage_source_reconstruction = bool(result.get("three_stage_accounting_used"))
+                if three_stage_source_reconstruction:
+                    allocation_plan = []
+                    allocation_coverage = {
+                        "status": "not_applicable",
+                        "reason": "three_stage_source_reconstruction_uses_row_decision_coverage",
+                        "canonical_line_count": len(lines),
+                        "allocation_count": 0,
+                    }
+                else:
+                    allocation_plan, allocation_coverage = _allocation_plan(
+                        canonical_lines=lines,
+                        draft_lines=draft_lines,
+                        line_decisions=result.get("line_decisions"),
+                    )
                 result["line_allocation_coverage"] = allocation_coverage
                 line_decision_coverage = result.get("line_decision_coverage")
                 line_decision_valid = (
                     isinstance(line_decision_coverage, dict)
                     and str(line_decision_coverage.get("status") or "") == "valid"
                 )
-                if allocation_coverage["status"] != "valid" or not line_decision_valid:
+                allocation_invalid = (
+                    not three_stage_source_reconstruction
+                    and allocation_coverage["status"] != "valid"
+                )
+                if allocation_invalid or not line_decision_valid:
                     result["export_status"] = "review_required"
                     result["review_reason_codes"] = list(
                         dict.fromkeys(
@@ -1285,7 +1299,7 @@ class NormalizedAccountingRepository:
                                 *(result.get("review_reason_codes") or []),
                                 *(
                                     ["canonical_line_allocation_incomplete"]
-                                    if allocation_coverage["status"] != "valid"
+                                    if allocation_invalid
                                     else []
                                 ),
                                 *(["canonical_line_decision_incomplete"] if not line_decision_valid else []),
@@ -1600,11 +1614,21 @@ class NormalizedAccountingRepository:
                             ]
                         )
                     )
-                allocation_plan, allocation_coverage = _allocation_plan(
-                    canonical_lines=canonical_lines,
-                    draft_lines=draft_lines,
-                    line_decisions=corrected_result.get("line_decisions"),
-                )
+                three_stage_source_reconstruction = bool(corrected_result.get("three_stage_accounting_used"))
+                if three_stage_source_reconstruction:
+                    allocation_plan = []
+                    allocation_coverage = {
+                        "status": "not_applicable",
+                        "reason": "three_stage_source_reconstruction_uses_row_decision_coverage",
+                        "canonical_line_count": len(canonical_lines),
+                        "allocation_count": 0,
+                    }
+                else:
+                    allocation_plan, allocation_coverage = _allocation_plan(
+                        canonical_lines=canonical_lines,
+                        draft_lines=draft_lines,
+                        line_decisions=corrected_result.get("line_decisions"),
+                    )
                 corrected_result["line_allocation_coverage"] = allocation_coverage
                 expected_line_ids = {str(line.get("canonical_line_id") or "") for line in canonical_lines}
                 received_line_ids = [
@@ -1674,12 +1698,13 @@ class NormalizedAccountingRepository:
                     and str(corrected_result.get("canonical_validation_status") or "") == "valid"
                 )
                 requested_approval = str(decision.get("action") or "") in {"approve", "approve_with_changes"}
+                allocation_valid = three_stage_source_reconstruction or allocation_coverage["status"] == "valid"
                 approved = (
                     requested_approval
                     and total_debit > 0
                     and canonical_valid
                     and line_decision_valid
-                    and allocation_coverage["status"] == "valid"
+                    and allocation_valid
                     and not unusable_accounts
                     and not material_reasons
                     and document_currency == "TRY"
@@ -1697,7 +1722,7 @@ class NormalizedAccountingRepository:
                                 *(["canonical_validation_required"] if not canonical_valid else []),
                                 *(
                                     ["canonical_line_allocation_incomplete"]
-                                    if allocation_coverage["status"] != "valid"
+                                    if not allocation_valid
                                     else []
                                 ),
                                 *(["canonical_line_decision_incomplete"] if not line_decision_valid else []),

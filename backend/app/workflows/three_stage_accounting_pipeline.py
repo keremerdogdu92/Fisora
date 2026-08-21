@@ -450,6 +450,60 @@ def _row_coverage_warning(package: Mapping[str, object], final_output: Mapping[s
     return [] if expected == actual else ["row_coverage_incomplete"]
 
 
+def _canonical_line_decisions(
+    canonical: Mapping[str, object],
+    final_output: Mapping[str, object],
+) -> tuple[list[dict[str, object]], dict[str, object]]:
+    canonical_rows = [item for item in canonical.get("line_items") or [] if isinstance(item, Mapping)]
+    rows_by_position: dict[str, list[Mapping[str, object]]] = {}
+    expected_ids: list[str] = []
+    for row in canonical_rows:
+        canonical_line_id = str(row.get("canonical_line_id") or "")
+        if canonical_line_id:
+            expected_ids.append(canonical_line_id)
+        position = _normalized_source_position(row.get("source_position"))
+        if position:
+            rows_by_position.setdefault(position, []).append(row)
+
+    decisions: list[dict[str, object]] = []
+    received_ids: list[str] = []
+    unmatched_positions: list[str] = []
+    ambiguous_positions: list[str] = []
+    for raw in final_output.get("row_decisions") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        decision = dict(raw)
+        position = _normalized_source_position(raw.get("source_position"))
+        matches = rows_by_position.get(position, [])
+        canonical_line_id = ""
+        if len(matches) == 1:
+            canonical_line_id = str(matches[0].get("canonical_line_id") or "")
+        elif len(matches) > 1:
+            ambiguous_positions.append(position)
+        else:
+            unmatched_positions.append(position)
+        decision["canonical_line_id"] = canonical_line_id
+        decisions.append(decision)
+        if canonical_line_id:
+            received_ids.append(canonical_line_id)
+
+    duplicate_ids = sorted({line_id for line_id in received_ids if received_ids.count(line_id) > 1})
+    missing_ids = sorted(set(expected_ids) - set(received_ids))
+    valid = bool(expected_ids) and len(decisions) == len(expected_ids) and not (
+        missing_ids or duplicate_ids or unmatched_positions or ambiguous_positions
+    )
+    return decisions, {
+        "status": "valid" if valid else "invalid",
+        "expected_ids": expected_ids,
+        "received_ids": received_ids,
+        "missing_ids": missing_ids,
+        "duplicate_ids": duplicate_ids,
+        "unknown_ids": [],
+        "unmatched_source_positions": unmatched_positions,
+        "ambiguous_source_positions": ambiguous_positions,
+    }
+
+
 def _party_projection(package: Mapping[str, object], plan: Mapping[str, object]) -> tuple[dict[str, str], dict[str, str]]:
     parties = [item for item in package.get("principal_parties") or [] if isinstance(item, Mapping)]
     our_index = str(plan.get("our_party_index") or "unknown")
@@ -472,9 +526,11 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         canonical["supplier_party"], canonical["customer_party"] = own, counterparty
     else:
         canonical["supplier_party"], canonical["customer_party"] = counterparty, own
+    line_decisions, line_decision_coverage = _canonical_line_decisions(canonical, final_output)
     draft_lines = _draft_lines(journal_lines)
     debit, credit = _totals(journal_lines)
     reason_codes = list(dict.fromkeys(str(item) for item in warnings if str(item).strip()))
+    final_failed = str(final_output.get("_stage_status") or "") == "failed" or "final_accountant_unavailable" in reason_codes
     if debit != credit:
         reason_codes.append("draft_unbalanced")
     if any(not str(line.get("account_code") or "") for line in draft_lines):
@@ -526,7 +582,8 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         "canonical_validation_reasons": reason_codes,
         "canonical_extraction_ai_used": True,
         "draft_lines": draft_lines,
-        "line_decisions": list(final_output.get("row_decisions") or []),
+        "line_decisions": line_decisions,
+        "line_decision_coverage": line_decision_coverage,
         "total_debit": f"{debit:.2f}",
         "total_credit": f"{credit:.2f}",
         "is_balanced": debit == credit,
@@ -547,6 +604,8 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         "draft_balance_status": "balanced" if debit == credit else "unbalanced",
         "review_status": "review_required",
         "export_status": "review_required",
+        "ai_resolution_status": "ai_retry_required" if final_failed else "",
+        "ai_retry_reason": "final_accountant_unavailable" if final_failed else "",
         "pipeline_warnings": reason_codes,
         "review_reason_codes": reason_codes,
         "risk_flags": reason_codes,

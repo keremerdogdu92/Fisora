@@ -1,3 +1,5 @@
+// File: frontend/app/portal-types.ts
+// Summary: Defines portal domain, processing progress, review, workspace, and integration view types.
 export type IntakeCategory = "sales_invoice" | "purchase_invoice" | "bank_statement" | "special_document";
 
 export type DraftLine = {
@@ -163,6 +165,20 @@ export type PilotStatus =
   | "exported"
   | "post_export_correction_requested";
 
+export type DocumentProcessingStage = {
+  status: "pending" | "processing" | "completed" | "failed" | string;
+  elapsedMs: number;
+};
+
+export type DocumentProcessingStages = {
+  attemptId: string;
+  attemptCount: number;
+  currentStage: string;
+  reader: DocumentProcessingStage;
+  planner: DocumentProcessingStage;
+  final: DocumentProcessingStage;
+};
+
 export type PilotDocument = {
   id: string;
   clientId: string;
@@ -221,6 +237,7 @@ export type PilotDocument = {
   exportGateReason: string;
   draftStatus: string;
   draftConfidence?: number;
+  processingStages?: DocumentProcessingStages;
   primarySuggestion?: Record<string, unknown>;
   reviewBlockers?: string[];
   automationEligibility?: string;

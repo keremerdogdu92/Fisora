@@ -1,3 +1,5 @@
+# File: backend/app/api/phase0_routes_workspace.py
+# Summary: Exposes authenticated workspace, onboarding, document progress, and document-management HTTP routes.
 from __future__ import annotations
 
 from pathlib import Path
@@ -159,6 +161,23 @@ def store_workspace(
     return get_workspace_service().store_workspace(
         client_id=client_id,
         view=view,
+        x_fisora_user_id=x_fisora_user_id,
+        x_fisora_session=x_fisora_session,
+        fisora_session=fisora_session,
+    )
+
+
+@router.get("/store/workspace/{client_id}/documents/{document_ref}/progress")
+def document_processing_progress(
+    client_id: str,
+    document_ref: str,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_workspace_service().document_processing_progress(
+        client_id=client_id,
+        document_ref=document_ref,
         x_fisora_user_id=x_fisora_user_id,
         x_fisora_session=x_fisora_session,
         fisora_session=fisora_session,

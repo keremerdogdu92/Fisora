@@ -195,6 +195,24 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertIn("SATIR 1: İnternet", run.source_text)
         self.assertNotIn("new_counterparty_required", result["review_reason_codes"])
 
+    def test_stage_observer_reports_reader_planner_and_final_boundaries(self) -> None:
+        events: list[tuple[str, dict[str, object]]] = []
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(READER, PLANNER),
+            final_provider=FakeFinalProvider(FINAL),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+            stage_observer=lambda event, payload: events.append((event, dict(payload))),
+        )
+        self.assertEqual([event for event, _ in events], ["reader_completed", "planner_completed", "final_completed"])
+        self.assertEqual(events[0][1]["source_package"]["invoice_table_rows"][0]["source_position"], "1")
+        self.assertEqual(events[1][1]["semantic_plan"]["accounting_direction"], "purchase")
+        self.assertEqual(events[2][1]["status"], "completed")
+        self.assertEqual(run.result["processing_status"], "completed")
+
     def test_vat_summary_ignores_tax_base_labels(self) -> None:
         reader_payload = dict(READER)
         reader_payload["printed_summary_lines"] = [
@@ -297,6 +315,24 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(run.result["ai_retry_reason"], "final_accountant_unavailable")
         self.assertEqual(run.result["processing_status"], "completed")
         self.assertEqual(run.result["ai_trace"][-1]["status"], "failed")
+
+
+    def test_reader_failure_is_reported_to_stage_observer(self) -> None:
+        class FailingReader:
+            def generate_structured_json(self, **kwargs: object) -> FakeResult:
+                raise RuntimeError("reader unavailable")
+
+        events: list[tuple[str, dict[str, object]]] = []
+        with self.assertRaises(RuntimeError):
+            run_three_stage_accounting_pipeline(
+                reader_provider=FailingReader(), final_provider=FakeFinalProvider(FINAL),
+                source_bytes=b"%PDF-1.7 test", source_sha256="abc", workspace=WORKSPACE,
+                tenant_tax_id="29021276942", expected_direction="purchase",
+                stage_observer=lambda event, payload: events.append((event, dict(payload))),
+            )
+        self.assertEqual(events[0][0], "reader_failed")
+        self.assertEqual(events[0][1]["status"], "failed")
+
 
 if __name__ == "__main__":
     unittest.main()

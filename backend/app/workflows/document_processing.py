@@ -1,3 +1,5 @@
+# File: backend/app/workflows/document_processing.py
+# Summary: Orchestrates document parsing, AI-first invoice processing, progressive stage snapshots, persistence, retries, and processing metrics.
 from __future__ import annotations
 
 from dataclasses import asdict, replace
@@ -9,7 +11,7 @@ from os import environ
 from pathlib import Path
 import re
 import time
-from typing import Any
+from typing import Any, Mapping
 import unicodedata
 from uuid import uuid4
 
@@ -1370,6 +1372,7 @@ def _run_gemini_pdf_v2_for_worker(
     max_parallel_accounting_chunks: int = 1,
     candidate_experiment_percent: int | None = None,
     max_accounting_request_bytes: int | None = None,
+    processing_job: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], object]:
     path = _stored_path(document)
     if path is None:
@@ -1413,6 +1416,58 @@ def _run_gemini_pdf_v2_for_worker(
             final_provider = _accounting_provider_from_env("xkiro", environ)
         except ValueError as exc:
             raise RetryableDocumentTechnicalError("three_stage_final_provider_unavailable") from exc
+        processing_snapshot: dict[str, Any] = {
+            "pipeline": "three_stage_accounting",
+            "attempt_id": str((processing_job or {}).get("normalized_attempt_id") or ""),
+            "attempt_count": int((processing_job or {}).get("attempt_count") or 0),
+            "document_ref": str(document.get("document_ref") or document.get("document_id") or ""),
+            "current_stage": "reader",
+            "stages": {
+                "reader": {"status": "processing", "elapsed_ms": 0},
+                "planner": {"status": "pending", "elapsed_ms": 0},
+                "final": {"status": "pending", "elapsed_ms": 0},
+            },
+            "reader": {},
+            "planner": {},
+        }
+
+        def persist_stage_snapshot(event: str, payload: Mapping[str, object]) -> None:
+            if not processing_job or not hasattr(store, "update_processing_snapshot"):
+                return
+            stages = processing_snapshot["stages"]
+            assert isinstance(stages, dict)
+            if event == "reader_completed":
+                processing_snapshot["reader"] = dict(payload.get("source_package") or {})
+                stages["reader"] = {"status": "completed", "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                stages["planner"] = {"status": "processing", "elapsed_ms": 0}
+                processing_snapshot["current_stage"] = "planner"
+            elif event == "reader_failed":
+                stages["reader"] = {"status": "failed", "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                processing_snapshot["current_stage"] = "reader"
+            elif event == "planner_completed":
+                processing_snapshot["planner"] = dict(payload.get("semantic_plan") or {})
+                stages["planner"] = {"status": "completed", "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                stages["final"] = {"status": "processing", "elapsed_ms": 0}
+                processing_snapshot["current_stage"] = "final"
+            elif event == "planner_failed":
+                stages["planner"] = {"status": "failed", "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                processing_snapshot["current_stage"] = "planner"
+            elif event == "final_completed":
+                final_status = str(payload.get("status") or "completed")
+                stages["final"] = {"status": final_status, "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                processing_snapshot["current_stage"] = "failed" if final_status == "failed" else "completed"
+            processing_snapshot["updated_at"] = datetime.now(UTC).isoformat()
+            try:
+                store.update_processing_snapshot(
+                    job_id=str(processing_job.get("id") or ""), processing_snapshot=processing_snapshot,
+                    attempt_id=str(processing_job.get("normalized_attempt_id") or ""),
+                    attempt_count=int(processing_job.get("attempt_count") or 0),
+                )
+            except Exception:
+                # Progressive UI persistence must never change the AI accounting outcome.
+                return
+
+        persist_stage_snapshot("reader_started", {})
         three_stage = run_three_stage_accounting_pipeline(
             reader_provider=provider,
             final_provider=final_provider,
@@ -1426,6 +1481,7 @@ def _run_gemini_pdf_v2_for_worker(
                 "nace_code": str(profile.get("nace_code") or ""),
                 "activity_tags": list(profile.get("activity_tags") or []),
             },
+            stage_observer=persist_stage_snapshot,
         )
         receipt_ids: list[str] = []
         for stage, attempt, prompt_version in (
@@ -2743,6 +2799,7 @@ def process_next_job_once(
                 extraction_provider=extraction_provider,
                 accounting_provider=accounting_provider,
                 artifact_repository=artifact_repository,
+                processing_job=job,
                 max_parallel_accounting_chunks=max_parallel_accounting_chunks,
                 candidate_experiment_percent=candidate_experiment_percent,
                 max_accounting_request_bytes=max_accounting_request_bytes,

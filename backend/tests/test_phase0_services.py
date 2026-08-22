@@ -1,3 +1,5 @@
+# File: backend/tests/test_phase0_services.py
+# Summary: Verifies phase0 workspace, document, review, export, access, and progressive processing services.
 from __future__ import annotations
 
 from pathlib import Path
@@ -1021,6 +1023,77 @@ class Phase0ServiceTests(unittest.TestCase):
         ])
         self.assertEqual(workspace["document_pipeline_events"][0]["message_tr"], "Müşavir muhasebe fişine müdahale etti.")
         self.assertEqual(workspace["documents"][0]["export_status"], "export_ready")
+
+
+class ProgressiveProcessingServiceTests(unittest.TestCase):
+    def test_selected_document_progress_exposes_latest_job_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            service = WorkspaceService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+                request_user_id=request_user_id,
+            )
+            job = store.create_processing_job(
+                client_id="client-1",
+                document_ref="doc-1",
+                document_type="invoice",
+                parser_kind="gemini_pdf_v2",
+                intake_category="purchase_invoice",
+            )
+            claimed = store.claim_next_processing_job()
+            self.assertIsNotNone(claimed)
+            snapshot = {
+                "attempt_count": 1,
+                "current_stage": "planner",
+                "stages": {
+                    "reader": {"status": "completed", "elapsed_ms": 5000},
+                    "planner": {"status": "processing", "elapsed_ms": 0},
+                    "final": {"status": "pending", "elapsed_ms": 0},
+                },
+                "reader": {"invoice_table_rows": [{"source_position": "1"}]},
+            }
+            updated = store.update_processing_snapshot(
+                job_id=job["id"], processing_snapshot=snapshot, attempt_count=1,
+            )
+            self.assertIsNotNone(updated)
+            progress = service.document_processing_progress(
+                client_id="client-1", document_ref="doc-1",
+                x_fisora_user_id="mali-musavir", x_fisora_session=None, fisora_session=None,
+            )
+            self.assertFalse(progress["terminal"])
+            self.assertEqual(progress["job"]["id"], job["id"])
+            self.assertEqual(progress["job"]["processing_snapshot"]["current_stage"], "planner")
+            store.update_processing_job(job_id=job["id"], status="completed")
+            terminal = service.document_processing_progress(
+                client_id="client-1", document_ref="doc-1",
+                x_fisora_user_id="mali-musavir", x_fisora_session=None, fisora_session=None,
+            )
+            self.assertTrue(terminal["terminal"])
+
+    def test_snapshot_rejects_stale_attempt_after_reclaim(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            job = store.create_processing_job(
+                client_id="client-1", document_ref="doc-1",
+                document_type="invoice", parser_kind="gemini_pdf_v2",
+            )
+            first = store.claim_next_processing_job()
+            self.assertEqual(first["attempt_count"], 1)
+            store.update_processing_snapshot(
+                job_id=job["id"], processing_snapshot={"current_stage": "planner"}, attempt_count=1,
+            )
+            store.update_processing_job(job_id=job["id"], status="queued")
+            second = store.claim_next_processing_job()
+            self.assertEqual(second["attempt_count"], 2)
+            self.assertEqual(second["processing_snapshot"], {})
+            stale = store.update_processing_snapshot(
+                job_id=job["id"], processing_snapshot={"current_stage": "stale"}, attempt_count=1,
+            )
+            self.assertIsNone(stale)
+            current = next(item for item in store.list_processing_jobs(client_id="client-1") if item["id"] == job["id"])
+            self.assertEqual(current["processing_snapshot"], {})
 
 
 if __name__ == "__main__":

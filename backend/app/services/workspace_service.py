@@ -1,3 +1,5 @@
+# File: backend/app/services/workspace_service.py
+# Summary: Provides authenticated workspace reads, onboarding operations, compact projections, and selected-document processing progress.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -268,6 +270,28 @@ class WorkspaceService:
             return review_workspace_payload(workspace)
         return workspace
 
+    def document_processing_progress(
+        self, *, client_id: str, document_ref: str,
+        x_fisora_user_id: str | None, x_fisora_session: str | None, fisora_session: str | None,
+    ) -> dict[str, object]:
+        normalized_client_id = client_id.strip()
+        normalized_document_ref = document_ref.strip()
+        if not normalized_client_id or not normalized_document_ref:
+            raise HTTPException(status_code=400, detail="client_id and document_ref are required")
+        self.require_client_access(
+            client_id=normalized_client_id,
+            user_id=self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+        )
+        jobs = [
+            job for job in self.store.list_processing_jobs(client_id=normalized_client_id)
+            if str(job.get("document_ref") or "") == normalized_document_ref
+        ]
+        if not jobs:
+            raise HTTPException(status_code=404, detail="processing job not found")
+        job = max(jobs, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""))
+        status = str(job.get("status") or "")
+        return {"client_id": normalized_client_id, "document_ref": normalized_document_ref, "terminal": status in {"completed", "failed"}, "job": compact_processing_job(job)}
+
     def delete_client_documents(
         self,
         payload: ClientDocumentsDeletePayload,
@@ -491,6 +515,7 @@ def compact_processing_job(job: object) -> dict[str, object]:
     if not isinstance(job, dict):
         return {}
     allowed_keys = {
+        "id",
         "client_id",
         "created_at",
         "document_ref",
@@ -499,6 +524,11 @@ def compact_processing_job(job: object) -> dict[str, object]:
         "parser_kind",
         "period",
         "status",
+        "attempt_count",
+        "error_message",
+        "next_attempt_at",
+        "retry_step",
+        "processing_snapshot",
         "updated_at",
     }
     return {key: value for key, value in job.items() if key in allowed_keys}

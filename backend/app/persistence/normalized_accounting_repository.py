@@ -1,3 +1,5 @@
+# File: backend/app/persistence/normalized_accounting_repository.py
+# Summary: Normalized PostgreSQL accounting repository for documents, processing attempts, journals, reviews, and progressive snapshots.
 from __future__ import annotations
 
 from copy import copy
@@ -753,6 +755,7 @@ class NormalizedAccountingRepository:
                         claimed_by = case when %s then null else processing_jobs.claimed_by end,
                         claim_expires_at = case when %s then null else processing_jobs.claim_expires_at end,
                         current_attempt_id = case when %s then null else processing_jobs.current_attempt_id end,
+                        processing_snapshot = case when %s then '{}'::jsonb else processing_jobs.processing_snapshot end,
                         updated_at = case when %s then now() else processing_jobs.updated_at end
                     returning id, status, attempt_count, created_at, updated_at
                     """,
@@ -767,6 +770,7 @@ class NormalizedAccountingRepository:
                         self.tenant_id,
                         taxpayer_id,
                         document_ref,
+                        force_requeue,
                         force_requeue,
                         force_requeue,
                         force_requeue,
@@ -813,6 +817,7 @@ class NormalizedAccountingRepository:
                     update processing_jobs jobs
                     set status = 'processing',
                         attempt_count = jobs.attempt_count + 1,
+                        processing_snapshot = '{}'::jsonb,
                         claimed_by = %s,
                         claim_expires_at = now() + interval '15 minutes',
                         updated_at = now()
@@ -962,6 +967,32 @@ class NormalizedAccountingRepository:
             "affected_document_count": int(row[2] or 0),
             "status": "recovered",
         }
+
+    def update_processing_snapshot(
+        self,
+        *,
+        job_id: str,
+        processing_snapshot: dict[str, Any],
+        attempt_id: str = "",
+        attempt_count: int = 0,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    update processing_jobs
+                    set processing_snapshot = %s, updated_at = now()
+                    where tenant_id = %s and id = %s
+                      and (%s = '' or current_attempt_id = %s::uuid)
+                      and (%s = 0 or attempt_count = %s)
+                    returning document_ref, status, attempt_count, updated_at
+                    """,
+                    (self._json(processing_snapshot), self.tenant_id, job_id, attempt_id, attempt_id or None, int(attempt_count or 0), int(attempt_count or 0)),
+                )
+                row = cursor.fetchone()
+        if not row:
+            return None
+        return {"id": job_id, "document_ref": str(row[0]), "status": str(row[1]), "attempt_count": int(row[2] or 0), "processing_snapshot": dict(processing_snapshot), "updated_at": row[3].isoformat() if hasattr(row[3], "isoformat") else str(row[3])}
 
     def update_processing_job(
         self,

@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import re
 from time import perf_counter
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import httpx
 
@@ -706,7 +706,12 @@ def run_final_accountant_stage(*, provider: object, source_text: str, semantic_p
     raise final_error
 
 
-def run_three_stage_accounting_pipeline(*, reader_provider: object, final_provider: object, source_bytes: bytes, source_sha256: str, workspace: Mapping[str, object], tenant_tax_id: str = "", expected_direction: str = "", client_context: Mapping[str, object] | None = None) -> ThreeStageAccountingRun:
+def run_three_stage_accounting_pipeline(
+    *, reader_provider: object, final_provider: object, source_bytes: bytes,
+    source_sha256: str, workspace: Mapping[str, object], tenant_tax_id: str = "",
+    expected_direction: str = "", client_context: Mapping[str, object] | None = None,
+    stage_observer: Callable[[str, Mapping[str, object]], None] | None = None,
+) -> ThreeStageAccountingRun:
     if not source_bytes.startswith(b"%PDF"):
         raise ValueError("three-stage accounting requires PDF bytes")
     chart_text, current_candidates, account_names = _chart_parts(workspace)
@@ -718,15 +723,30 @@ def run_three_stage_accounting_pipeline(*, reader_provider: object, final_provid
         "activity": dict(client_context or {}),
     }
 
-    source_package, source_text, reader_attempt, reader_ms = run_source_reader_stage(
-        provider=reader_provider,
-        source_bytes=source_bytes,
-    )
+    reader_started = perf_counter()
+    try:
+        source_package, source_text, reader_attempt, reader_ms = run_source_reader_stage(
+            provider=reader_provider, source_bytes=source_bytes,
+        )
+    except Exception as exc:
+        if stage_observer is not None:
+            stage_observer("reader_failed", {"status": "failed", "elapsed_ms": round((perf_counter() - reader_started) * 1000), "error_type": type(exc).__name__})
+        raise
+    if stage_observer is not None:
+        stage_observer("reader_completed", {"source_package": source_package, "elapsed_ms": reader_ms})
 
-    semantic_plan, planner_attempt, planner_ms = run_semantic_planner_stage(
-        provider=reader_provider, source_text=source_text, client=client,
-        current_candidates=current_candidates, expected_direction=expected_direction,
-    )
+    planner_started = perf_counter()
+    try:
+        semantic_plan, planner_attempt, planner_ms = run_semantic_planner_stage(
+            provider=reader_provider, source_text=source_text, client=client,
+            current_candidates=current_candidates, expected_direction=expected_direction,
+        )
+    except Exception as exc:
+        if stage_observer is not None:
+            stage_observer("planner_failed", {"status": "failed", "elapsed_ms": round((perf_counter() - planner_started) * 1000), "error_type": type(exc).__name__})
+        raise
+    if stage_observer is not None:
+        stage_observer("planner_completed", {"semantic_plan": semantic_plan, "elapsed_ms": planner_ms})
     final_started = perf_counter()
     try:
         final_output, accountant_ms = run_final_accountant_stage(
@@ -768,6 +788,12 @@ def run_three_stage_accounting_pipeline(*, reader_provider: object, final_provid
             final_output["_repair_elapsed_ms"] = repair_ms
             if repair_status != "successful":
                 composition_warnings = [*composition_warnings, f"unbalanced_self_repair_{repair_status}"]
+    if stage_observer is not None:
+        stage_observer(
+            "final_completed",
+            {"status": "failed" if str(final_output.get("_stage_status") or "") == "failed" else "completed",
+             "elapsed_ms": accountant_ms + repair_ms},
+        )
     warnings = [
         *[str(item) for item in final_output.get("warnings") or [] if str(item).strip()],
         *composition_warnings,

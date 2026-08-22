@@ -1,3 +1,5 @@
+// File: frontend/app/portal-workspace-view.tsx
+// Summary: Renders the accountant invoice workbench, progressive AI stage cards, navigation, and final-result approval gates.
 "use client";
 
 import { useMemo, useState } from "react";
@@ -43,42 +45,44 @@ function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
 }
 
+function processingStageLabel(status?: string) {
+  if (status === "processing") return "Çalışıyor";
+  if (status === "completed") return "Tamamlandı";
+  if (status === "failed") return "Hata";
+  return "Bekliyor";
+}
+
+function processingStageDetail(status: string | undefined, elapsedMs: number | undefined, fallback: string) {
+  if (status === "completed" && elapsedMs) return `${fallback} · ${(elapsedMs / 1000).toFixed(1)} sn`;
+  return fallback;
+}
+
+function documentProcessingComplete(document?: PilotDocument) {
+  if (!document) return false;
+  if (["queued", "processing"].includes(document.status) || document.draftStatus === "processing") return false;
+  if (document.processingStages) return document.processingStages.final.status === "completed";
+  return true;
+}
+
 function documentAgentSteps(document?: PilotDocument) {
   if (!document) {
     return [
-      { key: "document", name: "Belge ajanı", status: "Belge seçin", detail: "Önizleme ve ayrıştırma bekliyor" },
-      { key: "account", name: "Hesap ajanı", status: "Beklemede", detail: "Fiş taslağı yok" },
-      { key: "counterparty", name: "Cari ajanı", status: "Beklemede", detail: "Cari eşleşmesi yok" },
-      { key: "research", name: "Araştırma ajanı", status: "Gerekmedi", detail: "Araştırma sinyali yok" },
+      { key: "reader", name: "Reader", status: "Belge seçin", detail: "PDF kaynak okuması bekliyor" },
+      { key: "planner", name: "Planner", status: "Bekliyor", detail: "Yön ve cari bağlamı bekliyor" },
+      { key: "final", name: "Final Accountant", status: "Bekliyor", detail: "Muhasebe fişi bekliyor" },
+      { key: "research", name: "Research Agent", status: "Gerekmedi", detail: "Yalnızca belirsizlikte çalışır" },
     ];
   }
-  const accountValue = document.selectedRevenueAccount || document.selectedExpenseAccount || document.draftLines[0]?.account_code || "";
-  const counterpartyValue = document.selectedCustomerAccount || document.selectedCounterpartyAccount || document.suggestedCounterpartyAccount || "";
+  const stages = document.processingStages;
+  const legacyStatus = documentProcessingComplete(document) ? "completed" : "pending";
+  const reader = stages?.reader ?? { status: document.status === "processing" ? "processing" : legacyStatus, elapsedMs: 0 };
+  const planner = stages?.planner ?? { status: legacyStatus, elapsedMs: 0 };
+  const final = stages?.final ?? { status: legacyStatus, elapsedMs: 0 };
   return [
-    {
-      key: "document",
-      name: "Belge ajanı",
-      status: formatStatus(document.status),
-      detail: document.provider || document.originalDocumentMimeType || "Belge okunuyor",
-    },
-    {
-      key: "account",
-      name: "Hesap ajanı",
-      status: accountValue ? "Fiş taslağı hazır" : "Hesap bekliyor",
-      detail: accountValue || document.draftStatus || "Taslak yok",
-    },
-    {
-      key: "counterparty",
-      name: "Cari ajanı",
-      status: counterpartyValue ? "Cari önerildi" : "Cari bekliyor",
-      detail: counterpartyValue || "Eşleşme yok",
-    },
-    {
-      key: "research",
-      name: "Araştırma ajanı",
-      status: document.aiResearchRequested ? "Araştırma sinyali var" : "Gerekmedi",
-      detail: document.aiResearchQuery || "Yalnızca belirsizlikte çalışır",
-    },
+    { key: "reader", name: "Reader", status: processingStageLabel(reader.status), detail: processingStageDetail(reader.status, reader.elapsedMs, document.sourceReviewRows?.length ? `${document.sourceReviewRows.length} kaynak satır hazır` : "PDF kaynak okuması") },
+    { key: "planner", name: "Planner", status: processingStageLabel(planner.status), detail: processingStageDetail(planner.status, planner.elapsedMs, document.counterpartyTitle || document.accountingDirection || "Yön ve cari bağlamı") },
+    { key: "final", name: "Final Accountant", status: processingStageLabel(final.status), detail: processingStageDetail(final.status, final.elapsedMs, documentProcessingComplete(document) ? document.draftStatus : "Muhasebe fişi hazırlanıyor") },
+    { key: "research", name: "Research Agent", status: document.aiResearchRequested ? "Sinyal var" : "Gerekmedi", detail: document.aiResearchQuery || "İleride gerektiğinde devreye girer" },
   ];
 }
 
@@ -407,7 +411,9 @@ export function AccountantWorkspace({
                 </div>
                 <div className="bottom-queue-actions">
                   {isActive ? (
-                    document.directionConflict?.status === "needs_review" ? (
+                    !documentProcessingComplete(document) ? (
+                      <button disabled type="button">Final bekleniyor</button>
+                    ) : document.directionConflict?.status === "needs_review" ? (
                       <button disabled type="button">Önce yönü yanıtla</button>
                     ) : (
                       <button onClick={() => void onApproveAndNext()} type="button">Onayla</button>

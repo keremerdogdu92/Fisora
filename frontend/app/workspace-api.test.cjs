@@ -1,3 +1,5 @@
+// File: frontend/app/workspace-api.test.cjs
+// Summary: Tests workspace mapping, selected-document progress polling, stale-result isolation, capacity, and research API helpers.
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -8,6 +10,7 @@ const {
   fetchResearchProfiles,
   fetchBackendReadiness,
   fetchBackendPilotData,
+  fetchDocumentProgress,
   normalizeBackendWorkspaces,
   overrideResearchProfile,
   refreshResearchProfile,
@@ -856,4 +859,106 @@ test("fetchBackendPilotData aborts slow backend requests so local fallback can c
       }),
     /aborted http:\/\/localhost:8000\/phase0\/store\/clients/,
   );
+});
+
+
+test("active processing snapshot replaces a stale final result for the same document", () => {
+  const progressiveWorkspace = structuredClone(workspaceRecord);
+  progressiveWorkspace.processing_jobs.push({
+    id: "job-reprocess-2",
+    document_ref: "processed-1",
+    status: "processing",
+    attempt_count: 2,
+    updated_at: "2026-06-08T10:00:00Z",
+    processing_snapshot: {
+      attempt_id: "attempt-2",
+      attempt_count: 2,
+      current_stage: "final",
+      stages: {
+        reader: { status: "completed", elapsed_ms: 5100 },
+        planner: { status: "completed", elapsed_ms: 1200 },
+        final: { status: "processing", elapsed_ms: 0 },
+      },
+      reader: {
+        document_header: [{ label: "FATURA TARİHİ", value: "2026-06-08" }],
+        printed_summary_lines: [{ label: "ÖDENECEK TOPLAM", value: "245,50" }],
+        invoice_table_rows: [{
+          source_position: "1",
+          source_text: "Danışmanlık 245,50",
+          description: "Danışmanlık",
+          ui_amount: "245,50",
+          ui_amount_label: "Tutar",
+          ui_amount_basis: "line_total_inc_tax",
+          ui_role: "posting_candidate",
+        }],
+      },
+      planner: {
+        accounting_direction: "purchase",
+        counterparty_name: "Yeni Tedarikçi A.Ş.",
+        counterparty_identifier: "9999999999",
+        counterparty_match: "none",
+        counterparty_account_code: "",
+      },
+    },
+  });
+
+  const data = normalizeBackendWorkspaces({ clients: [clientRecord], workspaces: [progressiveWorkspace] });
+  const document = data.documents.find((item) => item.id === "processed-1");
+  assert.equal(document.status, "processing");
+  assert.equal(document.amount, "245,50");
+  assert.equal(document.accountingDirection, "purchase");
+  assert.equal(document.counterpartyTitle, "Yeni Tedarikçi A.Ş.");
+  assert.equal(document.sourceReviewRows.length, 1);
+  assert.equal(document.draftLines.length, 0);
+  assert.equal(document.processingStages.attemptId, "attempt-2");
+  assert.equal(document.processingStages.final.status, "processing");
+});
+
+test("fetchDocumentProgress loads only the selected document job", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init = {}) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ terminal: false, job: { id: "job-1", status: "processing" } }) };
+  };
+
+  const payload = await fetchDocumentProgress({
+    apiBaseUrl: "http://localhost:8000/",
+    clientId: "client-1",
+    documentRef: "doc / 1",
+    fetchImpl,
+    sessionToken: "session-1",
+    userId: "mali-musavir",
+  });
+  assert.equal(payload.job.id, "job-1");
+  assert.equal(requests[0].url, "http://localhost:8000/phase0/store/workspace/client-1/documents/doc%20%2F%201/progress");
+  assert.deepEqual(requests[0].init.headers, {
+    "X-Fisora-Session": "session-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+});
+
+test("failed reprocess keeps the stale final result hidden", () => {
+  const failedWorkspace = structuredClone(workspaceRecord);
+  failedWorkspace.processing_jobs.push({
+    id: "job-failed-2",
+    document_ref: "processed-1",
+    status: "failed",
+    attempt_count: 2,
+    updated_at: "2026-06-08T11:00:00Z",
+    error_message: "reader_failed",
+    processing_snapshot: {
+      attempt_id: "attempt-failed-2",
+      stages: {
+        reader: { status: "failed", elapsed_ms: 2100 },
+        planner: { status: "pending", elapsed_ms: 0 },
+        final: { status: "pending", elapsed_ms: 0 },
+      },
+    },
+  });
+  const data = normalizeBackendWorkspaces({ clients: [clientRecord], workspaces: [failedWorkspace] });
+  const document = data.documents.find((item) => item.id === "processed-1");
+  assert.equal(document.status, "review_required");
+  assert.equal(document.draftStatus, "processing");
+  assert.equal(document.draftLines.length, 0);
+  assert.equal(document.processingStages.reader.status, "failed");
 });

@@ -1,3 +1,5 @@
+# File: backend/app/persistence/workflow_store.py
+# Summary: JSON workflow store and compatibility persistence for document processing, review, and export state.
 from __future__ import annotations
 
 import json
@@ -2116,6 +2118,7 @@ class JsonWorkflowStore:
             "status": "queued",
             "attempt_count": 0,
             "error_message": "",
+            "processing_snapshot": {},
             "created_at": created_at,
             "updated_at": created_at,
         }
@@ -2143,10 +2146,31 @@ class JsonWorkflowStore:
                     continue
                 job["status"] = "processing"
                 job["attempt_count"] = int(job.get("attempt_count") or 0) + 1
+                job["processing_snapshot"] = {}
                 job["updated_at"] = utc_now()
                 self._write(data)
                 return deepcopy(job)
             return None
+
+    def update_processing_snapshot(
+        self,
+        *,
+        job_id: str,
+        processing_snapshot: dict[str, Any],
+        attempt_id: str = "",
+        attempt_count: int = 0,
+    ) -> dict[str, Any] | None:
+        data = self._read()
+        for job in data["processing_jobs"]:
+            if job.get("id") != job_id:
+                continue
+            if attempt_count and int(job.get("attempt_count") or 0) != int(attempt_count):
+                return None
+            job["processing_snapshot"] = deepcopy(processing_snapshot)
+            job["updated_at"] = utc_now()
+            self._write(data)
+            return deepcopy(job)
+        return None
 
     def update_processing_job(
         self,

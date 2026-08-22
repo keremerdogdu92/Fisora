@@ -1,3 +1,5 @@
+// File: frontend/app/portal-review-panels.tsx
+// Summary: Renders document preview, source rows, journal editing, review decisions, and processing-safe approval controls.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -560,7 +562,10 @@ export function JournalPanel({
     activeDraftLines.every((line) => parseAmount(line.debit) === 0 && parseAmount(line.credit) === 0) ||
     !totals.balanced
   );
-  const blocksApproval = hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
+  const processingIncomplete = ["queued", "processing"].includes(document.status)
+    || document.draftStatus === "processing"
+    || Boolean(document.processingStages && document.processingStages.final.status !== "completed");
+  const blocksApproval = processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
   const pendingDirectionConflict = hasPendingDirectionConflict(document);

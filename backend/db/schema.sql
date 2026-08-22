@@ -846,6 +846,7 @@ alter table journal_entries add column if not exists current_revision_no integer
 alter table journal_entries add column if not exists approved_revision_no integer;
 alter table journal_entries add column if not exists version integer not null default 0;
 alter table processing_jobs add column if not exists current_attempt_id uuid references processing_attempts(id);
+alter table processing_jobs add column if not exists processing_snapshot jsonb not null default '{}'::jsonb;
 alter table review_decisions add column if not exists journal_revision_id uuid references journal_revisions(id);
 alter table review_decisions add column if not exists base_revision_no integer;
 

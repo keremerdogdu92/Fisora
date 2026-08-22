@@ -1,3 +1,5 @@
+// File: frontend/app/workspace-api.js
+// Summary: Loads and normalizes portal workspace data, including attempt-scoped progressive invoice processing snapshots.
 const { normalizeChartAccountOptions } = require("./portal-account-combobox");
 
 function trimSlashes(value) {
@@ -216,6 +218,24 @@ function workspacePath(clientId, view) {
   return `/phase0/store/workspace/${encodedClientId}${query}`;
 }
 
+async function fetchDocumentProgress({
+  apiBaseUrl,
+  clientId,
+  documentRef,
+  sessionToken = "",
+  userId = "",
+  fetchImpl = fetch,
+  timeoutMs = DEFAULT_BACKEND_TIMEOUT_MS,
+}) {
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/store/workspace/${encodeURIComponent(clientId)}/documents/${encodeURIComponent(documentRef)}/progress`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+    timeoutMs,
+  });
+}
+
 async function fetchBackendReadiness({
   apiBaseUrl,
   fetchImpl = fetch,
@@ -419,10 +439,30 @@ function onboardingAttachmentLabel(type) {
   return "Onboarding dosyasi";
 }
 
+function latestProcessingJob(workspace, documentRef) {
+  return safeList(workspace?.processing_jobs)
+    .filter((job) => safeText(job?.document_ref) === safeText(documentRef))
+    .sort((left, right) => safeText(right?.updated_at || right?.created_at).localeCompare(safeText(left?.updated_at || left?.created_at)))[0] || {};
+}
+
+function activeProcessingJob(workspace, documentRef) {
+  const job = latestProcessingJob(workspace, documentRef);
+  const status = safeText(job?.status).toLowerCase();
+  return ["queued", "processing", "retry_wait", "failed"].includes(status) ? job : null;
+}
+
 function backendDocumentsForWorkspace(workspace, client) {
+  const uploads = safeList(workspace?.uploaded_documents);
+  const uploadByRef = new Map(uploads.map((document) => [safeText(document?.document_ref), document]));
   const processedRefs = new Set(safeList(workspace?.documents).map((document) => safeText(document?.document_ref)));
-  const processed = safeList(workspace?.documents).map((document) => processedBackendDocument(document, workspace, client));
-  const pending = safeList(workspace?.uploaded_documents)
+  const processed = safeList(workspace?.documents).map((document) => {
+    const documentRef = safeText(document?.document_ref || document?.result?.file_name || document?.id);
+    const activeJob = activeProcessingJob(workspace, documentRef);
+    return activeJob
+      ? pendingBackendDocument(uploadByRef.get(documentRef) || { document_ref: documentRef, document_type: document?.document_type }, workspace, client, activeJob)
+      : processedBackendDocument(document, workspace, client);
+  });
+  const pending = uploads
     .filter((document) => !processedRefs.has(safeText(document?.document_ref)))
     .map((document) => pendingBackendDocument(document, workspace, client));
   return [...processed, ...pending];
@@ -442,6 +482,86 @@ function normalizeSourceReviewRows(value) {
       role: ["posting_candidate", "group_or_subtotal", "informational"].includes(role) ? role : "informational",
     };
   }).filter((row) => row.sourcePosition || row.sourceText || row.description);
+}
+
+function readerSourceReviewRows(reader) {
+  return normalizeSourceReviewRows(safeList(reader?.invoice_table_rows).map((row) => ({
+    source_position: row?.source_position,
+    source_text: row?.source_text,
+    description: row?.description,
+    amount: row?.ui_amount,
+    amount_label: row?.ui_amount_label,
+    amount_basis: row?.ui_amount_basis,
+    role: row?.ui_role,
+  })));
+}
+
+function labeledSnapshotValue(lines, labels) {
+  const normalizedLabels = labels.map((label) => label.toLocaleUpperCase("tr-TR"));
+  const match = safeList(lines).find((item) => {
+    const label = safeText(item?.label).toLocaleUpperCase("tr-TR");
+    return normalizedLabels.some((candidate) => label.includes(candidate));
+  });
+  return safeText(match?.value);
+}
+
+function processingStagesForJob(job) {
+  const snapshot = job?.processing_snapshot && typeof job.processing_snapshot === "object" ? job.processing_snapshot : {};
+  const stages = snapshot?.stages && typeof snapshot.stages === "object" ? snapshot.stages : {};
+  const jobStatus = safeText(job?.status).toLowerCase();
+  const fallbackReaderStatus = jobStatus === "processing" ? "processing" : "pending";
+  const stage = (key, fallbackStatus) => ({
+    status: safeText(stages?.[key]?.status, fallbackStatus),
+    elapsedMs: safeNumber(stages?.[key]?.elapsed_ms),
+  });
+  return {
+    attemptId: safeText(snapshot?.attempt_id),
+    attemptCount: safeNumber(snapshot?.attempt_count || job?.attempt_count),
+    currentStage: safeText(snapshot?.current_stage, jobStatus === "processing" ? "reader" : jobStatus),
+    reader: stage("reader", fallbackReaderStatus),
+    planner: stage("planner", "pending"),
+    final: stage("final", "pending"),
+  };
+}
+
+function progressiveFieldsForJob(job) {
+  const snapshot = job?.processing_snapshot && typeof job.processing_snapshot === "object" ? job.processing_snapshot : {};
+  const reader = snapshot?.reader && typeof snapshot.reader === "object" ? snapshot.reader : {};
+  const planner = snapshot?.planner && typeof snapshot.planner === "object" ? snapshot.planner : {};
+  const sourceReviewRows = readerSourceReviewRows(reader);
+  const issueDate = labeledSnapshotValue(reader?.document_header, ["FATURA TARİH", "FATURA TARIH", "ISSUE DATE", "TARİH", "TARIH"]);
+  const amount = labeledSnapshotValue(reader?.printed_summary_lines, ["ÖDENECEK TOPLAM", "ODENECEK TOPLAM", "ÖDENECEK TUTAR", "ODENECEK TUTAR", "PAYABLE"]);
+  const exactCounterpartyCode = safeText(planner?.counterparty_match) === "exact" ? safeText(planner?.counterparty_account_code) : "";
+  return {
+    status: statusForBackendJob(job?.status),
+    provider: snapshot?.current_stage ? "AI invoice pipeline" : "Belge yükleme",
+    issueDate: issueDate || "-",
+    amount: amount || "-",
+    sourceReviewRows,
+    accountingDirection: safeText(planner?.accounting_direction),
+    counterpartyTitle: safeText(planner?.counterparty_name),
+    counterpartyTaxId: safeText(planner?.counterparty_identifier),
+    selectedCounterpartyAccount: exactCounterpartyCode || "-",
+    suggestedCounterpartyAccount: exactCounterpartyCode || "-",
+    draftStatus: "processing",
+    processingStages: processingStagesForJob(job),
+    exportGateReason: "Final Accountant tamamlanmadan onay veya çıktı alınamaz.",
+    accountantSummary: sourceReviewRows.length ? "Kaynak fatura satırları hazır; muhasebe fişi Final Accountant tarafından hazırlanıyor." : "Belge işleniyor; Reader sonucu bekleniyor.",
+  };
+}
+
+function mergeProcessingJobIntoDocument(document, job) {
+  if (!document || !job) return document;
+  const fields = progressiveFieldsForJob(job);
+  return {
+    ...document,
+    ...fields,
+    accountingDirection: fields.accountingDirection || document.accountingDirection,
+    draftLines: [],
+    lineDecisions: [],
+    reviewReasons: [],
+    riskFlags: [],
+  };
 }
 
 function processedBackendDocument(document, workspace, client) {
@@ -551,11 +671,12 @@ function processedBackendDocument(document, workspace, client) {
   };
 }
 
-function pendingBackendDocument(document, workspace, client) {
+function pendingBackendDocument(document, workspace, client, processingJob = null) {
   const documentRef = safeText(document?.document_ref || document?.document_id || document?.original_file_name);
-  const job = safeList(workspace?.processing_jobs).find((item) => safeText(item?.document_ref) === documentRef) || {};
+  const job = processingJob || latestProcessingJob(workspace, documentRef);
   const documentType = safeText(document?.document_type || job.document_type, "invoice");
   const chartAccounts = normalizeChartAccountOptions(safeList(workspace?.chart_accounts?.accounts));
+  const progressive = progressiveFieldsForJob(job);
   return {
     id: documentRef,
     clientId: client.clientId,
@@ -633,6 +754,8 @@ function pendingBackendDocument(document, workspace, client) {
     learningRuleSourceSummary: "",
     ruleInterpretation: null,
     rulePrompt: normalizeRulePrompt({}),
+    ...progressive,
+    accountingDirection: progressive.accountingDirection || directionForBackendDocument(document?.intake_category || job.intake_category || documentType),
   };
 }
 
@@ -778,6 +901,8 @@ module.exports = {
   fetchResearchProfiles,
   fetchBackendReadiness,
   fetchBackendPilotData,
+  fetchDocumentProgress,
+  mergeProcessingJobIntoDocument,
   normalizeBackendWorkspaces,
   overrideResearchProfile,
   refreshResearchProfile,

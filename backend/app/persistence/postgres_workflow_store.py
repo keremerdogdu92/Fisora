@@ -1,3 +1,5 @@
+# File: backend/app/persistence/postgres_workflow_store.py
+# Summary: PostgreSQL workflow compatibility store integrating normalized accounting persistence with portal workspace records.
 from __future__ import annotations
 
 from copy import deepcopy
@@ -2878,6 +2880,7 @@ class PostgresWorkflowStore:
             "status": "queued",
             "attempt_count": 0,
             "error_message": "",
+            "processing_snapshot": {},
             "created_at": timestamp,
             "updated_at": timestamp,
         }
@@ -2958,7 +2961,40 @@ class PostgresWorkflowStore:
                 row = cursor.fetchone()
         if not row:
             return None
-        return deepcopy(row[2])
+        claimed = deepcopy(row[2])
+        claimed["processing_snapshot"] = {}
+        return self._upsert_record(str(row[0]), "processing_job", str(row[1]), claimed)
+
+    def update_processing_snapshot(
+        self,
+        *,
+        job_id: str,
+        processing_snapshot: dict[str, Any],
+        attempt_id: str = "",
+        attempt_count: int = 0,
+    ) -> dict[str, Any] | None:
+        if self.normalized_accounting_enabled:
+            updated = self.normalized_repository.update_processing_snapshot(
+                job_id=job_id, processing_snapshot=processing_snapshot,
+                attempt_id=attempt_id, attempt_count=attempt_count,
+            )
+            if updated is None:
+                return None
+            row = self._get_record_by_key("processing_job", job_id)
+            if row is None:
+                return updated
+            client_id = str(row["client_id"])
+            payload = {**row["payload"], **updated, "client_id": client_id}
+            return self._upsert_record(client_id, "processing_job", job_id, payload)
+        row = self._get_record_by_key("processing_job", job_id)
+        if row is None:
+            return None
+        payload = deepcopy(row["payload"])
+        if attempt_count and int(payload.get("attempt_count") or 0) != int(attempt_count):
+            return None
+        payload["processing_snapshot"] = deepcopy(processing_snapshot)
+        payload["updated_at"] = utc_now()
+        return self._upsert_record(str(row["client_id"]), "processing_job", job_id, payload)
 
     def update_processing_job(
         self,

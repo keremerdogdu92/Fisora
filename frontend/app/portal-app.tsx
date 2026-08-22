@@ -1,3 +1,5 @@
+// File: frontend/app/portal-app.tsx
+// Summary: Composes authenticated portal routes, workspace state, selected-document progress polling, and review commands.
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { AgentTrainingView } from "./portal-agents-view";
@@ -17,6 +19,7 @@ import {
   refreshBackendPilotData as refreshBackendPilotDataAction,
   useAiCapacityQuery,
   usePilotReadinessQuery,
+  useProgressiveSelectedDocument,
 } from "./features/workspace";
 import { useClientManagementCommands } from "./features/clients";
 import { useDocumentRetentionCommands } from "./features/operations";
@@ -247,6 +250,10 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   useEffect(() => {
     setCorrectionDraft(emptyCorrectionDraft());
   }, [selectedDocument?.id]);
+  const { progressiveActiveReviewDocuments, progressiveClientDocuments, progressiveSelectedDocument } = useProgressiveSelectedDocument({
+    activeReviewDocuments, clientDocuments, defaultUserId: portalConfig.defaultUserId,
+    enabled: mode === "documents", refreshBackendPilotData, selectedDocument, session,
+  });
   const clientSelectedDocument = periodDocuments.find((document) => document.id === selectedDocumentId);
   const filteredClients = useMemo(() => {
     const query = clientSearch.trim().toLocaleLowerCase("tr-TR");
@@ -479,8 +486,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           correctionDraft={correctionDraft}
           dashboardMetrics={dashboardView.dashboardMetrics}
           decisionStatus={decisionStatus}
-          documents={activeReviewDocuments}
-          allClientDocuments={clientDocuments}
+          documents={progressiveActiveReviewDocuments}
+          allClientDocuments={progressiveClientDocuments}
           hasUnsavedReviewChanges={hasUnsavedReviewChanges}
           newClientDraft={newClientDraft}
           newClientStatus={newClientStatus}
@@ -498,7 +505,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onSaveStatementDecision={saveStatementLineDecision}
           reviewFilter={reviewFilter}
           selectedClient={selectedClient}
-          selectedDocument={selectedDocument}
+          selectedDocument={progressiveSelectedDocument}
           selectedDocumentSegment={selectedDocumentSegment}
           selectedStatementLineNo={selectedStatementLineNo}
           session={session}

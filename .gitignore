@@ -52,3 +52,10 @@ Thumbs.db
 # Codex Pets
 .codex-pets/
 
+
+# Local development, diagnostic, and benchmark artifacts
+/tmp/
+/backend/tmp/
+/.vs/
+/.codex/
+/.codebase-memory/

@@ -1,3 +1,5 @@
+# File: backend/app/domain/production_readiness.py
+# Summary: Reports pilot, authoritative-accounting, security, storage, backup, and integration readiness.
 from __future__ import annotations
 
 import os
@@ -169,6 +171,9 @@ def production_readiness_payload(
         "off",
     }
     real_data_pilot_enabled = _env_bool(source.get("FISORA_REAL_DATA_PILOT_ENABLED", ""), default=False)
+    authoritative_accounting_enabled = _env_bool(
+        source.get("FISORA_AUTHORITATIVE_ACCOUNTING_ENABLED", ""), default=False
+    )
     real_data_access_mode = source.get("FISORA_REAL_DATA_ACCESS_MODE", "").strip().lower()
     restricted_live_access = real_data_access_mode in {"tls", "restricted_network", "vpn", "ip_allowlist"}
     qnb_adapter = source.get("FISORA_QNB_ADAPTER", "fake").strip().lower() or "fake"
@@ -265,8 +270,6 @@ def production_readiness_payload(
         "postgres_store_active": bool(pilot_checks["postgres_store_active"]),
         "document_storage_writable": bool(document_storage["ok"]),
         "export_storage_writable": bool(export_storage["ok"]),
-        "scheduled_backup_mode": backup_mode == "scheduled",
-        "recoverable_backup": bool(backup["ok"]) and backup_mode == "scheduled",
         "ai_provider_configured": ai_provider_configured,
         "controlled_export_available": controlled_export_available,
     }
@@ -295,6 +298,22 @@ def production_readiness_payload(
         "access_mode": real_data_access_mode or "unset",
         "blocking": real_data_pilot_blocking,
         "checks": real_data_pilot_checks,
+    }
+    authoritative_accounting_checks = {
+        "explicit_authoritative_enable": authoritative_accounting_enabled,
+        "real_data_pilot_allowed": real_data_pilot_allowed,
+        "scheduled_backup_mode": backup_mode == "scheduled",
+        "recoverable_backup": bool(backup["ok"]) and backup_mode == "scheduled",
+    }
+    authoritative_accounting_blocking = [
+        key for key, passed in authoritative_accounting_checks.items() if not passed
+    ]
+    authoritative_accounting_allowed = not authoritative_accounting_blocking
+    authoritative_accounting = {
+        "status": "enabled" if authoritative_accounting_allowed else "blocked",
+        "allowed": authoritative_accounting_allowed,
+        "blocking": authoritative_accounting_blocking,
+        "checks": authoritative_accounting_checks,
     }
     qnb_platform_checks = {
         "incoming_runtime_ready": bool(qnb_runtime["incoming_ready"]),
@@ -365,6 +384,7 @@ def production_readiness_payload(
         "pilot_blocking": pilot_blocking,
         "commercial_readiness": commercial_readiness,
         "real_data_pilot": real_data_pilot,
+        "authoritative_accounting": authoritative_accounting,
         "qnb_pilot": qnb_pilot,
         "qnb_readiness": qnb_readiness,
         "auth": auth,

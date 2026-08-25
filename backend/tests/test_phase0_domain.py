@@ -1,3 +1,5 @@
+# File: backend/tests/test_phase0_domain.py
+# Summary: Verifies Phase 0 domain policies, readiness gates, parsing, accounting, and safety contracts.
 from __future__ import annotations
 
 from dataclasses import replace
@@ -1031,7 +1033,7 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertNotIn("backup_missing", payload["warnings"])
         self.assertNotIn("backup_available", payload["pilot_checks"])
 
-    def test_real_data_pilot_requires_scheduled_backup_mode(self) -> None:
+    def test_real_data_pilot_does_not_require_authoritative_backup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
             payload = production_readiness_payload(
@@ -1049,8 +1051,10 @@ class Phase0DomainTests(unittest.TestCase):
                 },
             )
 
-        self.assertFalse(payload["real_data_pilot"]["allowed"])
-        self.assertIn("scheduled_backup_mode", payload["real_data_pilot"]["blocking"])
+        self.assertTrue(payload["real_data_pilot"]["allowed"])
+        self.assertNotIn("scheduled_backup_mode", payload["real_data_pilot"]["checks"])
+        self.assertFalse(payload["authoritative_accounting"]["allowed"])
+        self.assertIn("scheduled_backup_mode", payload["authoritative_accounting"]["blocking"])
 
     def test_scheduled_backup_requires_fresh_receipt_and_restore_proof(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1575,6 +1579,33 @@ class Phase0DomainTests(unittest.TestCase):
         self.assertTrue(payload["real_data_pilot"]["allowed"])
         self.assertEqual(payload["real_data_pilot"]["status"], "ready_for_restricted_live_pilot")
         self.assertEqual(payload["real_data_pilot"]["blocking"], [])
+
+    def test_authoritative_accounting_requires_explicit_enable_and_recoverable_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            backup_path = base / "backups"
+            _write_recoverable_backup_receipts(backup_path)
+            payload = production_readiness_payload(
+                document_storage_path=base / "documents",
+                export_path=base / "exports",
+                backup_path=backup_path,
+                env={
+                    "FISORA_AUTH_MODE": "session_required",
+                    "FISORA_SESSION_COOKIE_SECURE": "true",
+                    "FISORA_STORE_BACKEND": "postgres",
+                    "DATABASE_URL": "postgresql://fisora:test@localhost:5432/fisora",
+                    "FISORA_AI_PROVIDER": "groq",
+                    "GROQ_API_KEY": "gsk-test",
+                    "FISORA_REAL_DATA_PILOT_ENABLED": "true",
+                    "FISORA_REAL_DATA_ACCESS_MODE": "restricted_network",
+                    "FISORA_AUTHORITATIVE_ACCOUNTING_ENABLED": "true",
+                    "FISORA_BACKUP_MODE": "scheduled",
+                    "FISORA_BACKUP_OFFHOST_ATTESTED": "true",
+                },
+            )
+
+        self.assertTrue(payload["authoritative_accounting"]["allowed"])
+        self.assertEqual(payload["authoritative_accounting"]["blocking"], [])
 
     def test_production_readiness_reports_mapping_adapter_and_security_gates(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

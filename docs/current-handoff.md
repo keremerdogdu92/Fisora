@@ -1,5 +1,18 @@
 # Current Handoff
 
+### 2026-08-25 repository cleanup, tax-certificate release, and next execution gate
+
+- Git/worktree cleanup completed: the authoritative local and remote branch is only `main`; the only active worktree is `C:\Users\kerem\Documents\Fisero`.
+- Local `main`, `origin/main`, and production checkout are aligned at `1647df5` (`feat: add AI-assisted tax certificate parsing`).
+- Production release proof: full local gate ran 1136 backend tests with 34 skips and zero failures; frontend tests and production build passed. Production smoke returned `status=ok`, `completed_jobs=1`, `SMOKE_EXIT=0`; `/health` and root return 200, readiness reports `ready=true`, `pilot_sellable=true`.
+- AI-assisted tax-certificate parsing is live: text layer first, Gemini vision for weak/scanned certificates, OCR fallback, TCKN/VKN checksum validation, and `parsed/partial` profile-update gate. Targeted proof before merge: backend 62/62 and frontend 65/65.
+- The execution backlog is now canonicalized in `docs/next-execution-backlog-20260825.md`.
+- Real-data pilot and authoritative accounting are now separate readiness levels. Historical real invoices, tax certificates, charts, review, export and Zirve/Luca transfer experiments may be used for non-authoritative testing without requiring production backup.
+- The real-data pilot still requires explicit enable, restricted TLS/network access, session-backed authentication, PostgreSQL/storage, rate limits and configured AI providers. Production env is not yet switched to pilot mode.
+- Authoritative accounting remains disabled by default through `FISORA_AUTHORITATIVE_ACCOUNTING_ENABLED=false`. It becomes eligible only after explicit operator enable plus scheduled recoverable backup/restore proof; this is reserved for the future point where active-period Fisora output is used as an official accounting record.
+- Pilot backup priority is accountant-created learning/review decisions rather than replaceable source PDFs; a lightweight learning-state backup can be added separately without blocking field validation.
+- A five-invoice Arif production pilot package plus tax certificate and chart is selected and hashed in ignored `private_samples/real-pilot-selection-20260825.json`; no real document has been uploaded while the real-data gate is closed.
+
 ### 2026-08-18 Gemini V2 multi-project accountant-pilot readiness: local verification
 
 Bu bölüm yalnızca mevcut yerel çalışma ağacında yapılan doğrulamayı kaydeder;

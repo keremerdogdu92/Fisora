@@ -61,33 +61,35 @@ production_preflight() {
     case "$portal_base" in
       https://*) ;;
       *)
-        echo "QNB live mode requires HTTPS FISORA_PORTAL_BASE_URL" >&2
+        echo "Live data/QNB mode requires HTTPS FISORA_PORTAL_BASE_URL" >&2
         exit 2
         ;;
     esac
     case "$nginx_config" in
       *default.tls.conf) ;;
       *)
-        echo "QNB live mode requires HTTPS nginx configuration" >&2
+        echo "Live data/QNB mode requires HTTPS nginx configuration" >&2
         exit 2
         ;;
     esac
     if [ ! -f "$tls_cert_dir/live/fisora/fullchain.pem" ] || [ ! -f "$tls_cert_dir/live/fisora/privkey.pem" ]; then
-      echo "QNB live mode requires fullchain.pem and privkey.pem under FISORA_TLS_CERT_DIR/live/fisora" >&2
+      echo "Live data/QNB mode requires fullchain.pem and privkey.pem under FISORA_TLS_CERT_DIR/live/fisora" >&2
       exit 2
     fi
-    if [ -z "$credential_key" ]; then
-      echo "QNB live mode requires FISORA_QNB_CREDENTIAL_KEY" >&2
-      exit 2
-    fi
-    if [ -z "$operation_owner" ]; then
-      echo "QNB live mode requires FISORA_QNB_OPERATION_OWNER" >&2
-      exit 2
+    if [ "$qnb_scheduler" = "true" ]; then
+      if [ -z "$credential_key" ]; then
+        echo "QNB scheduler requires FISORA_QNB_CREDENTIAL_KEY" >&2
+        exit 2
+      fi
+      if [ -z "$operation_owner" ]; then
+        echo "QNB scheduler requires FISORA_QNB_OPERATION_OWNER" >&2
+        exit 2
+      fi
     fi
     case "$access_mode" in
       tls|restricted_network|vpn|ip_allowlist) ;;
       *)
-        echo "QNB live mode requires restricted real-data access" >&2
+        echo "Live data/QNB mode requires restricted real-data access" >&2
         exit 2
         ;;
     esac

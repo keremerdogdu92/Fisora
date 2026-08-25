@@ -1,3 +1,5 @@
+# File: backend/app/services/document_service.py
+# Summary: Stores documents and gates tax-certificate profile updates on complete critical extraction.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -13,7 +15,11 @@ from fastapi import HTTPException
 from app.domain.business_relevance import ClientProfile, check_client_onboarding
 from app.domain.document_uploads import normalize_document_period, store_document_content
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
-from app.domain.tax_certificates import parse_tax_certificate_file
+from app.domain.tax_certificates import (
+    parse_tax_certificate_file,
+    tax_certificate_parse_state,
+    tax_certificate_payload_parse_state,
+)
 from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
 
 
@@ -34,10 +40,8 @@ def file_fingerprint(path: Path) -> str:
 
 
 def has_tax_certificate_core_fields(tax_certificate: dict[str, object]) -> bool:
-    return any(
-        str(tax_certificate.get(field) or "").strip()
-        for field in ("nace_code", "tax_id", "tckn", "vkn", "tax_identifier", "title", "legal_name", "activity_description")
-    )
+    status, _ = tax_certificate_payload_parse_state(tax_certificate)
+    return status == "parsed"
 
 
 class DocumentService:
@@ -365,26 +369,31 @@ class DocumentService:
             try:
                 storage_path = Path(str(payload.get("storage_path") or ""))
                 payload["tax_certificate_fingerprint"] = file_fingerprint(storage_path)
-                tax_certificate = parse_tax_certificate_file(storage_path).to_payload()
+                extraction = parse_tax_certificate_file(storage_path)
+                tax_certificate = extraction.to_payload()
+                parse_status, missing_critical_fields = tax_certificate_parse_state(extraction)
                 payload.update(
                     {
-                        "tax_certificate_parse_status": "parsed",
+                        "tax_certificate_parse_status": parse_status,
                         "tax_certificate_parse_error": "",
+                        "tax_certificate_missing_critical_fields": list(missing_critical_fields),
                         "tax_certificate": tax_certificate,
                     }
                 )
-                workspace = self.store.get_workspace(normalized_client_id)
-                self._update_client_from_tax_certificate(
-                    client_id=normalized_client_id,
-                    workspace=workspace,
-                    tax_certificate=tax_certificate,
-                    nace_profile={},
-                )
+                if parse_status == "parsed":
+                    workspace = self.store.get_workspace(normalized_client_id)
+                    self._update_client_from_tax_certificate(
+                        client_id=normalized_client_id,
+                        workspace=workspace,
+                        tax_certificate=tax_certificate,
+                        nace_profile={},
+                    )
             except Exception as exc:  # pragma: no cover - exercised through API behavior, exact OCR errors vary by runtime
                 payload.update(
                     {
                         "tax_certificate_parse_status": "failed",
                         "tax_certificate_parse_error": str(exc),
+                        "tax_certificate_missing_critical_fields": [],
                         "tax_certificate": {},
                     }
                 )
@@ -543,15 +552,19 @@ class DocumentService:
         )
         workspace = self.store.get_workspace(normalized_client_id)
         tax_certificate = self._reparse_latest_tax_certificate(workspace)
+        tax_certificate_parse_status = ""
+        tax_certificate_missing_critical_fields: tuple[str, ...] = ()
         nace_profile: dict[str, object] = {}
         if tax_certificate:
-            nace_profile = self._research_nace_for_tax_certificate(tax_certificate)
-            self._update_client_from_tax_certificate(
-                client_id=normalized_client_id,
-                workspace=workspace,
-                tax_certificate=tax_certificate,
-                nace_profile=nace_profile,
-            )
+            tax_certificate_parse_status, tax_certificate_missing_critical_fields = tax_certificate_payload_parse_state(tax_certificate)
+            if tax_certificate_parse_status == "parsed":
+                nace_profile = self._research_nace_for_tax_certificate(tax_certificate)
+                self._update_client_from_tax_certificate(
+                    client_id=normalized_client_id,
+                    workspace=workspace,
+                    tax_certificate=tax_certificate,
+                    nace_profile=nace_profile,
+                )
         queued_jobs = []
         for document in workspace.get("uploaded_documents", []):
             document_ref = str(document.get("document_ref") or document.get("document_id") or "").strip()
@@ -592,6 +605,7 @@ class DocumentService:
             metadata={
                 "queued_document_count": len(queued_jobs),
                 "tax_certificate_reparsed": bool(tax_certificate),
+                "tax_certificate_parse_status": tax_certificate_parse_status,
                 "nace_researched": bool(nace_profile),
             },
         )
@@ -601,6 +615,8 @@ class DocumentService:
             "queued_jobs": queued_jobs,
             "processing_summary": processing_summary,
             "tax_certificate": tax_certificate or {},
+            "tax_certificate_parse_status": tax_certificate_parse_status,
+            "tax_certificate_missing_critical_fields": list(tax_certificate_missing_critical_fields),
             "nace_research_profile": nace_profile,
         }
 

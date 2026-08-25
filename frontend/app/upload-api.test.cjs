@@ -1,3 +1,5 @@
+// File: frontend/app/upload-api.test.cjs
+// Summary: Verifies frontend API transport and tax-certificate status messaging contracts.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
@@ -229,17 +231,29 @@ test("buildClientOnboardingPackagePayload preserves separated tax identity field
   assert.equal(payload.client.tax_office, "Kucukyali");
 });
 
-test("buildTaxCertificateParseStatus warns when TCKN is read but VKN is missing", () => {
+test("buildTaxCertificateParseStatus accepts a valid TCKN-only certificate", () => {
   const message = buildTaxCertificateParseStatus({
     filledFields: ["unvan", "TCKN"],
     confidence: 82,
-    profileSummary: "",
-    tckn: "45661316282",
-    vkn: "",
+    parseStatus: "parsed",
+    missingCriticalFields: [],
   });
 
-  assert.match(message, /VKN okunamadı/);
-  assert.match(message, /kontrol edin/);
+  assert.match(message, /Vergi levhası okundu/);
+  assert.doesNotMatch(message, /VKN okunamadı/);
+});
+
+test("buildTaxCertificateParseStatus explains partial critical fields", () => {
+  const message = buildTaxCertificateParseStatus({
+    filledFields: ["unvan", "faaliyet"],
+    confidence: 70,
+    parseStatus: "partial",
+    missingCriticalFields: ["tax_identifier"],
+  });
+
+  assert.match(message, /kısmen okundu/);
+  assert.match(message, /VKN\/TCKN/);
+  assert.match(message, /Elle tamamlayabilirsiniz/);
 });
 
 test("buildNaceResearchRefreshPayload normalizes OCR NACE and activity context", () => {

@@ -1,3 +1,5 @@
+// File: frontend/app/upload-api.js
+// Summary: Provides frontend API transport helpers and honest tax-certificate parse status messaging.
 const DEFAULT_BACKEND_PORT = "8000";
 const DEFAULT_UPLOAD_USER_ID = "ofis-mukellef-user";
 
@@ -123,18 +125,29 @@ function buildClientOnboardingPackagePayload({
 }
 
 /**
- * @param {{ filledFields?: string[], confidence?: number, profileSummary?: string, tckn?: string, vkn?: string }} options
+ * @param {{ filledFields?: string[], confidence?: number, profileSummary?: string, parseStatus?: string, missingCriticalFields?: string[] }} options
  */
-function buildTaxCertificateParseStatus({ filledFields = [], confidence = 0, profileSummary = "", tckn = "", vkn = "" } = {}) {
+function buildTaxCertificateParseStatus({
+  filledFields = [],
+  confidence = 0,
+  profileSummary = "",
+  parseStatus = "",
+  missingCriticalFields = [],
+} = {}) {
   const fields = Array.isArray(filledFields) ? filledFields.filter(Boolean) : [];
+  const missing = Array.isArray(missingCriticalFields) ? missingCriticalFields.map((value) => String(value || "").trim()).filter(Boolean) : [];
+  if (String(parseStatus || "").trim() === "partial") {
+    const labels = { title: "unvan", tax_identifier: "VKN/TCKN", nace_code: "NACE" };
+    const missingLabel = missing.map((field) => labels[field] || field).join(", ");
+    const readLabel = fields.length ? ` Okunan: ${fields.join(", ")}.` : "";
+    const confidenceLabel = confidence ? ` Güven ${confidence}.` : "";
+    const missingLabelText = missingLabel ? ` Eksik kritik alan: ${missingLabel}.` : "";
+    return `Vergi levhası kısmen okundu.${readLabel}${confidenceLabel}${missingLabelText} Elle tamamlayabilirsiniz.`;
+  }
   const base = fields.length
     ? `Vergi levhası okundu: ${fields.join(", ")}${confidence ? ` / güven ${confidence}` : ""}.`
     : "Vergi levhasından alan okunamadı; elle kayıt yapabilirsiniz.";
-  const warnings = [];
-  if (String(tckn || "").trim() && !String(vkn || "").trim()) {
-    warnings.push("VKN okunamadı, kontrol edin.");
-  }
-  return [base, profileSummary, ...warnings].filter(Boolean).join(" ");
+  return [base, profileSummary].filter(Boolean).join(" ");
 }
 
 function buildNaceResearchRefreshPayload({ naceCode = "", activityDescription = "", force = false } = {}) {

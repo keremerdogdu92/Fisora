@@ -1,3 +1,5 @@
+// File: frontend/app/portal-client-actions.ts
+// Summary: Handles client onboarding actions and surfaces partial tax-certificate extraction safely.
 import type { Dispatch, SetStateAction } from "react";
 import {
   buildDelegatedClientPortalUrl,
@@ -338,11 +340,21 @@ export async function selectNewClientTaxCertificateAction({
       workplaceAddresses.length ? "adres" : "",
     ].filter(Boolean);
     const confidence = Number(extraction?.confidence || 0);
+    const parseStatus = String(extraction?.parse_status || "").trim();
+    const missingCriticalFields = Array.isArray(extraction?.missing_critical_fields)
+      ? (extraction.missing_critical_fields as unknown[]).map((value) => String(value).trim()).filter(Boolean)
+      : [];
     const profileLabel = String(activityProfile.display_label || "").trim();
     const profileConfidence = Number(activityProfile.confidence || 0);
     const profileSummary = profileLabel ? `Profil: ${profileLabel}${profileConfidence ? ` ${profileConfidence}` : ""}` : "";
-    setNewClientStatus(buildTaxCertificateParseStatus({ filledFields, confidence, profileSummary, tckn, vkn }));
-    setNewClientTaxCertificateStage("Alanlar dolduruldu");
+    setNewClientStatus(buildTaxCertificateParseStatus({
+      filledFields,
+      confidence,
+      profileSummary,
+      parseStatus,
+      missingCriticalFields,
+    }));
+    setNewClientTaxCertificateStage(parseStatus === "partial" ? "Eksik kritik alanlar var" : "Alanlar dolduruldu");
     if (naceCode) {
       await refreshNewClientNaceResearchAction({
         loginUserId,

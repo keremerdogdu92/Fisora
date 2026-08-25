@@ -1,3 +1,5 @@
+# File: backend/app/domain/tax_certificates.py
+# Summary: Uses text-layer parsing first, Gemini vision for weak/scanned certificates, and OCR as fallback.
 from __future__ import annotations
 
 import json
@@ -11,13 +13,20 @@ import subprocess
 import tempfile
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from urllib import request as urllib_request
 
 from app.domain.business_relevance import ActivityProfile, build_activity_profile
 from app.domain.pdf_invoices import extract_pdf_text
+from app.domain.tax_certificate_vision import (
+    TaxCertificateVisionRead,
+    build_tax_certificate_vision_reader_from_env,
+    is_valid_tckn,
+    is_valid_vkn,
+)
 
 ExternalOcrProvider = Callable[[Path], tuple[str, tuple[str, ...]]]
+TaxCertificateVisionReader = Callable[[Path], TaxCertificateVisionRead]
 OCR_SPACE_API_URL = "https://api.ocr.space/parse/image"
 
 
@@ -843,9 +852,13 @@ def _post_ocr_space(
 
 
 def merge_tax_certificate_extractions(primary: TaxCertificateExtraction, supplemental: TaxCertificateExtraction) -> TaxCertificateExtraction:
-    tckn = primary.tckn or supplemental.tckn
-    vkn = primary.vkn or supplemental.vkn
-    tax_identifier = vkn or primary.tax_identifier or supplemental.tax_identifier or tckn
+    primary_tckn = primary.tckn if is_valid_tckn(primary.tckn) else ""
+    primary_vkn = primary.vkn if is_valid_vkn(primary.vkn) else ""
+    supplemental_tckn = supplemental.tckn if is_valid_tckn(supplemental.tckn) else ""
+    supplemental_vkn = supplemental.vkn if is_valid_vkn(supplemental.vkn) else ""
+    tckn = primary_tckn or supplemental_tckn
+    vkn = primary_vkn or supplemental_vkn
+    tax_identifier = vkn or tckn
     identity_type = "tckn_vkn" if tckn and vkn else identity_type_for(tax_identifier)
     activity_profile = primary.activity_profile if primary.activity_profile.confidence >= supplemental.activity_profile.confidence else supplemental.activity_profile
     legal_name = _clean_name_candidate(primary.legal_name) or _clean_name_candidate(supplemental.legal_name)
@@ -875,20 +888,156 @@ def merge_tax_certificate_extractions(primary: TaxCertificateExtraction, supplem
     )
 
 
+def tax_certificate_extraction_from_vision(read: TaxCertificateVisionRead) -> TaxCertificateExtraction:
+    title = read.display_title or read.trade_name or read.legal_name
+    tax_identifier = read.vkn or read.tckn
+    identity_type = "tckn_vkn" if read.tckn and read.vkn else identity_type_for(tax_identifier)
+    activity_profile = build_activity_profile(
+        activity_description=read.activity_description,
+        nace_code=read.nace_code,
+    )
+    confidence = score_confidence(
+        title=title,
+        tax_id=tax_identifier,
+        tax_office=read.tax_office,
+        activity_description=read.activity_description,
+        nace_code=read.nace_code,
+        addresses=read.workplace_addresses,
+        start_date=read.start_date,
+    )
+    notes = tuple(dict.fromkeys((
+        "ai_vision",
+        *(f"ai_vision_warning:{warning}" for warning in read.warnings),
+        "fields_extracted" if confidence else "no_fields_extracted",
+    )))
+    return TaxCertificateExtraction(
+        title=title,
+        tax_id=tax_identifier,
+        tckn=read.tckn,
+        vkn=read.vkn,
+        identity_type=identity_type,
+        tax_identifier=tax_identifier,
+        legal_name=read.legal_name or title,
+        trade_name=read.trade_name,
+        display_title=title,
+        tax_office=read.tax_office,
+        activity_description=read.activity_description,
+        nace_code=read.nace_code,
+        workplace_addresses=read.workplace_addresses,
+        start_date=read.start_date,
+        activity_tags=activity_profile.activity_tags,
+        activity_profile=activity_profile,
+        confidence=confidence,
+        extraction_notes=notes,
+    )
+
+
+def merge_tax_certificate_vision_extraction(
+    base: TaxCertificateExtraction,
+    vision: TaxCertificateExtraction,
+) -> TaxCertificateExtraction:
+    base_tckn = base.tckn if is_valid_tckn(base.tckn) else ""
+    base_vkn = base.vkn if is_valid_vkn(base.vkn) else ""
+    supplemental_tckn = vision.tckn if is_valid_tckn(vision.tckn) else ""
+    supplemental_vkn = vision.vkn if is_valid_vkn(vision.vkn) else ""
+    base_identity_locked = bool(base_tckn or base_vkn)
+    tckn = base_tckn if base_identity_locked else supplemental_tckn
+    vkn = base_vkn if base_identity_locked else supplemental_vkn
+    identifier = vkn or tckn
+    activity_description = base.activity_description or vision.activity_description
+    nace_code = base.nace_code or vision.nace_code
+    activity_profile = build_activity_profile(
+        activity_description=activity_description,
+        nace_code=nace_code,
+    )
+    legal_name = base.legal_name or vision.legal_name
+    trade_name = base.trade_name or vision.trade_name
+    title = base.title or vision.title or trade_name or legal_name
+    addresses = base.workplace_addresses or vision.workplace_addresses
+    tax_office = base.tax_office or vision.tax_office
+    start_date = base.start_date or vision.start_date
+    confidence = score_confidence(
+        title=title,
+        tax_id=identifier,
+        tax_office=tax_office,
+        activity_description=activity_description,
+        nace_code=nace_code,
+        addresses=addresses,
+        start_date=start_date,
+    )
+    return TaxCertificateExtraction(
+        title=title,
+        tax_id=identifier,
+        tckn=tckn,
+        vkn=vkn,
+        identity_type="tckn_vkn" if tckn and vkn else identity_type_for(identifier),
+        tax_identifier=identifier,
+        legal_name=legal_name,
+        trade_name=trade_name,
+        display_title=base.display_title or vision.display_title or title,
+        tax_office=tax_office,
+        activity_description=activity_description,
+        nace_code=nace_code,
+        workplace_addresses=addresses,
+        start_date=start_date,
+        activity_tags=activity_profile.activity_tags,
+        activity_profile=activity_profile,
+        confidence=confidence,
+        extraction_notes=tuple(dict.fromkeys((*base.extraction_notes, *vision.extraction_notes))),
+    )
+
+
+def _should_run_tax_certificate_vision(extraction: TaxCertificateExtraction) -> bool:
+    identifier_valid = is_valid_vkn(extraction.vkn) or is_valid_tckn(extraction.tckn)
+    return not bool(
+        extraction.title
+        and identifier_valid
+        and extraction.tax_office
+        and extraction.nace_code
+        and extraction.activity_description
+        and extraction.workplace_addresses
+    )
+
+
+def tax_certificate_parse_state(
+    extraction: TaxCertificateExtraction,
+) -> tuple[str, tuple[str, ...]]:
+    missing: list[str] = []
+    if not extraction.title.strip():
+        missing.append("title")
+    if not (is_valid_vkn(extraction.vkn) or is_valid_tckn(extraction.tckn)):
+        missing.append("tax_identifier")
+    if not re.fullmatch(r"\d{6}", extraction.nace_code.strip()):
+        missing.append("nace_code")
+    return ("parsed" if not missing else "partial", tuple(missing))
+
+
+def tax_certificate_payload_parse_state(
+    payload: Mapping[str, object],
+) -> tuple[str, tuple[str, ...]]:
+    extraction = TaxCertificateExtraction(
+        title=str(payload.get("title") or payload.get("display_title") or "").strip(),
+        tckn=str(payload.get("tckn") or "").strip(),
+        vkn=str(payload.get("vkn") or "").strip(),
+        nace_code=str(payload.get("nace_code") or "").strip(),
+    )
+    return tax_certificate_parse_state(extraction)
+
+
 def _duration_ms(start: float) -> int:
     return int((time.perf_counter() - start) * 1000)
 
 
+def _has_valid_tax_certificate_identity(extraction: TaxCertificateExtraction) -> bool:
+    return is_valid_vkn(extraction.vkn) or is_valid_tckn(extraction.tckn)
+
+
 def _tax_certificate_extraction_complete(extraction: TaxCertificateExtraction) -> bool:
-    return bool(extraction.title and extraction.nace_code and (extraction.vkn or extraction.tckn or extraction.tax_id))
+    return tax_certificate_parse_state(extraction)[0] == "parsed"
 
 
 def _should_run_pdf_ocr_fallback(extraction: TaxCertificateExtraction) -> bool:
-    if not extraction.title or not extraction.nace_code:
-        return True
-    if not (extraction.vkn or extraction.tckn or extraction.tax_id):
-        return True
-    return False
+    return tax_certificate_parse_state(extraction)[0] != "parsed"
 
 
 def _ocr_attempt_count(notes: tuple[str, ...]) -> int:
@@ -907,15 +1056,23 @@ def _selected_psm(notes: tuple[str, ...]) -> str:
     return ""
 
 
-def parse_tax_certificate_file(path: Path, external_ocr_provider: ExternalOcrProvider | None = None) -> TaxCertificateExtraction:
+def parse_tax_certificate_file(
+    path: Path,
+    external_ocr_provider: ExternalOcrProvider | None = None,
+    vision_reader: TaxCertificateVisionReader | None = None,
+) -> TaxCertificateExtraction:
     total_start = time.perf_counter()
     metrics: dict[str, object] = {
         "used_text_layer": False,
+        "used_ai_vision": False,
         "used_ocr": False,
         "used_external_ocr": False,
+        "ai_model": "",
+        "ai_confidence": 0,
         "selected_psm": "",
         "ocr_attempts": 0,
         "text_layer_ms": 0,
+        "ai_vision_ms": 0,
         "pdf_render_ms": 0,
         "ocr_ms": 0,
         "external_ocr_ms": 0,
@@ -923,56 +1080,81 @@ def parse_tax_certificate_file(path: Path, external_ocr_provider: ExternalOcrPro
         "total_ms": 0,
     }
     suffix = path.suffix.lower()
+    runtime_notes: list[str] = []
     text = ""
-    notes: tuple[str, ...]
     if suffix == ".pdf":
         text_start = time.perf_counter()
         _, text, pdf_notes = extract_pdf_text(path)
         metrics["text_layer_ms"] = _duration_ms(text_start)
         if text.strip():
             metrics["used_text_layer"] = True
-            notes = tuple((*pdf_notes, "pdf_text_layer"))
+            source_notes = tuple((*pdf_notes, "pdf_text_layer"))
         else:
-            ocr_start = time.perf_counter()
-            text, notes = ocr_pdf(path)
-            metrics["ocr_ms"] = _duration_ms(ocr_start)
-            metrics["used_ocr"] = any(note.startswith("ocr_tesseract") for note in notes)
+            source_notes = tuple(dict.fromkeys((*pdf_notes, "pdf_text_empty")))
+    elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
+        source_notes = ("image_source",)
     else:
-        ocr_start = time.perf_counter()
-        text, notes = extract_tax_certificate_text(path)
-        metrics["ocr_ms"] = _duration_ms(ocr_start)
-        metrics["used_ocr"] = any(note.startswith("ocr_tesseract") for note in notes)
+        source_notes = ("unsupported_tax_certificate_file_type",)
 
     parse_start = time.perf_counter()
-    extraction = parse_tax_certificate_text(text, extraction_notes=notes)
+    extraction = parse_tax_certificate_text(text, extraction_notes=source_notes)
     metrics["parse_ms"] = _duration_ms(parse_start)
-    metrics["selected_psm"] = _selected_psm(notes)
-    metrics["ocr_attempts"] = _ocr_attempt_count(notes)
 
-    if suffix == ".pdf" and metrics["used_text_layer"] and _should_run_pdf_ocr_fallback(extraction):
-        if extraction.title and extraction.nace_code and not (extraction.vkn or extraction.tckn or extraction.tax_id):
-            identity_start = time.perf_counter()
-            identity_text, identity_notes = ocr_pdf_identity_region(path)
-            metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(identity_start)
-            if identity_text.strip():
-                supplemental_start = time.perf_counter()
-                supplemental = parse_tax_certificate_text(identity_text, extraction_notes=identity_notes)
-                metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
-                if supplemental.vkn or supplemental.tckn or supplemental.tax_id:
+    if _should_run_tax_certificate_vision(extraction):
+        resolved_vision_reader = vision_reader or build_tax_certificate_vision_reader_from_env()
+        if resolved_vision_reader is None:
+            runtime_notes.append("ai_vision_unavailable")
+        else:
+            vision_start = time.perf_counter()
+            try:
+                vision_read = resolved_vision_reader(path)
+                vision_extraction = tax_certificate_extraction_from_vision(vision_read)
+                extraction = merge_tax_certificate_vision_extraction(extraction, vision_extraction)
+                metrics["used_ai_vision"] = True
+                metrics["ai_confidence"] = vision_read.confidence
+                metrics["ai_model"] = str(getattr(resolved_vision_reader, "model_name", "") or "")
+            except Exception as exc:  # noqa: BLE001 - OCR fallback must survive provider failures
+                runtime_notes.append(f"ai_vision_failed:{type(exc).__name__}")
+            finally:
+                metrics["ai_vision_ms"] = _duration_ms(vision_start)
+
+    if _should_run_pdf_ocr_fallback(extraction):
+        if suffix == ".pdf":
+            if metrics["used_text_layer"] and extraction.title and extraction.nace_code and not _has_valid_tax_certificate_identity(extraction):
+                identity_start = time.perf_counter()
+                identity_text, identity_notes = ocr_pdf_identity_region(path)
+                metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(identity_start)
+                if identity_text.strip():
+                    supplemental_start = time.perf_counter()
+                    supplemental = parse_tax_certificate_text(identity_text, extraction_notes=identity_notes)
+                    metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
+                    if _has_valid_tax_certificate_identity(supplemental):
+                        extraction = merge_tax_certificate_extractions(extraction, supplemental)
+                        metrics["used_ocr"] = True
+                        metrics["selected_psm"] = _selected_psm(identity_notes)
+                        metrics["ocr_attempts"] = _ocr_attempt_count(identity_notes)
+            if _should_run_pdf_ocr_fallback(extraction):
+                ocr_start = time.perf_counter()
+                ocr_text, ocr_notes = ocr_pdf(path)
+                metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(ocr_start)
+                if ocr_text.strip():
+                    supplemental_start = time.perf_counter()
+                    supplemental = parse_tax_certificate_text(ocr_text, extraction_notes=ocr_notes)
+                    metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
                     extraction = merge_tax_certificate_extractions(extraction, supplemental)
                     metrics["used_ocr"] = True
-                    metrics["selected_psm"] = _selected_psm(identity_notes)
-                    metrics["ocr_attempts"] = _ocr_attempt_count(identity_notes)
-        if _should_run_pdf_ocr_fallback(extraction):
+                    metrics["selected_psm"] = _selected_psm(ocr_notes)
+                    metrics["ocr_attempts"] = _ocr_attempt_count(ocr_notes)
+        elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
             ocr_start = time.perf_counter()
-            ocr_text, ocr_notes = ocr_pdf(path)
-            metrics["ocr_ms"] = int(metrics["ocr_ms"]) + _duration_ms(ocr_start)
+            ocr_text, ocr_notes = extract_tax_certificate_text(path)
+            metrics["ocr_ms"] = _duration_ms(ocr_start)
             if ocr_text.strip():
                 supplemental_start = time.perf_counter()
                 supplemental = parse_tax_certificate_text(ocr_text, extraction_notes=ocr_notes)
                 metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(supplemental_start)
                 extraction = merge_tax_certificate_extractions(extraction, supplemental)
-                metrics["used_ocr"] = True
+                metrics["used_ocr"] = any(note.startswith("ocr_tesseract") for note in ocr_notes)
                 metrics["selected_psm"] = _selected_psm(ocr_notes)
                 metrics["ocr_attempts"] = _ocr_attempt_count(ocr_notes)
 
@@ -989,6 +1171,7 @@ def parse_tax_certificate_file(path: Path, external_ocr_provider: ExternalOcrPro
             metrics["used_external_ocr"] = True
 
     metrics["total_ms"] = _duration_ms(total_start)
+    final_notes = tuple(dict.fromkeys((*extraction.extraction_notes, *runtime_notes)))
     return TaxCertificateExtraction(
         title=extraction.title,
         tax_id=extraction.tax_id,
@@ -1007,6 +1190,6 @@ def parse_tax_certificate_file(path: Path, external_ocr_provider: ExternalOcrPro
         activity_tags=extraction.activity_tags,
         activity_profile=extraction.activity_profile,
         confidence=extraction.confidence,
-        extraction_notes=extraction.extraction_notes,
+        extraction_notes=final_notes,
         processing_metrics=metrics,
     )

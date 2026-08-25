@@ -1,3 +1,5 @@
+# File: backend/tests/test_tax_certificates.py
+# Summary: Verifies tax-certificate parsing, status classification, OCR fallback, and API contracts.
 from __future__ import annotations
 
 from pathlib import Path
@@ -477,7 +479,7 @@ class TaxCertificateParserTests(unittest.TestCase):
             "parse_tax_certificate_file",
             return_value=TaxCertificateExtraction(
                 title="IBRAHIM DEGERLI",
-                tax_id="1234567890",
+                tax_id="9270740926",
                 tax_office="CEKMEKOY VERGI DAIRESI",
                 activity_description="Isitme cihazi satisi",
                 nace_code="477401",
@@ -507,11 +509,11 @@ class TaxCertificateParserTests(unittest.TestCase):
             response.json(),
             {
                 "title": "IBRAHIM DEGERLI",
-                "tax_id": "1234567890",
+                "tax_id": "9270740926",
                 "tckn": "",
-                "vkn": "1234567890",
+                "vkn": "9270740926",
                 "identity_type": "vkn",
-                "tax_identifier": "1234567890",
+                "tax_identifier": "9270740926",
                 "legal_name": "IBRAHIM DEGERLI",
                 "trade_name": "",
                 "display_title": "IBRAHIM DEGERLI",
@@ -533,6 +535,8 @@ class TaxCertificateParserTests(unittest.TestCase):
                 "confidence": 92,
                 "extraction_notes": ["pdf_text_layer"],
                 "processing_metrics": {},
+                "parse_status": "parsed",
+                "missing_critical_fields": [],
             },
         )
 
@@ -740,6 +744,51 @@ class TaxCertificateParserTests(unittest.TestCase):
         self.assertEqual(notes, ("external_ocr:ocr_space", "external_ocr_pages:1"))
         self.assertEqual(urlopen.call_args.args[0].full_url, "https://ocr.example.test/parse")
 
+
+class TaxCertificateParseStatusTests(unittest.TestCase):
+    def test_parse_status_is_parsed_only_when_critical_fields_are_valid(self) -> None:
+        from app.domain.tax_certificates import tax_certificate_parse_state
+
+        extraction = TaxCertificateExtraction(title="ORNEK LIMITED SIRKETI", vkn="9270740926", nace_code="477401")
+        status, missing = tax_certificate_parse_state(extraction)
+        self.assertEqual(status, "parsed")
+        self.assertEqual(missing, ())
+
+    def test_parse_status_is_partial_when_identity_is_missing(self) -> None:
+        from app.domain.tax_certificates import tax_certificate_parse_state
+
+        extraction = TaxCertificateExtraction(title="ORNEK LIMITED SIRKETI", nace_code="477401")
+        status, missing = tax_certificate_parse_state(extraction)
+        self.assertEqual(status, "partial")
+        self.assertEqual(missing, ("tax_identifier",))
+
+class TaxCertificateParseEndpointStatusTests(unittest.TestCase):
+    def test_partial_parse_endpoint_keeps_fields_and_reports_missing_critical_data(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+
+        with patch.object(
+            phase0,
+            "parse_tax_certificate_file",
+            return_value=TaxCertificateExtraction(
+                title="PARTIAL CLIENT",
+                tax_office="KADIKOY",
+                activity_description="Medical retail",
+                nace_code="477401",
+                confidence=70,
+            ),
+        ):
+            response = TestClient(app).post(
+                "/phase0/tax-certificate/parse",
+                files={"file": ("levha.pdf", b"%PDF-1.7", "application/pdf")},
+            )
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["parse_status"], "partial")
+        self.assertEqual(payload["missing_critical_fields"], ["tax_identifier"])
+        self.assertEqual(payload["title"], "PARTIAL CLIENT")
+        self.assertEqual(payload["nace_code"], "477401")
 
 if __name__ == "__main__":
     unittest.main()

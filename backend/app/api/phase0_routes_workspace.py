@@ -19,7 +19,10 @@ from app.api.phase0_schemas import (
     ClientOnboardingPackagePayload,
     ClientProfilePayload,
 )
-from app.domain.tax_certificates import parse_tax_certificate_file as _parse_tax_certificate_file
+from app.domain.tax_certificates import (
+    parse_tax_certificate_file as _parse_tax_certificate_file,
+    tax_certificate_parse_state,
+)
 
 
 router = APIRouter()
@@ -145,7 +148,12 @@ async def parse_tax_certificate_upload(
         handle.write(content)
         temp_path = Path(handle.name)
     try:
-        return parse_tax_certificate_file(temp_path).to_payload()
+        extraction = parse_tax_certificate_file(temp_path)
+        payload = extraction.to_payload()
+        parse_status, missing_critical_fields = tax_certificate_parse_state(extraction)
+        payload["parse_status"] = parse_status
+        payload["missing_critical_fields"] = list(missing_critical_fields)
+        return payload
     finally:
         temp_path.unlink(missing_ok=True)
 

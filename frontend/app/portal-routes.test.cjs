@@ -1,3 +1,5 @@
+// File: frontend/app/portal-routes.test.cjs
+// Summary: Verifies portal routing and client-management source contracts.
 const assert = require("node:assert/strict");
 const { existsSync } = require("node:fs");
 const { join } = require("node:path");
@@ -235,7 +237,8 @@ test("client management view separates tax certificate OCR loading from NACE res
   assert.match(clientsView, /Bu dosya taranmış görünüyor; OCR biraz sürebilir\./);
   assert.match(clientsView, /NACE araştırması yapılıyor/);
   assert.match(clientActions, /setNewClientTaxCertificateParsePending\(true\)/);
-  assert.match(clientActions, /setNewClientTaxCertificateStage\("Alanlar dolduruldu"\)/);
+  assert.match(clientActions, /setNewClientTaxCertificateStage\(parseStatus === "partial" \? "Eksik kritik alanlar var" : "Alanlar dolduruldu"\)/);
+  assert.match(clientActions, /missing_critical_fields/);
 });
 
 test("journal distinguishes a missing new cari suggestion from an invalid ledger account", () => {

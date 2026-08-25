@@ -1,3 +1,5 @@
+# File: backend/tests/test_document_upload_api.py
+# Summary: Verifies document upload, onboarding attachment, and tax-certificate reprocess safety.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -469,8 +471,8 @@ class DocumentUploadApiTests(unittest.TestCase):
                 "app.services.document_service.parse_tax_certificate_file",
                 return_value=TaxCertificateExtraction(
                     title="Demo Mukellef",
-                    tax_id="1111111111",
-                    vkn="1111111111",
+                    tax_id="9270740926",
+                    vkn="9270740926",
                     tax_office="Kadikoy",
                     activity_description="Tibbi ve ortopedik urunlerin perakende ticareti",
                     nace_code="477401",
@@ -538,8 +540,8 @@ class DocumentUploadApiTests(unittest.TestCase):
                 "app.services.document_service.parse_tax_certificate_file",
                 return_value=TaxCertificateExtraction(
                     title="Demo Mukellef",
-                    tax_id="1111111111",
-                    vkn="1111111111",
+                    tax_id="9270740926",
+                    vkn="9270740926",
                     tax_office="Kadikoy",
                     activity_description="Tibbi ve ortopedik urunlerin perakende ticareti",
                     nace_code="477401",
@@ -704,8 +706,8 @@ class DocumentUploadApiTests(unittest.TestCase):
                 "app.services.document_service.parse_tax_certificate_file",
                 return_value=TaxCertificateExtraction(
                     title="Demo Mukellef A.S.",
-                    tax_id="1111111111",
-                    vkn="1111111111",
+                    tax_id="9270740926",
+                    vkn="9270740926",
                     tax_office="Kadikoy",
                     activity_description="Tibbi ve ortopedik urunlerin perakende ticareti",
                     nace_code="477401",
@@ -1547,6 +1549,118 @@ class DocumentUploadApiTests(unittest.TestCase):
         self.assertEqual(payload["suggestions"][0]["suggested_account_code"], "320.01.123")
         self.assertFalse(payload["suggestions"][0]["export_allowed"])
         self.assertEqual(summary_response.json()["summary"]["ai_used_count"], 1)
+
+
+class TaxCertificateAttachmentStatusTests(unittest.TestCase):
+    def test_partial_tax_certificate_is_stored_without_updating_client_profile(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.domain.tax_certificates import TaxCertificateExtraction
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-partial", "title": "Original Client", "has_chart_accounts": False},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={"user_id": "mali-musavir", "display_name": "Mali Musavir", "role": "accountant", "allowed_client_ids": ["client-partial"]},
+            )
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                return_value=TaxCertificateExtraction(title="AI TITLE", nace_code="477401", activity_description="Medical retail", confidence=70),
+            ):
+                response = client.post(
+                    "/phase0/store/client-onboarding-attachment",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    data={"client_id": "client-partial", "attachment_type": "tax_certificate", "uploaded_by": "mali-musavir", "uploaded_by_user_id": "mali-musavir"},
+                    files={"file": ("vergi-levhasi.pdf", b"%PDF-1.7", "application/pdf")},
+                )
+            workspace = client.get(
+                "/phase0/store/workspace/client-partial",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["tax_certificate_parse_status"], "partial")
+        self.assertEqual(payload["tax_certificate_missing_critical_fields"], ["tax_identifier"])
+        self.assertEqual(payload["tax_certificate"]["nace_code"], "477401")
+        self.assertEqual(workspace["client"].get("profile", {}).get("nace_code", ""), "")
+
+
+class TaxCertificateReprocessStatusTests(unittest.TestCase):
+    def test_client_reprocess_does_not_apply_partial_tax_certificate(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        from app.domain.tax_certificates import TaxCertificateExtraction
+
+        partial = TaxCertificateExtraction(
+            title="AI TITLE",
+            nace_code="477401",
+            activity_description="Medical retail",
+            confidence=70,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "client-partial-reprocess", "title": "Original Client", "has_chart_accounts": False},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["client-partial-reprocess"],
+                },
+            )
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                return_value=partial,
+            ):
+                upload = client.post(
+                    "/phase0/store/client-onboarding-attachment",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    data={
+                        "client_id": "client-partial-reprocess",
+                        "attachment_type": "tax_certificate",
+                        "uploaded_by": "mali-musavir",
+                        "uploaded_by_user_id": "mali-musavir",
+                    },
+                    files={"file": ("vergi-levhasi.pdf", b"%PDF-1.7", "application/pdf")},
+                )
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                return_value=partial,
+            ), patch(
+                "app.services.document_service.build_research_runtime_from_env",
+                side_effect=AssertionError("partial tax certificate must not trigger NACE research"),
+            ):
+                response = client.post(
+                    "/phase0/store/client-reprocess",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"client_id": "client-partial-reprocess", "max_jobs": 5},
+                )
+            workspace = client.get(
+                "/phase0/store/workspace/client-partial-reprocess",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        payload = response.json()
+        profile = workspace["client"].get("profile", {})
+        self.assertEqual(upload.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["tax_certificate"]["nace_code"], "477401")
+        self.assertEqual(payload["nace_research_profile"], {})
+        self.assertEqual(profile.get("title"), "Original Client")
+        self.assertEqual(profile.get("nace_code", ""), "")
 
 
 if __name__ == "__main__":

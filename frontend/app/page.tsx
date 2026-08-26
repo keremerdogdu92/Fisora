@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { canUseLocalPilotFallback } from "./pilot-readiness";
 import { LANDING_ROLE_ENTRIES, portalEntryForRole } from "./portal-routes";
-import { loginWithPassword, resolveApiBaseUrl } from "./upload-api";
+import { loginWithPassword, requestPasswordReset, resolveApiBaseUrl } from "./upload-api";
 
 type LandingRole = "accountant" | "client_user";
 
@@ -35,6 +35,9 @@ export default function RoleGatewayLanding() {
   const [userId, setUserId] = useState(() => portalEntryForRole("accountant").defaultUserId);
   const [password, setPassword] = useState("");
   const [status, setStatus] = useState("");
+  const [resetMode, setResetMode] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
   const selectedEntry = useMemo(
     () => portalEntryForRole(selectedRole) as LandingEntry,
     [selectedRole],
@@ -46,6 +49,30 @@ export default function RoleGatewayLanding() {
     setUserId(entry.defaultUserId);
     setPassword("");
     setStatus("");
+    setResetMode(false);
+    setResetEmail("");
+  }
+
+  async function sendResetLink() {
+    const email = resetEmail.trim();
+    if (!email) {
+      setStatus("Şifre sıfırlama bağlantısı için e-posta adresinizi girin.");
+      return;
+    }
+    setResetBusy(true);
+    setStatus("Şifre sıfırlama isteği gönderiliyor.");
+    try {
+      await requestPasswordReset({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        email,
+      });
+      setStatus("Hesap bulunursa şifre sıfırlama bağlantısı e-posta adresinize gönderildi.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatus(`Şifre sıfırlama isteği gönderilemedi. ${message}`);
+    } finally {
+      setResetBusy(false);
+    }
   }
 
   async function enterPortal() {
@@ -146,6 +173,35 @@ export default function RoleGatewayLanding() {
             <button className="primary" onClick={enterPortal} type="button">
               {selectedEntry.label}
             </button>
+            <button
+              className="secondary"
+              onClick={() => {
+                setResetMode((value) => !value);
+                setResetEmail((value) => value || (userId.includes("@") ? userId : ""));
+                setStatus("");
+              }}
+              type="button"
+            >
+              {resetMode ? "Girişe dön" : "Şifremi unuttum"}
+            </button>
+            {resetMode ? (
+              <div className="landing-login">
+                <label>
+                  <span>E-posta</span>
+                  <input
+                    aria-label="Şifre sıfırlama e-postası"
+                    autoComplete="email"
+                    onChange={(event) => setResetEmail(event.target.value)}
+                    placeholder="ornek@firma.com"
+                    type="email"
+                    value={resetEmail}
+                  />
+                </label>
+                <button className="primary" disabled={resetBusy} onClick={sendResetLink} type="button">
+                  {resetBusy ? "Gönderiliyor..." : "Sıfırlama bağlantısı gönder"}
+                </button>
+              </div>
+            ) : null}
             {status ? <p className="decision-status">{status}</p> : null}
           </div>
         </section>

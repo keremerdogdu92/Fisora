@@ -303,6 +303,7 @@ class ChartAccountsStorePayload(BaseModel):
 class PortalUserPayload(BaseModel):
     user_id: str
     display_name: str = ""
+    email: str = ""
     role: Literal["client_user", "accountant", "admin"] = "client_user"
     allowed_client_ids: list[str] = Field(default_factory=list)
 
@@ -384,6 +385,10 @@ class AuthInvitePayload(BaseModel):
 class AuthInviteAcceptPayload(BaseModel):
     invite_token: str
     password: str
+
+
+class AuthPasswordResetRequestPayload(BaseModel):
+    email: str
 
 
 class AuthPasswordResetPayload(BaseModel):

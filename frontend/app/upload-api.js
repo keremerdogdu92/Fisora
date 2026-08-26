@@ -240,6 +240,24 @@ async function loginWithPassword({
   };
 }
 
+async function requestPasswordReset({ apiBaseUrl, email, fetchImpl = fetch }) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/password-reset/request",
+    payload: { email: String(email || "").trim() },
+    fetchImpl,
+  });
+}
+
+async function confirmPasswordReset({ apiBaseUrl, resetToken, password, fetchImpl = fetch }) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/password-reset/confirm",
+    payload: { reset_token: String(resetToken || "").trim(), password: String(password || "") },
+    fetchImpl,
+  });
+}
+
 async function fetchAuthSession({
   apiBaseUrl,
   sessionToken = "",
@@ -1194,6 +1212,8 @@ module.exports = {
   fetchQnbHealth,
   fetchQnbSyncPolicy,
   loginWithPassword,
+  requestPasswordReset,
+  confirmPasswordReset,
   parseDelegatedSessionHash,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,

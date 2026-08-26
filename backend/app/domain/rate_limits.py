@@ -11,10 +11,11 @@ class RateLimitConfig:
     window_seconds: int
     ai_max_requests: int
     export_max_requests: int
+    auth_max_requests: int
 
     @property
     def configured(self) -> bool:
-        return self.enabled and self.window_seconds > 0 and self.ai_max_requests > 0 and self.export_max_requests > 0
+        return self.enabled and self.window_seconds > 0 and self.ai_max_requests > 0 and self.export_max_requests > 0 and self.auth_max_requests > 0
 
 
 def _env_bool(value: str, *, default: bool) -> bool:
@@ -37,4 +38,5 @@ def rate_limit_config(env: Mapping[str, str] | None = None) -> RateLimitConfig:
         window_seconds=max(_env_int(source.get("FISORA_RATE_LIMIT_WINDOW_SECONDS", "60"), default=60), 1),
         ai_max_requests=max(_env_int(source.get("FISORA_RATE_LIMIT_AI_MAX_REQUESTS", "120"), default=120), 0),
         export_max_requests=max(_env_int(source.get("FISORA_RATE_LIMIT_EXPORT_MAX_REQUESTS", "60"), default=60), 0),
+        auth_max_requests=max(_env_int(source.get("FISORA_RATE_LIMIT_AUTH_MAX_REQUESTS", "10"), default=10), 0),
     )

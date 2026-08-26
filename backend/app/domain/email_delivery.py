@@ -31,6 +31,14 @@ def send_auth_email(
             action_url=action_url,
             env=config,
         )
+    if provider == "brevo":
+        return _send_brevo(
+            recipient=normalized_recipient,
+            subject=subject,
+            body_text=body_text,
+            action_url=action_url,
+            env=config,
+        )
     if provider == "smtp":
         return _send_smtp(
             recipient=normalized_recipient,
@@ -103,6 +111,55 @@ def _send_resend(
     except json.JSONDecodeError:
         decoded = {}
     return _delivery_result("sent", "resend", recipient, action_url, provider_message_id=str(decoded.get("id") or ""))
+
+
+def _send_brevo(
+    *,
+    recipient: str,
+    subject: str,
+    body_text: str,
+    action_url: str,
+    env: Mapping[str, str],
+) -> dict[str, object]:
+    api_key = str(env.get("FISORA_BREVO_API_KEY") or "").strip()
+    sender_email = str(env.get("FISORA_BREVO_SENDER_EMAIL") or env.get("FISORA_EMAIL_FROM") or "").strip()
+    sender_name = str(env.get("FISORA_BREVO_SENDER_NAME") or "Fisora").strip() or "Fisora"
+    if not api_key or not sender_email or not recipient:
+        return _delivery_result("error", "brevo", recipient, action_url, reason="missing_brevo_config")
+    payload = json.dumps(
+        {
+            "sender": {"name": sender_name, "email": sender_email},
+            "to": [{"email": recipient}],
+            "subject": subject,
+            "textContent": body_text,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=payload,
+        headers={
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:  # noqa: S310
+            raw = response.read().decode("utf-8", errors="replace")
+    except Exception as exc:  # noqa: BLE001
+        return _delivery_result("error", "brevo", recipient, action_url, reason=f"send_failed:{type(exc).__name__}")
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        decoded = {}
+    return _delivery_result(
+        "sent",
+        "brevo",
+        recipient,
+        action_url,
+        provider_message_id=str(decoded.get("messageId") or decoded.get("message_id") or ""),
+    )
 
 
 def _send_smtp(

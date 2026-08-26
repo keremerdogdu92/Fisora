@@ -379,6 +379,7 @@ class PostgresWorkflowStore:
         display_name: str,
         role: str,
         allowed_client_ids: list[str],
+        email: str = "",
     ) -> dict[str, Any]:
         if not user_id.strip():
             raise ValueError("user_id is required")
@@ -391,6 +392,7 @@ class PostgresWorkflowStore:
                 display_name=display_name,
                 role=role,
                 allowed_client_ids=allowed_client_ids,
+                email=email or str((existing or {}).get("email") or ""),
             ),
             "updated_at": timestamp,
         }
@@ -399,6 +401,16 @@ class PostgresWorkflowStore:
 
     def get_portal_user(self, user_id: str) -> dict[str, Any] | None:
         return self._get_record(PORTAL_USERS_CLIENT_ID, "portal_user", user_id)
+
+    def find_portal_user_by_email(self, *, email: str) -> dict[str, Any] | None:
+        normalized = email.strip().lower()
+        if not normalized:
+            return None
+        for record in self._payloads(PORTAL_USERS_CLIENT_ID, "portal_user"):
+            candidate = str(record.get("email") or record.get("user_id") or "").strip().lower()
+            if candidate == normalized:
+                return record
+        return None
 
     def replace_client_portal_user(
         self,
@@ -434,6 +446,7 @@ class PostgresWorkflowStore:
                 ),
                 role="client_user",
                 allowed_client_ids=allowed_client_ids,
+                email=str(new_user.get("email") or ""),
             ),
             "updated_at": timestamp,
         }
@@ -538,6 +551,18 @@ class PostgresWorkflowStore:
         stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_session", token_hash, record)
         return {"revoked": True, "reason": "session_revoked", **session_public_payload(stored)}
 
+    def revoke_auth_sessions_for_user(self, *, user_id: str) -> int:
+        timestamp = utc_now()
+        revoked = 0
+        for record in self._payloads(PORTAL_USERS_CLIENT_ID, "auth_session"):
+            if str(record.get("user_id") or "") != user_id or record.get("revoked_at"):
+                continue
+            record["revoked_at"] = timestamp
+            record["updated_at"] = timestamp
+            self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_session", str(record.get("token_hash") or ""), record)
+            revoked += 1
+        return revoked
+
     def create_auth_token(
         self,
         *,
@@ -562,6 +587,20 @@ class PostgresWorkflowStore:
         stored = self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash, record)
         return auth_token_public_payload(stored)
 
+    def invalidate_auth_tokens_for_user(self, *, user_id: str, purpose: str) -> int:
+        timestamp = utc_now()
+        invalidated = 0
+        for record in self._payloads(PORTAL_USERS_CLIENT_ID, "auth_token"):
+            if str(record.get("user_id") or "") != user_id or str(record.get("purpose") or "") != purpose:
+                continue
+            if record.get("used_at"):
+                continue
+            record["used_at"] = timestamp
+            record["updated_at"] = timestamp
+            self._upsert_record(PORTAL_USERS_CLIENT_ID, "auth_token", str(record.get("token_hash") or ""), record)
+            invalidated += 1
+        return invalidated
+
     def resolve_auth_token(self, *, purpose: str, token_hash: str) -> dict[str, Any]:
         record = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash)
         if not record or record.get("purpose") != purpose:
@@ -571,6 +610,44 @@ class PostgresWorkflowStore:
         if is_expired(str(record.get("expires_at") or "")):
             return {"valid": False, "reason": "token_expired", "user_id": record.get("user_id", "")}
         return {"valid": True, "reason": "token_valid", **auth_token_public_payload(record), "payload": deepcopy(record.get("payload") or {})}
+
+    def consume_auth_token(self, *, purpose: str, token_hash: str) -> dict[str, Any]:
+        self._ensure_tenant()
+        with self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select id, payload
+                    from workflow_records
+                    where tenant_id = %s and client_id = %s
+                      and record_type = 'auth_token' and record_key = %s
+                    for update
+                    """,
+                    (self.tenant_id, PORTAL_USERS_CLIENT_ID, token_hash),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return {"valid": False, "reason": "token_not_found"}
+                record = dict(row[1] or {})
+                if record.get("purpose") != purpose:
+                    return {"valid": False, "reason": "token_not_found"}
+                if record.get("used_at"):
+                    return {"valid": False, "reason": "token_used", "user_id": record.get("user_id", "")}
+                if is_expired(str(record.get("expires_at") or "")):
+                    return {"valid": False, "reason": "token_expired", "user_id": record.get("user_id", "")}
+                timestamp = utc_now()
+                record["used_at"] = timestamp
+                record["updated_at"] = timestamp
+                cursor.execute(
+                    "update workflow_records set payload = %s, updated_at = now() where id = %s",
+                    (self._json(record), row[0]),
+                )
+                return {
+                    "valid": True,
+                    "reason": "token_consumed",
+                    **auth_token_public_payload(record),
+                    "payload": deepcopy(record.get("payload") or {}),
+                }
 
     def mark_auth_token_used(self, *, token_hash: str) -> dict[str, Any]:
         record = self._get_record(PORTAL_USERS_CLIENT_ID, "auth_token", token_hash)

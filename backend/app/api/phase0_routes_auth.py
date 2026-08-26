@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Cookie, Header, HTTPException, Response
+from fastapi import APIRouter, Cookie, Header, HTTPException, Request, Response
 
 from app.api.phase0_context import (
     SESSION_COOKIE_NAME,
@@ -17,6 +17,7 @@ from app.api.phase0_context import (
     request_user_id,
     set_portal_session_cookie,
 )
+from app.api.rate_limit import enforce_rate_limit
 from app.api.phase0_schemas import (
     AuthInviteAcceptPayload,
     AuthInvitePayload,
@@ -25,6 +26,7 @@ from app.api.phase0_schemas import (
     AuthPasswordPayload,
     AuthPasswordResetConfirmPayload,
     AuthPasswordResetPayload,
+    AuthPasswordResetRequestPayload,
     ClientPortalAccessUpdatePayload,
     DelegatedClientSessionPayload,
     PortalAccessPayload,
@@ -90,6 +92,7 @@ def store_portal_user(
             display_name=payload.display_name,
             role=payload.role,
             allowed_client_ids=payload.allowed_client_ids,
+            email=payload.email,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -266,6 +269,7 @@ def store_auth_invite(
             display_name=payload.display_name,
             role=payload.role,
             allowed_client_ids=payload.allowed_client_ids,
+            email=payload.email,
         )
         expires_at = action_token_expires_at(ttl_hours=payload.ttl_hours)
     except ValueError as exc:
@@ -316,6 +320,27 @@ def store_auth_invite_accept(payload: AuthInviteAcceptPayload) -> dict[str, obje
     return {"credential": credential, "token": used}
 
 
+@router.post("/store/auth/password-reset/request")
+def store_auth_password_reset_request(payload: AuthPasswordResetRequestPayload, request: Request) -> dict[str, object]:
+    enforce_rate_limit(scope="auth", request=request)
+    email = payload.email.strip().lower()
+    generic = {"accepted": True, "message": "Hesap bulunursa sifre sifirlama baglantisi e-posta adresine gonderildi."}
+    if not email:
+        return generic
+    store = get_workflow_store()
+    portal_user = store.find_portal_user_by_email(email=email) if hasattr(store, "find_portal_user_by_email") else None
+    user_id = str((portal_user or {}).get("user_id") or "").strip()
+    if not user_id or not store.get_auth_password_hash(user_id=user_id):
+        return generic
+    store.invalidate_auth_tokens_for_user(user_id=user_id, purpose="password_reset")
+    token = create_auth_action_token()
+    expires_at = action_token_expires_at(ttl_hours=1)
+    action_url = _portal_action_url("/portal/password-reset", token.raw_token)
+    store.create_auth_token(purpose="password_reset", user_id=user_id, token_hash=token.token_hash, expires_at=expires_at, payload={"email": email})
+    _auth_email_delivery(recipient=email, subject="Fisora sifre sifirlama", body_text=f"Fisora sifre sifirlama linkiniz: {action_url or token.raw_token}", action_url=action_url)
+    return generic
+
+
 @router.post("/store/auth/password-reset")
 def store_auth_password_reset(
     payload: AuthPasswordResetPayload,
@@ -356,17 +381,19 @@ def store_auth_password_reset(
 @router.post("/store/auth/password-reset/confirm")
 def store_auth_password_reset_confirm(payload: AuthPasswordResetConfirmPayload) -> dict[str, object]:
     token_hash = hash_session_token(payload.reset_token.strip())
-    store = get_workflow_store()
-    token = store.resolve_auth_token(purpose="password_reset", token_hash=token_hash)
-    if not token.get("valid"):
-        raise HTTPException(status_code=400, detail=token)
     try:
         password_hash = create_password_hash(payload.password)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    credential = store.set_auth_password(user_id=str(token["user_id"]), password_hash=password_hash)
-    used = store.mark_auth_token_used(token_hash=token_hash)
-    return {"credential": credential, "token": used}
+    store = get_workflow_store()
+    token = store.consume_auth_token(purpose="password_reset", token_hash=token_hash)
+    if not token.get("valid"):
+        raise HTTPException(status_code=400, detail=token)
+    user_id = str(token["user_id"])
+    credential = store.set_auth_password(user_id=user_id, password_hash=password_hash)
+    revoked_sessions = store.revoke_auth_sessions_for_user(user_id=user_id)
+    store.invalidate_auth_tokens_for_user(user_id=user_id, purpose="password_reset")
+    return {"credential": credential, "token": token, "revoked_sessions": revoked_sessions}
 
 
 @router.get("/store/auth/session")

@@ -245,6 +245,7 @@ class JsonWorkflowStore:
         display_name: str,
         role: str,
         allowed_client_ids: list[str],
+        email: str = "",
     ) -> dict[str, Any]:
         if not user_id.strip():
             raise ValueError("user_id is required")
@@ -257,6 +258,7 @@ class JsonWorkflowStore:
                 display_name=display_name,
                 role=role,
                 allowed_client_ids=allowed_client_ids,
+                email=email or str(existing.get("email") or ""),
             ),
             "updated_at": utc_now(),
         }
@@ -269,6 +271,17 @@ class JsonWorkflowStore:
         data = self._read()
         record = data["portal_users"].get(user_id)
         return deepcopy(record) if record else None
+
+    def find_portal_user_by_email(self, *, email: str) -> dict[str, Any] | None:
+        normalized = email.strip().lower()
+        if not normalized:
+            return None
+        data = self._read()
+        for record in data["portal_users"].values():
+            candidate = str(record.get("email") or record.get("user_id") or "").strip().lower()
+            if candidate == normalized:
+                return deepcopy(record)
+        return None
 
     def replace_client_portal_user(
         self,
@@ -307,6 +320,7 @@ class JsonWorkflowStore:
                 display_name=fallback_display_name,
                 role="client_user",
                 allowed_client_ids=allowed_client_ids,
+                email=str(new_user.get("email") or ""),
             ),
             "updated_at": timestamp,
         }
@@ -420,6 +434,20 @@ class JsonWorkflowStore:
         self._write(data)
         return {"revoked": True, "reason": "session_revoked", **session_public_payload(record)}
 
+    def revoke_auth_sessions_for_user(self, *, user_id: str) -> int:
+        data = self._read()
+        timestamp = utc_now()
+        revoked = 0
+        for record in data["auth_sessions"].values():
+            if str(record.get("user_id") or "") != user_id or record.get("revoked_at"):
+                continue
+            record["revoked_at"] = timestamp
+            record["updated_at"] = timestamp
+            revoked += 1
+        if revoked:
+            self._write(data)
+        return revoked
+
     def create_auth_token(
         self,
         *,
@@ -446,6 +474,22 @@ class JsonWorkflowStore:
         self._write(data)
         return auth_token_public_payload(record)
 
+    def invalidate_auth_tokens_for_user(self, *, user_id: str, purpose: str) -> int:
+        data = self._read()
+        timestamp = utc_now()
+        invalidated = 0
+        for record in data["auth_tokens"].values():
+            if str(record.get("user_id") or "") != user_id or str(record.get("purpose") or "") != purpose:
+                continue
+            if record.get("used_at"):
+                continue
+            record["used_at"] = timestamp
+            record["updated_at"] = timestamp
+            invalidated += 1
+        if invalidated:
+            self._write(data)
+        return invalidated
+
     def resolve_auth_token(self, *, purpose: str, token_hash: str) -> dict[str, Any]:
         data = self._read()
         record = data["auth_tokens"].get(token_hash)
@@ -456,6 +500,27 @@ class JsonWorkflowStore:
         if is_expired(str(record.get("expires_at") or "")):
             return {"valid": False, "reason": "token_expired", "user_id": record.get("user_id", "")}
         return {"valid": True, "reason": "token_valid", **auth_token_public_payload(record), "payload": deepcopy(record.get("payload") or {})}
+
+    def consume_auth_token(self, *, purpose: str, token_hash: str) -> dict[str, Any]:
+        with self._lock:
+            data = self._read()
+            record = data["auth_tokens"].get(token_hash)
+            if not record or record.get("purpose") != purpose:
+                return {"valid": False, "reason": "token_not_found"}
+            if record.get("used_at"):
+                return {"valid": False, "reason": "token_used", "user_id": record.get("user_id", "")}
+            if is_expired(str(record.get("expires_at") or "")):
+                return {"valid": False, "reason": "token_expired", "user_id": record.get("user_id", "")}
+            timestamp = utc_now()
+            record["used_at"] = timestamp
+            record["updated_at"] = timestamp
+            self._write(data)
+            return {
+                "valid": True,
+                "reason": "token_consumed",
+                **auth_token_public_payload(record),
+                "payload": deepcopy(record.get("payload") or {}),
+            }
 
     def mark_auth_token_used(self, *, token_hash: str) -> dict[str, Any]:
         data = self._read()

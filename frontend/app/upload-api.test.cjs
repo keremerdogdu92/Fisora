@@ -19,6 +19,8 @@ const {
   fetchAuthSession,
   fetchQnbConnectionStatus,
   loginWithPassword,
+  requestPasswordReset,
+  confirmPasswordReset,
   sessionAuthErrorMessage,
   pickUploadUser,
   parseChartAccountsFromBackend,
@@ -572,6 +574,29 @@ test("loginWithPassword posts credentials and returns a backend session", async 
   });
   assert.equal(result.sessionToken, "session-token-1");
   assert.equal(result.userId, "mali-musavir");
+});
+
+test("requestPasswordReset posts only the email", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ accepted: true }) };
+  };
+  const result = await requestPasswordReset({ apiBaseUrl: "http://localhost:8000", email: "user@example.com", fetchImpl });
+  assert.equal(request.url, "http://localhost:8000/phase0/store/auth/password-reset/request");
+  assert.deepEqual(JSON.parse(request.init.body), { email: "user@example.com" });
+  assert.equal(result.accepted, true);
+});
+
+test("confirmPasswordReset posts token and new password", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ credential: { has_password: true } }) };
+  };
+  await confirmPasswordReset({ apiBaseUrl: "http://localhost:8000", resetToken: "reset-1", password: "NewSecret123", fetchImpl });
+  assert.equal(request.url, "http://localhost:8000/phase0/store/auth/password-reset/confirm");
+  assert.deepEqual(JSON.parse(request.init.body), { reset_token: "reset-1", password: "NewSecret123" });
 });
 
 test("fetchAuthSession validates the stored token before opening a portal route", async () => {

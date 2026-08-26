@@ -20,16 +20,19 @@ def build_portal_user_record(
     display_name: str,
     role: str,
     allowed_client_ids: list[str],
+    email: str = "",
 ) -> dict[str, Any]:
     normalized_role = role.strip().lower() or "client_user"
     if normalized_role not in {"client_user", "accountant", "admin"}:
         raise ValueError(f"unsupported portal role: {role}")
     cleaned_clients = [client_id.strip() for client_id in allowed_client_ids if client_id.strip()]
+    normalized_email = email.strip().lower()
     return {
         "user_id": user_id.strip(),
         "display_name": display_name.strip() or user_id.strip(),
         "role": normalized_role,
         "allowed_client_ids": cleaned_clients,
+        **({"email": normalized_email} if normalized_email else {}),
     }
 
 

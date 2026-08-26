@@ -57,6 +57,32 @@ class AuthPolicyTests(unittest.TestCase):
         self.assertEqual(result["status"], "dry_run")
         self.assertEqual(result["provider"], "dry_run")
 
+    def test_email_delivery_brevo_posts_transactional_email(self) -> None:
+        from app.domain.email_delivery import send_auth_email
+
+        with patch("app.domain.email_delivery.urllib.request.urlopen") as opener:
+            response = Mock()
+            response.read.return_value = b'{"messageId":"brevo-message-1"}'
+            opener.return_value.__enter__.return_value = response
+            result = send_auth_email(
+                recipient="client@example.com",
+                subject="Fisora sifre sifirlama",
+                body_text="Link: https://portal.test/reset?token=abc",
+                action_url="https://portal.test/reset?token=abc",
+                env={
+                    "FISORA_EMAIL_PROVIDER": "brevo",
+                    "FISORA_BREVO_API_KEY": "test-key",
+                    "FISORA_BREVO_SENDER_EMAIL": "noreply@example.com",
+                    "FISORA_BREVO_SENDER_NAME": "Fisora",
+                },
+            )
+
+        request = opener.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.brevo.com/v3/smtp/email")
+        self.assertEqual(result["status"], "sent")
+        self.assertEqual(result["provider"], "brevo")
+        self.assertEqual(result["provider_message_id"], "brevo-message-1")
+
     def test_invite_route_returns_email_delivery_status(self) -> None:
         if TestClient is None or phase0 is None or app is None:
             self.skipTest("fastapi is not installed in this Python environment")

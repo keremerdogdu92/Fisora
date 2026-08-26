@@ -34,7 +34,7 @@ def enforce_rate_limit(
     config = rate_limit_config(env)
     if not config.enabled:
         return
-    limit = config.ai_max_requests if scope == "ai" else config.export_max_requests
+    limit = config.ai_max_requests if scope == "ai" else config.auth_max_requests if scope == "auth" else config.export_max_requests
     if limit <= 0:
         raise HTTPException(
             status_code=429,

@@ -1,2 +1,3 @@
 *.sh text eol=lf
 *.ps1 text eol=crlf
+backend/vendor/fisora-html-source-reader/** -text

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 from app.domain.ai_classification import merge_semantic_attempt_result, sanitize_semantic_evidence
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
+from app.domain.document_source_snapshots import READER_VERSION, SNAPSHOT_VERSION, snapshot_sha256, validate_source_snapshot
 from app.domain.storage_adapters import LocalDocumentStorage
 from app.domain.qnb_credentials import QnbCredentialCipher
 from app.domain.portal_access import (
@@ -131,6 +132,7 @@ def empty_store() -> dict[str, Any]:
         "ai_capacity_snapshots": {},
         "operation_events": [],
         "document_pipeline_events": [],
+        "document_source_snapshots": {},
         "nace_research_profiles": {},
         "brand_research_profiles": {},
         "research_benchmark_runs": [],
@@ -610,6 +612,7 @@ class JsonWorkflowStore:
             + len(data["ai_capacity_snapshots"])
             + len(data["operation_events"])
             + len(data["document_pipeline_events"])
+            + len(data["document_source_snapshots"])
             + len(data["nace_research_profiles"])
             + len(data["brand_research_profiles"])
             + len(data["research_benchmark_runs"])
@@ -636,6 +639,7 @@ class JsonWorkflowStore:
                 "ai_capacity_snapshots": {},
                 "operation_events": [],
                 "document_pipeline_events": [],
+                "document_source_snapshots": {},
                 "nace_research_profiles": {},
                 "brand_research_profiles": {},
                 "research_benchmark_runs": [],
@@ -1648,6 +1652,59 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def save_document_source_snapshot(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+        snapshot: dict[str, Any],
+        reader_version: str,
+        parser_kind: str,
+    ) -> dict[str, Any]:
+        validated = validate_source_snapshot(snapshot)
+        document_ref = str(document.get("document_ref") or document.get("document_id") or "").strip()
+        if not document_ref:
+            raise ValueError("document_ref is required for source snapshot")
+        if reader_version != READER_VERSION:
+            raise ValueError("document source snapshot reader version mismatch")
+        key = f"{client_id}:{document_ref}:{SNAPSHOT_VERSION}:{reader_version}"
+        payload_hash = snapshot_sha256(validated)
+        data = self._read()
+        existing = data["document_source_snapshots"].get(key)
+        if existing:
+            if str(existing.get("snapshot_sha256") or "") != payload_hash:
+                raise ValueError("immutable source snapshot conflicts with existing release output")
+            return deepcopy(existing)
+        record = {
+            "id": str(uuid4()),
+            "client_id": client_id,
+            "document_ref": document_ref,
+            "source_file_sha256": str(document.get("sha256") or ""),
+            "snapshot_version": SNAPSHOT_VERSION,
+            "reader_version": reader_version,
+            "parser_kind": parser_kind,
+            "snapshot_sha256": payload_hash,
+            "payload": validated,
+            "created_at": utc_now(),
+            "created": True,
+        }
+        data["document_source_snapshots"][key] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def latest_document_source_snapshot(
+        self, *, client_id: str, document_ref: str
+    ) -> dict[str, Any] | None:
+        prefix = f"{client_id}:{document_ref}:"
+        records = [
+            deepcopy(record)
+            for key, record in self._read()["document_source_snapshots"].items()
+            if key.startswith(prefix)
+        ]
+        if not records:
+            return None
+        return sorted(records, key=lambda item: str(item.get("created_at") or ""), reverse=True)[0]
+
     def record_qnb_incoming_status(
         self,
         *,
@@ -2105,6 +2162,11 @@ class JsonWorkflowStore:
                 for event in data["document_pipeline_events"]
                 if not (event.get("client_id") == normalized_client_id and str(event.get("document_ref") or "") in deleted_set)
             ]
+            data["document_source_snapshots"] = {
+                key: snapshot
+                for key, snapshot in data["document_source_snapshots"].items()
+                if not (snapshot.get("client_id") == normalized_client_id and str(snapshot.get("document_ref") or "") in deleted_set)
+            }
             self._write(data)
         return {
             "client_id": normalized_client_id,

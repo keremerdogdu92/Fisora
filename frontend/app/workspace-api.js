@@ -484,6 +484,36 @@ function normalizeSourceReviewRows(value) {
   }).filter((row) => row.sourcePosition || row.sourceText || row.description);
 }
 
+function normalizeSourceSnapshot(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const sections = safeList(value.sections).map((section) => ({
+    kind: safeText(section?.kind),
+    title: section?.title == null ? null : safeText(section?.title),
+    columns: safeList(section?.columns).map(String),
+    rows: safeList(section?.rows).map((row) => safeList(row).map(String)),
+    columnCount: safeNumber(section?.columnCount),
+    meta: section?.meta && typeof section.meta === "object" ? section.meta : {},
+  }));
+  if (!sections.length) return undefined;
+  return {
+    version: safeText(value.version),
+    source: {
+      file: value?.source?.file == null ? null : safeText(value?.source?.file),
+      folder: value?.source?.folder == null ? null : safeText(value?.source?.folder),
+      bytes: safeNumber(value?.source?.bytes),
+    },
+    mode: safeText(value.mode),
+    confidence: safeNumber(value.confidence),
+    sections,
+    warnings: safeList(value.warnings).map(String),
+    metrics: {
+      sectionCount: safeNumber(value?.metrics?.sectionCount),
+      rowCount: safeNumber(value?.metrics?.rowCount),
+      columnCount: safeNumber(value?.metrics?.columnCount),
+    },
+  };
+}
+
 function readerSourceReviewRows(reader) {
   return normalizeSourceReviewRows(safeList(reader?.invoice_table_rows).map((row) => ({
     source_position: row?.source_position,
@@ -529,24 +559,35 @@ function progressiveFieldsForJob(job) {
   const reader = snapshot?.reader && typeof snapshot.reader === "object" ? snapshot.reader : {};
   const planner = snapshot?.planner && typeof snapshot.planner === "object" ? snapshot.planner : {};
   const sourceReviewRows = readerSourceReviewRows(reader);
+  const sourceSnapshot = normalizeSourceSnapshot(reader?.source_snapshot);
+  const isHtmlSource = safeText(reader?.reader_kind) === "html_source_reader";
   const issueDate = labeledSnapshotValue(reader?.document_header, ["FATURA TARİH", "FATURA TARIH", "ISSUE DATE", "TARİH", "TARIH"]);
   const amount = labeledSnapshotValue(reader?.printed_summary_lines, ["ÖDENECEK TOPLAM", "ODENECEK TOPLAM", "ÖDENECEK TUTAR", "ODENECEK TUTAR", "PAYABLE"]);
   const exactCounterpartyCode = safeText(planner?.counterparty_match) === "exact" ? safeText(planner?.counterparty_account_code) : "";
   return {
     status: statusForBackendJob(job?.status),
-    provider: snapshot?.current_stage ? "AI invoice pipeline" : "Belge yükleme",
+    provider: isHtmlSource ? "HTML Source Reader" : snapshot?.current_stage ? "AI invoice pipeline" : "Belge yükleme",
     issueDate: issueDate || "-",
     amount: amount || "-",
     sourceReviewRows,
+    sourceSnapshot,
     accountingDirection: safeText(planner?.accounting_direction),
     counterpartyTitle: safeText(planner?.counterparty_name),
     counterpartyTaxId: safeText(planner?.counterparty_identifier),
     selectedCounterpartyAccount: exactCounterpartyCode || "-",
     suggestedCounterpartyAccount: exactCounterpartyCode || "-",
-    draftStatus: "processing",
+    draftStatus: isHtmlSource ? "manual_draft_required" : "processing",
     processingStages: processingStagesForJob(job),
-    exportGateReason: "Final Accountant tamamlanmadan onay veya çıktı alınamaz.",
-    accountantSummary: sourceReviewRows.length ? "Kaynak fatura satırları hazır; muhasebe fişi Final Accountant tarafından hazırlanıyor." : "Belge işleniyor; Reader sonucu bekleniyor.",
+    exportGateReason: isHtmlSource
+      ? "HTML kaynak satırları hazır; muhasebe kararı bu geçici denemede otomatik çalıştırılmadı."
+      : "Final Accountant tamamlanmadan onay veya çıktı alınamaz.",
+    accountantSummary: isHtmlSource
+      ? sourceReviewRows.length
+        ? "HTML kaynak satırları ve orijinal karşılaştırma hazır; muhasebe kararı bu geçici denemede çalıştırılmadı."
+        : "HTML kaynak okuyucu sonucu bekleniyor."
+      : sourceReviewRows.length
+        ? "Kaynak fatura satırları hazır; muhasebe fişi Final Accountant tarafından hazırlanıyor."
+        : "Belge işleniyor; Reader sonucu bekleniyor.",
   };
 }
 
@@ -656,6 +697,7 @@ function processedBackendDocument(document, workspace, client) {
     riskFlags: safeList(result.risk_flags).map(String),
     draftLines: safeList(result.draft_lines),
     sourceReviewRows: normalizeSourceReviewRows(result.source_review_rows),
+    sourceSnapshot: normalizeSourceSnapshot(result.source_snapshot),
     lineDecisions: safeList(result.line_decisions),
     statementLines: safeList(result.statement_lines),
     statementEntries: safeList(result.statement_entries),
@@ -784,6 +826,7 @@ function mimeTypeForFile(fileName) {
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
   if (lower.endsWith(".xml")) return "application/xml";
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html";
   if (lower.endsWith(".csv")) return "text/csv";
   return "";
 }

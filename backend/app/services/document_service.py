@@ -14,20 +14,21 @@ from fastapi import HTTPException
 
 from app.domain.business_relevance import ClientProfile, check_client_onboarding
 from app.domain.document_uploads import normalize_document_period, store_document_content
+from app.domain.html_document_preview import build_isolated_html_preview, html_preview_response_headers
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
 from app.domain.tax_certificates import (
     parse_tax_certificate_file,
     tax_certificate_parse_state,
     tax_certificate_payload_parse_state,
 )
-from app.workflows.document_processing import parser_kind_for_document_type, process_queued_documents
+from app.workflows.document_processing import parser_kind_for_upload, process_queued_documents
 
 
 OperationRecorder = Callable[..., dict[str, object]]
 AccessChecker = Callable[..., dict[str, object]]
 
 MAX_DOCUMENT_UPLOAD_BYTES = 50 * 1024 * 1024
-INVOICE_SUFFIXES = {".pdf"}
+INVOICE_SUFFIXES = {".pdf", ".html", ".htm"}
 EINVOICE_XML_SUFFIXES = {".xml"}
 
 
@@ -81,7 +82,7 @@ class DocumentService:
             raise HTTPException(status_code=400, detail="client_id is required for document upload")
         suffix = Path(file_name).suffix.lower()
         if document_type == "invoice" and suffix not in INVOICE_SUFFIXES:
-            raise HTTPException(status_code=400, detail="invoice upload requires a PDF file")
+            raise HTTPException(status_code=400, detail="invoice upload requires a PDF or HTML file")
         if document_type == "einvoice_xml" and suffix not in EINVOICE_XML_SUFFIXES:
             raise HTTPException(status_code=400, detail="e-invoice XML upload requires an XML file")
         effective_size = len(content) if content is not None else int(size_bytes or 0)
@@ -205,7 +206,7 @@ class DocumentService:
             client_id=client_id,
             document_ref=str(saved["document_ref"]),
             document_type=document_type,
-            parser_kind=parser_kind_for_document_type(document_type),
+            parser_kind=parser_kind_for_upload(document_type, file_name),
             intake_category=str(saved.get("intake_category") or ""),
         )
         self.record_operation_event(
@@ -512,7 +513,9 @@ class DocumentService:
             client_id=normalized_client_id,
             document_ref=normalized_ref,
             document_type=document_type,
-            parser_kind=parser_kind_for_document_type(document_type),
+            parser_kind=parser_kind_for_upload(
+                document_type, str(document.get("original_file_name") or "")
+            ),
             intake_category=intake_category,
             force_requeue=True,
         )
@@ -575,7 +578,9 @@ class DocumentService:
                 client_id=normalized_client_id,
                 document_ref=document_ref,
                 document_type=document_type,
-                parser_kind=parser_kind_for_document_type(document_type),
+                parser_kind=parser_kind_for_upload(
+                    document_type, str(document.get("original_file_name") or "")
+                ),
                 intake_category=str(document.get("intake_category") or ""),
                 force_requeue=True,
             )
@@ -818,6 +823,14 @@ class DocumentService:
         file_name = Path(str(document.get("original_file_name") or path.name)).name
         media_type = str(document.get("content_type") or "") or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
         document_type = str(document.get("document_type") or "")
+        if path.suffix.lower() in {".html", ".htm"} or "html" in media_type.lower():
+            return {
+                "file_name": file_name,
+                "media_type": "text/html; charset=utf-8",
+                "html": build_isolated_html_preview(path.read_bytes()),
+                "headers": html_preview_response_headers(),
+                "isolated_preview": True,
+            }
         if path.suffix.lower() == ".xml" or "xml" in media_type.lower() or document_type == "einvoice_xml":
             from app.domain.ubl_invoice_preview import render_ubl_invoice_preview_html
 

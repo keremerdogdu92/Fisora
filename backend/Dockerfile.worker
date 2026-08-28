@@ -1,0 +1,40 @@
+# File: backend/Dockerfile.worker
+# Summary: Builds the production document worker with Python, Node 20, and the hash-verified frozen HTML Source Reader runtime.
+FROM node:20-bookworm-slim AS html_reader_build
+
+WORKDIR /opt/fisora/html-reader
+COPY backend/vendor/fisora-html-source-reader/package.json ./package.json
+COPY backend/vendor/fisora-html-source-reader/package-lock.json ./package-lock.json
+RUN npm ci --omit=dev
+COPY backend/vendor/fisora-html-source-reader/src ./src
+COPY backend/vendor/fisora-html-source-reader/integration ./integration
+
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+ENV FISORA_HTML_READER_WORKER=/opt/fisora/html-reader/integration/fisora-html-reader-jsonl-worker.mjs
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-tur \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt /app/backend/requirements.txt
+RUN pip install --no-cache-dir -r /app/backend/requirements.txt
+
+COPY --from=html_reader_build /usr/local/bin/node /usr/local/bin/node
+COPY --from=html_reader_build /opt/fisora/html-reader /opt/fisora/html-reader
+
+COPY backend/app /app/app
+COPY backend/db /app/backend/db
+COPY backend/scripts /app/backend/scripts
+COPY backend/vendor/fisora-html-source-reader /app/backend/vendor/fisora-html-source-reader
+
+RUN python /app/backend/scripts/verify_html_reader_vendor.py /app/backend/vendor/fisora-html-source-reader \
+    && node --version \
+    && python --version
+
+CMD ["python", "-m", "app.worker"]

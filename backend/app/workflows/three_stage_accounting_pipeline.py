@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import re
 from time import perf_counter
+from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
 
 import httpx
@@ -507,23 +508,31 @@ def _canonical_line_decisions(
     }
 
 
-def _party_projection(package: Mapping[str, object], plan: Mapping[str, object]) -> tuple[dict[str, str], dict[str, str]]:
+def _party_projection(
+    package: Mapping[str, object],
+    plan: Mapping[str, object],
+    client: Mapping[str, object] | None = None,
+) -> tuple[dict[str, str], dict[str, str]]:
     parties = [item for item in package.get("principal_parties") or [] if isinstance(item, Mapping)]
     our_index = str(plan.get("our_party_index") or "unknown")
     try:
         our_party = parties[int(our_index) - 1] if our_index in {"1", "2"} else {}
     except IndexError:
         our_party = {}
+    client = client or {}
     counterparty_name = str(plan.get("counterparty_name") or "")
     counterparty = next((item for item in parties if str(item.get("primary_name") or "") == counterparty_name), {})
-    own = {"title": str(our_party.get("primary_name") or ""), "tax_id": _party_tax_id(our_party)}
+    own = {
+        "title": str(our_party.get("primary_name") or client.get("title") or ""),
+        "tax_id": _party_tax_id(our_party) or str(client.get("tax_id") or ""),
+    }
     other = {"title": counterparty_name or str(counterparty.get("primary_name") or ""), "tax_id": str(plan.get("counterparty_identifier") or "") or _party_tax_id(counterparty)}
     return own, other
 
 
-def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, object], final_output: Mapping[str, object], journal_lines: list[dict[str, object]], account_names: Mapping[str, str], source_sha256: str, warnings: Sequence[str], stage_elapsed_ms: Mapping[str, int], reader_attempt: Any, planner_attempt: Any, final_provider: object, source_text: str) -> dict[str, Any]:
+def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, object], final_output: Mapping[str, object], journal_lines: list[dict[str, object]], account_names: Mapping[str, str], source_sha256: str, warnings: Sequence[str], stage_elapsed_ms: Mapping[str, int], reader_attempt: Any, planner_attempt: Any, final_provider: object, source_text: str, client: Mapping[str, object] | None = None) -> dict[str, Any]:
     direction = str(plan.get("accounting_direction") or "unknown")
-    own, counterparty = _party_projection(package, plan)
+    own, counterparty = _party_projection(package, plan, client)
     canonical = _canonical_invoice(package, source_sha256, direction)
     if direction == "sales":
         canonical["supplier_party"], canonical["customer_party"] = own, counterparty
@@ -704,6 +713,164 @@ def run_final_accountant_stage(*, provider: object, source_text: str, semantic_p
                 raise
     assert final_error is not None
     raise final_error
+
+
+def run_prepared_source_accounting_pipeline(
+    *,
+    planner_provider: object,
+    final_provider: object,
+    source_package: Mapping[str, object],
+    planner_source_text: str,
+    accountant_source_text: str,
+    source_sha256: str,
+    workspace: Mapping[str, object],
+    tenant_tax_id: str = "",
+    expected_direction: str = "",
+    client_context: Mapping[str, object] | None = None,
+    reader_elapsed_ms: int = 0,
+    reader_attempt: Any = None,
+    stage_observer: Callable[[str, Mapping[str, object]], None] | None = None,
+) -> ThreeStageAccountingRun:
+    """Run Planner and Final Accountant from a validated deterministic source package."""
+
+    package = dict(source_package)
+    chart_text, current_candidates, account_names = _chart_parts(workspace)
+    profile = workspace.get("client") if isinstance(workspace.get("client"), Mapping) else {}
+    profile = profile.get("profile") if isinstance(profile.get("profile"), Mapping) else profile
+    client = {
+        "title": str(profile.get("title") or profile.get("name") or ""),
+        "tax_id": tenant_tax_id,
+        "activity": dict(client_context or {}),
+    }
+
+    planner_started = perf_counter()
+    try:
+        semantic_plan, planner_attempt, planner_ms = run_semantic_planner_stage(
+            provider=planner_provider,
+            source_text=planner_source_text,
+            client=client,
+            current_candidates=current_candidates,
+            expected_direction=expected_direction,
+        )
+    except Exception as exc:
+        if stage_observer is not None:
+            stage_observer(
+                "planner_failed",
+                {
+                    "status": "failed",
+                    "elapsed_ms": round((perf_counter() - planner_started) * 1000),
+                    "error_type": type(exc).__name__,
+                },
+            )
+        raise
+    if stage_observer is not None:
+        stage_observer("planner_completed", {"semantic_plan": semantic_plan, "elapsed_ms": planner_ms})
+
+    final_started = perf_counter()
+    try:
+        final_output, accountant_ms = run_final_accountant_stage(
+            provider=final_provider,
+            source_text=accountant_source_text,
+            semantic_plan=semantic_plan,
+            chart_text=chart_text,
+            client=client,
+            expected_direction=expected_direction,
+        )
+    except Exception as exc:
+        accountant_ms = round((perf_counter() - final_started) * 1000)
+        final_output = {
+            "warnings": ["final_accountant_unavailable"],
+            "summary": "Kaynak sat?rlar haz?r; muhasebe ?nerisi al?namad?.",
+            "_stage_status": "failed",
+            "_stage_error_type": type(exc).__name__,
+        }
+
+    repair_ms = 0
+    if str(final_output.get("_stage_status") or "") == "failed":
+        journal_lines, composition_warnings = [], []
+    else:
+        journal_lines, composition_warnings = _compose_journal(final_output, semantic_plan, account_names)
+        debit_before_repair, credit_before_repair = _totals(journal_lines)
+        if journal_lines and debit_before_repair != credit_before_repair:
+            repair_started = perf_counter()
+            repair_status = "failed"
+            repair_context = {
+                "computed_total_debit": f"{debit_before_repair:.2f}",
+                "computed_total_credit": f"{credit_before_repair:.2f}",
+                "difference": f"{abs(debit_before_repair-credit_before_repair):.2f}",
+                "previous_draft": dict(final_output),
+            }
+            try:
+                repaired_output, repair_ms = run_final_accountant_stage(
+                    provider=final_provider,
+                    source_text=accountant_source_text,
+                    semantic_plan=semantic_plan,
+                    chart_text=chart_text,
+                    client=client,
+                    expected_direction=expected_direction,
+                    repair_context=repair_context,
+                )
+                repaired_lines, repaired_warnings = _compose_journal(repaired_output, semantic_plan, account_names)
+                repaired_debit, repaired_credit = _totals(repaired_lines)
+                if repaired_lines and repaired_debit == repaired_credit:
+                    final_output, journal_lines, composition_warnings = repaired_output, repaired_lines, repaired_warnings
+                    repair_status = "successful"
+                else:
+                    repair_status = "unbalanced"
+            except Exception:
+                repair_ms = round((perf_counter() - repair_started) * 1000)
+            final_output["_repair_attempted"] = True
+            final_output["_repair_status"] = repair_status
+            final_output["_repair_elapsed_ms"] = repair_ms
+            if repair_status != "successful":
+                composition_warnings = [*composition_warnings, f"unbalanced_self_repair_{repair_status}"]
+
+    if stage_observer is not None:
+        stage_observer(
+            "final_completed",
+            {
+                "status": "failed" if str(final_output.get("_stage_status") or "") == "failed" else "completed",
+                "elapsed_ms": accountant_ms + repair_ms,
+            },
+        )
+    warnings = [
+        *[str(item) for item in final_output.get("warnings") or [] if str(item).strip()],
+        *composition_warnings,
+        *_row_coverage_warning(package, final_output),
+    ]
+    stage_elapsed_ms = {
+        "reader": max(int(reader_elapsed_ms), 0),
+        "planner": planner_ms,
+        "accountant": accountant_ms,
+        "accountant_repair": repair_ms,
+        "total": max(int(reader_elapsed_ms), 0) + planner_ms + accountant_ms + repair_ms,
+    }
+    prepared_reader_attempt = reader_attempt or SimpleNamespace(provider="prepared_source", resolved_model="", model_alias="", status="successful")
+    result = _compatibility_result(
+        package=package,
+        plan=semantic_plan,
+        final_output=final_output,
+        journal_lines=journal_lines,
+        account_names=account_names,
+        source_sha256=source_sha256,
+        warnings=warnings,
+        stage_elapsed_ms=stage_elapsed_ms,
+        reader_attempt=prepared_reader_attempt,
+        planner_attempt=planner_attempt,
+        final_provider=final_provider,
+        source_text=accountant_source_text,
+        client=client,
+    )
+    return ThreeStageAccountingRun(
+        result=result,
+        source_package=package,
+        source_text=accountant_source_text,
+        semantic_plan=semantic_plan,
+        final_output=final_output,
+        reader_attempt=prepared_reader_attempt,
+        planner_attempt=planner_attempt,
+        stage_elapsed_ms=stage_elapsed_ms,
+    )
 
 
 def run_three_stage_accounting_pipeline(

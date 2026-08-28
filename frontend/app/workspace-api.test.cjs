@@ -1,5 +1,5 @@
 // File: frontend/app/workspace-api.test.cjs
-// Summary: Tests workspace mapping, selected-document progress polling, stale-result isolation, capacity, and research API helpers.
+// Summary: Tests workspace mapping, HTML source progress, selected-document polling, stale-result isolation, capacity, and research API helpers.
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -961,4 +961,68 @@ test("failed reprocess keeps the stale final result hidden", () => {
   assert.equal(document.draftStatus, "processing");
   assert.equal(document.draftLines.length, 0);
   assert.equal(document.processingStages.reader.status, "failed");
+});
+
+test("HTML source progress stays source-only and exposes the immutable reader snapshot", () => {
+  const htmlWorkspace = structuredClone(workspaceRecord);
+  htmlWorkspace.uploaded_documents.push({
+    document_ref: "html-1",
+    document_id: "html-1",
+    document_type: "invoice",
+    intake_category: "purchase_invoice",
+    original_file_name: "invoice.html",
+    content_type: "text/html",
+    period: "2026-06",
+  });
+  htmlWorkspace.processing_jobs.push({
+    id: "job-html-1",
+    document_ref: "html-1",
+    status: "processing",
+    document_type: "invoice",
+    intake_category: "purchase_invoice",
+    attempt_count: 1,
+    processing_snapshot: {
+      attempt_id: "attempt-html-1",
+      current_stage: "source_ready",
+      stages: {
+        reader: { status: "completed", elapsed_ms: 18 },
+        planner: { status: "skipped", elapsed_ms: 0 },
+        final: { status: "skipped", elapsed_ms: 0 },
+      },
+      reader: {
+        reader_kind: "html_source_reader",
+        source_snapshot: {
+          version: "1.0.0",
+          source: { file: "invoice.html", folder: null, bytes: 100 },
+          mode: "table",
+          confidence: 0.99,
+          sections: [{ kind: "table", title: null, columns: ["Mal Hizmet"], rows: [["Kalem 1"]] }],
+          warnings: [],
+          metrics: { sectionCount: 1, rowCount: 1, columnCount: 1 },
+        },
+        invoice_table_rows: [{
+          source_position: "1:1",
+          source_text: "Kalem 1",
+          description: "Kalem 1",
+          ui_amount: "",
+          ui_amount_label: "",
+          ui_amount_basis: "none",
+          ui_role: "posting_candidate",
+        }],
+      },
+      planner: { status: "not_run", reason: "html_source_only_trial" },
+    },
+  });
+
+  const data = normalizeBackendWorkspaces({ clients: [clientRecord], workspaces: [htmlWorkspace] });
+  const document = data.documents.find((item) => item.id === "html-1");
+  assert.equal(document.provider, "HTML Source Reader");
+  assert.equal(document.draftStatus, "manual_draft_required");
+  assert.equal(document.sourceReviewRows.length, 1);
+  assert.equal(document.sourceSnapshot.version, "1.0.0");
+  assert.equal(document.processingStages.currentStage, "source_ready");
+  assert.equal(document.processingStages.planner.status, "skipped");
+  assert.match(document.exportGateReason, /otomatik/);
+  assert.match(document.accountantSummary, /muhasebe/);
+  assert.match(document.accountantSummary, /denemede/);
 });

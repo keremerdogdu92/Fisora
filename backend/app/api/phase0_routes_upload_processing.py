@@ -286,6 +286,7 @@ def store_document_file(
         return HTMLResponse(
             content=str(file_info["html"]),
             media_type=str(file_info["media_type"]),
+            headers={str(key): str(value) for key, value in dict(file_info.get("headers") or {}).items()},
         )
     return FileResponse(
         file_info["path"],

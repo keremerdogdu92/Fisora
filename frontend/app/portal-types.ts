@@ -30,6 +30,25 @@ export type SourceReviewRow = {
   role: "posting_candidate" | "group_or_subtotal" | "informational";
 };
 
+export type DocumentSourceSnapshotSection = {
+  kind: "table" | "key_value" | "fragmented";
+  title: string | null;
+  columns: string[];
+  rows: string[][];
+  columnCount?: number;
+  meta?: Record<string, unknown>;
+};
+
+export type DocumentSourceSnapshot = {
+  version: string;
+  source: { file: string | null; folder: string | null; bytes: number };
+  mode: "table" | "section";
+  confidence: number;
+  sections: DocumentSourceSnapshotSection[];
+  warnings: string[];
+  metrics: { sectionCount: number; rowCount: number; columnCount: number };
+};
+
 export type VatGroupEvidence = {
   vatGroupId: string;
   label: string;
@@ -267,6 +286,7 @@ export type PilotDocument = {
   chartAccounts: ChartAccountOption[];
   draftLines: DraftLine[];
   sourceReviewRows?: SourceReviewRow[];
+  sourceSnapshot?: DocumentSourceSnapshot;
   lineDecisions?: Record<string, unknown>[];
   statementLines: StatementLineReview[];
   statementEntries: StatementEntryReview[];

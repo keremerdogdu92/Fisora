@@ -114,11 +114,25 @@ from app.workflows.gemini_invoice_pipeline import (
     run_gemini_invoice_pipeline_v2,
 )
 from app.workflows.gemini_invoice_result_adapter import to_document_processing_payload
+from app.domain.html_semantic_evidence import (
+    HTML_SEMANTIC_EVIDENCE_VERSION,
+    extract_html_semantic_evidence,
+    render_html_accountant_source_text,
+    render_html_planner_source_text,
+)
+from app.workflows.html_source_processing import (
+    HTML_SOURCE_PARSER_KIND,
+    build_html_accounting_source_package,
+    html_accounting_eligibility,
+    html_accounting_enabled,
+    run_html_source_reader,
+)
 from app.workflows.three_stage_accounting_pipeline import (
     PIPELINE_VERSION as THREE_STAGE_PIPELINE_VERSION,
     READER_PROMPT_VERSION as THREE_STAGE_READER_PROMPT_VERSION,
     PLANNER_PROMPT_VERSION as THREE_STAGE_PLANNER_PROMPT_VERSION,
     SCHEMA_VERSION as THREE_STAGE_SCHEMA_VERSION,
+    run_prepared_source_accounting_pipeline,
     run_three_stage_accounting_pipeline,
     three_stage_accounting_enabled,
 )
@@ -135,6 +149,14 @@ PARSER_BY_DOCUMENT_TYPE = {
 
 def parser_kind_for_document_type(document_type: str) -> str:
     return PARSER_BY_DOCUMENT_TYPE.get(document_type, "manual_review")
+
+
+def parser_kind_for_upload(document_type: str, file_name: str = "") -> str:
+    """Select the parser from both the logical document type and the original source suffix."""
+
+    if document_type == "invoice" and Path(file_name).suffix.lower() in {".html", ".htm"}:
+        return HTML_SOURCE_PARSER_KIND
+    return parser_kind_for_document_type(document_type)
 
 
 def _chart_account(payload: dict[str, Any]) -> ChartAccount:
@@ -2710,6 +2732,299 @@ def _timestamp_to_ms(value: object) -> int:
     return max(int((datetime.now(UTC) - timestamp).total_seconds() * 1000), 0)
 
 
+def _process_html_source_job(
+    *,
+    store: Any,
+    job: dict[str, Any],
+    client_id: str,
+    document: dict[str, Any],
+    workspace: dict[str, Any],
+    html_source_reader: Any,
+    pipeline_event: Any,
+    total_start: float,
+    extraction_provider: object | None = None,
+    accounting_provider: object | None = None,
+) -> dict[str, Any]:
+    """Process HTML deterministically, then optionally run Planner and Final behind rollout gates."""
+
+    pipeline_event(
+        "html_source_reader_selected",
+        "ok",
+        "HTML kaynak okuyucu se\u00e7ildi.",
+        "html_source_reader_selected",
+        {"parser_kind": HTML_SOURCE_PARSER_KIND},
+    )
+    source_result, parse_ms = run_html_source_reader(
+        store=store,
+        document=document,
+        job=job,
+        client_id=client_id,
+        html_source_reader=html_source_reader,
+    )
+    row_count = len(source_result.get("source_review_rows") or [])
+    pipeline_event(
+        "html_source_snapshot_ready",
+        "ok",
+        "HTML kaynak yap\u0131s\u0131 ve sat\u0131rlar\u0131 haz\u0131rland\u0131.",
+        "html_source_snapshot_ready",
+        {
+            "source_row_count": row_count,
+            "snapshot_version": str((source_result.get("technical_details") or {}).get("snapshot_version") or ""),
+            "source_snapshot_id": str((source_result.get("technical_details") or {}).get("source_snapshot_id") or ""),
+        },
+    )
+
+    result = source_result
+    ai_ms = 0
+    provider_label = "html_source_reader"
+    use_accounting = html_accounting_enabled(environ) and three_stage_accounting_enabled(environ)
+
+    if use_accounting:
+        workspace = _workspace_with_nace_research(workspace, store)
+        path = _stored_path(document)
+        if path is None:
+            raise RetryableDocumentTechnicalError("html_source_missing")
+        source_bytes = path.read_bytes()
+        source_hash = sha256(source_bytes).hexdigest()
+        evidence = extract_html_semantic_evidence(source_bytes, source_sha256=source_hash)
+        package = build_html_accounting_source_package(
+            dict(source_result.get("source_snapshot") or {}),
+            evidence,
+        )
+        eligibility = html_accounting_eligibility(package)
+        evidence_warnings = set(str(item) for item in evidence.get("warnings") or [])
+        blocked_reasons: list[str] = []
+        if "source_decode_replacement_characters" in evidence_warnings:
+            blocked_reasons.append("semantic_evidence_decode_review_required")
+        blocked_reasons.extend(str(item) for item in eligibility.get("reasons") or [])
+
+        if blocked_reasons:
+            result = dict(source_result)
+            result["html_accounting_eligible"] = False
+            result["html_accounting_used"] = False
+            result["review_reason_codes"] = list(dict.fromkeys([
+                *result.get("review_reason_codes", []),
+                *(f"html_accounting_{reason}" for reason in blocked_reasons),
+            ]))
+            result["accountant_summary"] = (
+                "HTML kaynak sat\u0131rlar\u0131 haz\u0131r; g\u00fcvenli otomatik muhasebe i\u00e7in gerekli kaynak kan\u0131t\u0131 tamamlanmad\u0131."
+            )
+            result["accountant_explanation_tr"] = result["accountant_summary"]
+            details = dict(result.get("technical_details") or {})
+            details.update({
+                "html_semantic_evidence_version": HTML_SEMANTIC_EVIDENCE_VERSION,
+                "html_semantic_evidence_encoding": str(evidence.get("source_encoding") or ""),
+                "html_semantic_evidence_warnings": list(evidence.get("warnings") or []),
+                "html_semantic_evidence_metrics": dict(evidence.get("metrics") or {}),
+                "html_accounting_eligibility": dict(eligibility),
+                "html_accounting_block_reasons": blocked_reasons,
+            })
+            result["technical_details"] = details
+            pipeline_event(
+                "html_accounting_not_eligible",
+                "warning",
+                "HTML kaynak kan\u0131t\u0131 otomatik muhasebe i\u00e7in yeterli de\u011fil; belge kaynak incelemesinde tutuldu.",
+                "html_accounting_not_eligible",
+                {"reasons": blocked_reasons, **dict(eligibility)},
+            )
+        else:
+            planner_text = render_html_planner_source_text(evidence)
+            accountant_text = render_html_accountant_source_text(
+                dict(source_result.get("source_snapshot") or {}),
+                evidence,
+            )
+            planner_provider = accounting_provider or extraction_provider
+            if planner_provider is None:
+                runtime = build_gemini_pdf_runtime_from_env(environ)
+                if not runtime.available or runtime.provider is None:
+                    raise RetryableDocumentTechnicalError(
+                        runtime.unavailable_reason or "html_accounting_planner_unavailable"
+                    )
+                planner_provider = runtime.provider
+            try:
+                final_provider = _accounting_provider_from_env("xkiro", environ)
+            except ValueError as exc:
+                raise RetryableDocumentTechnicalError("html_accounting_final_provider_unavailable") from exc
+
+            profile = (workspace.get("client") or {}).get("profile") or {}
+            processing_snapshot: dict[str, Any] = {
+                "pipeline": "html_three_stage_accounting",
+                "attempt_id": str(job.get("normalized_attempt_id") or ""),
+                "attempt_count": int(job.get("attempt_count") or 0),
+                "document_ref": str(job.get("document_ref") or ""),
+                "current_stage": "planner",
+                "updated_at": datetime.now(UTC).isoformat(),
+                "stages": {
+                    "reader": {"status": "completed", "elapsed_ms": parse_ms},
+                    "planner": {"status": "processing", "elapsed_ms": 0},
+                    "final": {"status": "pending", "elapsed_ms": 0},
+                },
+                "reader": {
+                    "reader_kind": "html_source_reader",
+                    "source_snapshot": dict(source_result.get("source_snapshot") or {}),
+                    "invoice_table_rows": list(source_result.get("source_review_rows") or []),
+                    "document_header": list(package.get("document_header") or []),
+                    "printed_summary_lines": list(package.get("printed_summary_lines") or []),
+                    "semantic_evidence_version": HTML_SEMANTIC_EVIDENCE_VERSION,
+                    "semantic_evidence_encoding": str(evidence.get("source_encoding") or ""),
+                },
+                "planner": {},
+                "source_snapshot_id": str((source_result.get("technical_details") or {}).get("source_snapshot_id") or ""),
+            }
+
+            def persist_stage_snapshot(event: str, payload: Mapping[str, object]) -> None:
+                if not hasattr(store, "update_processing_snapshot"):
+                    return
+                stages = processing_snapshot["stages"]
+                assert isinstance(stages, dict)
+                if event == "planner_completed":
+                    processing_snapshot["planner"] = dict(payload.get("semantic_plan") or {})
+                    stages["planner"] = {"status": "completed", "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                    stages["final"] = {"status": "processing", "elapsed_ms": 0}
+                    processing_snapshot["current_stage"] = "final"
+                elif event == "planner_failed":
+                    stages["planner"] = {"status": "failed", "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                    processing_snapshot["current_stage"] = "planner"
+                elif event == "final_completed":
+                    final_status = str(payload.get("status") or "completed")
+                    stages["final"] = {"status": final_status, "elapsed_ms": int(payload.get("elapsed_ms") or 0)}
+                    processing_snapshot["current_stage"] = "failed" if final_status == "failed" else "completed"
+                processing_snapshot["updated_at"] = datetime.now(UTC).isoformat()
+                try:
+                    store.update_processing_snapshot(
+                        job_id=str(job.get("id") or ""),
+                        processing_snapshot=processing_snapshot,
+                        attempt_id=str(job.get("normalized_attempt_id") or ""),
+                        attempt_count=int(job.get("attempt_count") or 0),
+                    )
+                except Exception:
+                    # Progressive persistence must never change the accounting outcome.
+                    return
+
+            persist_stage_snapshot("planner_started", {})
+            pipeline_event(
+                "html_accounting_selected",
+                "ok",
+                "HTML kaynak kan\u0131tlar\u0131 Planner ve Final Accountant ak\u0131\u015f\u0131na ba\u011fland\u0131.",
+                "html_accounting_selected",
+                {
+                    "semantic_evidence_version": HTML_SEMANTIC_EVIDENCE_VERSION,
+                    "source_encoding": str(evidence.get("source_encoding") or ""),
+                    **dict(eligibility),
+                },
+            )
+            prepared = run_prepared_source_accounting_pipeline(
+                planner_provider=planner_provider,
+                final_provider=final_provider,
+                source_package=package,
+                planner_source_text=planner_text,
+                accountant_source_text=accountant_text,
+                source_sha256=source_hash,
+                workspace=workspace,
+                tenant_tax_id=_client_tax_id(workspace),
+                expected_direction=_intake_direction(str(document.get("intake_category") or job.get("intake_category") or "")),
+                client_context={
+                    "activity_description": str(profile.get("activity_description") or ""),
+                    "nace_code": str(profile.get("nace_code") or ""),
+                    "activity_tags": list(profile.get("activity_tags") or []),
+                },
+                reader_elapsed_ms=parse_ms,
+                stage_observer=persist_stage_snapshot,
+            )
+            result = {**source_result, **dict(prepared.result)}
+            result["source_snapshot"] = dict(source_result.get("source_snapshot") or {})
+            result["document_validation_status"] = "expected_document"
+            result["canonical_validation_status"] = "frozen_html_snapshot"
+            result["extraction_validation_status"] = "frozen_html_snapshot"
+            result["canonical_extraction_ai_used"] = False
+            result["html_accounting_eligible"] = True
+            result["html_accounting_used"] = True
+            result["html_semantic_evidence_version"] = HTML_SEMANTIC_EVIDENCE_VERSION
+            result["ai_estimated_input_chars"] = len(planner_text) + len(accountant_text)
+            details = dict(source_result.get("technical_details") or {})
+            details.update({
+                "html_semantic_evidence_version": HTML_SEMANTIC_EVIDENCE_VERSION,
+                "html_semantic_evidence_encoding": str(evidence.get("source_encoding") or ""),
+                "html_semantic_evidence_warnings": list(evidence.get("warnings") or []),
+                "html_semantic_evidence_metrics": dict(evidence.get("metrics") or {}),
+                "html_accounting_eligibility": dict(eligibility),
+                "html_planner_source_chars": len(planner_text),
+                "html_accountant_source_chars": len(accountant_text),
+            })
+            result["technical_details"] = details
+            ai_ms = (
+                int(prepared.stage_elapsed_ms.get("planner", 0))
+                + int(prepared.stage_elapsed_ms.get("accountant", 0))
+                + int(prepared.stage_elapsed_ms.get("accountant_repair", 0))
+            )
+            provider_label = "html_three_stage_accounting"
+            _record_ai_usage_from_result(store, client_id=client_id, result=result)
+            _record_ai_capacity_snapshot(store, planner_provider)
+            _record_ai_capacity_snapshot(store, final_provider)
+            pipeline_event(
+                "html_accounting_completed",
+                "ok" if result.get("is_balanced") else "warning",
+                "HTML muhasebe tasla\u011f\u0131 haz\u0131rland\u0131."
+                if result.get("draft_lines")
+                else "HTML muhasebe \u00f6nerisi tamamlanamad\u0131.",
+                "html_accounting_completed",
+                {
+                    "balanced": bool(result.get("is_balanced")),
+                    "draft_line_count": len(result.get("draft_lines") or []),
+                    "counterparty_tax_id": str(result.get("counterparty_tax_id") or ""),
+                },
+            )
+
+    for warning in result.get("pipeline_warnings") or []:
+        warning_code = str(warning or "").strip()
+        if warning_code:
+            pipeline_event(
+                "pipeline_warning",
+                "warning",
+                "HTML belge i\u015fleme uyar\u0131s\u0131 kaydedildi.",
+                warning_code,
+                {"warning": warning_code, "draft_retained": bool(result.get("draft_lines"))},
+            )
+    store.save_simulation_result(
+        client_id=client_id,
+        document_ref=str(job.get("document_ref") or ""),
+        result=result,
+        **(
+            {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+            if job.get("normalized_attempt_id")
+            else {}
+        ),
+    )
+    processing_metrics = {
+        "queue_wait_ms": _timestamp_to_ms(job.get("created_at")),
+        "parse_ms": parse_ms,
+        "ai_ms": ai_ms,
+        "research_ms": 0,
+        "total_ms": _duration_ms(total_start),
+        "provider": provider_label,
+        "research_cache_hit": False,
+        "nace_cache_hit": False,
+    }
+    store.update_processing_job(
+        job_id=str(job.get("id") or ""),
+        status="completed",
+        processing_metrics=processing_metrics,
+        **(
+            {"attempt_id": str(job.get("normalized_attempt_id") or "")}
+            if job.get("normalized_attempt_id")
+            else {}
+        ),
+    )
+    pipeline_event(
+        "html_source_review_ready",
+        "ok",
+        "HTML kaynak kar\u015f\u0131la\u015ft\u0131rmas\u0131 m\u00fc\u015favir kontrol\u00fcne haz\u0131r.",
+        "html_source_review_ready",
+        {"source_row_count": row_count, "html_accounting_used": bool(result.get("html_accounting_used"))},
+    )
+    return {"processed_count": 1, "completed_count": 1, "failed_count": 0}
+
+
 def process_next_job_once(
     store: Any,
     *,
@@ -2720,6 +3035,7 @@ def process_next_job_once(
     extraction_provider: object | None = None,
     accounting_provider: object | None = None,
     artifact_repository: Any | None = None,
+    html_source_reader: Any | None = None,
     max_parallel_accounting_chunks: int = 1,
     candidate_experiment_percent: int | None = None,
     max_accounting_request_bytes: int | None = None,
@@ -2778,6 +3094,20 @@ def process_next_job_once(
         )
         if document is None:
             raise ValueError(f"uploaded document not found: {document_ref}")
+        if str(job.get("parser_kind") or "") == HTML_SOURCE_PARSER_KIND:
+            failure_stage = "processing"
+            return _process_html_source_job(
+                store=store,
+                job=job,
+                client_id=client_id,
+                document=document,
+                workspace=workspace,
+                html_source_reader=html_source_reader,
+                pipeline_event=pipeline_event,
+                total_start=total_start,
+                extraction_provider=extraction_provider,
+                accounting_provider=accounting_provider,
+            )
         gemini_pdf_v2_selected = _gemini_pdf_v2_eligible(document, job)
         workspace = _workspace_with_nace_research(workspace, store)
         parse_start = time.perf_counter()
@@ -3383,6 +3713,7 @@ def process_queued_documents(
     extraction_provider: object | None = None,
     accounting_provider: object | None = None,
     artifact_repository: Any | None = None,
+    html_source_reader: Any | None = None,
     max_parallel_accounting_chunks: int = 1,
     candidate_experiment_percent: int | None = None,
     max_accounting_request_bytes: int | None = None,
@@ -3410,6 +3741,7 @@ def process_queued_documents(
             extraction_provider=extraction_provider,
             accounting_provider=accounting_provider,
             artifact_repository=artifact_repository,
+            html_source_reader=html_source_reader,
             max_parallel_accounting_chunks=max_parallel_accounting_chunks,
             candidate_experiment_percent=candidate_experiment_percent,
             max_accounting_request_bytes=max_accounting_request_bytes,

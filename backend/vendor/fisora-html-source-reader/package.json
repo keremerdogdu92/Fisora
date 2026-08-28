@@ -1,0 +1,33 @@
+﻿{
+    "name":  "fisora-html-source-reader",
+    "version":  "1.0.0",
+    "private":  true,
+    "description":  "Isolated structural HTML invoice source reader for Fisora.",
+    "main":  "./src/index.mjs",
+    "exports":  {
+                    ".":  "./src/index.mjs",
+                    "./schema/document-source-snapshot.v1.schema.json":  "./schema/document-source-snapshot.v1.schema.json"
+                },
+    "scripts":  {
+                    "test":  "node regression_fixtures.mjs \u0026\u0026 node security_fixtures.mjs \u0026\u0026 node edge_fixtures.mjs \u0026\u0026 node robustness_fixtures.mjs \u0026\u0026 node mutation_fixtures.mjs \u0026\u0026 node public_api_fixtures.mjs",
+                    "test:regression":  "node regression_fixtures.mjs",
+                    "test:security":  "node security_fixtures.mjs",
+                    "test:edge":  "node edge_fixtures.mjs",
+                    "test:robustness":  "node robustness_fixtures.mjs",
+                    "test:mutation":  "node mutation_fixtures.mjs",
+                    "test:api":  "node public_api_fixtures.mjs",
+                    "release:gate":  "node release_gate.mjs",
+                    "coverage:build":  "node coverage_tool.mjs build coverage_baseline_v9.json benchmark-v7-hardening-new/snapshots.jsonl benchmark-v7-hardening-old/snapshots.jsonl",
+                    "audit:report":  "node audit_report.mjs audit/audit-manifest-v5.json",
+                    "holdout":  "node blind_holdout.mjs",
+                    "freeze:verify":  "node verify_freeze.mjs"
+                },
+    "engines":  {
+                    "node":  "\u003e=20"
+                },
+    "license":  "UNLICENSED",
+    "type":  "commonjs",
+    "dependencies":  {
+                         "cheerio":  "1.2.0"
+                     }
+}

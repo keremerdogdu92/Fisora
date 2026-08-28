@@ -13,6 +13,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.domain.ai_classification import merge_semantic_attempt_result, sanitize_semantic_evidence
 from app.domain.document_uploads import extend_retention_deadline, retention_decision
+from app.domain.document_source_snapshots import DocumentSourceSnapshotWrite
 from app.domain.storage_adapters import LocalDocumentStorage
 from app.domain.portal_access import (
     PORTAL_USERS_CLIENT_ID,
@@ -39,6 +40,7 @@ from app.persistence.workflow_store import (
 from app.persistence.normalized_accounting_repository import NormalizedAccountingRepository
 from app.persistence.learning_rule_repository import LearningRuleRepository
 from app.persistence.document_ai_artifact_repository import PostgresDocumentAiArtifactRepository
+from app.persistence.document_source_snapshot_repository import PostgresDocumentSourceSnapshotRepository
 from app.persistence.protected_corpus_repository import (
     ProtectedCorpusConflict,
     ProtectedCorpusRepository,
@@ -152,6 +154,11 @@ class PostgresWorkflowStore:
             )
         )
         self._connect_factory = connect
+        self.document_source_snapshot_repository = PostgresDocumentSourceSnapshotRepository(
+            connect=self._connect,
+            tenant_id=self.tenant_id,
+            json_value=self._json,
+        )
         self.accounting_store_target = (
             accounting_store_target
             or os.environ.get("FISORA_ACCOUNTING_STORE_TARGET", "compatibility")
@@ -209,6 +216,37 @@ class PostgresWorkflowStore:
                 or ""
             ),
         }
+
+    def save_document_source_snapshot(
+        self,
+        *,
+        client_id: str,
+        document: dict[str, Any],
+        snapshot: dict[str, Any],
+        reader_version: str,
+        parser_kind: str,
+    ) -> dict[str, Any]:
+        scope = self.document_ai_artifact_scope(client_id=client_id, document=document)
+        return self.document_source_snapshot_repository.save(
+            DocumentSourceSnapshotWrite(
+                tenant_id=scope["tenant_id"],
+                taxpayer_id=scope["taxpayer_id"],
+                document_id=scope["document_id"],
+                source_file_id=scope["source_file_id"],
+                source_file_sha256=str(document.get("sha256") or "").strip().lower(),
+                parser_kind=parser_kind,
+                snapshot=snapshot,
+                reader_version=reader_version,
+            )
+        )
+
+    def latest_document_source_snapshot(
+        self, *, client_id: str, document_ref: str
+    ) -> dict[str, Any] | None:
+        return self.document_source_snapshot_repository.latest_for_document_ref(
+            taxpayer_id=str(taxpayer_uuid(self.tenant_id, client_id)),
+            document_ref=document_ref,
+        )
 
     def _delete_document_ai_raw_bodies(
         self,

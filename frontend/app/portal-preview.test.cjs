@@ -1,3 +1,5 @@
+// File: frontend/app/portal-preview.test.cjs
+// Summary: Tests original document previews, isolated HTML comparison, accounting evidence UI, and AI trace rendering.
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -68,4 +70,16 @@ test("review history includes a collapsed ai trace panel with wrapped json", () 
   assert.match(styles, /\.ai-trace-panel/);
   assert.match(styles, /overflow-wrap:\s*anywhere/);
   assert.match(styles, /white-space:\s*pre-wrap/);
+});
+
+test("HTML accountant preview keeps original appearance isolated and exposes three-way comparison", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /HtmlSourceComparison/);
+  assert.match(reviewPanels, /HTML kaynak/);
+  assert.match(reviewPanels, /frozen reader/);
+  assert.match(reviewPanels, /Fisora UI/);
+  assert.match(reviewPanels, /sandbox=\{htmlPreview \? "" : "allow-same-origin"\}/);
+  assert.match(reviewPanels, /session\?\.role === "accountant" && htmlPreview/);
+  assert.match(reviewPanels, /const htmlSourceReady = isHtmlPreview\(document\)/);
 });

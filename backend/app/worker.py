@@ -13,6 +13,7 @@ from app.domain.gemini_pdf_runtime import (
     build_gemini_pdf_runtime_from_env,
     gemini_pdf_v2_enabled,
 )
+from app.integrations.html_source_reader import RestartingHtmlSourceReader, build_html_source_reader_from_env
 from app.persistence.store_factory import build_workflow_store
 from app.services.retention_service import RetentionService
 from app.workflows.document_processing import (
@@ -29,6 +30,8 @@ MAX_JOBS_PER_TICK = int(os.environ.get("FISORA_WORKER_MAX_JOBS_PER_TICK", "10"))
 RUN_ONCE = os.environ.get("FISORA_WORKER_RUN_ONCE", "").lower() in {"1", "true", "yes"}
 _GEMINI_RUNTIME: GeminiPdfRuntime | None = None
 _GEMINI_RUNTIME_LOCK = Lock()
+_HTML_SOURCE_READER: RestartingHtmlSourceReader | None = None
+_HTML_SOURCE_READER_LOCK = Lock()
 
 
 def worker_concurrency_from_env(env: Mapping[str, str] | None = None) -> int:
@@ -61,6 +64,17 @@ def _gemini_runtime_for_worker() -> GeminiPdfRuntime | None:
     return _GEMINI_RUNTIME
 
 
+def _html_source_reader_for_worker() -> RestartingHtmlSourceReader:
+    """Return one process-global Node reader shared by all Python worker slots."""
+
+    global _HTML_SOURCE_READER
+    if _HTML_SOURCE_READER is None:
+        with _HTML_SOURCE_READER_LOCK:
+            if _HTML_SOURCE_READER is None:
+                _HTML_SOURCE_READER = build_html_source_reader_from_env()
+    return _HTML_SOURCE_READER
+
+
 def run_processing_once() -> dict[str, object]:
     try:
         store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
@@ -86,6 +100,7 @@ def run_processing_once() -> dict[str, object]:
             max_jobs=MAX_JOBS_PER_TICK,
             extraction_provider=provider,
             accounting_provider=provider,
+            html_source_reader=_html_source_reader_for_worker(),
             max_parallel_accounting_chunks=max_parallel_chunks,
             candidate_experiment_percent=candidate_experiment_percent,
             max_accounting_request_bytes=max_accounting_request_bytes,

@@ -186,6 +186,12 @@ function isFramePreviewMime(value: string) {
     || normalized.includes("csv");
 }
 
+function isHtmlPreview(document: PilotDocument) {
+  const mime = String(document.originalDocumentMimeType || "").toLowerCase();
+  const fileName = String(document.fileName || "").toLowerCase();
+  return mime.includes("html") || fileName.endsWith(".html") || fileName.endsWith(".htm");
+}
+
 function latestPipelineProblem(document: PilotDocument) {
   return [...(document.pipelineEvents ?? [])].reverse().find((event) => event.status === "error" || event.status === "warning");
 }
@@ -379,6 +385,72 @@ export function AiTracePanel({ document }: { document?: PilotDocument }) {
   );
 }
 
+function HtmlSourceComparison({ document, previewUrl }: { document: PilotDocument; previewUrl: string }) {
+  const snapshot = document.sourceSnapshot;
+  const rows = document.sourceReviewRows ?? [];
+  if (!snapshot || !previewUrl) return null;
+
+  return (
+    <section className="html-source-comparison" aria-label="HTML kaynak karşılaştırması">
+      <div className="html-source-comparison-heading">
+        <div>
+          <strong>HTML kaynak karşılaştırması</strong>
+          <span>Orijinal görünüm / frozen reader / Fisora UI satırları</span>
+        </div>
+        <span>Reader {snapshot.version} • güven {Math.round(snapshot.confidence * 100)}%</span>
+      </div>
+      {snapshot.warnings.length ? (
+        <div className="html-source-warning">{snapshot.warnings.join(" • ")}</div>
+      ) : null}
+      <div className="html-source-comparison-grid">
+        <article className="html-source-compare-card">
+          <header><strong>1. Orijinal HTML</strong><span>Sandboxed görünüm</span></header>
+          <iframe
+            className="html-source-original-frame"
+            sandbox=""
+            src={previewUrl}
+            title={`${document.fileName} izole orijinal HTML`}
+          />
+        </article>
+        <article className="html-source-compare-card">
+          <header><strong>2. Reader snapshot</strong><span>{snapshot.metrics.rowCount} kaynak satırı</span></header>
+          <div className="html-source-reader-sections">
+            {snapshot.sections.map((section, sectionIndex) => (
+              <section className="html-source-reader-section" key={`${section.kind}-${sectionIndex}`}>
+                <div className="html-source-reader-section-title">
+                  <strong>{section.title || `Bölüm ${sectionIndex + 1}`}</strong>
+                  <span>{section.kind}</span>
+                </div>
+                {section.columns.length ? <div className="html-source-reader-row header">{section.columns.map((cell, index) => <span key={index}>{cell}</span>)}</div> : null}
+                {section.rows.map((row, rowIndex) => (
+                  <div className="html-source-reader-row" key={rowIndex}>
+                    {row.map((cell, cellIndex) => <span key={cellIndex}>{cell || "?"}</span>)}
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        </article>
+        <article className="html-source-compare-card">
+          <header><strong>3. Fisora UI satırları</strong><span>{rows.length} satır</span></header>
+          <div className="html-source-ui-rows">
+            {rows.length ? rows.map((row, index) => (
+              <div className="html-source-ui-row" key={`${row.sourcePosition}-${index}`}>
+                <span>{row.sourcePosition || String(index + 1)}</span>
+                <div>
+                  <strong>{row.description || row.sourceText || "?"}</strong>
+                  {row.sourceText && row.sourceText !== row.description ? <small>{row.sourceText}</small> : null}
+                </div>
+                <span>{row.role}</span>
+              </div>
+            )) : <p className="empty">UI satırı henüz oluşmadı.</p>}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
 export function DocumentPreview({ document, session }: { document?: PilotDocument; session?: LocalSession | null }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
@@ -429,6 +501,7 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
   const pipelineProblem = latestPipelineProblem(document);
   const errorMessage = previewError || pipelineProblem?.messageTr || "Gerçek belge henüz önizlenemiyor.";
   const canFramePreview = isFramePreviewMime(document.originalDocumentMimeType);
+  const htmlPreview = isHtmlPreview(document);
   return (
     <section className="review-panel document-panel">
       <div className="panel-heading">
@@ -446,7 +519,7 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
             ) : canFramePreview ? (
               <iframe
                 className="original-document-frame"
-                sandbox="allow-same-origin"
+                sandbox={htmlPreview ? "" : "allow-same-origin"}
                 src={previewUrl}
                 title={`${document.fileName} orijinal belge`}
               />
@@ -495,6 +568,9 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
           <Info label="Orijinal ref" value={document.originalDocumentRef || "-"} />
         </aside>
       </div>
+      {session?.role === "accountant" && htmlPreview ? (
+        <HtmlSourceComparison document={document} previewUrl={previewUrl} />
+      ) : null}
     </section>
   );
 }
@@ -562,9 +638,12 @@ export function JournalPanel({
     activeDraftLines.every((line) => parseAmount(line.debit) === 0 && parseAmount(line.credit) === 0) ||
     !totals.balanced
   );
+  const htmlSourceReady = isHtmlPreview(document)
+    && document.processingStages?.reader.status === "completed"
+    && document.processingStages?.currentStage === "source_ready";
   const processingIncomplete = ["queued", "processing"].includes(document.status)
     || document.draftStatus === "processing"
-    || Boolean(document.processingStages && document.processingStages.final.status !== "completed");
+    || Boolean(document.processingStages && !htmlSourceReady && document.processingStages.final.status !== "completed");
   const blocksApproval = processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);

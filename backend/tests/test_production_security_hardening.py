@@ -88,7 +88,7 @@ class ProductionSecurityHardeningTests(unittest.TestCase):
         self.assertEqual(retention.status_code, 401)
         self.assertEqual(processing.status_code, 401)
 
-    def test_invoice_upload_rejects_html_file(self) -> None:
+    def test_invoice_html_upload_is_accepted_but_preview_removes_active_script(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
             os.environ,
             {"FISORA_ENV": "test", "FISORA_AUTH_MODE": "mock_header_optional"},
@@ -117,12 +117,61 @@ class ProductionSecurityHardeningTests(unittest.TestCase):
                     "period": "2026-08",
                     "file_name": "invoice.html",
                     "uploaded_by_user_id": "client-user",
-                    "content_base64": base64.b64encode(b"<script>alert(1)</script>").decode("ascii"),
+                    "content_base64": base64.b64encode(
+                        b"<html><body><h1>Invoice</h1><script>alert(1)</script></body></html>"
+                    ).decode("ascii"),
+                },
+            )
+            self.assertEqual(response.status_code, 200)
+            document_ref = str(response.json().get("document_ref") or "")
+            self.assertTrue(document_ref)
+
+            preview = client.get(
+                f"/phase0/store/document-file/client-1/{document_ref}",
+                headers={"X-Fisora-User-Id": "client-user"},
+            )
+            self.assertEqual(preview.status_code, 200)
+            self.assertIn("Invoice", preview.text)
+            self.assertNotIn("<script", preview.text.lower())
+            self.assertNotIn("alert(1)", preview.text)
+            self.assertIn("script-src 'none'", preview.headers.get("content-security-policy", ""))
+            self.assertEqual(preview.headers.get("x-content-type-options"), "nosniff")
+
+    def test_invoice_upload_still_rejects_unapproved_file_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"FISORA_ENV": "test", "FISORA_AUTH_MODE": "mock_header_optional"},
+            clear=False,
+        ):
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            created = client.post(
+                "/phase0/store/client-onboarding-package",
+                json={
+                    "client": {"client_id": "client-1", "title": "Client One", "tax_id": "1111111111"},
+                    "portal_users": [
+                        {"user_id": "client-user", "role": "client_user", "allowed_client_ids": ["client-1"]}
+                    ],
+                },
+            )
+            self.assertEqual(created.status_code, 200)
+            response = client.post(
+                "/phase0/store/document-upload",
+                headers={"X-Fisora-User-Id": "client-user"},
+                json={
+                    "client_id": "client-1",
+                    "document_type": "invoice",
+                    "intake_category": "purchase_invoice",
+                    "period": "2026-08",
+                    "file_name": "invoice.svg",
+                    "uploaded_by_user_id": "client-user",
+                    "content_base64": base64.b64encode(b"<svg></svg>").decode("ascii"),
                 },
             )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("requires a PDF", str(response.json()))
+        self.assertIn("requires a PDF or HTML", str(response.json()))
 
 
 if __name__ == "__main__":

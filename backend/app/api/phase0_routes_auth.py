@@ -330,7 +330,8 @@ def store_auth_password_reset_request(payload: AuthPasswordResetRequestPayload, 
     store = get_workflow_store()
     portal_user = store.find_portal_user_by_email(email=email) if hasattr(store, "find_portal_user_by_email") else None
     user_id = str((portal_user or {}).get("user_id") or "").strip()
-    if not user_id or not store.get_auth_password_hash(user_id=user_id):
+    # Email ownership is sufficient for secure first-password recovery of an existing portal user.
+    if not user_id:
         return generic
     store.invalidate_auth_tokens_for_user(user_id=user_id, purpose="password_reset")
     token = create_auth_action_token()

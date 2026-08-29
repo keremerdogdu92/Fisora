@@ -61,6 +61,27 @@ def test_reset_request_does_not_enumerate_accounts(isolated_store):
     assert known.json()["accepted"] is True
     assert "reset_token" not in known.json()
     assert sender.call_count == 1
+
+def test_passwordless_existing_user_can_set_first_password_via_reset(isolated_store):
+    email = "first-password@example.com"
+    isolated_store.upsert_portal_user(
+        user_id=email, display_name="First Password User", role="admin", allowed_client_ids=["*"], email=email
+    )
+    client = TestClient(app)
+    with patch("app.api.phase0_routes_auth.create_auth_action_token", return_value=token("first-password-reset")), patch(
+        "app.api.phase0_routes_auth.send_auth_email", return_value={"status": "sent", "provider": "test"}
+    ) as sender:
+        requested = client.post("/phase0/store/auth/password-reset/request", json={"email": email})
+    assert requested.status_code == 200
+    assert sender.call_count == 1
+    confirmed = client.post(
+        "/phase0/store/auth/password-reset/confirm",
+        json={"reset_token": "first-password-reset", "password": "FirstPassword123"},
+    )
+    assert confirmed.status_code == 200
+    assert client.post("/phase0/store/auth/login", json={"user_id": email, "password": "FirstPassword123"}).status_code == 200
+
+
 def test_new_reset_supersedes_old_and_confirm_revokes_sessions(isolated_store):
     email = "known@example.com"
     create_account(isolated_store, email)

@@ -388,6 +388,7 @@ class ProtectedCorpusTests(unittest.TestCase):
                 decision=ReviewDecisionPayload(
                     document_ref="invoice-1", action="approve_with_changes", reviewer="mali-musavir",
                     corrected_account_code="153.01", reason="Musavir duzeltmesi",
+                    validation={"reader_status": "correct", "accounting_status": "corrected"},
                 ),
             ),
             user_id="mali-musavir",
@@ -397,6 +398,16 @@ class ProtectedCorpusTests(unittest.TestCase):
         self.assertEqual(len(references), 1)
         self.assertTrue(references[0]["is_authoritative"])
         self.assertEqual(references[0]["proposal_snapshot"]["canonical_line_count"], 1)
+        self.assertEqual(references[0]["provenance"]["review_validation"], {
+            "reader_status": "correct", "accounting_status": "corrected"
+        })
+        validation_summary = self.service.get_corpus(self.corpus["corpus_id"])["validation_summary"]
+        self.assertEqual(validation_summary["reviewed_count"], 1)
+        self.assertEqual(validation_summary["reader"]["correct"], 1)
+        self.assertEqual(validation_summary["accounting"]["corrected"], 1)
+        self.assertEqual(validation_summary["reader_correct_rate"], 1.0)
+        self.assertEqual(validation_summary["accounting_exact_rate"], 0.0)
+        self.assertEqual(validation_summary["accounting_acceptable_after_correction_rate"], 1.0)
 
     def test_sales_review_correction_updates_revenue_and_creates_authoritative_reference(self) -> None:
         self._store_source(direction="sale")
@@ -525,8 +536,8 @@ class ProtectedCorpusTests(unittest.TestCase):
                 json={
                     "corpus_key": "pilot-accountant-reference",
                     "version": 1,
-                    "target_purchase_count": 35,
-                    "target_sales_count": 15,
+                    "target_purchase_count": 25,
+                    "target_sales_count": 25,
                 },
             )
             loaded = client.get(

@@ -606,6 +606,8 @@ export type ExportMode = "bulk" | "by_client";
 export type CorrectionDraft = {
   accountCode: string;
   applyToSimilar: boolean;
+  readerValidation: "" | "correct" | "incorrect" | "unsure";
+  accountingValidation: "" | "correct" | "corrected" | "incorrect" | "unsure";
   counterpartyCode: string;
   manualDraftLines: DraftLine[];
   reason: string;

@@ -364,6 +364,7 @@ export async function saveDecisionAction({
       confirmedRuleInterpretation: learningOptions.confirmedRuleInterpretation || null,
       suppressRulePromptKey: learningOptions.suppressRulePromptKey || "",
       draftLines: manualDraftLines,
+      validation: { readerStatus: correctionDraft.readerValidation, accountingStatus: correctionDraft.accountingValidation },
       expectedRevision: selectedDocument.normalizedRevision || 0,
       sessionToken: session?.sessionToken,
     });

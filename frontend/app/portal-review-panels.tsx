@@ -575,6 +575,29 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
   );
 }
 
+function ValidationChoice({ label, value, selected, onClick }: { label: string; value: string; selected: string; onClick: (value: string) => void }) {
+  return <button className={`validation-choice${selected === value ? " selected" : ""}`} onClick={() => onClick(value)} type="button">{label}</button>;
+}
+
+function AccountantValidationPanel({ correctionDraft, setCorrectionDraft }: { correctionDraft: CorrectionDraft; setCorrectionDraft: (value: CorrectionDraft) => void }) {
+  return (
+    <section className="accountant-validation-panel" aria-label="Pilot kalite doğrulama">
+      <div className="statement-review-heading"><div><h3>Pilot kalite doğrulama</h3><span>Okuma ile muhasebe kararını ayrı değerlendiriyoruz.</span></div></div>
+      <div className="validation-question"><strong>1. Reader belgeyi doğru okudu mu?</strong><div className="validation-choices">
+        <ValidationChoice label="Doğru" value="correct" selected={correctionDraft.readerValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, readerValidation: value as CorrectionDraft["readerValidation"] })} />
+        <ValidationChoice label="Hatalı" value="incorrect" selected={correctionDraft.readerValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, readerValidation: value as CorrectionDraft["readerValidation"] })} />
+        <ValidationChoice label="Emin değilim" value="unsure" selected={correctionDraft.readerValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, readerValidation: value as CorrectionDraft["readerValidation"] })} />
+      </div></div>
+      <div className="validation-question"><strong>2. Muhasebe fişi doğru mu?</strong><div className="validation-choices">
+        <ValidationChoice label="Doğru" value="correct" selected={correctionDraft.accountingValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, accountingValidation: value as CorrectionDraft["accountingValidation"] })} />
+        <ValidationChoice label="Düzelttim" value="corrected" selected={correctionDraft.accountingValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, accountingValidation: value as CorrectionDraft["accountingValidation"] })} />
+        <ValidationChoice label="Hatalı" value="incorrect" selected={correctionDraft.accountingValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, accountingValidation: value as CorrectionDraft["accountingValidation"] })} />
+        <ValidationChoice label="Emin değilim" value="unsure" selected={correctionDraft.accountingValidation} onClick={(value) => setCorrectionDraft({ ...correctionDraft, accountingValidation: value as CorrectionDraft["accountingValidation"] })} />
+      </div></div>
+    </section>
+  );
+}
+
 export function JournalPanel({
   correctionDraft,
   decisionStatus,
@@ -755,6 +778,9 @@ export function JournalPanel({
             </div>
             <button onClick={onResetDraft} type="button">İlk taslağa dön</button>
           </section>
+        ) : null}
+        {session?.role === "accountant" ? (
+          <AccountantValidationPanel correctionDraft={correctionDraft} setCorrectionDraft={setCorrectionDraft} />
         ) : null}
         <ManualDraftEditor
           activeDraftLines={activeDraftLines}

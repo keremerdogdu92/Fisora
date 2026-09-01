@@ -340,7 +340,7 @@ export function AccountantWorkspace({
           document={selectedDocument}
           hasUnsavedReviewChanges={hasUnsavedReviewChanges}
           onApproveAndNext={onApproveAndNext}
-          onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
+          onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
           onReprocessDocument={onReprocessDocument}
           onRequestStatementAi={onRequestStatementAi}
           onSaveDecision={onSaveDecision}

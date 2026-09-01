@@ -191,6 +191,7 @@ class ProtectedCorpusService:
         return {
             **corpus,
             "items": items,
+            "validation_summary": self._validation_summary(items),
             "target_purchase_count": target_purchase_count,
             "target_sales_count": target_sales_count,
             "enrolled_purchase_count": enrolled_purchase_count,
@@ -198,6 +199,43 @@ class ProtectedCorpusService:
             "reference_ready_count": reference_ready_count,
             "missing_reference_count": max(target_purchase_count + target_sales_count - reference_ready_count, 0),
             "status": str(corpus.get("status") or "draft"),
+        }
+
+    def _validation_summary(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        reader_counts = {"correct": 0, "incorrect": 0, "unsure": 0, "missing": 0}
+        accounting_counts = {"correct": 0, "corrected": 0, "incorrect": 0, "unsure": 0, "missing": 0}
+        cross_tab: dict[str, int] = {}
+        reviewed_count = 0
+        for item in items:
+            item_id = str(item.get("corpus_item_id") or item.get("item_id") or "")
+            references = self.store.list_reference_outcomes(item_id) if item_id else []
+            latest = references[-1] if references else {}
+            provenance = latest.get("provenance") if isinstance(latest, dict) else {}
+            validation = provenance.get("review_validation") if isinstance(provenance, dict) else {}
+            if not isinstance(validation, dict):
+                validation = {}
+            reader = str(validation.get("reader_status") or "missing")
+            accounting = str(validation.get("accounting_status") or "missing")
+            if reader not in reader_counts:
+                reader = "missing"
+            if accounting not in accounting_counts:
+                accounting = "missing"
+            reader_counts[reader] += 1
+            accounting_counts[accounting] += 1
+            if reader != "missing" or accounting != "missing":
+                reviewed_count += 1
+            cross_tab[f"{reader}|{accounting}"] = cross_tab.get(f"{reader}|{accounting}", 0) + 1
+        reader_decided = reader_counts["correct"] + reader_counts["incorrect"]
+        accounting_decided = accounting_counts["correct"] + accounting_counts["corrected"] + accounting_counts["incorrect"]
+        return {
+            "item_count": len(items),
+            "reviewed_count": reviewed_count,
+            "reader": reader_counts,
+            "accounting": accounting_counts,
+            "reader_correct_rate": (reader_counts["correct"] / reader_decided) if reader_decided else None,
+            "accounting_exact_rate": (accounting_counts["correct"] / accounting_decided) if accounting_decided else None,
+            "accounting_acceptable_after_correction_rate": ((accounting_counts["correct"] + accounting_counts["corrected"]) / accounting_decided) if accounting_decided else None,
+            "cross_tab": cross_tab,
         }
 
     def capture_reference_if_enrolled(
@@ -278,6 +316,7 @@ class ProtectedCorpusService:
                     "quality_delta": quality_delta,
                     "document_ref": document_ref,
                     "review_record_id": str(saved_review.get("id") or ""),
+                    "review_validation": ((saved_review.get("decision") or {}).get("validation") or {}) if isinstance(saved_review.get("decision"), dict) else {},
                 },
                 "reviewer": actor,
                 "reason": str(final.get("reason") or "") if isinstance(final, dict) else "",

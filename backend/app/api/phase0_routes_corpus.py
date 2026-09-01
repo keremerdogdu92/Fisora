@@ -62,8 +62,8 @@ def create_protected_corpus(
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     actor = _accountant_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
-    if payload.target_purchase_count != 35 or payload.target_sales_count != 15:
-        raise HTTPException(status_code=400, detail={"allowed": False, "reason": "pilot_corpus_requires_35_15"})
+    if payload.target_purchase_count + payload.target_sales_count != 50:
+        raise HTTPException(status_code=400, detail={"allowed": False, "reason": "pilot_corpus_requires_50_documents"})
     try:
         return _safe_corpus_payload(get_protected_corpus_service().create_corpus(
             corpus_key=payload.corpus_key,

@@ -14,6 +14,8 @@ export function emptyCorrectionDraft(): CorrectionDraft {
   return {
     accountCode: "",
     applyToSimilar: false,
+    readerValidation: "",
+    accountingValidation: "",
     counterpartyCode: "",
     manualDraftLines: [],
     reason: "",

@@ -880,6 +880,7 @@ async function storeReviewDecision({
   statementLineNo = 0,
   expectedRevision = 0,
   draftLines = /** @type {Array<Record<string, unknown>> | null} */ (null),
+  validation = /** @type {Record<string, unknown> | null} */ (null),
   sessionToken = "",
   fetchImpl = fetch,
 }) {
@@ -933,6 +934,11 @@ async function storeReviewDecision({
   }
   if (normalizedDraftLines.length) {
     payload.decision.draft_lines = normalizedDraftLines;
+  }
+  const readerStatus = String(validation?.readerStatus || validation?.reader_status || "");
+  const accountingStatus = String(validation?.accountingStatus || validation?.accounting_status || "");
+  if (readerStatus || accountingStatus) {
+    payload.decision.validation = { reader_status: readerStatus, accounting_status: accountingStatus };
   }
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/review-decision`, {
     method: "POST",

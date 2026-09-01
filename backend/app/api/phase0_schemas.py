@@ -246,6 +246,11 @@ class JournalLinePayload(BaseModel):
     document_ref: str | None = None
 
 
+class ReviewValidationPayload(BaseModel):
+    reader_status: Literal["", "correct", "incorrect", "unsure"] = ""
+    accounting_status: Literal["", "correct", "corrected", "incorrect", "unsure"] = ""
+
+
 class ReviewDecisionPayload(BaseModel):
     document_ref: str
     action: ReviewAction
@@ -265,6 +270,7 @@ class ReviewDecisionPayload(BaseModel):
     statement_line_no: int = 0
     draft_lines: list[JournalLinePayload] = Field(default_factory=list)
     vat_split_review: dict[str, object] = Field(default_factory=dict)
+    validation: ReviewValidationPayload = Field(default_factory=ReviewValidationPayload)
     expected_revision: int = 0
 
     @property

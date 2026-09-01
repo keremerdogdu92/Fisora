@@ -1115,6 +1115,19 @@ test("storeReviewDecision posts statement line accountant decisions", async () =
   assert.deepEqual(result, { updated_at: "2026-06-06T10:00:00" });
 });
 
+test("storeReviewDecision includes independent reader and accounting validation", async () => {
+  let request;
+  const fetchImpl = async (url, init) => { request = { url, init }; return { ok: true, json: async () => ({ ok: true }) }; };
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000", clientId: "client-1", userId: "mali-musavir",
+    documentRef: "fatura.pdf", action: "approve_with_changes", reviewer: "mali-musavir",
+    validation: { readerStatus: "correct", accountingStatus: "corrected" }, fetchImpl,
+  });
+  assert.deepEqual(JSON.parse(request.init.body).decision.validation, {
+    reader_status: "correct", accounting_status: "corrected",
+  });
+});
+
 test("storeReviewDecision includes manual journal draft lines when provided", async () => {
   let request;
   const fetchImpl = async (url, init) => {

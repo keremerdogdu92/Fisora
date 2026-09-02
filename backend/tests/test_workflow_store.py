@@ -24,7 +24,7 @@ from app.persistence.store_factory import (
     build_workflow_store,
 )
 from app.services.document_service import DocumentService
-from app.worker import next_idle_delay, worker_concurrency_from_env
+from app.worker import next_idle_delay, retention_enabled_from_env, worker_concurrency_from_env
 from backend.scripts.import_private_intake_manifest import import_manifest
 from app.workflows.document_processing import (
     _accountant_summary,
@@ -315,6 +315,11 @@ class WorkflowStoreTests(unittest.TestCase):
 
     def test_worker_concurrency_uses_configured_positive_slot_count(self) -> None:
         self.assertEqual(worker_concurrency_from_env({"FISORA_WORKER_CONCURRENCY": "3"}), 3)
+
+    def test_worker_retention_defaults_enabled_and_can_be_disabled(self) -> None:
+        self.assertTrue(retention_enabled_from_env({}))
+        self.assertFalse(retention_enabled_from_env({"FISORA_WORKER_RETENTION_ENABLED": "false"}))
+        self.assertTrue(retention_enabled_from_env({"FISORA_WORKER_RETENTION_ENABLED": "on"}))
 
     def test_worker_idle_delay_resets_after_productive_tick_and_backs_off_when_idle(self) -> None:
         self.assertEqual(next_idle_delay(5, processed_count=1), 0)

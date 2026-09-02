@@ -43,6 +43,11 @@ def worker_concurrency_from_env(env: Mapping[str, str] | None = None) -> int:
         return 1
 
 
+def retention_enabled_from_env(env: Mapping[str, str] | None = None) -> bool:
+    source = env or os.environ
+    return str(source.get("FISORA_WORKER_RETENTION_ENABLED", "true")).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def run_retention_once() -> dict[str, object]:
     store = build_workflow_store(json_path=os.environ.get("FISORA_STORE_PATH", "/opt/fisora/data/exports/phase0_store.json"))
     if getattr(store, "normalized_accounting_enabled", False):
@@ -168,11 +173,12 @@ def main() -> None:
     next_retention_at = 0.0
     idle_delay = 0.0
     concurrency = worker_concurrency_from_env()
+    retention_enabled = retention_enabled_from_env()
     while True:
         processing_summary = run_processing_tick(concurrency=concurrency)
         print(f"document_processing {processing_summary}", flush=True)
         now = time.monotonic()
-        if now >= next_retention_at:
+        if retention_enabled and now >= next_retention_at:
             retention_summary = run_retention_once()
             print(f"document_retention {retention_summary}", flush=True)
             next_retention_at = now + max(RETENTION_INTERVAL_SECONDS, 1)

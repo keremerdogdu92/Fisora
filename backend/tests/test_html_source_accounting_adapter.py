@@ -52,6 +52,7 @@ EVIDENCE = {
     ],
     "label_values": [
         {"label": "Hesaplanan KDV (%20)", "value": "30.00", "source_kind": "table_label_value"},
+        {"label": "Odenecek Tutar", "value": "180.00", "source_kind": "table_label_value"},
     ],
     "text_lines": ["Passive note"],
     "identity_text_lines": ["SUPPLIER A.S.", "VKN: 1111111111", "CUSTOMER LTD.", "VKN: 2222222222"],
@@ -116,6 +117,7 @@ FINAL = {
     "row_decisions": [
         {"source_position": "1", "role": "business_line", "account_code": "770.01", "reason": "Service A"},
         {"source_position": "2", "role": "business_line", "account_code": "770.01", "reason": "Service B"},
+        {"source_position": "3", "role": "non_posting_info", "account_code": "", "reason": "Reference metadata"},
     ],
     "operating_journal_lines": [
         {"account_code": "770.01", "account_name": "SERVICE EXPENSE", "description": "Services", "debit": "150.00", "credit": "0", "source_positions": ["1", "2"]},
@@ -139,7 +141,7 @@ class HtmlSourceAccountingAdapterTests(unittest.TestCase):
         eligible_package = build_html_accounting_source_package(SNAPSHOT, EVIDENCE)
         eligible = html_accounting_eligibility(eligible_package)
         self.assertTrue(eligible["eligible"])
-        self.assertEqual(eligible["accounting_row_count"], 2)
+        self.assertEqual(eligible["accounting_row_count"], 3)
         self.assertTrue(eligible["posting_basis_evidence"])
 
         no_rows = dict(eligible_package)
@@ -156,6 +158,21 @@ class HtmlSourceAccountingAdapterTests(unittest.TestCase):
             ["no_explicit_posting_basis"],
         )
 
+        invoice_total_basis = dict(eligible_package)
+        invoice_total_basis["printed_summary_lines"] = [{"label": "Fatura Tutar\u0131", "value": "180.00"}]
+        self.assertTrue(html_accounting_eligibility(invoice_total_basis)["eligible"])
+
+        generic_total_basis = dict(eligible_package)
+        generic_total_basis["printed_summary_lines"] = [{"label": "Toplam Tutar", "value": "180.00"}]
+        self.assertTrue(html_accounting_eligibility(generic_total_basis)["eligible"])
+
+        goods_total_only = dict(eligible_package)
+        goods_total_only["printed_summary_lines"] = [{"label": "Mal Hizmet Toplam Tutarı", "value": "150.00"}]
+        self.assertEqual(
+            html_accounting_eligibility(goods_total_only)["reasons"],
+            ["no_explicit_posting_basis"],
+        )
+
     def test_strips_leading_separator_from_html_label_values(self) -> None:
         evidence = {**EVIDENCE, "machine_facts": [], "label_values": [{"label": "Fatura No:", "value": ": INV-1", "source_kind": "table_label_value"}, {"label": "Odenecek Tutar", "value": ": 1.144,00 TL", "source_kind": "table_label_value"}]}
         package = build_html_accounting_source_package(SNAPSHOT, evidence)
@@ -165,11 +182,11 @@ class HtmlSourceAccountingAdapterTests(unittest.TestCase):
     def test_projects_frozen_rows_to_unique_accounting_ordinals(self) -> None:
         package = build_html_accounting_source_package(SNAPSHOT, EVIDENCE)
 
-        self.assertEqual([row["source_position"] for row in package["invoice_table_rows"]], ["1", "2"])
+        self.assertEqual([row["source_position"] for row in package["invoice_table_rows"]], ["1", "2", "3"])
         self.assertEqual(package["invoice_table_rows"][0]["source_text"], "[SOURCE 1:1] Service A | 100.00")
-        self.assertTrue(all(row["ui_role"] == "posting_candidate" for row in package["invoice_table_rows"]))
+        self.assertEqual([row["ui_role"] for row in package["invoice_table_rows"]], ["posting_candidate", "posting_candidate", "informational"])
         self.assertEqual(package["document_header"][0], {"label": "FATURA NO", "value": "ABC2026000000001"})
-        self.assertIn({"label": "ODENECEK TUTAR", "value": "180.00"}, package["printed_summary_lines"])
+        self.assertIn({"label": "Odenecek Tutar", "value": "180.00"}, package["printed_summary_lines"])
 
     def test_planner_and_accountant_receive_different_bounded_evidence_channels(self) -> None:
         planner_text = render_html_planner_source_text(EVIDENCE)
@@ -180,9 +197,10 @@ class HtmlSourceAccountingAdapterTests(unittest.TestCase):
         self.assertNotIn("SOURCE COLUMNS", planner_text)
         self.assertIn("SATIR 1: [SOURCE 1:1] Service A | 100.00", accountant_text)
         self.assertIn("SATIR 2: [SOURCE 1:2] Service B | 50.00", accountant_text)
-        self.assertIn("SOURCE ROW 2:1: Reference | X1", accountant_text)
-        self.assertNotIn("SATIR 3:", accountant_text)
+        self.assertIn("SATIR 3: [SOURCE 2:1] Reference | X1", accountant_text)
+        self.assertNotIn("SOURCE ROW 2:1:", accountant_text)
         self.assertNotIn("SATIR 1:1:", accountant_text)
+        self.assertIn("[SOURCE section:row] is provenance only", accountant_text)
 
     def test_prepared_source_runner_keeps_rows_exact_and_uses_workspace_identity_fallback(self) -> None:
         package = build_html_accounting_source_package(SNAPSHOT, EVIDENCE)
@@ -205,7 +223,7 @@ class HtmlSourceAccountingAdapterTests(unittest.TestCase):
         )
 
         self.assertEqual(run.result["line_decision_coverage"]["status"], "valid")
-        self.assertEqual(run.result["source_review_row_count"], 2)
+        self.assertEqual(run.result["source_review_row_count"], 3)
         self.assertEqual(run.result["payable_total"], "180.00")
         self.assertTrue(run.result["is_balanced"])
         self.assertEqual(run.result["supplier_title"], "SUPPLIER A.S.")

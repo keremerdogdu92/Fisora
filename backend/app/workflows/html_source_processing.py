@@ -119,10 +119,16 @@ def _label_value(evidence: Mapping[str, Any], *needles: str) -> str:
     return ""
 
 
+_HTML_POSTING_BASIS_EXACT_LABELS = (
+    "TOPLAM TUTAR",
+    "G TOPLAM",
+)
+
 _HTML_POSTING_BASIS_LABEL_HINTS = (
     "ODENECEK",
     "PAYABLE",
     "FATURA TOPLAMI",
+    "FATURA TUTARI",
     "TOPLAM FATURA TUTARI",
     "VERGILER DAHIL TOPLAM",
     "VERGI DAHIL TOPLAM",
@@ -150,6 +156,11 @@ def html_accounting_eligibility(source_package: Mapping[str, Any]) -> dict[str, 
         ),
         "",
     )
+    if not matched_basis:
+        matched_basis = next(
+            (label for label in _HTML_POSTING_BASIS_EXACT_LABELS if _normalized_label(label) in normalized_labels),
+            "",
+        )
     reasons: list[str] = []
     if not rows:
         reasons.append("no_frozen_table_rows")
@@ -186,8 +197,6 @@ def build_html_accounting_source_package(
         columns = [str(value) for value in section.get("columns") or [] if str(value).strip()]
         if columns:
             headers.append(f"SECTION {section_index}: " + " | ".join(columns))
-        if kind != "table":
-            continue
         for row_index, raw_row in enumerate(section.get("rows") or [], start=1):
             cells = [str(cell) for cell in raw_row] if isinstance(raw_row, list) else []
             text = " | ".join(cell for cell in cells if cell.strip())
@@ -201,20 +210,28 @@ def build_html_accounting_source_package(
                 "ui_amount": "",
                 "ui_amount_label": "",
                 "ui_amount_basis": "none",
-                "ui_role": "posting_candidate",
+                "ui_role": "posting_candidate" if kind == "table" else "informational",
             })
 
-    summaries = [
-        {"label": str(item.get("label") or ""), "value": _projected_value(item.get("value"))}
-        for item in evidence.get("label_values") or []
-        if isinstance(item, Mapping) and str(item.get("label") or "").strip() and str(item.get("value") or "").strip()
-    ]
-    payable = _machine_fact(evidence, "odenecek")
-    if payable and not _label_value(evidence, "ODENECEK TOPLAM", "ODENECEK TUTAR", "PAYABLE"):
-        summaries.append({"label": "ODENECEK TUTAR", "value": payable})
-    tax_inclusive = _machine_fact(evidence, "vergidahil")
-    if tax_inclusive and not _label_value(evidence, "VERGILER DAHIL", "TAX INCLUSIVE"):
-        summaries.append({"label": "VERGILER DAHIL TOPLAM TUTAR", "value": tax_inclusive})
+    summaries: list[dict[str, str]] = []
+    seen_summaries: set[tuple[str, str]] = set()
+
+    def add_summary(label: object, value: object) -> None:
+        pair = (str(label or "").strip(), _projected_value(value))
+        if not pair[0] or not pair[1] or pair in seen_summaries:
+            return
+        seen_summaries.add(pair)
+        summaries.append({"label": pair[0], "value": pair[1]})
+
+    for item in evidence.get("label_values") or []:
+        if isinstance(item, Mapping):
+            add_summary(item.get("label"), item.get("value"))
+    for section in validated.get("sections") or []:
+        if str(section.get("kind") or "") != "key_value":
+            continue
+        for raw_row in section.get("rows") or []:
+            if isinstance(raw_row, list) and len(raw_row) == 2:
+                add_summary(raw_row[0], raw_row[1])
 
     return {
         "document_header": header,

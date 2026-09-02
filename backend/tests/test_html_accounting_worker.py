@@ -64,7 +64,7 @@ class FakeHtmlReader:
         return {"snapshot": SNAPSHOT}
 
 
-class ZeroRowHtmlReader:
+class EmptySectionHtmlReader:
     reader_version = "1.0.0"
 
     def read(self, path: Path):
@@ -74,11 +74,26 @@ class ZeroRowHtmlReader:
             "kind": "key_value",
             "title": None,
             "columns": ["Label", "Value"],
-            "rows": [["Service", "100.00"]],
+            "rows": [],
         }]
-        snapshot["metrics"] = {"sectionCount": 1, "rowCount": 1, "columnCount": 2}
+        snapshot["metrics"] = {"sectionCount": 1, "rowCount": 0, "columnCount": 2}
         return {"snapshot": snapshot}
 
+
+class SectionRowHtmlReader:
+    reader_version = "1.0.0"
+
+    def read(self, path: Path):
+        snapshot = dict(SNAPSHOT)
+        snapshot["mode"] = "section"
+        snapshot["sections"] = [{
+            "kind": "key_value",
+            "title": None,
+            "columns": ["Label", "Value"],
+            "rows": [["Service A", "100.00"], ["Service B", "50.00"]],
+        }]
+        snapshot["metrics"] = {"sectionCount": 1, "rowCount": 2, "columnCount": 2}
+        return {"snapshot": snapshot}
 
 class FakePlannerProvider:
     provider_name = "gemini"
@@ -198,7 +213,7 @@ class HtmlAccountingWorkerTests(unittest.TestCase):
         self.assertEqual(store.saved["draft_lines"], [])
         self.assertEqual(store.updated["status"], "completed")
 
-    def test_flag_on_still_blocks_ai_when_frozen_table_rows_are_missing(self) -> None:
+    def test_flag_on_still_blocks_ai_when_frozen_source_rows_are_missing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)
             planner = FakePlannerProvider()
@@ -210,7 +225,7 @@ class HtmlAccountingWorkerTests(unittest.TestCase):
             ):
                 summary = process_next_job_once(
                     store,
-                    html_source_reader=ZeroRowHtmlReader(),
+                    html_source_reader=EmptySectionHtmlReader(),
                     accounting_provider=planner,
                 )
 
@@ -222,6 +237,30 @@ class HtmlAccountingWorkerTests(unittest.TestCase):
         self.assertIn("html_accounting_no_frozen_table_rows", store.saved["review_reason_codes"])
         self.assertTrue(any(event["step"] == "html_accounting_not_eligible" for event in store.events))
 
+    def test_flag_on_runs_ai_for_frozen_section_rows_with_explicit_basis(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(directory)
+            planner = FakePlannerProvider()
+            final = FakeFinalProvider()
+            env = {"FISORA_HTML_ACCOUNTING_ENABLED": "true", "FISORA_THREE_STAGE_ACCOUNTING_ENABLED": "true"}
+            with patch.dict(os.environ, env, clear=False), patch(
+                "app.workflows.document_processing._accounting_provider_from_env",
+                return_value=final,
+            ):
+                summary = process_next_job_once(
+                    store,
+                    html_source_reader=SectionRowHtmlReader(),
+                    accounting_provider=planner,
+                )
+
+        self.assertEqual(summary, {"processed_count": 1, "completed_count": 1, "failed_count": 0})
+        self.assertEqual(len(planner.calls), 1)
+        self.assertEqual(len(final.calls), 1)
+        self.assertTrue(store.saved["html_accounting_eligible"])
+        self.assertTrue(store.saved["html_accounting_used"])
+        self.assertEqual(store.saved["source_review_row_count"], 2)
+        self.assertEqual(store.saved["line_decision_coverage"]["status"], "valid")
+        self.assertTrue(any(event["step"] == "html_accounting_completed" for event in store.events))
     def test_flag_on_runs_prepared_html_planner_and_final_pipeline(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(directory)

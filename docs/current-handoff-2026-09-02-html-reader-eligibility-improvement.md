@@ -110,3 +110,79 @@ Reader'a muhasebe mantığı, hesap seçimi, cari kararı, KDV hesabı veya post
 
 Normal Fatura İşleme UI'ını Reader karşılaştırması için değiştirme; bu iş ileride ayrı `Okuma Ajanı Karşılaştırması` müşavir-demo sayfasında gösterilecek.
 ```
+
+## 2026-09-03 v-next doğrulama güncellemesi
+Bu bölüm önceki handoff'un üzerine authoritative durum güncellemesidir.
+
+Çalışma izolasyonu:
+- Worktree: `C:\Users\kerem\Documents\Fisero-html-eligibility-vnext`
+- Branch: `html-eligibility-vnext-20260902`
+- Production'a deploy/hot-patch yapılmadı.
+- Frozen HTML Source Reader v1.0.0 değiştirilmedi.
+- PDF pipeline dosyaları değiştirilmedi.
+
+Kök nedenler source-level olarak doğrulandı:
+1. Frozen Reader `key_value` ve `fragmented` source rows'u koruyordu; eski accounting adapter yalnız `kind == "table"` satırlarını `invoice_table_rows` içine projekte ediyordu.
+2. Literal current-invoice totals bazı HTML'lerde aynı hücrede, bazı HTML'lerde komşu tablo hücrelerinde, bazı HTML'lerde ise komşu DOM text parçalarında basılıydı; semantic evidence yalnız exact 2-cell label/value satırlarını kabul ettiği için bu totals kayboluyordu.
+3. Machine/QR facts kaynak kimlik evidence olarak yararlı olsa da literal posting-basis label yerine sentetik `ODENECEK TUTAR` üretmek source-faithful kabul edilmedi ve kaldırıldı.
+
+v-next davranışı:
+- Bütün frozen section rows accounting source package'a sıra/provenance korunarak taşınır.
+- `table` rows `posting_candidate`, `key_value`/`fragmented` rows `informational` olarak source-structure seviyesinde işaretlenir.
+- Final Accountant bütün frozen rows'u sequential `SATIR N: [SOURCE section:row] ...` biçiminde görür.
+- Literal totals yalnız source'taki label/value yapısından çıkarılır; arithmetic/reconciliation/inference yoktur.
+Ek structural hardening:
+- Paralel `<br>` label/value listeleri yalnız iki hücrede segment sayıları eşitse hizalanır; corpus'ta 11 dosyada 22 literal total pair üretti.
+- Aynı table cell içindeki `label -> ':' -> value` DOM chunk adjacency ayrı kanal olarak korunur; corpus'ta 17 dosyada 34 literal total pair üretti.
+- Global table-içi chunk adjacency kullanılmaz; farklı hücreler arası yanlış label/value çapraz eşleşmesi kapatıldı.
+- Rana enerji örneğinde yanlış `FATURA TUTARI = 226,50` eşleşmesi kaldırıldı; yalnız gerçek `FATURA TUTARI = 279,10` ve `ÖDENECEK TUTAR = 280,00` evidence kaldı.
+- HTML Final Accountant source text'i, `row_decisions.source_position` için yalnız sequential `SATIR N` ordinalinin kullanılacağını; `[SOURCE section:row]` değerinin provenance olduğunu açıkça belirtir. PDF/Final global prompt değiştirilmedi.
+
+Final corpus doğrulaması:
+- Toplam corpus: 2.120 HTML = 1.327 frozen baseline + 598 genuine holdout + Downloads'tan SHA-256 dedupe sonrası 195 gerçekten yeni blind HTML.
+- Accounting eligibility: 2.120/2.120.
+- Source missing: 0.
+- Extraction error: 0.
+- Lossless row count: 2.120/2.120.
+- Exact frozen source-text projection: 2.120/2.120, mismatch 0.
+- Yeni 195 blind corpus Reader sonucu: 195/195 parse; 0 crash, 0 contract-invalid, 0 zero-row, 0 low-confidence, 0 suspicious.
+- Yeni blind corpus 14 yeni generalized structural family getirdi.
+
+Reader/frozen kapıları:
+- regression 59/59
+- security 7/7
+- edge 10/10
+- robustness 8/8
+- mutation 500/500
+- public API 7/7
+- freeze verify 20/20
+- `npm run release:gate`: PASS
+Gerçek Planner -> Final Accountant kapısı:
+- Test grubu: 11 eski production failure + Downloads'taki 14 yeni structural-family temsilcisi = 25 vaka.
+- Provider chain: Gemini Planner + XKIRO Final.
+- Provider completed: 25/25.
+- Final row coverage: 25/25 valid.
+- Balanced journal result: 25/25.
+- Posting-basis amount doğrudan literal printed summary değerine eşleşen: 24/25.
+- Tek non-literal vaka `family14::0111.html`: 173,09 = basılı 173,25 cari toplam - basılı 0,16 önceki ay devreden; bu Final Accountant kontratında izin verilen source-grounded arithmetic'tir.
+- Eski 11 gerçek kalite grubunda provider completed 11/11, coverage valid 11/11, balanced 11/11 ve kullanılan chart code'larda invalid case 0.
+- Eski 11 kalite grubunun posting-basis amount'larının 11/11'i kaynakta literal bir printed summary değerine eşleşti.
+- Rana stacked-energy vakası sequential 3/3 ve parallel 3/3 tekrar testinde coverage valid + balanced kaldı; posting basis üç tekrarda da 279,10 seçildi.
+- `family14::0111.html` SATIR/provenance açıklamasından sonra 3/3 tekrar testinde `source_position` tam `1..13` oldu; 3/3 coverage valid ve balanced.
+
+Backend kapısı:
+- Full backend suite: 1.130 PASS / 34 SKIP / 0 FAIL.
+- İlk worktree test koşularındaki XML/tax failure'ları yalnız eksik `private_samples/real_pilot` test mount'undan kaynaklandı; doğru junction ile suite tamamen yeşil geçti.
+- Test junction'ı doğrulama sonrası kaldırıldı; ana `Fisero/private_samples/real_pilot` kaynağı korunuyor.
+- Product diff yalnız HTML semantic evidence, HTML source/accounting adapter ve ilgili HTML testleri + bu handoff ile sınırlıdır.
+- PDF pipeline dosyaları değiştirilmedi.
+- Normal Invoice Processing UI değiştirilmedi.
+- Production'a deploy/hot-patch yapılmadı.
+
+Release durumu:
+- HTML source/eligibility değişikliği local v-next release candidate seviyesindedir.
+- Frozen Reader v1.0.0 baseline olarak aynen korunur.
+- Production'a geçiş ayrı deploy kararıdır; bu handoff production deploy yapıldığı anlamına gelmez.
+Ek AI stabilite notu:
+- `9250353261_N3F2026000523334.html` üç bağımsız tekrar testinde 3/3 `Ara Toplam = 433,65` current-invoice basis seçti; 3/3 coverage valid ve balanced.
+- Bu vaka `FATURA TUTARI = 433,75`, `Ara Toplam = 433,65` ve `Önceki Aydan Devreden = 0,13` değerlerini birlikte basar; Final üç tekrarda da basılı `Ara Toplam`ı cari dönem basis olarak kullandı.

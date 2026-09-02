@@ -81,6 +81,102 @@ class HtmlSemanticEvidenceTests(unittest.TestCase):
             evidence["label_values"],
         )
 
+    def test_extracts_literal_inline_total_label_values_without_calculation(self) -> None:
+        html = (
+            "<html><body><table>"
+            "<tr><td>Odenecek Tutar 755,00</td><td>Son Odeme Tarihi 03-07-2026</td><td>7.059</td></tr>"
+            "<tr><td>Fatura Tutari 754,65TL</td></tr>"
+            "<tr><td>Matrah 685,67</td></tr>"
+            "<tr><td>Bu fatura kapsaminda odenmesi gereken fatura tutari 755.00 TLdir.</td></tr>"
+            "</table></body></html>"
+        ).encode("utf-8")
+        evidence = extract_html_semantic_evidence(html)
+
+        self.assertIn(
+            {"label": "Odenecek Tutar", "value": "755,00", "source_kind": "table_inline_label_value"},
+            evidence["label_values"],
+        )
+        self.assertIn(
+            {"label": "Fatura Tutari", "value": "754,65TL", "source_kind": "table_inline_label_value"},
+            evidence["label_values"],
+        )
+        self.assertFalse(any(item["label"] == "Matrah" for item in evidence["label_values"]))
+        self.assertEqual(sum(item["source_kind"] == "table_inline_label_value" for item in evidence["label_values"]), 2)
+
+    def test_extracts_adjacent_literal_totals_from_table_cells_and_text_chunks(self) -> None:
+        html = (
+            "<html><body>"
+            "<table><tr><td>IMZA</td><td>G.Toplam:</td><td>11.980,48 TL</td></tr></table>"
+            "<div>Odenecek Tutar</div><span>:</span><strong>600,00 TL</strong>"
+            "</body></html>"
+        ).encode("utf-8")
+        evidence = extract_html_semantic_evidence(html)
+
+        self.assertIn(
+            {"label": "G.Toplam:", "value": "11.980,48 TL", "source_kind": "table_adjacent_label_value"},
+            evidence["label_values"],
+        )
+        self.assertIn(
+            {"label": "Odenecek Tutar", "value": "600,00 TL", "source_kind": "adjacent_text_label_value"},
+            evidence["label_values"],
+        )
+    def test_extracts_total_from_chunks_within_one_table_cell(self) -> None:
+        html = (
+            "<html><body><table><td>"
+            "<span>Odenecek Tutar</span><span>:</span><strong>600,00 TL</strong>"
+            "</td></table></body></html>"
+        ).encode("utf-8")
+        evidence = extract_html_semantic_evidence(html)
+
+        self.assertIn(
+            {"label": "Odenecek Tutar", "value": "600,00 TL", "source_kind": "table_cell_adjacent_label_value"},
+            evidence["label_values"],
+        )
+
+    def test_extracts_parallel_stacked_literal_totals_without_deriving_amounts(self) -> None:
+        html = (
+            "<html><body><table><tr>"
+            "<td>Enerji Bedelleri Toplamı<br>Vergi / Fonlar Toplamı<br>FATURA TUTARI</td>"
+            "<td>226,50<br>52,60<br>279,10</td>"
+            "</tr><tr>"
+            "<td>Önceki Dönem Yuvarlama Farkı<br>Yuvarlama Farkı<br>ÖDENECEK TUTAR<br>SON ÖDEME TARİHİ<br>ESKİ BORÇ</td>"
+            "<td>0,30<br>0,60<br>280,00<br>13.07.2026<br>-</td>"
+            "</tr></table></body></html>"
+        ).encode("utf-8")
+        evidence = extract_html_semantic_evidence(html)
+
+        self.assertIn(
+            {"label": "FATURA TUTARI", "value": "279,10", "source_kind": "table_stacked_label_value"},
+            evidence["label_values"],
+        )
+        self.assertIn(
+            {"label": "ÖDENECEK TUTAR", "value": "280,00", "source_kind": "table_stacked_label_value"},
+            evidence["label_values"],
+        )
+        self.assertFalse(any(item["value"] == "279,70" for item in evidence["label_values"]))
+        self.assertFalse(any(
+            item["label"] == "FATURA TUTARI" and item["value"] == "226,50"
+            for item in evidence["label_values"]
+        ))
+        self.assertEqual(
+            sum(item["source_kind"] == "table_stacked_label_value" for item in evidence["label_values"]),
+            2,
+        )
+
+    def test_does_not_pair_misaligned_stacked_cells(self) -> None:
+        html = (
+            "<html><body><table><tr>"
+            "<td>FATURA TUTARI<br>ÖDENECEK TUTAR</td>"
+            "<td>279,10<br>0,60<br>280,00</td>"
+            "</tr></table></body></html>"
+        ).encode("utf-8")
+        evidence = extract_html_semantic_evidence(html)
+
+        self.assertFalse(any(
+            item["source_kind"] == "table_stacked_label_value"
+            for item in evidence["label_values"]
+        ))
+
     def test_rejects_oversized_or_hash_mismatched_sources(self) -> None:
         with self.assertRaisesRegex(ValueError, "html_semantic_evidence_input_too_large"):
             extract_html_semantic_evidence(b"x" * (DEFAULT_MAX_HTML_BYTES + 1))

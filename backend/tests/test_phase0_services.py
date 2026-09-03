@@ -16,9 +16,11 @@ if str(BACKEND) not in sys.path:
 
 from app.api.phase0_dependencies import record_operation_event
 from app.api.phase0_schemas import ClientProfilePayload, ReviewDecisionPayload, ReviewRulePreviewPayload, StoredReviewDecisionPayload, WorkspaceExportPackagePayload
+from app.persistence.learning_rule_repository import LearningRuleRepository
 from app.persistence.workflow_store import JsonWorkflowStore
 from app.services.document_service import DocumentService
 from app.services.export_service import ExportService
+from app.services.learning_rule_service import LearningRuleService
 from app.services.review_service import ReviewService
 from app.services.workspace_service import WorkspaceService, compact_workspace_payload, review_workspace_payload
 
@@ -971,6 +973,64 @@ class Phase0ServiceTests(unittest.TestCase):
         event = workspace["learning_events"][0]
         self.assertEqual(event["learning_confirmation"], "suggest_similar")
         self.assertEqual(event["rule_interpretation"]["summary_tr"], "Yurtici Kargo faturalari kargo gideri onerisi olacak.")
+
+    def test_save_rule_confirmation_activates_versioned_learning_rule(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[{
+                    "normalized_account_code": "760.03.010", "account_name": "Kargo Gideri",
+                    "is_detail_account": True, "is_active": True, "semantic_roles": ["expense"],
+                }],
+            )
+            store.save_simulation_result(
+                client_id="client-1", document_ref="kargo.xml",
+                result={
+                    "file_name": "kargo.xml", "export_status": "review_required", "is_balanced": True,
+                    "accounting_direction": "purchase", "selected_expense_account": "760.03.010",
+                    "selected_supplier_account": "320.9860008925", "counterparty_tax_id": "9860008925",
+                    "counterparty_title": "Yurtici Kargo", "product_line_hint": "Kargo hizmeti", "product_category": "kargo",
+                },
+            )
+            learning_service = LearningRuleService(repository=LearningRuleRepository())
+            service = ReviewService(
+                store=store, record_operation_event=record_operation_event, require_client_access=allow_access,
+                learning_rule_service=learning_service,
+            )
+            saved = service.store_review_decision(
+                payload=StoredReviewDecisionPayload(
+                    client_id="client-1",
+                    decision=ReviewDecisionPayload(
+                        document_ref="kargo.xml", action="suggest_for_similar", reviewer="spoofed-reviewer",
+                        corrected_account_code="760.03.010", category="kargo",
+                        decision_note="Bundan sonra bu VKN'den gelen faturalar kargo gideridir.",
+                        learning_confirmation="save_rule",
+                        confirmed_rule_interpretation={
+                            "status": "ready",
+                            "summary_tr": "Yurtici Kargo faturalari kargo gideri onerisi olacak.",
+                            "trigger_tr": "VKN 9860008925 / alis faturasi",
+                            "action_tr": "Hesap 760.03.010 onerilecek.",
+                            "guardrail_tr": "Ilk uygulamalarda musavir kontrolu istenir.",
+                            "confidence": 88,
+                            "reason_codes": ["counterparty_tax_id_rule", "account_rule"],
+                        },
+                    ),
+                ),
+                user_id="mali-musavir",
+            )
+            workspace = store.get_workspace("client-1")
+            active = learning_service.list_active(client_id="client-1")
+
+        self.assertEqual(saved["learning_rule"]["status"], "active")
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["account_code"], "760.03.010")
+        self.assertEqual(active[0]["confirmed_by"], "mali-musavir")
+        self.assertIn(
+            "learning_rule_activated",
+            [event["step"] for event in workspace["document_pipeline_events"]],
+        )
 
     def test_review_service_records_journal_edit_save_and_export_pipeline_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

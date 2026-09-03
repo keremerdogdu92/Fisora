@@ -1,3 +1,5 @@
+# File: backend/tests/test_learning_rule_lifecycle.py
+# Summary: Verifies confirmed learning-rule versioning, lifecycle safety, and compilation into narrow accountant-authorized posting authorities.
 from __future__ import annotations
 
 import os
@@ -107,6 +109,21 @@ class LearningRuleLifecycleTests(unittest.TestCase):
         self.assertEqual(archived["status"], "archived")
         self.assertEqual(len(repository.list_versions(created["rule_key"])), 1)
 
+    def test_activating_new_version_pauses_previous_active_version(self) -> None:
+        repository = LearningRuleRepository()
+        service = LearningRuleService(repository=repository)
+        key = "client:firma-1:supplier:1234567890:dogalgaz"
+        first = service.create_version(rule_key=key, expected_version=0, snapshot=_snapshot(), actor="accountant")
+        service.activate(rule_key=key, expected_version=first["version"], actor="accountant")
+        second = service.create_version(
+            rule_key=key, expected_version=1, snapshot=_snapshot(account_code="760.03.001"), actor="accountant"
+        )
+        service.activate(rule_key=key, expected_version=second["version"], actor="accountant")
+
+        versions = repository.list_versions(key)
+        self.assertEqual([item["status"] for item in versions], ["paused", "active"])
+        self.assertEqual(service.list_active(rule_key=key)[0]["account_code"], "760.03.001")
+
     def test_create_version_preserves_source_review_and_protected_reference_linkage(self) -> None:
         repository = LearningRuleRepository()
         service = LearningRuleService(repository=repository)
@@ -136,6 +153,45 @@ class LearningRuleLifecycleTests(unittest.TestCase):
                 snapshot={**_snapshot(), "confirmation_provenance": {}},
                 actor="accountant",
             )
+
+    def test_confirmed_review_rule_creates_narrow_active_authority(self) -> None:
+        service = LearningRuleService(repository=LearningRuleRepository())
+        active = service.save_confirmed_review_rule(
+            client_id="firma-1",
+            decision={
+                "learning_confirmation": "save_rule",
+                "corrected_account_code": "770.03.001",
+                "document_ref": "doc-1",
+                "decision_note": "Bu VKN için doğalgaz gideri hesabını kullan.",
+            },
+            learning_event={
+                "natural_language_rule_candidate": {
+                    "scope": "client_counterparty", "account_treatment": "expense", "match_phrase": "dogalgaz gideri"
+                },
+                "counterparty_tax_id": "1234567890",
+                "corrected_account_code": "770.03.001",
+                "category": "dogalgaz",
+                "utility_context": {},
+            },
+            interpretation={
+                "status": "ready", "summary_tr": "Doğalgaz gideri hesabı önerilecek.",
+                "guardrail_tr": "Müşavir kontrolü sürer.", "source": "accountant_confirmed",
+            },
+            saved_review={"id": "review-42"},
+            document={"result": {"accounting_direction": "purchase", "file_name": "doc-1.html"}},
+            chart_accounts={"accounts": [{
+                "normalized_account_code": "770.03.001", "is_detail_account": True,
+                "is_active": True, "semantic_roles": ["expense"],
+            }]},
+            actor="accountant",
+        )
+
+        self.assertIsNotNone(active)
+        self.assertEqual(active["status"], "active")
+        self.assertEqual(active["scope"], "client_counterparty")
+        self.assertEqual(active["counterparty_tax_id"], "1234567890")
+        self.assertEqual(active["source_review_decision_id"], "review-42")
+        self.assertEqual(active["account_code"], "770.03.001")
 
     def test_full_vkn_rule_compiles_one_authority_per_canonical_line(self) -> None:
         authorities = compile_verified_rule_authorities(

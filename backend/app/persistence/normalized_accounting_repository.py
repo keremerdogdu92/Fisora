@@ -1796,6 +1796,7 @@ class NormalizedAccountingRepository:
                     allocation_plan=allocation_plan,
                     currency=str(corrected_result.get("currency") or "TRY"),
                 )
+                review_decision_id = uuid4()
                 cursor.execute(
                     """
                     insert into review_decisions (
@@ -1807,7 +1808,7 @@ class NormalizedAccountingRepository:
                     values (%s, %s, %s, %s, %s, %s, null, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        uuid4(),
+                        review_decision_id,
                         self.tenant_id,
                         taxpayer_id,
                         document_id,
@@ -1855,7 +1856,12 @@ class NormalizedAccountingRepository:
                     actor=str(decision.get("reviewer") or ""),
                     details={"revision_no": revision_no, "base_revision_no": current_revision},
                 )
-        return {"revision_no": revision_no, "approved": approved, "result": corrected_result}
+        return {
+            "revision_no": revision_no,
+            "approved": approved,
+            "result": corrected_result,
+            "review_decision_id": str(review_decision_id),
+        }
 
     def reopen(
         self,

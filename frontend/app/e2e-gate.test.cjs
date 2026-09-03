@@ -1,3 +1,5 @@
+// File: frontend/app/e2e-gate.test.cjs
+// Summary: Locks production frontend integration boundaries, including authenticated query hydration and real-data browser gate availability.
 const assert = require("node:assert/strict");
 const { existsSync, readFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -27,6 +29,7 @@ test("portal shell wires the first TanStack Query provider boundary", () => {
   assert.match(portalApp, /usePilotReadinessQuery/);
   assert.match(workspaceQueries, /useQuery/);
   assert.match(workspaceQueries, /workspaceQueryKeys/);
+  assert.match(workspaceQueries, /useAiCapacityQuery[\s\S]*enabled: Boolean\(session\)/);
 });
 
 test("portal feature and shared boundaries are explicit", () => {

@@ -1,3 +1,5 @@
+# File: backend/app/api/phase0_context.py
+# Summary: Builds production service dependencies for authentication, document processing, review, retention, and accountant-confirmed learning rules.
 from __future__ import annotations
 
 import os
@@ -19,6 +21,7 @@ from app.api.phase0_dependencies import (
 )
 from app.api.phase0_uploads import save_uploaded_document_with_job as _save_uploaded_document_with_job
 from app.persistence.store_factory import build_workflow_store
+from app.persistence.learning_rule_repository import LearningRuleRepository
 from app.domain.research_harness import ResearchHarness, build_research_runtime_from_env
 from app.domain.qnb_efatura import QnbConnectionService, build_qnb_adapter_from_env
 from app.domain.outgoing_invoices import OutgoingInvoiceService
@@ -28,6 +31,7 @@ from app.services.document_service import DocumentService
 from app.services.retention_service import RetentionService
 from app.services.export_service import ExportService
 from app.services.review_service import ReviewService
+from app.services.learning_rule_service import LearningRuleService
 from app.services.protected_corpus_service import ProtectedCorpusService
 from app.services.workspace_service import WorkspaceService
 from app.services.pilot_reinitialization_service import PilotReinitializationService
@@ -130,6 +134,18 @@ def _build_document_service(store) -> DocumentService:
     )
 
 
+def _build_learning_rule_service(store) -> LearningRuleService | None:
+    if not hasattr(store, "_connect"):
+        return None
+    return LearningRuleService(
+        repository=LearningRuleRepository(
+            connect=store._connect,
+            tenant_id=store.tenant_id,
+            json_value=getattr(store, "_json", None),
+        )
+    )
+
+
 def get_review_service() -> ReviewService:
     store = get_workflow_store()
     return ReviewService(
@@ -143,6 +159,7 @@ def get_review_service() -> ReviewService:
             document_root=default_document_storage_path(),
             export_root=default_export_path(),
         ),
+        learning_rule_service=_build_learning_rule_service(store),
     )
 
 

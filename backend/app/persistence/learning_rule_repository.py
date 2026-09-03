@@ -1,3 +1,5 @@
+# File: backend/app/persistence/learning_rule_repository.py
+# Summary: Persists versioned accountant-confirmed learning rules and enforces a single active version per rule key.
 from __future__ import annotations
 
 from copy import deepcopy
@@ -130,12 +132,27 @@ class LearningRuleRepository:
             row = versions[-1]
             if row["status"] == "archived" and status != "archived":
                 raise LearningRuleConflict("learning_rule_archived")
+            if status == "active":
+                for prior in versions[:-1]:
+                    if prior["status"] == "active":
+                        prior["status"] = "paused"
+                        prior["confirmed_by"] = str(actor)
+                        prior["updated_at"] = _now()
             row["status"] = status
             row["confirmed_by"] = str(actor)
             row["updated_at"] = _now()
             return deepcopy(row)
         with self._connect() as conn:
             with conn.cursor() as cursor:
+                if status == "active":
+                    cursor.execute(
+                        """
+                        update learning_rules
+                        set status = 'paused', confirmed_by = %s, updated_at = now()
+                        where tenant_id = %s and rule_key = %s and status = 'active' and version <> %s
+                        """,
+                        (actor, self.tenant_id, rule_key, expected_version),
+                    )
                 cursor.execute(
                     """
                     update learning_rules

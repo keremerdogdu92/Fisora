@@ -97,6 +97,7 @@ export function useAiCapacityQuery({
         sessionToken: session?.sessionToken,
         userId,
       })) as AiCapacityView,
+    enabled: Boolean(session),
     placeholderData: (previousData) => previousData,
     refetchInterval: 5 * 60 * 1000,
     refetchIntervalInBackground: false,

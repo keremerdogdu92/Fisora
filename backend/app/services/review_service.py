@@ -1,3 +1,5 @@
+# File: backend/app/services/review_service.py
+# Summary: Validates and persists accountant review decisions, journal revisions, learning evidence, and explicit confirmed-rule activation.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -21,6 +23,7 @@ from app.persistence.normalized_accounting_repository import (
     NormalizedAccountingError,
     NormalizedRevisionConflict,
 )
+from app.services.learning_rule_service import LearningRuleService
 
 
 OperationRecorder = Callable[..., dict[str, object]]
@@ -36,12 +39,14 @@ class ReviewService:
         require_client_access: AccessChecker,
         rule_interpreter: Any | None = None,
         protected_corpus_service: Any | None = None,
+        learning_rule_service: LearningRuleService | None = None,
     ) -> None:
         self.store = store
         self.record_operation_event = record_operation_event
         self.require_client_access = require_client_access
         self.rule_interpreter = rule_interpreter
         self.protected_corpus_service = protected_corpus_service
+        self.learning_rule_service = learning_rule_service
 
     def review_learning_event(self, payload: ReviewDecisionPayload) -> dict[str, object]:
         decision = ReviewDecision(
@@ -125,6 +130,15 @@ class ReviewService:
             user_id=user_id,
             allowed_roles=("accountant", "admin"),
         )
+        authenticated_actor = str(user_id or "").strip()
+        if authenticated_actor:
+            payload = payload.model_copy(
+                update={
+                    "decision": payload.decision.model_copy(
+                        update={"reviewer": authenticated_actor}
+                    )
+                }
+            )
         if payload.decision.action in {
             "approve",
             "approve_with_changes",
@@ -214,6 +228,17 @@ class ReviewService:
             event=event,
             interpretation=rule_interpretation,
         )
+        learning_rule_result = self._persist_confirmed_learning_rule(
+            client_id=payload.client_id,
+            decision=decision,
+            event=event,
+            interpretation=rule_interpretation,
+            saved=saved,
+            document=(saved.get("corrected_document") if isinstance(saved, dict) else None) or document,
+            workspace=workspace,
+        )
+        if learning_rule_result is not None and isinstance(saved, dict):
+            saved["learning_rule"] = learning_rule_result
         document_ref = decision.document_ref
         if (
             decision.corrected_account_code.strip()
@@ -315,6 +340,69 @@ class ReviewService:
             ) from exc
         except (NormalizedAccountingError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail={"code": "journal_reopen_failed", "message": str(exc)}) from exc
+
+    def _persist_confirmed_learning_rule(
+        self,
+        *,
+        client_id: str,
+        decision: ReviewDecisionPayload,
+        event: dict[str, object],
+        interpretation: dict[str, object] | None,
+        saved: dict[str, object],
+        document: dict[str, object] | None,
+        workspace: dict[str, object],
+    ) -> dict[str, object] | None:
+        if decision.learning_confirmation.strip() != "save_rule":
+            return None
+        if self.learning_rule_service is None:
+            reason = "learning_rule_service_unavailable"
+            return self._learning_rule_failure(client_id=client_id, document_ref=decision.document_ref, reason=reason)
+        try:
+            rule = self.learning_rule_service.save_confirmed_review_rule(
+                client_id=client_id,
+                decision=decision.model_dump(),
+                learning_event=event,
+                interpretation=interpretation,
+                saved_review=saved,
+                document=document,
+                chart_accounts=workspace.get("chart_accounts") if isinstance(workspace, dict) else None,
+                actor=decision.reviewer,
+            )
+        except (ValueError, RuntimeError) as exc:
+            return self._learning_rule_failure(client_id=client_id, document_ref=decision.document_ref, reason=str(exc))
+        if not isinstance(rule, dict):
+            return self._learning_rule_failure(client_id=client_id, document_ref=decision.document_ref, reason="learning_rule_not_created")
+        self.store.record_document_pipeline_event(
+            client_id=client_id,
+            document_ref=decision.document_ref,
+            step="learning_rule_activated",
+            status="ok",
+            message_tr="Müşavir onaylı öğrenme kuralı aktifleştirildi.",
+            debug_code="learning_rule_activated",
+            details={"rule_key": str(rule.get("rule_key") or ""), "version": int(rule.get("version") or 0)},
+        )
+        return {
+            "status": str(rule.get("status") or "active"),
+            "rule_key": str(rule.get("rule_key") or ""),
+            "version": int(rule.get("version") or 0),
+            "already_active": bool(rule.get("already_active")),
+        }
+
+    def _learning_rule_failure(self, *, client_id: str, document_ref: str, reason: str) -> dict[str, object]:
+        self.store.record_document_pipeline_event(
+            client_id=client_id,
+            document_ref=document_ref,
+            step="learning_rule_activation_failed",
+            status="warning",
+            message_tr="Müşavir kararı kaydedildi; öğrenme kuralı aktifleştirilemedi.",
+            debug_code="learning_rule_activation_failed",
+            details={"reason": reason},
+        )
+        self.record_operation_event(
+            store=self.store, client_id=client_id, event_type="learning_rule_activation_failed", status="warning",
+            message="Review karari korundu; learning rule aktivasyonu tamamlanamadi.", metadata={"document_ref": document_ref, "reason": reason},
+        )
+        return {"status": "error", "reason": reason}
 
     def _record_learning_pipeline_events(
         self,

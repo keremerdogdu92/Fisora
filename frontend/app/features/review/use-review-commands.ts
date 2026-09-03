@@ -1,6 +1,8 @@
+// File: frontend/app/features/review/use-review-commands.ts
+// Summary: Coordinates review persistence, adjacent-document navigation, approval, and revision-safe short-window undo against the existing review APIs.
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   reprocessSelectedDocumentAction,
@@ -9,6 +11,27 @@ import {
   saveStatementLineDecisionAction,
 } from "../../portal-document-actions";
 import type { CorrectionDraft, LocalSession, PilotData, PilotDocument, ReviewLearningDecisionOptions } from "../../portal-types";
+import { reopenJournal, resolveApiBaseUrl } from "../../upload-api";
+
+type UndoableApproval = {
+  clientId: string;
+  documentId: string;
+  documentRef: string;
+  expiresAt: number;
+  fileName: string;
+  revisionNo: number;
+};
+
+function pageUrl() {
+  return typeof window === "undefined" ? "" : window.location.href;
+}
+
+function normalizedReviewFromPayload(payload: Record<string, unknown> | null) {
+  const value = payload?.normalized_review;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
 
 export function emptyCorrectionDraft(): CorrectionDraft {
   return {
@@ -54,6 +77,22 @@ export function useReviewCommands({
   setSelectedStatementLineNo: (lineNo: number) => void;
   setStatementAiStatus: (status: string) => void;
 }) {
+  const [undoableApproval, setUndoableApproval] = useState<UndoableApproval | null>(null);
+  const [undoAvailable, setUndoAvailable] = useState(false);
+
+  useEffect(() => {
+    if (!undoableApproval) {
+      setUndoAvailable(false);
+      return;
+    }
+    setUndoAvailable(true);
+    const timeoutId = window.setTimeout(() => {
+      setUndoAvailable(false);
+      setUndoableApproval(null);
+    }, Math.max(0, undoableApproval.expiresAt - Date.now()));
+    return () => window.clearTimeout(timeoutId);
+  }, [undoableApproval]);
+
   const selectAdjacentReviewDocument = useCallback(
     (direction: 1 | -1 = 1) => {
       if (!activeReviewDocuments.length || !selectedDocument) return;
@@ -104,7 +143,7 @@ export function useReviewCommands({
     ],
   );
 
-  const saveDecision = useCallback(
+  const persistDecision = useCallback(
     (action: string, options: ReviewLearningDecisionOptions = {}) => {
       return saveDecisionAction({
         action,
@@ -129,6 +168,14 @@ export function useReviewCommands({
       setData,
       setDecisionStatus,
     ],
+  );
+
+
+  const saveDecision = useCallback(
+    async (action: string, options: ReviewLearningDecisionOptions = {}) => {
+      return persistDecision(action, options);
+    },
+    [persistDecision],
   );
 
   const reprocessSelectedDocument = useCallback(() => {
@@ -163,7 +210,21 @@ export function useReviewCommands({
       selectAdjacentReviewDocument(1);
       return;
     }
-    await saveDecision(approveAction);
+    const result = await saveDecision(approveAction);
+    const normalizedReview = result?.ok ? normalizedReviewFromPayload(result.payload) : null;
+    const revisionNo = Number(normalizedReview?.revision_no || 0);
+    if (normalizedReview?.approved === true && revisionNo > 0) {
+      setUndoableApproval({
+        clientId: selectedDocument.clientId,
+        documentId: selectedDocument.id,
+        documentRef: selectedDocument.id,
+        expiresAt: Date.now() + 8000,
+        fileName: selectedDocument.fileName,
+        revisionNo,
+      });
+    } else {
+      setUndoableApproval(null);
+    }
     selectAdjacentReviewDocument(1);
   }, [
     hasUnsavedReviewChanges,
@@ -175,6 +236,33 @@ export function useReviewCommands({
     setSelectedStatementLineNo,
   ]);
 
+  const undoLastApproval = useCallback(async () => {
+    const approval = undoableApproval;
+    if (!approval || Date.now() > approval.expiresAt) return false;
+    const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim();
+    setDecisionStatus(`${approval.fileName}: son onay geri alınıyor.`);
+    try {
+      await reopenJournal({
+        apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+        clientId: approval.clientId,
+        documentRef: approval.documentRef,
+        expectedRevision: approval.revisionNo,
+        reason: "Son onay 8 saniye içinde geri alındı.",
+        userId: reviewer,
+        sessionToken: session?.sessionToken || "",
+      });
+      await refreshBackendPilotData();
+      setSelectedDocumentId(approval.documentId);
+      setDecisionStatus(`${approval.fileName}: onay geri alındı; belge yeniden kontrolde.`);
+      setUndoableApproval(null);
+      return true;
+    } catch (error) {
+      setDecisionStatus(error instanceof Error ? error.message : String(error));
+      setUndoableApproval(null);
+      return false;
+    }
+  }, [loginUserId, refreshBackendPilotData, session, setDecisionStatus, setSelectedDocumentId, undoableApproval]);
+
   return {
     approveSelectedAndMoveNext,
     reprocessSelectedDocument,
@@ -182,5 +270,7 @@ export function useReviewCommands({
     saveDecision,
     saveStatementLineDecision,
     selectAdjacentReviewDocument,
+    undoAvailable,
+    undoLastApproval,
   };
 }

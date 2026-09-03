@@ -12,7 +12,8 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
     "lucide-react": "^1.21.0",
-    "next": "16.2.6",
+    "next": "16.3.4",
+    "pdfjs-dist": "^5.4.624",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
@@ -24,6 +25,6 @@
     "typescript": "5.7.2"
   },
   "overrides": {
-    "postcss": "8.5.15"
+    "postcss": "8.5.28"
   }
 }

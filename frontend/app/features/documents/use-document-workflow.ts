@@ -1,3 +1,5 @@
+// File: frontend/app/features/documents/use-document-workflow.ts
+// Summary: Manages document segmentation, review filtering, active selection, and statement-line focus for accountant workspaces.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,18 +13,22 @@ import {
 
 export function useDocumentWorkflow({
   allDocuments,
+  initialReviewFilter = "review_required",
+  selectionScopeKey = "",
   clientDocuments,
   mode,
   selectedClientId,
 }: {
   allDocuments: PilotDocument[];
+  initialReviewFilter?: ReviewFilter;
+  selectionScopeKey?: string;
   clientDocuments: PilotDocument[];
   mode: string;
   selectedClientId?: string;
 }) {
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedDocumentSegment, setSelectedDocumentSegment] = useState<DocumentSegment>("purchase_invoices");
-  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("review_required");
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>(initialReviewFilter);
   const [selectedStatementLineNo, setSelectedStatementLineNo] = useState(0);
   const didAutoSelectInitialDocument = useRef(false);
 
@@ -52,7 +58,7 @@ export function useDocumentWorkflow({
 
   useEffect(() => {
     didAutoSelectInitialDocument.current = false;
-  }, [selectedClientId]);
+  }, [selectedClientId, selectionScopeKey]);
 
   useEffect(() => {
     if (mode !== "documents" || selectedDocumentId || didAutoSelectInitialDocument.current) return;

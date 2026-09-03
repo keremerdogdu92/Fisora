@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, classifyDraftAccountCode, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
+import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
 import { backendAuthHeaders, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
 
@@ -184,6 +185,11 @@ function isFramePreviewMime(value: string) {
     || normalized.startsWith("text/")
     || normalized.includes("xml")
     || normalized.includes("csv");
+}
+
+function isPdfPreview(document: PilotDocument) {
+  const mime = String(document.originalDocumentMimeType || "").toLowerCase();
+  return mime.includes("pdf") || String(document.fileName || "").toLowerCase().endsWith(".pdf");
 }
 
 function isHtmlPreview(document: PilotDocument) {
@@ -451,7 +457,7 @@ function HtmlSourceComparison({ document, previewUrl }: { document: PilotDocumen
   );
 }
 
-export function DocumentPreview({ document, session }: { document?: PilotDocument; session?: LocalSession | null }) {
+export function DocumentPreview({ controlledPdfPreview = false, document, session }: { controlledPdfPreview?: boolean; document?: PilotDocument; session?: LocalSession | null }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
 
@@ -501,6 +507,7 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
   const pipelineProblem = latestPipelineProblem(document);
   const errorMessage = previewError || pipelineProblem?.messageTr || "Gerçek belge henüz önizlenemiyor.";
   const canFramePreview = isFramePreviewMime(document.originalDocumentMimeType);
+  const pdfPreview = controlledPdfPreview && isPdfPreview(document);
   const htmlPreview = isHtmlPreview(document);
   return (
     <section className="review-panel document-panel">
@@ -516,6 +523,8 @@ export function DocumentPreview({ document, session }: { document?: PilotDocumen
           {previewUrl ? (
             isImageMime(document.originalDocumentMimeType) ? (
               <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
+            ) : pdfPreview ? (
+              <PdfDocumentViewer fileName={document.fileName} src={previewUrl} />
             ) : canFramePreview ? (
               <iframe
                 className="original-document-frame"
@@ -603,6 +612,7 @@ export function JournalPanel({
   decisionStatus,
   document,
   hasUnsavedReviewChanges,
+  nextKeyboardShortcuts = false,
   onApproveAndNext,
   onResetDraft,
   onReprocessDocument,
@@ -619,11 +629,12 @@ export function JournalPanel({
   decisionStatus: string;
   document?: PilotDocument;
   hasUnsavedReviewChanges: boolean;
+  nextKeyboardShortcuts?: boolean;
   onApproveAndNext: () => void | Promise<void>;
   onResetDraft: () => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
-  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<void>;
+  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   selectedStatementLineNo: number;
   session: LocalSession | null;
@@ -741,6 +752,7 @@ export function JournalPanel({
   }
 
   function handleJournalShortcut(event: KeyboardEvent<HTMLElement>) {
+    if (nextKeyboardShortcuts) return;
     if (pendingDirectionConflict) return;
     if (blocksApproval) return;
     if (event.key === "F2" || (event.key === "Enter" && event.ctrlKey)) {
@@ -897,7 +909,7 @@ function JournalDecisionBar({
   document: PilotDocument;
   hasInvalidDraftAccounts: boolean;
   onReprocessDocument: () => void | Promise<void>;
-  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<void>;
+  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
   pendingDirectionConflict: boolean;
 }) {
   return (

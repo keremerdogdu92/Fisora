@@ -347,7 +347,7 @@ export async function saveDecisionAction({
   }));
   setDecisionStatus(`${selectedDocument.fileName}: ${label} arayuzde uygulandi.`);
   try {
-    await (storeReviewDecision as unknown as (args: Record<string, unknown>) => Promise<unknown>)({
+    const payload = await (storeReviewDecision as unknown as (args: Record<string, unknown>) => Promise<Record<string, unknown>>)({
       apiBaseUrl: resolveApiBaseUrl(pageUrl()),
       clientId: selectedDocument.clientId,
       userId: reviewer,
@@ -370,6 +370,7 @@ export async function saveDecisionAction({
     });
     setDecisionStatus(`${selectedDocument.fileName}: ${label} backend'e kaydedildi.`);
     await refreshBackendPilotData();
+    return { ok: true, payload };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setDecisionStatus(
@@ -377,6 +378,7 @@ export async function saveDecisionAction({
         ? `${selectedDocument.fileName}: ${label} lokal uygulandi; backend kaydi tamamlanamadi. ${message}`
         : `${selectedDocument.fileName}: ${label} backend'e kaydedilemedi; serverda kalici karar olusmadi. ${message}`,
     );
+    return { ok: false, payload: null };
   }
 }
 

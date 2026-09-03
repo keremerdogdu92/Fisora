@@ -10,6 +10,7 @@ import {
 } from "./features/documents/document-workflow-model";
 import { reviewReasonLabel } from "./portal-normalization";
 import { AiTracePanel, DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
+import { PortalNextWorkspaceControls } from "./portal-next/portal-next-workspace-controls";
 import type {
   CancellationRequest,
   CorrectionDraft,
@@ -39,7 +40,7 @@ const statusLabels: Record<PilotStatus, string> = {
   post_export_correction_requested: "Aktarım sonrası düzeltme",
 };
 
-type WorkQueueFilter = "all" | "oneClickApproval" | "minorEdit" | "manualRisk";
+type WorkQueueFilter = "all" | "oneClickApproval" | "minorEdit" | "manualRisk" | "review";
 
 function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
@@ -103,6 +104,8 @@ function DocumentAgentStrip({ document }: { document?: PilotDocument }) {
 
 export function AccountantWorkspace({
   cancellationRequests,
+  controlledPdfPreview = false,
+  nextPresentation = false,
   statementAiStatus,
   clientSearch,
   clientRows,
@@ -127,12 +130,15 @@ export function AccountantWorkspace({
   onSaveDecision,
   onSaveStatementDecision,
   onTaxCertificateFileChange,
+  onToggleSidebar,
+  onUndoLastApproval,
   reviewFilter,
   selectedClient,
   selectedDocument,
   selectedDocumentSegment,
   selectedStatementLineNo,
   session,
+  undoAvailable = false,
   setCorrectionDraft,
   setNewClientDraft,
   setReviewFilter,
@@ -142,6 +148,8 @@ export function AccountantWorkspace({
   setSelectedStatementLineNo,
 }: {
   cancellationRequests: CancellationRequest[];
+  controlledPdfPreview?: boolean;
+  nextPresentation?: boolean;
   statementAiStatus: string;
   clientSearch: string;
   clientRows: DashboardClientRow[];
@@ -170,15 +178,18 @@ export function AccountantWorkspace({
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
-  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<void>;
+  onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
+  onToggleSidebar: () => void;
+  onUndoLastApproval: () => void | Promise<boolean>;
   reviewFilter: ReviewFilter;
   selectedClient?: PilotClient;
   selectedDocument?: PilotDocument;
   selectedDocumentSegment: DocumentSegment;
   selectedStatementLineNo: number;
   session: LocalSession | null;
+  undoAvailable?: boolean;
   setCorrectionDraft: (value: CorrectionDraft) => void;
   setNewClientDraft: (value: NewClientDraft) => void;
   setReviewFilter: (value: ReviewFilter) => void;
@@ -221,63 +232,81 @@ export function AccountantWorkspace({
       });
   }, [documentQuery, documents, selectedDocumentSegment]);
   const cockpitQueues = useMemo(() => reviewCockpitQueues(filteredSegmentDocuments), [filteredSegmentDocuments]);
+  const reviewQueueDocuments = useMemo<PilotDocument[]>(() => {
+    const unique = new Map<string, PilotDocument>();
+    const reviewSources: PilotDocument[] = [
+      ...(cockpitQueues.minorEdit as PilotDocument[]),
+      ...(cockpitQueues.manualRisk as PilotDocument[]),
+    ];
+    reviewSources.forEach((document) => unique.set(document.id, document));
+    return [...unique.values()];
+  }, [cockpitQueues]);
   const queueDocuments = useMemo(() => {
     if (workQueueFilter === "oneClickApproval") return cockpitQueues.oneClickApproval;
     if (workQueueFilter === "minorEdit") return cockpitQueues.minorEdit;
     if (workQueueFilter === "manualRisk") return cockpitQueues.manualRisk;
+    if (workQueueFilter === "review") return reviewQueueDocuments;
     return filteredSegmentDocuments;
-  }, [cockpitQueues, filteredSegmentDocuments, workQueueFilter]);
+  }, [cockpitQueues, filteredSegmentDocuments, reviewQueueDocuments, workQueueFilter]);
   const navigationDocuments = queueDocuments;
   const selectedDocumentPosition = selectedDocument
     ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
     : 0;
   const safeDocumentPosition = Math.max(selectedDocumentPosition, 1);
-  const workQueueOptions: { id: WorkQueueFilter; label: string; count: number }[] = [
-    { id: "oneClickApproval", label: "Onaylanabilir", count: cockpitQueues.oneClickApproval.length },
-    { id: "minorEdit", label: "Küçük düzeltme", count: cockpitQueues.minorEdit.length },
-    { id: "manualRisk", label: "Manuel / riskli", count: cockpitQueues.manualRisk.length },
-    { id: "all", label: "Tümü", count: filteredSegmentDocuments.length },
-  ];
+  const workQueueOptions: { id: WorkQueueFilter; label: string; count: number }[] = nextPresentation
+    ? [
+        { id: "all", label: "Tümü", count: filteredSegmentDocuments.length },
+        { id: "review", label: "Kontrol", count: reviewQueueDocuments.length },
+        { id: "oneClickApproval", label: "Onaya hazır", count: cockpitQueues.oneClickApproval.length },
+      ]
+    : [
+        { id: "oneClickApproval", label: "Onaylanabilir", count: cockpitQueues.oneClickApproval.length },
+        { id: "minorEdit", label: "Küçük düzeltme", count: cockpitQueues.minorEdit.length },
+        { id: "manualRisk", label: "Manuel / riskli", count: cockpitQueues.manualRisk.length },
+        { id: "all", label: "Tümü", count: filteredSegmentDocuments.length },
+      ];
 
   function applyWorkQueueFilter(nextFilter: WorkQueueFilter) {
     setWorkQueueFilter(nextFilter);
-    const nextDocuments =
-      nextFilter === "oneClickApproval" ? cockpitQueues.oneClickApproval
-        : nextFilter === "minorEdit" ? cockpitQueues.minorEdit
-          : nextFilter === "manualRisk" ? cockpitQueues.manualRisk
+    const nextDocuments = nextFilter === "oneClickApproval" ? cockpitQueues.oneClickApproval
+      : nextFilter === "minorEdit" ? cockpitQueues.minorEdit
+        : nextFilter === "manualRisk" ? cockpitQueues.manualRisk
+          : nextFilter === "review" ? reviewQueueDocuments
             : filteredSegmentDocuments;
     if (nextDocuments.length && !nextDocuments.some((document) => document.id === selectedDocument?.id)) {
       setSelectedDocumentId(nextDocuments[0].id);
     }
   }
-
   function selectDocument(document: PilotDocument) {
     const nextSelection = nextDocumentSelection(document);
     setSelectedDocumentSegment(nextSelection.selectedDocumentSegment as DocumentSegment);
     setSelectedDocumentId(nextSelection.selectedDocumentId);
   }
 
+  function navigateDocument(direction: 1 | -1) {
+    if (!selectedDocument || !navigationDocuments.length) return;
+    const currentIndex = navigationDocuments.findIndex((document) => document.id === selectedDocument.id);
+    const target = navigationDocuments[currentIndex + direction];
+    if (target) setSelectedDocumentId(target.id);
+  }
   return (
     <section className="accountant-workspace">
       <section className="document-review-toolbar" aria-label="Belge kontrol araçları">
         <div className="document-review-toolbar-fields">
-          <label className="compact-field">
-            <span>Mükellef</span>
-            <select
-              onChange={(event) => {
-                setSelectedClientId(event.target.value);
-                setSelectedDocumentId("");
-              }}
-              value={selectedClient?.clientId ?? ""}
-            >
-              {clients.map((client) => (
-                <option key={client.clientId} value={client.clientId}>
-                  {client.clientName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="compact-field">
+          {!nextPresentation ? (
+            <label className="compact-field">
+              <span>Mükellef</span>
+              <select
+                onChange={(event) => {
+                  setSelectedClientId(event.target.value);
+                  setSelectedDocumentId("");
+                }}
+                value={selectedClient?.clientId ?? ""}
+              >
+                {clients.map((client) => <option key={client.clientId} value={client.clientId}>{client.clientName}</option>)}
+              </select>
+            </label>
+          ) : null}          <label className="compact-field">
             <span>Ara</span>
             <input
               className="search-input"
@@ -326,19 +355,34 @@ export function AccountantWorkspace({
       <section className="document-agent-row" aria-label="Belge durumu ve gezinme">
         <DocumentAgentStrip document={selectedDocument} />
         <div className="queue-stepper">
-          <span>{selectedDocument && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
-          <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => setSelectedDocumentId(navigationDocuments[Math.max(safeDocumentPosition - 2, 0)]?.id ?? selectedDocument?.id ?? "")} type="button">Önceki</button>
-          <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => setSelectedDocumentId(navigationDocuments[safeDocumentPosition]?.id ?? selectedDocument?.id ?? "")} type="button">Sonraki</button>
+          {nextPresentation ? (
+            <>
+              <button aria-label="Önceki evrak" disabled={safeDocumentPosition <= 1} onClick={() => navigateDocument(-1)} type="button">‹</button>
+              <strong>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
+              <button aria-label="Sonraki evrak" disabled={!selectedDocument || safeDocumentPosition >= navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">›</button>
+            </>
+          ) : (
+            <>
+              <span>{selectedDocument && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
+              <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(-1)} type="button">Önceki</button>
+              <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">Sonraki</button>
+            </>
+          )}
         </div>
       </section>
 
       <section className="document-review-main">
-        <DocumentPreview document={selectedDocument} session={session} />
+        {controlledPdfPreview ? (
+          <DocumentPreview controlledPdfPreview document={selectedDocument} session={session} />
+        ) : (
+          <DocumentPreview document={selectedDocument} session={session} />
+        )}
         <JournalPanel
           correctionDraft={correctionDraft}
           decisionStatus={decisionStatus}
           document={selectedDocument}
           hasUnsavedReviewChanges={hasUnsavedReviewChanges}
+          nextKeyboardShortcuts={nextPresentation}
           onApproveAndNext={onApproveAndNext}
           onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
           onReprocessDocument={onReprocessDocument}
@@ -361,6 +405,15 @@ export function AccountantWorkspace({
         <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
         <AiTracePanel document={selectedDocument} />
       </details>
+
+      <PortalNextWorkspaceControls
+        active={nextPresentation}
+        onNavigateDocument={navigateDocument}
+        onToggleSidebar={onToggleSidebar}
+        onUndoLastApproval={onUndoLastApproval}
+        undoAvailable={undoAvailable}
+      />
+
 
       <section className="bottom-document-queue" aria-label="Belge listesi">
         <div className="bottom-queue-heading">

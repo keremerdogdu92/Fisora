@@ -954,6 +954,21 @@ async function storeReviewDecision({
   return response.json();
 }
 
+async function reopenJournal({ apiBaseUrl, clientId, documentRef, expectedRevision, reason, userId = "", sessionToken = "", fetchImpl = fetch }) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/journal/reopen",
+    payload: {
+      client_id: String(clientId || "").trim(),
+      document_ref: String(documentRef || "").trim(),
+      expected_revision: Number(expectedRevision || 0),
+      reviewer: String(userId || "").trim(),
+      reason: String(reason || "").trim(),
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
 async function reviewCollaborationRequest({ apiBaseUrl, path, method = "POST", payload, userId = "", sessionToken = "", fetchImpl = fetch }) {
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}${path}`, {
     method,
@@ -1227,6 +1242,7 @@ module.exports = {
   previewReviewRule,
   pickUploadUser,
   requestStatementAiSuggestions,
+  reopenJournal,
   reprocessClient,
   reprocessDocument,
   resetTestData,

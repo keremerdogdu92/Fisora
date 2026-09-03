@@ -9,7 +9,9 @@ import { ClientManagementView } from "./portal-clients-view";
 import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
 import { SettingsView } from "./portal-settings-view";
-import { PortalSidebar, PortalTopbarStatus } from "./shared/components";
+import { PortalNextAgentOverview, PortalNextWorkTypeTabs, type PortalNextAgentSection } from "./portal-next/portal-next-shell";
+import { resolvePortalNextWorkspacePeriod } from "./portal-next/portal-next-workspace-model";
+import { PortalPresentationChrome, type PortalPresentation } from "./portal-presentation-chrome";
 import { AccountantWorkspace } from "./portal-workspace-view";
 import { loginWithPassword, persistSession, resolveApiBaseUrl, usePortalSessionGuard, useTestDataReset } from "./features/session";
 import {
@@ -45,11 +47,10 @@ import { previousCompletedPeriod } from "./portal-periods";
 import { emptyCorrectionDraft, useReviewCommands } from "./features/review";
 import { useReviewEditLease } from "./features/review";
 type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
-
-export function FisoraPortalApp({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
+export function FisoraPortalApp({ routeKey = "home", presentation = "legacy" }: { routeKey?: PortalRouteKey | string; presentation?: PortalPresentation }) {
   return (
     <PilotQueryProvider>
-      <FisoraPortalContent routeKey={routeKey} />
+      <FisoraPortalContent presentation={presentation} routeKey={routeKey} />
     </PilotQueryProvider>
   );
 }
@@ -81,8 +82,9 @@ function workspaceSourceState(payload: PilotData, nextSource: string): Workspace
     detail: "Sunucu çalışma alanı kullanılıyor.",
   };
 }
-function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey | string }) {
+function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { routeKey?: PortalRouteKey | string; presentation?: PortalPresentation }) {
   const portalConfig = useMemo(() => portalConfigForRouteKey(routeKey), [routeKey]);
+  const isNextPresentation = presentation === "next";
   const lockedRole = portalConfig.lockedRole as LocalSession["role"] | undefined;
   const visibleNavItems = (PORTAL_NAV_ITEMS as PortalNavItem[]).filter((item) =>
     portalConfig.visibleModes.includes(item.mode),
@@ -102,6 +104,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const [clientSearch, setClientSearch] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [nextAgentSection, setNextAgentSection] = useState<PortalNextAgentSection>("agents");
   const { session, sessionHydrated, setSession } = usePortalSessionGuard({ lockedRole, portalConfig, routeKey: String(routeKey), setLocalFallbackAllowed });
   const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
   const [loginPassword, setLoginPassword] = useState("");
@@ -229,6 +232,9 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   const periodDocuments = useMemo(() => {
     return clientDocuments.filter((document) => !selectedPeriod || document.period === selectedPeriod);
   }, [clientDocuments, selectedPeriod]);
+  const nextWorkspacePeriod = resolvePortalNextWorkspacePeriod({ documents: clientDocuments, fallbackPeriod: previousCompletedPeriod(), selectedPeriod });
+  const workflowClientDocuments = isNextPresentation ? nextWorkspacePeriod.documents : clientDocuments;
+  const workflowAllDocuments = isNextPresentation && nextWorkspacePeriod.selectedPeriod ? data.documents.filter((document) => document.period === nextWorkspacePeriod.selectedPeriod) : data.documents;
   const {
     activeReviewDocuments,
     reviewFilter,
@@ -242,16 +248,16 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
     setSelectedDocumentSegment,
     setSelectedStatementLineNo,
   } = useDocumentWorkflow({
-    allDocuments: data.documents,
-    clientDocuments,
-    mode,
+    allDocuments: workflowAllDocuments,
+    clientDocuments: workflowClientDocuments,
+    mode, initialReviewFilter: isNextPresentation ? "all" : "review_required", selectionScopeKey: isNextPresentation ? nextWorkspacePeriod.selectedPeriod : "",
     selectedClientId: selectedClient?.clientId,
   });
   useEffect(() => {
     setCorrectionDraft(emptyCorrectionDraft());
   }, [selectedDocument?.id]);
   const { progressiveActiveReviewDocuments, progressiveClientDocuments, progressiveSelectedDocument } = useProgressiveSelectedDocument({
-    activeReviewDocuments, clientDocuments, defaultUserId: portalConfig.defaultUserId,
+    activeReviewDocuments, clientDocuments: workflowClientDocuments, defaultUserId: portalConfig.defaultUserId,
     enabled: mode === "documents", refreshBackendPilotData, selectedDocument, session,
   });
   const clientSelectedDocument = periodDocuments.find((document) => document.id === selectedDocumentId);
@@ -355,13 +361,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
   });
   const hasUnsavedReviewChanges = useMemo(() => Boolean(correctionDraft.accountCode.trim() || correctionDraft.counterpartyCode.trim() || correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim() || correctionDraft.applyToSimilar || correctionDraft.manualDraftLines.length), [correctionDraft]);
   useReviewEditLease({ correctionDraft, hasUnsavedReviewChanges, loginUserId, selectedDocument, session, onStatus: (status) => { if (status !== "idle") setDecisionStatus(status); } });
-  const {
-    approveSelectedAndMoveNext,
-    reprocessSelectedDocument,
-    requestStatementAiForSelectedDocument,
-    saveDecision,
-    saveStatementLineDecision,
-  } = useReviewCommands({
+  const { approveSelectedAndMoveNext, reprocessSelectedDocument, requestStatementAiForSelectedDocument,
+    saveDecision, saveStatementLineDecision, undoAvailable, undoLastApproval } = useReviewCommands({
     activeReviewDocuments,
     correctionDraft,
     hasUnsavedReviewChanges,
@@ -386,30 +387,26 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
 
   if (!sessionHydrated || (lockedRole && !session)) return <main className="landing-shell"><p className="decision-status">Oturum doğrulanıyor.</p></main>;
 
-  return (
-    <main className={showSidebar ? `private-shell portal-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}` : "private-shell portal-shell no-sidebar"}>
-      {showSidebar ? (
-        <PortalSidebar
-          activeDocumentSegment={selectedDocumentSegment} collapsed={sidebarCollapsed} mobileOpen={mobileSidebarOpen} mode={mode} navItems={visibleNavItems}
-          onCloseMobile={() => setMobileSidebarOpen(false)}
-          onExit={exitPortal}
-          onNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); setMobileSidebarOpen(false); }}
-          onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
-          session={session}
-        />
-      ) : null}
-      <section className="portal-main-shell">
-        <PortalTopbarStatus
-          onToggleSidebar={() => setMobileSidebarOpen((current) => !current)}
-          showSidebarToggle={showSidebar}
-          source={source}
-          notifications={notifications.notifications}
-          notificationPendingCount={notifications.pendingCount}
-          onReadNotification={notifications.markRead}
-          subtitle={mode === "client" && session?.delegatedBy ? "Müşavir vekaletinde işlem yapılıyor" : ""}
-          title={mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Fatura İşleme" : activeNavItem?.label || "Müşavir çalışma alanı"}
-        />
+  const shellClassName = showSidebar
+    ? `private-shell portal-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}${isNextPresentation ? " portal-next-theme" : ""}`
+    : `private-shell portal-shell no-sidebar${isNextPresentation ? " portal-next-theme" : ""}`;
 
+  const legacySubtitle = mode === "client" && session?.delegatedBy ? "Müşavir vekaletinde işlem yapılıyor" : "";
+  const legacyTitle = mode === "client" ? selectedClient?.clientName || "Mükellef portalı" : mode === "documents" ? "Fatura İşleme" : activeNavItem?.label || "Müşavir çalışma alanı";
+
+  return (
+    <main className={shellClassName}>
+      <PortalPresentationChrome
+        activeDocumentSegment={selectedDocumentSegment} agentSection={nextAgentSection} collapsed={sidebarCollapsed}
+        legacySubtitle={legacySubtitle} legacyTitle={legacyTitle} mobileOpen={mobileSidebarOpen} mode={mode} navItems={visibleNavItems}
+        clients={clients} notificationPendingCount={notifications.pendingCount} notifications={notifications.notifications}
+        onCloseMobile={() => setMobileSidebarOpen(false)} onExit={exitPortal}
+        onLegacyNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); setMobileSidebarOpen(false); }}
+        onNextNavigate={(nextMode, agentSection) => { if (agentSection) setNextAgentSection(agentSection); setMode(nextMode); setMobileSidebarOpen(false); }}
+        onReadNotification={notifications.markRead} onSelectClient={(clientId) => { setSelectedClientId(clientId); setSelectedPeriod(""); setSelectedDocumentId(""); }} onSelectPeriod={(period) => { setSelectedPeriod(period); setSelectedDocumentId(""); }} onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
+        onToggleMobile={() => setMobileSidebarOpen((current) => !current)} periods={isNextPresentation ? nextWorkspacePeriod.periods : clientPeriods} presentation={presentation}
+        selectedClient={selectedClient} selectedPeriod={isNextPresentation ? nextWorkspacePeriod.selectedPeriod : selectedPeriod} session={session} showSidebar={showSidebar} source={source}
+      >
       <div className="portal-route-content">
 
       {mode === "client" ? (
@@ -448,8 +445,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           uploadStatus={uploadStatus}
         />
       ) : null}
-
-      {mode === "agents" ? <AgentTrainingView agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} /> : null}
+      {mode === "agents" ? (isNextPresentation && nextAgentSection === "agents" ? <PortalNextAgentOverview agentSummaries={dashboardView.agentSummaries} /> : <AgentTrainingView key={isNextPresentation ? nextAgentSection : String(routeKey)} agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} />) : null}
 
       {mode === "accountant" ? (
         <AccountantDashboard
@@ -472,13 +468,18 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
       ) : null}
 
       {mode === "documents" ? (
+        <>
+        {isNextPresentation ? (
+          <PortalNextWorkTypeTabs documents={progressiveClientDocuments} selectedSegment={selectedDocumentSegment}
+            onSelect={(segment) => { setSelectedDocumentSegment(segment); setSelectedDocumentId(""); }} />
+        ) : null}
         <DocumentProcessingWorkspace
           aiCapacity={aiCapacityQuery.data}
           capacityError={aiCapacityQuery.isError}
           capacityPending={aiCapacityQuery.isPending}
         >
         <AccountantWorkspace
-          cancellationRequests={openCancellationRequests.filter((request) => request.clientId === selectedClient?.clientId)}
+          cancellationRequests={openCancellationRequests.filter((request) => request.clientId === selectedClient?.clientId)} controlledPdfPreview={isNextPresentation} nextPresentation={isNextPresentation}
           statementAiStatus={statementAiStatus}
           clientSearch={clientSearch}
           clientRows={visibleDashboardClientRows}
@@ -498,6 +499,8 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           onCreateNewClient={createNewClient}
           onClientSearchChange={setClientSearch}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onUndoLastApproval={undoLastApproval}
           onReprocessDocument={reprocessSelectedDocument}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
           onResolveCancellation={resolveCancellation}
@@ -508,7 +511,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           selectedDocument={progressiveSelectedDocument}
           selectedDocumentSegment={selectedDocumentSegment}
           selectedStatementLineNo={selectedStatementLineNo}
-          session={session}
+          session={session} undoAvailable={undoAvailable}
           setCorrectionDraft={setCorrectionDraft}
           setNewClientDraft={setNewClientDraft}
           setReviewFilter={setReviewFilter}
@@ -521,6 +524,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
           setSelectedStatementLineNo={setSelectedStatementLineNo}
         />
         </DocumentProcessingWorkspace>
+        </>
       ) : null}
 
       {mode === "clients" ? (
@@ -606,7 +610,7 @@ function FisoraPortalContent({ routeKey = "home" }: { routeKey?: PortalRouteKey 
         />
       ) : null}
       </div>
-      </section>
+      </PortalPresentationChrome>
     </main>
   );
 }

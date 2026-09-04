@@ -202,7 +202,7 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(workspace, /Belgeyi incele/);
   assert.match(workspace, /journalHidden/);
   assert.match(workspace, /mobilePane/);
-  assert.match(styles, /grid-template-columns:\s*220px minmax\(0, 1fr\)/);
+  assert.match(styles, /grid-template-columns:\s*210px minmax\(0, 1fr\)/);
   assert.match(styles, /\.portal-next-workbench-stage\.next\.focus-mode/);
   assert.match(styles, /focus-mode\.journal-hidden/);
   assert.match(styles, /portal-next-mobile-review-switch/);
@@ -217,7 +217,8 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   const styles = source("portal-next", "portal-next.css");
 
   assert.match(types, /DocumentSourceTarget/);
-  assert.match(review, /source-review-link/);
+  assert.match(types, /sourceAmount\?: string/);
+  assert.match(review, /source-review-chip/);
   assert.match(review, /onFocusSource/);
   assert.match(review, /onHoverSource/);
   assert.match(types, /pinned\?: boolean/);
@@ -235,6 +236,11 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(htmlViewer, /DOMParser/);
   assert.match(htmlViewer, /SOURCE_TARGET_ID/);
   assert.match(htmlViewer, /findTokenSequence/);
+  assert.match(htmlViewer, /invoiceLineRows/);
+  assert.match(htmlViewer, /#lineTable/);
+  assert.match(htmlViewer, /sourceAmount/);
+  assert.match(htmlViewer, /measureDocumentLayout/);
+  assert.match(htmlViewer, />İçerik</);
   assert.match(htmlViewer, /LENS_ZOOM = 2\.2/);
   assert.match(htmlViewer, /TOUCH_HOLD_MS = 420/);
   assert.match(htmlViewer, /document-magnifier/);

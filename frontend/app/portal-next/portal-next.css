@@ -1929,8 +1929,8 @@
 .portal-next-theme .portal-next-topbar.workspace {
   gap: 9px;
   grid-template-columns: minmax(150px, 1fr) minmax(340px, 540px) minmax(90px, 1fr);
-  min-height: 48px;
-  padding: 4px 10px;
+  min-height: 44px;
+  padding: 3px 10px;
 }
 .portal-next-theme .portal-next-topbar.workspace .portal-next-topbar-left > strong { font-size: 0.95rem; }
 .portal-next-theme .portal-next-topbar.workspace .portal-next-context { border-radius: 7px; }
@@ -1939,10 +1939,10 @@
 .portal-next-theme .portal-next-topbar.workspace .portal-next-context select { font-size: 0.76rem; padding-block: 0; }
 .portal-next-theme .portal-next-work-tabs {
   margin-bottom: 0;
-  min-height: 38px;
+  min-height: 34px;
 }
 .portal-next-theme .portal-next-work-tabs button {
-  min-height: 38px;
+  min-height: 34px;
   padding-inline: 10px;
 }
 .portal-next-theme .accountant-workspace { gap: 0; }
@@ -1954,8 +1954,8 @@
   display: flex;
   gap: 10px;
   justify-content: space-between;
-  min-height: 42px;
-  padding: 4px 8px;
+  min-height: 38px;
+  padding: 3px 8px;
 }
 .portal-next-workbench-commandbar .review-cockpit-queues {
   display: flex;
@@ -1975,8 +1975,8 @@
   background: var(--border-strong);
   border: 1px solid var(--border-strong);
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  height: calc(100vh - 170px);
+  grid-template-columns: 210px minmax(0, 1fr);
+  height: calc(100vh - 158px);
   min-height: 590px;
   overflow: hidden;
 }
@@ -1987,7 +1987,7 @@
   border: 0;
   display: grid;
   gap: 1px;
-  grid-template-columns: minmax(360px, 0.48fr) minmax(440px, 0.52fr);
+  grid-template-columns: minmax(440px, 0.56fr) minmax(400px, 0.44fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -2032,7 +2032,7 @@
   text-align: left;
   width: 100%;
 }
-.portal-next-queue-list button.active { background: #eff6ff; border-color: #486f9e; box-shadow: inset 3px 0 0 var(--accent); }
+.portal-next-queue-list button.active { background: #f3f7fb; border-color: var(--border); box-shadow: inset 3px 0 0 var(--accent); }
 .portal-next-queue-list button > span { align-items: center; display: flex; gap: 7px; justify-content: space-between; min-width: 0; }
 .portal-next-queue-list button strong { font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .portal-next-queue-list button b { flex: 0 0 auto; font-size: 0.72rem; }
@@ -2154,8 +2154,8 @@
   display: flex;
   gap: 5px;
   justify-content: space-between;
-  min-height: 36px;
-  padding: 3px 5px;
+  min-height: 34px;
+  padding: 2px 5px;
 }
 .portal-next-theme .pdf-viewer-page-controls,
 .portal-next-theme .pdf-viewer-zoom-controls,
@@ -2180,10 +2180,10 @@
   justify-content: flex-start;
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  padding: 6px;
   position: relative;
 }
-.portal-next-theme .html-viewer-canvas { flex: 0 0 auto; margin: auto; position: relative; }
+.portal-next-theme .html-viewer-canvas { flex: 0 0 auto; margin: auto; overflow: hidden; position: relative; }
 .portal-next-theme .html-viewer-frame {
   background: #fff;
   border: 0;
@@ -2323,6 +2323,37 @@
 .portal-next-theme .source-review-link:hover {
   text-decoration: underline;
 }
+.portal-next-theme .source-review-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-top: 3px;
+}
+.portal-next-theme .source-review-chip {
+  background: #fff8e6;
+  border: 1px solid #e7c77d;
+  border-radius: 999px;
+  color: #805000;
+  font-size: 0.61rem;
+  font-weight: 850;
+  line-height: 1.2;
+  min-height: 22px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.portal-next-theme .source-review-chip:hover { background: #fff1c7; border-color: #cc9c3d; }
+.portal-next-theme .source-review-details { color: var(--muted); font-size: 0.61rem; }
+.portal-next-theme .source-review-details > summary { cursor: pointer; font-weight: 750; }
+.portal-next-theme .source-review-details > div {
+  background: #fffdf7;
+  border: 1px solid #eadfca;
+  border-radius: 5px;
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 5px 6px;
+}
 
 @media (max-width: 860px) {
   .portal-next-theme .accountant-workspace,
@@ -2397,7 +2428,13 @@
   justify-content: flex-end;
   margin-left: 0;
 }
-
+@media (min-width: 861px) {
+  .portal-next-theme .document-viewer-toolbar { flex-wrap: nowrap; }
+  .portal-next-theme .document-source-focus-controls {
+    flex: 0 1 auto;
+    margin-left: auto;
+  }
+}
 
 /* Keep the desktop rail reversible: the expand control must remain visible after collapse. */
 .portal-next-sidebar.collapsed .portal-next-collapse {

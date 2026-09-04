@@ -91,7 +91,7 @@ function workspaceFor(fileName: string, contentType: string) {
               source_position: "1",
               source_text: SOURCE_TEXT,
               description: SOURCE_TEXT,
-              amount: "540,00",
+              amount: "540.00",
               amount_label: "Satır toplamı",
               amount_basis: "line_total_inc_tax",
               role: "posting_candidate",
@@ -153,30 +153,60 @@ async function openInspectorDocument(page: Page, expectedViewerClass: string) {
   await expect(page.locator(".journal-source-row").first()).toBeVisible();
 }
 
-test("HTML invoice magnifier and journal source focus work without extra controls", async ({ page }) => {
+async function expectHtmlLensCalibratedAtSource(page: Page) {
+  const target = page.frameLocator(".html-viewer-frame").locator("#fisora-source-target");
+  const targetBox = await target.boundingBox();
+  expect(targetBox).not.toBeNull();
+  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2);
+  await expect(page.locator(".html-document-magnifier")).toBeVisible();
+  const documentPoint = await target.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2 + window.scrollX, y: rect.top + rect.height / 2 + window.scrollY };
+  });
+  const centeredPoint = await page.locator(".html-document-lens-frame").evaluate((element, point) => {
+    const matrix = new DOMMatrix(getComputedStyle(element).transform);
+    return {
+      x: matrix.a * point.x + matrix.c * point.y + matrix.e,
+      y: matrix.b * point.x + matrix.d * point.y + matrix.f,
+    };
+  }, documentPoint);
+  expect(centeredPoint.x).toBeGreaterThan(95);
+  expect(centeredPoint.x).toBeLessThan(135);
+  expect(centeredPoint.y).toBeGreaterThan(95);
+  expect(centeredPoint.y).toBeLessThan(135);
+}
+
+test("HTML invoice magnifier and journal source focus stay calibrated across zoom modes", async ({ page }) => {
   const html = `<!doctype html><html><body style="font:16px Arial;padding:48px">
     <h1>Inspector HTML Invoice</h1>
-    <table><tbody><tr><td id="source-line">${SOURCE_TEXT}</td></tr></tbody></table>
+    <div id="duplicate-header">${SOURCE_TEXT}</div>
+    <table id="lineTable"><tbody>
+      <tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr>
+      <tr><td>1</td><td id="source-line">Kargo Hizmet Bedeli</td><td>540,00 TL</td></tr>
+      <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+    </tbody></table>
   </body></html>`;
   await setupInspector(page, "inspector.html", "text/html", html);
   await openInspectorDocument(page, ".html-document-viewer");
 
   const sourceCell = page.frameLocator(".html-viewer-frame").locator("#source-line");
   await expect(sourceCell).toBeVisible();
-  const frameBox = await page.locator(".html-viewer-frame").boundingBox();
-  expect(frameBox).not.toBeNull();
-  await page.mouse.move(frameBox!.x + 120, frameBox!.y + 120);
-  await expect(page.locator(".html-document-magnifier")).toBeVisible();
-  await expect(page.locator(".html-document-magnifier")).toHaveCSS("opacity", "1");
-
   const journalRow = page.locator(".journal-source-row").first();
   await journalRow.hover();
-  await expect(page.frameLocator(".html-viewer-frame").locator("#fisora-source-target")).toBeVisible();
+  const focusedTarget = page.frameLocator(".html-viewer-frame").locator("#lineTable #fisora-source-target");
+  await expect(focusedTarget).toBeVisible();
+  await expect(page.frameLocator(".html-viewer-frame").locator("#duplicate-header#fisora-source-target")).toHaveCount(0);
   await expect(journalRow).toHaveClass(/source-focused-row/);
-
   await journalRow.click({ position: { x: 2, y: 2 } });
   await expect(journalRow).toHaveClass(/source-pinned-row/);
-  await expect(page.frameLocator(".html-viewer-frame").locator("#fisora-source-target")).toBeVisible();
+  await expectHtmlLensCalibratedAtSource(page);
+
+  await page.locator(".html-document-viewer").getByRole("button", { name: "Genişlik" }).click();
+  await expectHtmlLensCalibratedAtSource(page);
+  await page.locator(".html-document-viewer").getByRole("button", { name: "İçerik" }).click();
+  await expectHtmlLensCalibratedAtSource(page);
+  await expect(journalRow).toHaveClass(/source-pinned-row/);
+  await expect(focusedTarget).toBeVisible();
 });
 
 test("PDF invoice magnifier and journal source focus use PDF.js text evidence", async ({ page }) => {

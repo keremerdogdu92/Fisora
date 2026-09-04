@@ -34,6 +34,7 @@ export type DocumentSourceTarget = {
   key: string;
   text: string;
   pinned?: boolean;
+  sourceAmount?: string;
   sourcePosition?: string;
   sourceLineNumbers?: number[];
 };

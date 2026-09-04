@@ -120,6 +120,10 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     }
   }, [isNextPresentation]);
 
+  useEffect(() => {
+    if (isNextPresentation && mode === "documents") setSidebarCollapsed(true);
+  }, [isNextPresentation, mode]);
+
   function toggleSidebarCollapsed() {
     setSidebarCollapsed((current) => {
       const next = !current;

@@ -80,6 +80,7 @@ function formatDraftStatus(status: string) {
     manual_draft_required: "Manuel fiş gerekli",
     manual_draft_unbalanced: "Fiş dengesi kontrol edilmeli",
     processing: "İşleniyor",
+    review_required: "Kontrol gerekli",
     provider_failed: "AI taslak alınamadı",
     ai_retry_required: "AI yeniden denenecek",
     ai_correction_required: "AI hesap düzeltmesi gerekli",
@@ -1177,6 +1178,7 @@ function ManualDraftEditor({
       key: `${line.source_position || sourceLineNumbers.join("-") || index + 1}::${text.replace(/\s+/g, " ").trim()}`,
       text,
       pinned: false,
+      sourceAmount: String(line.source_amount || "").trim(),
       sourcePosition: line.source_position || "",
       sourceLineNumbers,
     };
@@ -1251,23 +1253,28 @@ function ManualDraftEditor({
                     value={line.description}
                   />
                   {lineSourceTarget ? (
-                    <button
-                      className="field-notice source-review-evidence source-review-link"
-                      onClick={() => onFocusSource?.({ ...lineSourceTarget, pinned: true })}
-                      title="Kaynak belgede bu satırı bul"
-                      type="button"
-                    >
-                      ↗ Kaynak satır {line.source_position || line.source_line_numbers?.join(", ") || index + 1}: {line.source_amount || "metni göster"}
-                      {line.source_amount_label ? ` · ${line.source_amount_label}` : ""}
-                      {line.source_amount_basis ? ` · ${sourceAmountBasisLabel(line.source_amount_basis)}` : ""}
-                    </button>
-                  ) : null}
-                  {vatGroupEvidenceText(line) ? (
-                    <small className="field-notice">
-                      {vatGroupEvidenceText(line)}
-                      <br />
-                      Grup hesabı: {line.account_code} · {line.description || "Hesap açıklaması"}
-                    </small>
+                    <div className="source-review-meta">
+                      <button
+                        className="source-review-chip"
+                        onClick={() => onFocusSource?.({ ...lineSourceTarget, pinned: true })}
+                        title="Kaynak belgede bu satırı bul"
+                        type="button"
+                      >
+                        ↗ Kaynak {line.source_position || line.source_line_numbers?.join(", ") || index + 1}
+                        {line.source_amount ? ` · ${line.source_amount}` : ""}
+                      </button>
+                      {(line.source_amount_label || line.source_amount_basis || vatGroupEvidenceText(line)) ? (
+                        <details className="source-review-details">
+                          <summary>Kaynak ayrıntısı</summary>
+                          <div>
+                            {line.source_amount_label ? <span>{line.source_amount_label}</span> : null}
+                            {line.source_amount_basis ? <span>{sourceAmountBasisLabel(line.source_amount_basis)}</span> : null}
+                            {vatGroupEvidenceText(line) ? <span>{vatGroupEvidenceText(line)}</span> : null}
+                            <span>Grup hesabı: {line.account_code || "-"} · {line.description || "Hesap açıklaması"}</span>
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
                   ) : null}
                 </td>
                 <td>

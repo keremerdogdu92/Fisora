@@ -34,7 +34,6 @@ const MAX_ZOOM = 3;
 const LENS_SIZE = 230;
 const LENS_ZOOM = 2.2;
 const MAX_RENDER_PIXELS = 12_000_000;
-const PINNED_FOCUS_ZOOM = 1.2;
 const TOUCH_HOLD_MS = 420;
 
 function clampZoom(value: number) {
@@ -112,7 +111,6 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   const [sourceMatchStatus, setSourceMatchStatus] = useState("");
   const [highlightStyle, setHighlightStyle] = useState<CSSProperties | null>(null);
   const [lens, setLens] = useState<LensState>({ left: 0, top: 0, visible: false });
-  const focusZoomMultiplier = sourceTarget?.pinned ? PINNED_FOCUS_ZOOM : 1;
 
   function clearTouchTimer() {
     if (touchTimerRef.current !== null) window.clearTimeout(touchTimerRef.current);
@@ -211,7 +209,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
           : fitMode === "page"
             ? Math.min(availableWidth / baseViewport.width, availableHeight / baseViewport.height)
             : customZoom;
-        const scale = clampZoom(baseScale * focusZoomMultiplier);
+        const scale = clampZoom(baseScale);
         const viewport = page.getViewport({ scale });
         const desiredOutputScale = Math.max(window.devicePixelRatio || 1, LENS_ZOOM);
         const maxOutputScale = Math.sqrt(MAX_RENDER_PIXELS / Math.max(viewport.width * viewport.height, 1));
@@ -243,7 +241,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
       active = false;
       renderTask?.cancel();
     };
-  }, [customZoom, fitMode, focusZoomMultiplier, pageNumber, pdfDocument, stageSize.height, stageSize.width]);
+  }, [customZoom, fitMode, pageNumber, pdfDocument, stageSize.height, stageSize.width]);
   useEffect(() => {
     if (!sourceHighlight || sourceHighlight.page !== pageNumber) {
       setHighlightStyle(null);
@@ -273,7 +271,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   }, [effectiveScale, pageNumber, sourceHighlight, sourceTarget?.key, sourceTarget?.pinned, stageSize.height, stageSize.width]);
 
   function applyCustomZoom(nextEffectiveScale: number) {
-    const scale = clampZoom(nextEffectiveScale / focusZoomMultiplier);
+    const scale = clampZoom(nextEffectiveScale);
     setFitMode("custom");
     setCustomZoom(scale);
   }
@@ -350,7 +348,6 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     setSourceHighlight(null);
     setSourceMatchStatus("");
     setHighlightStyle(null);
-    setFitMode("page");
     onClearSourceTarget?.();
   }
 

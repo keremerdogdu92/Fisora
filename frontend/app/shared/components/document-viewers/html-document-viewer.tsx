@@ -1,12 +1,12 @@
 // File: frontend/app/shared/components/document-viewers/html-document-viewer.tsx
-// Summary: Renders sandboxed HTML with shared fit controls and safe source-text locator highlighting.
+// Summary: Renders sandboxed invoice HTML with calibrated zoom/magnifier controls, content fitting, and deterministic source-evidence highlighting.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import type { DocumentSourceTarget } from "../../../portal-types";
 import { findTokenSequence, sourceTokenValues } from "./document-source-match";
 
-type FitMode = "page" | "width" | "custom";
+type FitMode = "page" | "width" | "content" | "custom";
 type HtmlDocumentViewerProps = {
   fileName: string;
   src: string;
@@ -14,6 +14,7 @@ type HtmlDocumentViewerProps = {
   onClearSourceTarget?: () => void;
 };
 type LensState = { docX: number; docY: number; left: number; top: number; visible: boolean };
+type DocumentBounds = { left: number; top: number; width: number; height: number };
 
 const MIN_ZOOM = 0.35;
 const MAX_ZOOM = 3;
@@ -22,7 +23,6 @@ const VIRTUAL_SOURCE_HEIGHT = 1280;
 const SOURCE_TARGET_ID = "fisora-source-target";
 const LENS_SIZE = 230;
 const LENS_ZOOM = 2.2;
-const PINNED_FOCUS_ZOOM = 1.2;
 const TOUCH_HOLD_MS = 420;
 
 function clampZoom(value: number) {
@@ -41,26 +41,64 @@ function containsExactTokenSequence(value: string, needle: string[]) {
   return Boolean(findTokenSequence(tokens, needle));
 }
 
-function findBestSourceElement(document: Document, target: DocumentSourceTarget) {
-  const needle = sourceTokenValues(target.text);
-  const tableRows = Array.from(document.querySelectorAll<HTMLTableRowElement>("tr"))
-    .filter((row) => row.querySelector("td"));
-  const sourceIndex = Number.parseInt(String(target.sourcePosition || ""), 10);
+function invoiceLineRows(document: Document) {
+  const tables = Array.from(document.querySelectorAll<HTMLTableElement>("table"));
+  const preferred = document.querySelector<HTMLTableElement>("#lineTable");
+  const candidates = preferred ? [preferred, ...tables.filter((table) => table !== preferred)] : tables;
+  const headerHints = new Set(["malzeme", "hizmet", "ürün", "miktar", "birim", "kdv", "tutar", "amount", "description"]);
 
-  if (needle.length) {
-    const exactRows = tableRows.filter((element) => containsExactTokenSequence(elementText(element), needle));
-    if (exactRows.length === 1) return exactRows[0];
-    if (exactRows.length > 1) {
-      const indexedRow = Number.isInteger(sourceIndex) && sourceIndex > 0 ? tableRows[sourceIndex - 1] : undefined;
-      return indexedRow && exactRows.includes(indexedRow) ? indexedRow : null;
-    }
+  for (const table of candidates) {
+    const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>("tr")).filter((row) => row.querySelector("td"));
+    if (!rows.length) continue;
+    const tableTokens = sourceTokenValues(elementText(table));
+    const hintCount = [...new Set(tableTokens.filter((token) => headerHints.has(token)))].length;
+    if (table !== preferred && hintCount < 2) continue;
+    const dataRows = rows.filter((row) => {
+      const tokens = sourceTokenValues(elementText(row));
+      if (!tokens.length) return false;
+      const normalized = tokens.join(" ");
+      const looksLikeHeader = normalized.includes("sıra no")
+        || normalized.includes("malzeme hizmet")
+        || normalized.includes("birim fiyat")
+        || normalized.includes("kdv oran");
+      return !looksLikeHeader;
+    });
+    if (dataRows.length) return dataRows;
   }
+  return [];
+}
 
-  if (!needle.length) return null;
+function containsEquivalentAmount(value: string, sourceAmount: string) {
+  const amountDigits = String(sourceAmount || "").replace(/\D/g, "");
+  if (!amountDigits) return true;
+  const candidates = value.match(/\d[\d.,]*\d|\d/g) || [];
+  return candidates.some((candidate) => candidate.replace(/\D/g, "") === amountDigits);
+}
 
-  const selectors = "td,th,p,li,span,strong,b,div";
+function elementMatchesTarget(element: HTMLElement, target: DocumentSourceTarget) {
+  const textNeedle = sourceTokenValues(target.text);
+  const value = elementText(element);
+  const textMatches = !textNeedle.length || containsExactTokenSequence(value, textNeedle);
+  const amountMatches = containsEquivalentAmount(value, target.sourceAmount || "");
+  return textMatches && amountMatches;
+}
+
+function findBestSourceElement(document: Document, target: DocumentSourceTarget) {
+  const sourceIndex = Number.parseInt(String(target.sourcePosition || ""), 10);
+  const lineRows = invoiceLineRows(document);
+  const indexedRow = Number.isInteger(sourceIndex) && sourceIndex > 0 ? lineRows[sourceIndex - 1] : undefined;
+
+  if (indexedRow && elementMatchesTarget(indexedRow, target)) return indexedRow;
+
+  const matchingLineRows = lineRows.filter((row) => elementMatchesTarget(row, target));
+  if (matchingLineRows.length === 1) return matchingLineRows[0];
+  if (indexedRow && matchingLineRows.includes(indexedRow)) return indexedRow;
+
+  const textNeedle = sourceTokenValues(target.text);
+  if (!textNeedle.length) return null;
+  const selectors = "tr,td,th,p,li,span,strong,b,div";
   const matches = Array.from(document.querySelectorAll<HTMLElement>(selectors))
-    .filter((element) => containsExactTokenSequence(elementText(element), needle));
+    .filter((element) => elementMatchesTarget(element, target));
   const leafMatches = matches.filter((element) => !matches.some((other) => element !== other && element.contains(other)));
   return leafMatches.length === 1 ? leafMatches[0] : null;
 }
@@ -77,6 +115,30 @@ function instrumentHtmlSource(rawHtml: string, target: DocumentSourceTarget) {
   return `<!doctype html>${parsed.documentElement.outerHTML}`;
 }
 
+function measureDocumentLayout(document: Document) {
+  const root = document.documentElement;
+  const body = document.body;
+  const width = Math.max(VIRTUAL_SOURCE_WIDTH, root?.scrollWidth || 0, body?.scrollWidth || 0);
+  const height = Math.max(VIRTUAL_SOURCE_HEIGHT, root?.scrollHeight || 0, body?.scrollHeight || 0);
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>("td,th,span,p,h1,h2,h3,img,svg"))
+    .filter((element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return false;
+      return ["IMG", "SVG"].includes(element.tagName) || sourceTokenValues(element.textContent || "").length > 0;
+    });
+  if (!candidates.length) return { size: { width, height }, bounds: { left: 0, top: 0, width, height } };
+  const rects = candidates.map((element) => element.getBoundingClientRect());
+  const padding = 8;
+  const left = Math.max(0, Math.min(...rects.map((rect) => rect.left)) - padding);
+  const top = Math.max(0, Math.min(...rects.map((rect) => rect.top)) - padding);
+  const right = Math.min(width, Math.max(...rects.map((rect) => rect.right)) + padding);
+  const bottom = Math.min(height, Math.max(...rects.map((rect) => rect.bottom)) + padding);
+  return {
+    size: { width, height },
+    bounds: { left, top, width: Math.max(120, right - left), height: Math.max(160, bottom - top) },
+  };
+}
+
 export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceTarget }: HtmlDocumentViewerProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -90,6 +152,8 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
   const [fitMode, setFitMode] = useState<FitMode>("page");
   const [customZoom, setCustomZoom] = useState(1);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  const [documentSize, setDocumentSize] = useState({ width: VIRTUAL_SOURCE_WIDTH, height: VIRTUAL_SOURCE_HEIGHT });
+  const [contentBounds, setContentBounds] = useState<DocumentBounds>({ left: 0, top: 0, width: VIRTUAL_SOURCE_WIDTH, height: VIRTUAL_SOURCE_HEIGHT });
   const [focusedSrc, setFocusedSrc] = useState("");
   const [sourceMatchStatus, setSourceMatchStatus] = useState("");
   const [lens, setLens] = useState<LensState>({ docX: 0, docY: 0, left: 0, top: 0, visible: false });
@@ -119,6 +183,8 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
 
   useEffect(() => {
     rawHtmlRef.current = null;
+    setDocumentSize({ width: VIRTUAL_SOURCE_WIDTH, height: VIRTUAL_SOURCE_HEIGHT });
+    setContentBounds({ left: 0, top: 0, width: VIRTUAL_SOURCE_WIDTH, height: VIRTUAL_SOURCE_HEIGHT });
   }, [src]);
 
   useEffect(() => {
@@ -152,19 +218,28 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [sourceTarget?.key, sourceTarget?.text, src]);
+  }, [sourceTarget?.key, sourceTarget?.text, sourceTarget?.sourceAmount, src]);
 
   const availableWidth = Math.max(stageSize.width - 24, 120);
   const availableHeight = Math.max(stageSize.height - 24, 160);
-  const fitPageScale = Math.min(1, availableWidth / VIRTUAL_SOURCE_WIDTH, availableHeight / VIRTUAL_SOURCE_HEIGHT);
-  const fitWidthScale = Math.min(1, availableWidth / VIRTUAL_SOURCE_WIDTH);
-  const focusZoomMultiplier = sourceTarget?.pinned ? PINNED_FOCUS_ZOOM : 1;
-  const baseScale = fitMode === "page" ? fitPageScale : fitMode === "width" ? fitWidthScale : customZoom;
-  const effectiveScale = clampZoom(baseScale * focusZoomMultiplier);
+  const fitPageScale = Math.min(1, availableWidth / documentSize.width, availableHeight / documentSize.height);
+  const fitWidthScale = Math.min(1, availableWidth / documentSize.width);
+  const fitContentScale = Math.min(1, availableWidth / contentBounds.width);
+  const baseScale = fitMode === "page"
+    ? fitPageScale
+    : fitMode === "width"
+      ? fitWidthScale
+      : fitMode === "content"
+        ? fitContentScale
+        : customZoom;
+  const effectiveScale = clampZoom(baseScale);
+  const viewportBounds = fitMode === "content"
+    ? contentBounds
+    : { left: 0, top: 0, width: documentSize.width, height: documentSize.height };
 
   function applyCustomZoom(nextEffectiveScale: number) {
     setFitMode("custom");
-    setCustomZoom(clampZoom(nextEffectiveScale / focusZoomMultiplier));
+    setCustomZoom(clampZoom(nextEffectiveScale));
   }
 
   function hideLens() {
@@ -173,22 +248,21 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
     setLens((current) => ({ ...current, visible: false }));
   }
 
-  function syncLensScroll() {
-    const sourceWindow = frameRef.current?.contentWindow;
-    const lensWindow = lensFrameRef.current?.contentWindow;
-    if (!sourceWindow || !lensWindow) return;
-    lensWindow.scrollTo(sourceWindow.scrollX, sourceWindow.scrollY);
+  function resetLensScroll() {
+    lensFrameRef.current?.contentWindow?.scrollTo(0, 0);
   }
 
   function updateLens(event: PointerEvent) {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    syncLensScroll();
+    const frameWindow = frameRef.current?.contentWindow;
+    if (!canvas || !frameWindow) return;
+    const docX = event.clientX + frameWindow.scrollX;
+    const docY = event.clientY + frameWindow.scrollY;
     setLens({
-      docX: event.clientX,
-      docY: event.clientY,
-      left: canvas.offsetLeft + event.clientX * effectiveScale,
-      top: canvas.offsetTop + event.clientY * effectiveScale,
+      docX,
+      docY,
+      left: canvas.offsetLeft + (docX - viewportBounds.left) * effectiveScale,
+      top: canvas.offsetTop + (docY - viewportBounds.top) * effectiveScale,
       visible: true,
     });
   }
@@ -201,8 +275,8 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
     const targetElement = frame?.contentDocument?.getElementById(SOURCE_TARGET_ID);
     if (!stage || !canvas || !frameWindow || !targetElement || !sourceTarget) return;
     const rect = targetElement.getBoundingClientRect();
-    const left = canvas.offsetLeft + (rect.left + frameWindow.scrollX) * effectiveScale;
-    const top = canvas.offsetTop + (rect.top + frameWindow.scrollY) * effectiveScale;
+    const left = canvas.offsetLeft + (rect.left + frameWindow.scrollX - viewportBounds.left) * effectiveScale;
+    const top = canvas.offsetTop + (rect.top + frameWindow.scrollY - viewportBounds.top) * effectiveScale;
     const width = Math.max(8, rect.width * effectiveScale);
     const height = Math.max(8, rect.height * effectiveScale);
     const outsideViewport = top < stage.scrollTop + 8
@@ -222,6 +296,9 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
     const frameWindow = frameRef.current?.contentWindow;
     const documentNode = frameRef.current?.contentDocument;
     if (!frameWindow || !documentNode) return;
+    const layout = measureDocumentLayout(documentNode);
+    setDocumentSize(layout.size);
+    setContentBounds(layout.bounds);
     const handlePointerMove = (event: PointerEvent) => {
       if (event.pointerType === "touch" && !touchActiveRef.current) {
         const distance = Math.hypot(event.clientX - touchStartRef.current.clientX, event.clientY - touchStartRef.current.clientY);
@@ -274,7 +351,6 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
   function clearSourceFocus() {
     setFocusedSrc("");
     setSourceMatchStatus("");
-    setFitMode("page");
     onClearSourceTarget?.();
   }
   const viewerSrc = sourceTarget && focusedSrc ? focusedSrc : src;
@@ -286,6 +362,7 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
         <div className="html-viewer-zoom-controls">
           <button className={fitMode === "page" ? "active" : ""} onClick={() => setFitMode("page")} type="button">Sığdır</button>
           <button className={fitMode === "width" ? "active" : ""} onClick={() => setFitMode("width")} type="button">Genişlik</button>
+          <button className={fitMode === "content" ? "active" : ""} onClick={() => setFitMode("content")} type="button">İçerik</button>
           <button className={fitMode === "custom" && Math.abs(effectiveScale - 1) < 0.01 ? "active" : ""} onClick={() => applyCustomZoom(1)} type="button">%100</button>
           <button onClick={() => applyCustomZoom(effectiveScale - 0.1)} type="button" aria-label="Uzaklaştır">−</button>
           <span>{Math.round(effectiveScale * 100)}%</span>
@@ -299,14 +376,20 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
         ) : null}
       </div>
       <div className="html-viewer-stage" onScroll={hideLens} ref={stageRef}>
-        <div className="html-viewer-canvas" ref={canvasRef} style={{ height: `${VIRTUAL_SOURCE_HEIGHT * effectiveScale}px`, width: `${VIRTUAL_SOURCE_WIDTH * effectiveScale}px` }}>
+        <div className="html-viewer-canvas" ref={canvasRef} style={{ height: `${viewportBounds.height * effectiveScale}px`, width: `${viewportBounds.width * effectiveScale}px` }}>
           <iframe
             className="html-viewer-frame"
             onLoad={handleFrameLoad}
             ref={frameRef}
             sandbox="allow-same-origin"
             src={viewerSrc}
-            style={{ height: `${VIRTUAL_SOURCE_HEIGHT}px`, transform: `scale(${effectiveScale})`, width: `${VIRTUAL_SOURCE_WIDTH}px` }}
+            style={{
+              height: `${documentSize.height}px`,
+              left: `${-viewportBounds.left * effectiveScale}px`,
+              top: `${-viewportBounds.top * effectiveScale}px`,
+              transform: `scale(${effectiveScale})`,
+              width: `${documentSize.width}px`,
+            }}
             title={`${fileName} izole orijinal HTML`}
           />
         </div>
@@ -318,11 +401,11 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
           >
             <iframe
               className="html-document-lens-frame"
-              onLoad={syncLensScroll}
+              onLoad={resetLensScroll}
               ref={lensFrameRef}
               sandbox="allow-same-origin"
               src={viewerSrc}
-              style={{ height: VIRTUAL_SOURCE_HEIGHT, transform: lensTransform, width: VIRTUAL_SOURCE_WIDTH }}
+              style={{ height: documentSize.height, transform: lensTransform, width: documentSize.width }}
               tabIndex={-1}
               title=""
             />

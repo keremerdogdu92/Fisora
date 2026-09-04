@@ -423,6 +423,14 @@ def _verified_rule_authority_digest(authorities: tuple[object, ...]) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def _three_stage_gemini_runtime(source: Mapping[str, str] | Any):
+    runtime_env = dict(source)
+    runtime_env["FISORA_GEMINI_PDF_V2_MODEL"] = str(
+        source.get("FISORA_GEMINI_MODEL", "") or DEFAULT_GEMINI_MODEL
+    )
+    return build_gemini_pdf_runtime_from_env(runtime_env)
+
+
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
     if provider_name == "gemini":
         model = source.get("FISORA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
@@ -1320,6 +1328,24 @@ def is_transient_persistence_error(exc: BaseException) -> bool:
     return isinstance(exc, (psycopg.OperationalError, psycopg.InterfaceError))
 
 
+def is_transient_provider_error(exc: BaseException) -> bool:
+    try:
+        import httpx
+    except ImportError:
+        httpx = None
+    if httpx is not None:
+        if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+            return True
+        if isinstance(exc, httpx.HTTPStatusError):
+            return exc.response.status_code in {429, 500, 502, 503, 504}
+    attempt = getattr(exc, "attempt", None)
+    status = getattr(attempt, "http_status", None)
+    try:
+        return int(status or 0) in {429, 500, 502, 503, 504}
+    except (TypeError, ValueError):
+        return False
+
+
 def _gemini_pdf_v2_eligible(
     document: dict[str, Any],
     job: dict[str, Any],
@@ -1404,8 +1430,13 @@ def _run_gemini_pdf_v2_for_worker(
         raise DocumentParseError("gemini_pdf_v2_source_is_not_pdf")
 
     provider = extraction_provider or accounting_provider
+    three_stage_enabled = three_stage_accounting_enabled(environ)
     if extraction_provider is None or accounting_provider is None:
-        runtime = build_gemini_pdf_runtime_from_env(environ)
+        runtime = (
+            _three_stage_gemini_runtime(environ)
+            if three_stage_enabled
+            else build_gemini_pdf_runtime_from_env(environ)
+        )
         if not runtime.available or runtime.provider is None:
             raise RetryableDocumentTechnicalError(
                 runtime.unavailable_reason or "gemini_pdf_v2_runtime_unavailable"
@@ -1431,7 +1462,7 @@ def _run_gemini_pdf_v2_for_worker(
         client_id=client_id,
         document=document,
     )
-    if three_stage_accounting_enabled(environ):
+    if three_stage_enabled:
         profile = (workspace.get("client") or {}).get("profile") or {}
         source_hash = sha256(source_bytes).hexdigest()
         try:
@@ -2835,7 +2866,7 @@ def _process_html_source_job(
             )
             planner_provider = accounting_provider or extraction_provider
             if planner_provider is None:
-                runtime = build_gemini_pdf_runtime_from_env(environ)
+                runtime = _three_stage_gemini_runtime(environ)
                 if not runtime.available or runtime.provider is None:
                     raise RetryableDocumentTechnicalError(
                         runtime.unavailable_reason or "html_accounting_planner_unavailable"
@@ -3659,7 +3690,11 @@ def process_next_job_once(
             "research_cache_hit": research_cache_hit,
             "nace_cache_hit": nace_cache_hit,
         }
-        if isinstance(exc, RetryableDocumentTechnicalError) or is_transient_persistence_error(exc):
+        if (
+            isinstance(exc, RetryableDocumentTechnicalError)
+            or is_transient_persistence_error(exc)
+            or is_transient_provider_error(exc)
+        ):
             try:
                 opened_at = datetime.fromisoformat(
                     str(job.get("created_at") or "").replace("Z", "+00:00")

@@ -220,6 +220,7 @@ export function AccountantWorkspace({
   const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>("all");
   const [queueHidden, setQueueHidden] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [workspaceFullscreen, setWorkspaceFullscreen] = useState(false);
   const [journalHidden, setJournalHidden] = useState(false);
   const [mobilePane, setMobilePane] = useState<"queue" | "preview" | "journal">("preview");
   const [hoverSourceTarget, setHoverSourceTarget] = useState<DocumentSourceTarget | null>(null);
@@ -314,9 +315,16 @@ export function AccountantWorkspace({
   }, []);
 
   useEffect(() => {
+    const onFullscreenChange = () => setWorkspaceFullscreen(document.fullscreenElement === focusStageRef.current);
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
     if (!focusMode) return undefined;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (document.fullscreenElement) return;
       event.preventDefault();
       setFocusMode(false);
       setJournalHidden(false);
@@ -351,14 +359,24 @@ export function AccountantWorkspace({
     setMobilePane("preview");
   }
 
-  async function toggleWorkspaceFullscreen() {
+  async function toggleWorkspaceFullscreen(openFocusMode = false) {
     const stage = focusStageRef.current;
     if (!stage) return;
     if (document.fullscreenElement) {
       await document.exitFullscreen();
       return;
     }
+    if (openFocusMode) {
+      setFocusMode(true);
+      setJournalHidden(false);
+    }
     await stage.requestFullscreen();
+  }
+
+  async function closeFocusMode() {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    setFocusMode(false);
+    setJournalHidden(false);
   }
   return (
     <section className="accountant-workspace">
@@ -373,11 +391,14 @@ export function AccountantWorkspace({
             ))}
           </div>
           <div className="portal-next-workbench-actions">
-            <button onClick={() => setQueueHidden((current) => !current)} type="button">
-              {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}
+            <button className={`queue-action${queueHidden ? " active" : ""}`} onClick={() => setQueueHidden((current) => !current)} type="button">
+              <span aria-hidden="true">☰</span> {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}
             </button>
             <button className="focus-action" onClick={() => { setFocusMode(true); setJournalHidden(false); }} type="button">
-              ▣ Belgeyi incele
+              <span aria-hidden="true">▣</span> Belgeyi incele
+            </button>
+            <button className="fullscreen-action" onClick={() => void toggleWorkspaceFullscreen(true)} title="Çalışma masasını tarayıcı tam ekranında aç" type="button">
+              <span aria-hidden="true">⛶</span> Tam ekran
             </button>
             <span>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</span>
           </div>
@@ -445,10 +466,10 @@ export function AccountantWorkspace({
               ) : null}
             </div>
             <div>
-              <button onClick={() => setQueueHidden((current) => !current)} type="button">{queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}</button>
+              <button className={`queue-action${queueHidden ? " active" : ""}`} onClick={() => setQueueHidden((current) => !current)} type="button"><span aria-hidden="true">☰</span> {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}</button>
               <button onClick={() => setJournalHidden((current) => !current)} type="button">{journalHidden ? "Fişi göster" : "Fişi gizle"}</button>
-              <button onClick={() => void toggleWorkspaceFullscreen()} title="Tarayıcı tam ekran" type="button">⛶</button>
-              <button onClick={() => { setFocusMode(false); setJournalHidden(false); }} type="button">× Kapat</button>
+              <button className={`fullscreen-action${workspaceFullscreen ? " active" : ""}`} onClick={() => void toggleWorkspaceFullscreen()} title="Tarayıcı tam ekran" type="button"><span aria-hidden="true">⛶</span> {workspaceFullscreen ? "Tam ekrandan çık" : "Tam ekran"}</button>
+              <button className="focus-close-action" onClick={() => void closeFocusMode()} type="button">× Kapat</button>
             </div>
           </header>
         ) : null}

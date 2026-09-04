@@ -102,10 +102,9 @@ function classifyDraftAccountCode(options, accountCode, suggestedNewCounterparty
 }
 
 function applyAccountSelectionToLine(line, account, options = []) {
-  const accountName = safeText(account?.name);
   return {
     account_code: safeText(account?.code),
-    description: accountName,
+    description: safeText(line?.description),
     debit: safeText(line?.debit, "0.00"),
     credit: safeText(line?.credit, "0.00"),
   };

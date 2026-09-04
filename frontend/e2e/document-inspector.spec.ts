@@ -1,5 +1,5 @@
 // File: frontend/e2e/document-inspector.spec.ts
-// Summary: Verifies portal-next queue/focus layout, pointer-centered magnification, 100% lens suppression, and deterministic journal-to-source focus for real HTML and PDF viewers.
+// Summary: Verifies portal-next queue/focus layout, mode-aware pointer-centered magnification, and deterministic journal-to-source focus for real HTML and PDF viewers.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -208,15 +208,21 @@ test("HTML invoice magnifier and journal source focus stay calibrated across zoo
   await expect(journalRow).toHaveClass(/source-pinned-row/);
   await expectHtmlLensCalibratedAtSource(page);
 
+  const magnifierToggle = page.locator(".html-document-viewer").getByRole("button", { name: "Büyüteç" });
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "true");
   await page.locator(".html-document-viewer").getByRole("button", { name: "Genişlik" }).click();
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".html-document-magnifier")).toHaveCount(0);
+  await magnifierToggle.click();
   await expectHtmlLensCalibratedAtSource(page);
   await page.locator(".html-document-viewer").getByRole("button", { name: "İçerik" }).click();
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
+  await magnifierToggle.click();
   await expectHtmlLensCalibratedAtSource(page);
   await page.locator(".html-document-viewer").getByRole("button", { name: "%100" }).click();
-  const targetBoxAtFullScale = await focusedTarget.boundingBox();
-  expect(targetBoxAtFullScale).not.toBeNull();
-  await page.mouse.move(targetBoxAtFullScale!.x + targetBoxAtFullScale!.width / 2, targetBoxAtFullScale!.y + targetBoxAtFullScale!.height / 2);
-  await expect(page.locator(".html-document-magnifier")).toHaveCount(0);
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
+  await magnifierToggle.click();
+  await expectHtmlLensCalibratedAtSource(page);
   await expect(journalRow).toHaveClass(/source-pinned-row/);
   await expect(focusedTarget).toBeVisible();
 });
@@ -277,11 +283,23 @@ test("PDF invoice magnifier and journal source focus use PDF.js text evidence", 
   expect(lensBox).not.toBeNull();
   expect(Math.abs(lensBox!.x + lensBox!.width / 2 - pointerX)).toBeLessThan(2);
   expect(Math.abs(lensBox!.y + lensBox!.height / 2 - pointerY)).toBeLessThan(2);
+  const magnifierToggle = page.locator(".pdf-document-viewer").getByRole("button", { name: "Büyüteç" });
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "true");
+  await page.locator(".pdf-document-viewer").getByRole("button", { name: "Genişlik" }).click();
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".pdf-document-magnifier")).toHaveCount(0);
+  await magnifierToggle.click();
+  const widthCanvasBox = await canvas.boundingBox();
+  expect(widthCanvasBox).not.toBeNull();
+  await page.mouse.move(widthCanvasBox!.x + 120, widthCanvasBox!.y + 90);
+  await expect(pdfLens).toBeVisible();
   await page.locator(".pdf-document-viewer").getByRole("button", { name: "%100" }).click();
+  await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
+  await magnifierToggle.click();
   const fullScaleCanvasBox = await canvas.boundingBox();
   expect(fullScaleCanvasBox).not.toBeNull();
   await page.mouse.move(fullScaleCanvasBox!.x + 120, fullScaleCanvasBox!.y + 90);
-  await expect(page.locator(".pdf-document-magnifier")).toHaveCount(0);
+  await expect(pdfLens).toBeVisible();
 
   const journalRow = page.locator(".journal-source-row").first();
   await journalRow.hover();

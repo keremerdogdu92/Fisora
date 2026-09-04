@@ -149,6 +149,12 @@ function normalizeAccountCodeInput(value: string) {
   return String(value || "").trim().replace(/[\s-]+/g, ".").replace(/,+/g, ".").replace(/[^0-9A-Za-z.]/g, "").replace(/\.+/g, ".").replace(/^\.+|\.+$/g, "");
 }
 
+function chartAccountNameForCode(chartAccounts: ChartAccountOption[], accountCode: string) {
+  const normalizedCode = normalizeAccountCodeInput(accountCode);
+  if (!normalizedCode) return "";
+  return chartAccounts.find((account) => normalizeAccountCodeInput(account.code) === normalizedCode)?.name || "";
+}
+
 function newCounterpartyCodesForDocument(document: PilotDocument) {
   return new Set(
     [
@@ -1211,6 +1217,7 @@ function ManualDraftEditor({
             {rows.map((line, index) => {
               const lineSourceTarget = sourceTargetForLine(line, index);
               const sourceFocused = Boolean(lineSourceTarget && sourceTarget?.key === lineSourceTarget.key);
+              const accountName = chartAccountNameForCode(chartAccounts, line.account_code);
               return (
               <tr
                 className={`${lineSourceTarget ? "journal-source-row" : ""}${sourceFocused ? " source-focused-row" : ""}${sourceFocused && sourceTarget?.pinned ? " source-pinned-row" : ""}`.trim() || undefined}
@@ -1241,7 +1248,12 @@ function ManualDraftEditor({
                   ) : null}
                 </td>
                 <td>
+                  <div className="journal-account-caption" title={accountName || undefined}>
+                    <span>{line.account_code || "Hesap seçilmedi"}</span>
+                    <strong>{accountName || "Hesap planından seçim bekleniyor"}</strong>
+                  </div>
                   <input
+                    aria-label="Fatura satırı açıklaması"
                     onChange={(event) => onUpdateLine(index, { description: event.target.value })}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -1250,6 +1262,7 @@ function ManualDraftEditor({
                       }
                     }}
                     ref={(element) => { descriptionRefs.current[index] = element; }}
+                    title="Fatura satırından gelen hareket açıklaması"
                     value={line.description}
                   />
                   {lineSourceTarget ? (
@@ -1270,7 +1283,7 @@ function ManualDraftEditor({
                             {line.source_amount_label ? <span>{line.source_amount_label}</span> : null}
                             {line.source_amount_basis ? <span>{sourceAmountBasisLabel(line.source_amount_basis)}</span> : null}
                             {vatGroupEvidenceText(line) ? <span>{vatGroupEvidenceText(line)}</span> : null}
-                            <span>Grup hesabı: {line.account_code || "-"} · {line.description || "Hesap açıklaması"}</span>
+                            <span>Grup hesabı: {line.account_code || "-"} · {accountName || "Hesap planı açıklaması yok"}</span>
                           </div>
                         </details>
                       ) : null}

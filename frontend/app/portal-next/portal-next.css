@@ -1963,13 +1963,21 @@
 }
 .portal-next-workbench-commandbar .review-cockpit-queues button,
 .portal-next-workbench-actions button {
-  border-radius: 5px;
+  border-radius: 6px;
   min-height: 32px;
   padding: 4px 9px;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
 }
+.portal-next-workbench-commandbar .review-cockpit-queues button:hover,
+.portal-next-workbench-actions button:hover { transform: translateY(-1px); }
 .portal-next-workbench-actions { align-items: center; display: flex; gap: 6px; }
+.portal-next-workbench-actions button { align-items: center; background: #fff; border-color: #d5dde8; display: inline-flex; gap: 5px; }
+.portal-next-workbench-actions button > span[aria-hidden="true"] { color: inherit; font-size: 0.78rem; line-height: 1; }
 .portal-next-workbench-actions > span { color: var(--muted); font-size: 0.72rem; font-weight: 800; padding-inline: 3px; }
-.portal-next-workbench-actions .focus-action { border-color: var(--accent); color: var(--accent); }
+.portal-next-workbench-actions .queue-action.active { background: #eef5fb; border-color: #b9ccdc; color: #31536d; }
+.portal-next-workbench-actions .focus-action { background: var(--accent); border-color: var(--accent); box-shadow: 0 2px 7px rgba(27, 76, 111, 0.18); color: #fff; }
+.portal-next-workbench-actions .fullscreen-action { background: #f1f6fb; border-color: #b7cad9; color: var(--accent); font-weight: 850; }
+.portal-next-workbench-actions .fullscreen-action:hover { background: #e6f0f8; border-color: #94b1c6; }
 .portal-next-mobile-review-switch { display: none; }
 .portal-next-workbench-stage.next {
   background: var(--border-strong);
@@ -2078,7 +2086,20 @@
 .portal-next-focus-document > span { color: var(--muted); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .portal-next-focus-document > strong { color: var(--accent); flex: 0 0 auto; font-size: 0.68rem; white-space: nowrap; }
 .portal-next-focus-toolbar > div:last-child { display: flex; gap: 5px; }
-.portal-next-focus-toolbar button { border-radius: 5px; min-height: 30px; padding: 4px 8px; }
+.portal-next-focus-toolbar button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d5dde8;
+  border-radius: 6px;
+  display: inline-flex;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 8px;
+}
+.portal-next-focus-toolbar .queue-action.active { background: #eef5fb; border-color: #b9ccdc; color: #31536d; }
+.portal-next-focus-toolbar .fullscreen-action { background: #f1f6fb; border-color: #b7cad9; color: var(--accent); font-weight: 850; }
+.portal-next-focus-toolbar .fullscreen-action.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.portal-next-focus-toolbar .focus-close-action { color: #6b3540; }
 .portal-next-workbench-stage.next.focus-mode .portal-next-document-queue {
   display: grid;
   grid-column: 1;
@@ -2093,7 +2114,14 @@
 .portal-next-workbench-stage.next.focus-mode.queue-hidden .document-review-main { grid-column: 1; }
 .portal-next-workbench-stage.next.focus-mode.journal-hidden .document-review-main { grid-template-columns: minmax(0, 1fr); }
 .portal-next-workbench-stage.next.focus-mode.journal-hidden .journal-panel { display: none; }
-.portal-next-workbench-stage.next:fullscreen { inset: 0; }
+.portal-next-workbench-stage.next:fullscreen {
+  border-radius: 0;
+  height: 100vh;
+  inset: 0;
+  min-height: 0;
+  width: 100vw;
+}
+.portal-next-workbench-stage.next:fullscreen.focus-mode { border-radius: 0; inset: 0; }
 .portal-next-theme .document-panel > .panel-heading,
 .portal-next-theme .journal-scroll-area > .panel-heading {
   min-height: 40px;
@@ -2128,6 +2156,29 @@
 .portal-next-theme .journal-ledger th { font-size: 0.69rem; height: 34px; padding: 5px 6px; }
 .portal-next-theme .journal-ledger td { padding: 4px 6px; }
 .portal-next-theme .journal-ledger input { font-size: 0.74rem; min-height: 28px; padding: 3px 4px; }
+.portal-next-theme .journal-account-caption {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 3px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.portal-next-theme .journal-account-caption span {
+  color: #294e69;
+  flex: 0 0 auto;
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+.portal-next-theme .journal-account-caption strong {
+  color: #465564;
+  font-size: 0.65rem;
+  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .portal-next-theme .journal-ledger th:nth-child(1),
 .portal-next-theme .journal-ledger td:nth-child(1) { width: calc(11ch + 16px); }
 .portal-next-theme .journal-ledger th:nth-child(2),
@@ -2210,6 +2261,8 @@
   padding: 3px 6px;
 }
 .portal-next-theme .document-viewer-toolbar button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.portal-next-theme .document-viewer-toolbar .magnifier-toggle { background: #f3f6f9; margin-left: 2px; }
+.portal-next-theme .document-viewer-toolbar .magnifier-toggle.active { background: #294f6b; border-color: #294f6b; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); color: #fff; }
 .portal-next-theme .document-viewer-toolbar span { color: var(--muted); font-size: 0.68rem; font-weight: 800; white-space: nowrap; }
 .portal-next-theme .pdf-viewer-stage,
 .portal-next-theme .html-viewer-stage {

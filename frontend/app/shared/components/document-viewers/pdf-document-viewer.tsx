@@ -1,5 +1,5 @@
 // File: frontend/app/shared/components/document-viewers/pdf-document-viewer.tsx
-// Summary: Renders PDF.js previews with pointer-centered magnification, 100% lens suppression, shared zoom controls, and source-text highlighting.
+// Summary: Renders PDF.js previews with mode-aware pointer-centered magnification, shared zoom controls, and source-text highlighting.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -102,6 +102,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   const [pdfDocument, setPdfDocument] = useState<PdfDocumentHandle | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [fitMode, setFitMode] = useState<FitMode>("page");
+  const [magnifierRequested, setMagnifierRequested] = useState(true);
   const [customZoom, setCustomZoom] = useState(1);
   const [effectiveScale, setEffectiveScale] = useState(1);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -111,7 +112,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   const [sourceMatchStatus, setSourceMatchStatus] = useState("");
   const [highlightStyle, setHighlightStyle] = useState<CSSProperties | null>(null);
   const [lens, setLens] = useState<LensState>({ left: 0, top: 0, visible: false });
-  const magnifierEnabled = !(fitMode === "custom" && Math.abs(effectiveScale - 1) < 0.01);
+  const magnifierEnabled = magnifierRequested;
 
   function clearTouchTimer() {
     if (touchTimerRef.current !== null) window.clearTimeout(touchTimerRef.current);
@@ -271,10 +272,17 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     return () => window.cancelAnimationFrame(frame);
   }, [effectiveScale, pageNumber, sourceHighlight, sourceTarget?.key, sourceTarget?.pinned, stageSize.height, stageSize.width]);
 
+  function selectFitMode(mode: Exclude<FitMode, "custom">) {
+    hideLens();
+    setFitMode(mode);
+    setMagnifierRequested(mode === "page");
+  }
+
   function applyCustomZoom(nextEffectiveScale: number) {
     const scale = clampZoom(nextEffectiveScale);
-    if (Math.abs(scale - 1) < 0.01) hideLens();
+    hideLens();
     setFitMode("custom");
+    setMagnifierRequested(false);
     setCustomZoom(scale);
   }
 
@@ -282,6 +290,11 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     clearTouchTimer();
     touchActiveRef.current = false;
     setLens((current) => ({ ...current, visible: false }));
+  }
+
+  function toggleMagnifier() {
+    if (magnifierRequested) hideLens();
+    setMagnifierRequested((current) => !current);
   }
 
   function drawLensAt(clientX: number, clientY: number) {
@@ -373,17 +386,18 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
           <button disabled={!pageCount || pageNumber >= pageCount} onClick={() => setPageNumber((value) => Math.min(pageCount, value + 1))} type="button">›</button>
         </div>
         <div className="pdf-viewer-zoom-controls">
-          <button className={fitMode === "page" ? "active" : ""} onClick={() => setFitMode("page")} type="button">Sığdır</button>
-          <button className={fitMode === "width" ? "active" : ""} onClick={() => setFitMode("width")} type="button">Genişlik</button>
+          <button className={fitMode === "page" ? "active" : ""} onClick={() => selectFitMode("page")} type="button">Sığdır</button>
+          <button className={fitMode === "width" ? "active" : ""} onClick={() => selectFitMode("width")} type="button">Genişlik</button>
           <button className={fitMode === "custom" && Math.abs(effectiveScale - 1) < 0.01 ? "active" : ""} onClick={() => applyCustomZoom(1)} type="button">%100</button>
           <button onClick={() => applyCustomZoom(effectiveScale - 0.1)} type="button" aria-label="Uzaklaştır">−</button>
           <span>{Math.round(effectiveScale * 100)}%</span>
           <button onClick={() => applyCustomZoom(effectiveScale + 0.1)} type="button" aria-label="Yakınlaştır">+</button>
+          <button aria-pressed={magnifierRequested} className={`magnifier-toggle${magnifierRequested ? " active" : ""}`} onClick={toggleMagnifier} title="İmlecin çevresini büyüt" type="button">Büyüteç</button>
         </div>
         {sourceTarget?.pinned ? (
           <div className="document-source-focus-controls">
             <span>{sourceMatchStatus || "Kaynak aranıyor…"}</span>
-            <button onClick={clearSourceFocus} type="button">Tam belgeye dön</button>
+            <button onClick={clearSourceFocus} type="button">Vurguyu kaldır</button>
           </div>
         ) : null}
       </div>

@@ -88,22 +88,18 @@ test("resolveAccountSelection uses active index when several candidates are visi
   assert.equal(resolveAccountSelection(visibleAccounts, "770.", 1)?.code, "770.02");
 });
 
-test("applyAccountSelectionToLine always fills description from chart name", () => {
+test("applyAccountSelectionToLine preserves the journal description while changing the account", () => {
   assert.deepEqual(
-    applyAccountSelectionToLine({ account_code: "", description: "", debit: "0.00", credit: "0.00" }, accounts[2], accounts),
-    { account_code: "320.B04", description: "Rexton Medikal", debit: "0.00", credit: "0.00" },
+    applyAccountSelectionToLine({ account_code: "", description: "TICKET RESTAURANT YEMEK BEDELI", debit: "0.00", credit: "0.00" }, accounts[2], accounts),
+    { account_code: "320.B04", description: "TICKET RESTAURANT YEMEK BEDELI", debit: "0.00", credit: "0.00" },
   );
   assert.deepEqual(
     applyAccountSelectionToLine(
-      { account_code: "191.01.020", description: "Indirilecek KDV %20", debit: "0.00", credit: "0.00" },
+      { account_code: "191.01.020", description: "Fatura satiri", debit: "0.00", credit: "0.00" },
       accounts[3],
       accounts,
     ),
-    { account_code: "770.01", description: "Genel gider", debit: "0.00", credit: "0.00" },
-  );
-  assert.deepEqual(
-    applyAccountSelectionToLine({ account_code: "191.01.020", description: "Elle yazildi", debit: "0.00", credit: "0.00" }, accounts[1], accounts),
-    { account_code: "191.01.020", description: "Indirilecek KDV %20", debit: "0.00", credit: "0.00" },
+    { account_code: "770.01", description: "Fatura satiri", debit: "0.00", credit: "0.00" },
   );
 });
 

@@ -40,7 +40,7 @@ test("portal visible copy presents AI agent automation without internal implemen
     source("demo-data.ts"),
   ].join("\n");
 
-  assert.match(visibleSource, /AI ajan destekli fiş taslağı/);
+  assert.match(visibleSource, /Belgelerden fişe, tek çalışma alanında/);
   assert.match(visibleSource, /Otomasyon adayı/);
   assert.match(visibleSource, /Güven düzeyi/);
   assert.match(visibleSource, /Karar notu/);

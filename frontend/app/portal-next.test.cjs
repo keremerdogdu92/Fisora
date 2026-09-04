@@ -214,3 +214,24 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(styles, /document-source-focus-controls/);
   assert.match(styles, /journal-source-row/);
 });
+
+test("collapsed next sidebar always keeps a visible expand control", () => {
+  const shell = source("portal-next", "portal-next-shell.tsx");
+  const styles = source("portal-next", "portal-next.css");
+
+  assert.match(shell, /aria-label=\{collapsed \? "Menüyü genişlet" : "Menüyü daralt"\}/);
+  assert.match(styles, /\.portal-next-sidebar\.collapsed \.portal-next-collapse\s*\{[\s\S]*?display:\s*inline-grid/);
+});
+
+test("shared login gateway uses the portal-next product language", () => {
+  const page = source("page.tsx");
+  const styles = source("styles.css");
+
+  assert.match(page, /landing-shell fisora-gateway/);
+  assert.match(page, /Belgelerden fişe, tek çalışma alanında\./);
+  assert.match(page, /gateway-feature-list/);
+  assert.match(page, /Fisora'ya giriş yap/);
+  assert.match(styles, /\.fisora-gateway \.role-copy/);
+  assert.match(styles, /--gateway-navy:\s*#1e3a5f/);
+  assert.match(styles, /--gateway-ink:\s*#14201f/);
+});

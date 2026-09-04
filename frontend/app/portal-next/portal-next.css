@@ -2359,3 +2359,12 @@
   justify-content: flex-end;
   margin-left: 0;
 }
+
+
+/* Keep the desktop rail reversible: the expand control must remain visible after collapse. */
+.portal-next-sidebar.collapsed .portal-next-collapse {
+  display: inline-grid;
+  justify-self: center;
+  margin-top: 4px;
+  place-items: center;
+}

@@ -1,3 +1,5 @@
+// File: frontend/app/page.tsx
+// Summary: Renders the shared Fisora role gateway with production authentication and the portal-next visual language.
 "use client";
 
 import { useMemo, useState } from "react";
@@ -113,24 +115,38 @@ export default function RoleGatewayLanding() {
   }
 
   return (
-    <main className="landing-shell">
+    <main className="landing-shell fisora-gateway">
       <header className="landing-header">
         <a className="landing-brand" href="/">
-          <span>Fisora</span>
+          <span className="gateway-brand-mark">F</span>
+          <span className="gateway-brand-copy">
+            <strong>Fisora</strong>
+            <small>Mali müşavir çalışma sistemi</small>
+          </span>
         </a>
       </header>
 
       <section className="role-gateway">
         <div className="role-copy">
-          <span>Muhasebe operasyon çalışma alanı</span>
-          <h1>AI ajan destekli fiş taslağı ve müşavir kontrolü</h1>
+          <span className="gateway-kicker">Mali müşavir çalışma sistemi</span>
+          <h1>Belgelerden fişe, tek çalışma alanında.</h1>
           <p>
-            Belge ayrıştırma, muhasebe motoru, AI ajan önerileri ve müşavir
-            kararları aynı çalışma alanında ilerler.
+            Fisora belgeleri okur, muhasebe fişi taslağını hazırlar ve kontrolü
+            müşavirin elinde tutar. Günlük iş, kaynak belge ve fiş aynı akışta ilerler.
           </p>
+          <div className="gateway-feature-list" aria-label="Fisora çalışma akışı">
+            <div><span>01</span><strong>Belgeyi oku</strong><small>PDF ve HTML kaynaklarını güvenli biçimde işle.</small></div>
+            <div><span>02</span><strong>Fişi hazırla</strong><small>Kaynağı gösterilebilen muhasebe taslağı oluştur.</small></div>
+            <div><span>03</span><strong>Kontrol et</strong><small>İstisnayı incele, onayla ve çıktıya taşı.</small></div>
+          </div>
         </div>
 
         <section className="role-entry-panel" aria-label="Rol seçimi ve giriş">
+          <div className="gateway-login-heading">
+            <span>Güvenli erişim</span>
+            <h2>Fisora'ya giriş yap</h2>
+            <p>Çalışma alanınızı seçin ve hesabınızla devam edin.</p>
+          </div>
           <div className="role-card-grid">
             {entries.map((entry) => (
               <button
@@ -210,15 +226,15 @@ export default function RoleGatewayLanding() {
       <section className="workflow-strip" aria-label="Portal iş akışı">
         <div>
           <span>01</span>
-          <strong>Belge yükle</strong>
+          <strong>Belgeyi al</strong>
         </div>
         <div>
           <span>02</span>
-          <strong>AI destekli taslak</strong>
+          <strong>Fişi hazırla</strong>
         </div>
         <div>
           <span>03</span>
-          <strong>Müşavir onayı</strong>
+          <strong>Kontrol et ve aktar</strong>
         </div>
       </section>
     </main>

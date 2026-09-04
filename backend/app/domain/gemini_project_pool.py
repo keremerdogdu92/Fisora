@@ -1,3 +1,5 @@
+# File: backend/app/domain/gemini_project_pool.py
+# Summary: Dispatches Gemini calls across bounded project slots with rate-aware failover and cooldown handling.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -206,7 +208,8 @@ class GeminiProjectPoolProvider:
             except GeminiProviderAttemptError as error:
                 last_error = error
                 status = error.attempt.http_status
-                if status in {401, 403, 429}:
+                failover_statuses = {401, 403, 429, 500, 502, 503, 504}
+                if status in failover_statuses:
                     with self._lock:
                         self._cooling_until[config.slot_name] = (
                             float("inf") if status in {401, 403}

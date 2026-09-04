@@ -811,3 +811,109 @@
   .portal-next-theme .document-agent-row { justify-content: stretch; }
   .portal-next-theme .queue-stepper { justify-self: stretch; width: 100%; }
 }
+
+
+/* Document inspector adds source-linked focus and a buttonless inspection lens to the controlled invoice viewers. */
+.portal-next-theme .pdf-page-surface {
+  flex: 0 0 auto;
+  margin: auto;
+  position: relative;
+}
+
+.portal-next-theme .pdf-page-surface > canvas {
+  margin: 0;
+}
+
+.portal-next-theme .document-source-highlight {
+  background: rgba(250, 204, 21, 0.28);
+  border: 1px solid rgba(180, 83, 9, 0.62);
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.58);
+  pointer-events: none;
+  position: absolute;
+  z-index: 12;
+}
+
+.portal-next-theme .document-source-highlight.pinned {
+  background: rgba(250, 204, 21, 0.38);
+  border-color: rgba(146, 64, 14, 0.88);
+}
+
+.portal-next-theme .document-magnifier {
+  background: #ffffff;
+  border: 2px solid rgba(255, 255, 255, 0.96);
+  border-radius: 50%;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.32), 0 0 0 1px rgba(15, 23, 42, 0.28);
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  transition: opacity 70ms ease;
+  z-index: 30;
+}
+
+.portal-next-theme .document-magnifier.visible,
+.portal-next-theme .html-document-magnifier {
+  opacity: 1;
+}
+
+.portal-next-theme .pdf-document-magnifier canvas {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.portal-next-theme .html-document-viewer,
+.portal-next-theme .html-viewer-stage {
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.portal-next-theme .html-viewer-stage {
+  position: relative;
+}
+
+.portal-next-theme .html-document-frame {
+  background: #ffffff;
+  border: 0;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.portal-next-theme .html-document-lens-frame {
+  border: 0;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform-origin: top left;
+}
+
+.portal-next-theme .journal-ledger tbody tr.source-linked-row > td {
+  transition: background 90ms ease, box-shadow 90ms ease;
+}
+
+.portal-next-theme .journal-ledger tbody tr.source-focused-row > td {
+  background: #fff9db;
+}
+
+.portal-next-theme .journal-ledger tbody tr.source-pinned-row > td {
+  background: #fff3bf;
+  box-shadow: inset 0 1px 0 rgba(180, 83, 9, 0.22), inset 0 -1px 0 rgba(180, 83, 9, 0.22);
+}
+
+.portal-next-theme .journal-ledger tbody tr.source-focused-row .source-review-evidence {
+  color: #92400e;
+  font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .portal-next-theme .document-magnifier {
+    max-height: 210px;
+    max-width: 210px;
+  }
+}

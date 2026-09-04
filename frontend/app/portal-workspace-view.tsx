@@ -2,7 +2,7 @@
 // Summary: Renders the accountant invoice workbench, progressive AI stage cards, navigation, and final-result approval gates.
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   documentMatchesSegment,
   nextDocumentSelection,
@@ -11,6 +11,7 @@ import {
 import { reviewReasonLabel } from "./portal-normalization";
 import { AiTracePanel, DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import { PortalNextWorkspaceControls } from "./portal-next/portal-next-workspace-controls";
+import type { DocumentSourceFocus } from "./shared/components/document-viewers/document-inspector-types";
 import type {
   CancellationRequest,
   CorrectionDraft,
@@ -215,6 +216,18 @@ export function AccountantWorkspace({
 
   const [documentQuery, setDocumentQuery] = useState("");
   const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>("all");
+  const [hoverSourceFocus, setHoverSourceFocus] = useState<DocumentSourceFocus | null>(null);
+  const [pinnedSourceFocus, setPinnedSourceFocus] = useState<DocumentSourceFocus | null>(null);
+  const activeSourceFocus = pinnedSourceFocus?.documentId === selectedDocument?.id
+    ? pinnedSourceFocus
+    : hoverSourceFocus?.documentId === selectedDocument?.id
+      ? hoverSourceFocus
+      : null;
+
+  useEffect(() => {
+    setHoverSourceFocus(null);
+    setPinnedSourceFocus(null);
+  }, [selectedDocument?.id]);
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
     : undefined;
@@ -373,9 +386,9 @@ export function AccountantWorkspace({
 
       <section className="document-review-main">
         {controlledPdfPreview ? (
-          <DocumentPreview controlledPdfPreview document={selectedDocument} session={session} />
+          <DocumentPreview controlledPdfPreview document={selectedDocument} session={session} sourceFocus={activeSourceFocus} />
         ) : (
-          <DocumentPreview document={selectedDocument} session={session} />
+          <DocumentPreview document={selectedDocument} session={session} sourceFocus={activeSourceFocus} />
         )}
         <JournalPanel
           correctionDraft={correctionDraft}
@@ -387,10 +400,13 @@ export function AccountantWorkspace({
           onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
           onReprocessDocument={onReprocessDocument}
           onRequestStatementAi={onRequestStatementAi}
+          onSourceHover={setHoverSourceFocus}
+          onSourcePin={setPinnedSourceFocus}
           onSaveDecision={onSaveDecision}
           onSaveStatementDecision={onSaveStatementDecision}
           selectedStatementLineNo={selectedStatementLineNo}
           session={session}
+          sourceFocus={activeSourceFocus}
           setCorrectionDraft={setCorrectionDraft}
           setSelectedStatementLineNo={setSelectedStatementLineNo}
           statementAiStatus={statementAiStatus}

@@ -6,6 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, classifyDraftAccountCode, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
+import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
+import { documentSourceFocusKey } from "./shared/components/document-viewers/document-inspector-types";
+import type { DocumentSourceFocus } from "./shared/components/document-viewers/document-inspector-types";
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
 import { backendAuthHeaders, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
@@ -457,7 +460,7 @@ function HtmlSourceComparison({ document, previewUrl }: { document: PilotDocumen
   );
 }
 
-export function DocumentPreview({ controlledPdfPreview = false, document, session }: { controlledPdfPreview?: boolean; document?: PilotDocument; session?: LocalSession | null }) {
+export function DocumentPreview({ controlledPdfPreview = false, document, session, sourceFocus }: { controlledPdfPreview?: boolean; document?: PilotDocument; session?: LocalSession | null; sourceFocus?: DocumentSourceFocus | null }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
 
@@ -524,7 +527,9 @@ export function DocumentPreview({ controlledPdfPreview = false, document, sessio
             isImageMime(document.originalDocumentMimeType) ? (
               <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
             ) : pdfPreview ? (
-              <PdfDocumentViewer fileName={document.fileName} src={previewUrl} />
+              <PdfDocumentViewer fileName={document.fileName} sourceFocus={sourceFocus} src={previewUrl} />
+            ) : controlledPdfPreview && htmlPreview ? (
+              <HtmlDocumentViewer fileName={document.fileName} sourceFocus={sourceFocus} src={previewUrl} />
             ) : canFramePreview ? (
               <iframe
                 className="original-document-frame"
@@ -614,6 +619,8 @@ export function JournalPanel({
   hasUnsavedReviewChanges,
   nextKeyboardShortcuts = false,
   onApproveAndNext,
+  onSourceHover,
+  onSourcePin,
   onResetDraft,
   onReprocessDocument,
   onRequestStatementAi,
@@ -621,6 +628,7 @@ export function JournalPanel({
   onSaveStatementDecision,
   selectedStatementLineNo,
   session,
+  sourceFocus,
   setCorrectionDraft,
   setSelectedStatementLineNo,
   statementAiStatus,
@@ -631,6 +639,8 @@ export function JournalPanel({
   hasUnsavedReviewChanges: boolean;
   nextKeyboardShortcuts?: boolean;
   onApproveAndNext: () => void | Promise<void>;
+  onSourceHover: (focus: DocumentSourceFocus | null) => void;
+  onSourcePin: (focus: DocumentSourceFocus | null) => void;
   onResetDraft: () => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
@@ -638,6 +648,7 @@ export function JournalPanel({
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   selectedStatementLineNo: number;
   session: LocalSession | null;
+  sourceFocus?: DocumentSourceFocus | null;
   setCorrectionDraft: (value: CorrectionDraft) => void;
   setSelectedStatementLineNo: (value: number) => void;
   statementAiStatus: string;
@@ -797,6 +808,7 @@ export function JournalPanel({
         <ManualDraftEditor
           activeDraftLines={activeDraftLines}
           chartAccounts={document.chartAccounts}
+          documentId={document.id}
           generatedDraftLines={generatedDraftLines}
           invalidAccountCodes={invalidAccountCodes}
           newCounterpartyAccountCodes={newCounterpartyAccountCodes}
@@ -805,7 +817,10 @@ export function JournalPanel({
           sourceReviewTotalCount={document.sourceReviewRows?.length ?? 0}
           onAddLine={addManualDraftLine}
           onRemoveLine={removeManualDraftLine}
+          onSourceHover={onSourceHover}
+          onSourcePin={onSourcePin}
           onUpdateLine={setManualDraftLine}
+          sourceFocus={sourceFocus}
         />
         {!pendingDirectionConflict ? (
           <section className="journal-primary-approve" aria-label="Ana fiş kararı">
@@ -1055,6 +1070,7 @@ function QualityScorecardPanel({ document }: { document: PilotDocument }) {
 function ManualDraftEditor({
   activeDraftLines,
   chartAccounts,
+  documentId,
   generatedDraftLines,
   invalidAccountCodes,
   newCounterpartyAccountCodes,
@@ -1063,10 +1079,14 @@ function ManualDraftEditor({
   sourceReviewTotalCount,
   onAddLine,
   onRemoveLine,
+  onSourceHover,
+  onSourcePin,
   onUpdateLine,
+  sourceFocus,
 }: {
   activeDraftLines: DraftLine[];
   chartAccounts: ChartAccountOption[];
+  documentId: string;
   generatedDraftLines: DraftLine[];
   invalidAccountCodes: string[];
   newCounterpartyAccountCodes: string[];
@@ -1075,7 +1095,10 @@ function ManualDraftEditor({
   sourceReviewTotalCount: number;
   onAddLine: () => void;
   onRemoveLine: (index: number) => void;
+  onSourceHover: (focus: DocumentSourceFocus | null) => void;
+  onSourcePin: (focus: DocumentSourceFocus | null) => void;
   onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
+  sourceFocus?: DocumentSourceFocus | null;
 }) {
   const descriptionRefs = useRef<Array<HTMLInputElement | null>>([]);
   const debitRefs = useRef<Array<HTMLInputElement | null>>([]);
@@ -1132,8 +1155,26 @@ function ManualDraftEditor({
             </tr>
           </thead>
           <tbody>
-            {rows.map((line, index) => (
-              <tr key={index}>
+            {rows.map((line, index) => {
+              const lineSourceFocus = line.source_text ? {
+                documentId,
+                key: documentSourceFocusKey(documentId, line.source_text, line.source_position, index),
+                pinned: false,
+                sourcePosition: line.source_position,
+                sourceText: line.source_text,
+              } satisfies DocumentSourceFocus : null;
+              const sourceFocused = Boolean(lineSourceFocus && sourceFocus?.key === lineSourceFocus.key);
+              return (
+              <tr
+                className={`${lineSourceFocus ? "source-linked-row" : ""}${sourceFocused ? " source-focused-row" : ""}${sourceFocused && sourceFocus?.pinned ? " source-pinned-row" : ""}`.trim() || undefined}
+                key={index}
+                onClick={(event) => {
+                  if (!lineSourceFocus || (event.target as HTMLElement).closest("button")) return;
+                  onSourcePin(sourceFocused && sourceFocus?.pinned ? null : { ...lineSourceFocus, pinned: true });
+                }}
+                onMouseEnter={() => { if (lineSourceFocus) onSourceHover(lineSourceFocus); }}
+                onMouseLeave={() => onSourceHover(null)}
+              >
                 <td>
                   <AccountCodeCombobox
                     accounts={chartAccounts}
@@ -1201,7 +1242,8 @@ function ManualDraftEditor({
                 </td>
                 <td><button onClick={() => onRemoveLine(index)} type="button">Sil</button></td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -84,7 +84,7 @@ function normalizeRuleInterpretation(value: unknown) {
 function normalizeReviewData(raw: ReviewData): PilotData {
   const clientId = safeText(raw.clientId, "ofis-calisma-client");
   const clientName = safeText(raw.clientName, "Ofis Mükellefi");
-  const clientUser = raw.portalUsers?.find((user) => user.role === "client_user") ?? raw.portalUsers?.[0];
+  const clientUser = raw.portalUsers?.find((user) => user.role === "client_user");
   const documentsFromRows = (raw.invoiceRows ?? []).map((row, index): PilotDocument => {
     const fileName = safeText(row.documentRef || row.fileName, `ofis-belge-${index + 1}.pdf`);
     const status = normalizeStatus(row.exportStatus || row.status);
@@ -303,8 +303,8 @@ function normalizeReviewData(raw: ReviewData): PilotData {
         clientId,
         clientName,
         taxId: "ofis-local",
-        portalUserId: safeText(clientUser?.userId, "ofis-mukellef-user"),
-        userLabel: safeText(clientUser?.displayName, "Mükellef kullanıcısı"),
+        portalUserId: safeText(clientUser?.userId),
+        userLabel: safeText(clientUser?.displayName),
         onboardingStatus: "Hesap planı ve mükellef kartı çalışma alanında hazır",
       },
     ],
@@ -347,10 +347,7 @@ export function normalizePilotData(raw: unknown): PilotData {
       generatedFrom: safeText(maybePilot.generatedFrom, "Yerel çalışma verisi"),
       clients: (maybePilot.clients as PilotClient[]).map((client) => ({
         ...client,
-        portalUserId: safeText(
-          client.portalUserId || (client as PilotClient & { userId?: string }).userId,
-          "ofis-mukellef-user",
-        ),
+        portalUserId: safeText(client.portalUserId || (client as PilotClient & { userId?: string }).userId),
       })),
       documents: (maybePilot.documents as PilotDocument[]).map((document) => ({
         ...document,

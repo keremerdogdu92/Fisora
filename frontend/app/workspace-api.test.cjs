@@ -344,6 +344,15 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
     clientId: "client-1",
     clientName: "Canli Pilot A.S.",
     taxId: "1111111111",
+    tckn: "",
+    vkn: "",
+    legalName: "",
+    tradeName: "",
+    taxOffice: "",
+    naceCode: "",
+    activityDescription: "",
+    workplaceAddresses: [],
+    chartAccountCount: 3,
     userLabel: "Mukellef Kullanici",
     portalUserId: "mukellef-user",
     onboardingStatus: "Çalışma alanı",
@@ -505,6 +514,26 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
     period: "2026-06",
     status: "packaged",
   });
+});
+
+test("accountant access is not exposed as the client portal identity", () => {
+  const workspace = {
+    ...workspaceRecord,
+    portal_users: [
+      {
+        user_id: "kerem@example.com",
+        display_name: "Kerem",
+        role: "accountant",
+      },
+    ],
+  };
+  const data = normalizeBackendWorkspaces({
+    clients: [clientRecord],
+    workspaces: [workspace],
+    source: "test",
+  });
+  assert.equal(data.clients[0].portalUserId, "");
+  assert.equal(data.clients[0].userLabel, "");
 });
 
 test("processed backend documents keep upload stamp and expose direction conflict separately", () => {

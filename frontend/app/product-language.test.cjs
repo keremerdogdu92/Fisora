@@ -83,11 +83,13 @@ test("document processing shows passive AI agent capacity labels", () => {
   assert.match(stylesSource, /@media \(max-width: 720px\)/);
 });
 
-test("client onboarding labels portal user as the client email login", () => {
+test("client detail keeps portal access explicit and hides technical reprocess controls", () => {
   const clientsSource = source("portal-clients-view.tsx");
 
   assert.match(clientsSource, /Mükellef e-posta \/ giriş kullanıcı adı/);
-  assert.match(clientsSource, /Mükellefi yeniden işle/);
+  assert.match(clientsSource, /Mükellef portalını aç/);
+  assert.match(clientsSource, /Davet oluştur/);
+  assert.doesNotMatch(clientsSource, /Mükellefi yeniden işle/);
 });
 
 test("client reprocess copy explains queued background processing", () => {

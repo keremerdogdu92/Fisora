@@ -1,5 +1,5 @@
 // File: frontend/app/portal-clients-view.tsx
-// Summary: Renders accountant taxpayer management, Gemini tax-certificate onboarding, operational controls, and cancellation review using live portal state and callbacks.
+// Summary: Renders accountant taxpayer management, streamlined client detail, portal access, Gemini onboarding, and cancellation review.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -117,9 +117,6 @@ export function ClientManagementView({
 }) {
   const [activeTab, setActiveTab] = useState<ClientManagementTab>("client-list");
   const [clientSurface, setClientSurface] = useState<ClientManagementSurface>("list");
-  const selectedDocumentRefSet = new Set(selectedDocumentRefs);
-  const selectableDocumentRefs = documents.map((document) => document.originalDocumentRef || document.id).filter(Boolean);
-  const allDocumentsSelected = Boolean(selectableDocumentRefs.length && selectableDocumentRefs.every((ref) => selectedDocumentRefSet.has(ref)));
   const hasSelectedClient = Boolean(selectedClient);
   const readyClientCount = clientRows.filter((row) => (
     row.documentCount > 0
@@ -135,18 +132,6 @@ export function ClientManagementView({
   const otherCount = documents.filter((document) => document.intakeCategory === "special_document").length;
   const selectedTaxId = selectedClient?.vkn || selectedClient?.tckn || selectedClient?.taxId || "-";
   const onboardingAttachments = selectedClient?.onboardingAttachments ?? [];
-
-  const toggleDocument = (documentRef: string, checked: boolean) => {
-    if (checked) {
-      setSelectedDocumentRefs(Array.from(new Set([...selectedDocumentRefs, documentRef])));
-      return;
-    }
-    setSelectedDocumentRefs(selectedDocumentRefs.filter((ref) => ref !== documentRef));
-  };
-
-  const toggleAllDocuments = (checked: boolean) => {
-    setSelectedDocumentRefs(checked ? selectableDocumentRefs : []);
-  };
 
   const openClientDetail = (clientId: string) => {
     setSelectedClientId(clientId);
@@ -292,25 +277,21 @@ export function ClientManagementView({
             ← Mükellefler
           </button>
 
-          <header className="client-v13-detail-head">
-            <div>
+          <header className="panel client-v13-detail-hero">
+            <div className="client-v13-detail-identity">
+              <span>MÜKELLEF</span>
               <h2>{selectedClient?.clientName ?? "Mükellef"}</h2>
               <p>VKN / TCKN {selectedTaxId} · {selectedClient?.onboardingStatus || "Kurulum durumu bekleniyor"}</p>
             </div>
-            <button
-              className="primary"
-              disabled={!selectedClient?.portalUserId}
-              onClick={onOpenClientPortal}
-              type="button"
-            >
-              Mükellef ekranına git
-            </button>
+            <div className="client-v13-detail-hero-actions">
+              <span className={`client-state-pill ${selectedClient?.portalUserId ? "success" : "neutral"}`}>
+                {selectedClient?.portalUserId ? "Portal aktif" : "Portal tanımlı değil"}
+              </span>
+              {selectedClient?.portalUserId ? (
+                <button className="primary" onClick={onOpenClientPortal} type="button">Mükellef portalını aç</button>
+              ) : null}
+            </div>
           </header>
-
-          <nav className="client-v13-detail-tabs" aria-label="Mükellef görünümü">
-            <button className="active" type="button">Genel Bakış</button>
-            <button onClick={onOpenClientPortal} disabled={!selectedClient?.portalUserId} type="button">Mükellef Portalı</button>
-          </nav>
 
           <section className="client-v13-metrics detail" aria-label="Mükellef belge özeti">
             <article><span>Faturalar</span><strong>{invoiceCount}</strong><small>{selectedClientRow?.pendingReviewCount ?? 0} kontrol</small></article>
@@ -319,155 +300,81 @@ export function ClientManagementView({
             <article><span>Çıktıya hazır</span><strong>{selectedClientRow?.exportReadyCount ?? 0}</strong></article>
           </section>
 
-          <section className="client-v13-summary-grid">
-            <article className="panel client-v13-summary-card">
+          <section className="client-v13-detail-grid">
+            <article className="panel client-v13-detail-card client-v13-profile-card">
               <div className="section-heading">
-                <span>Kurulum</span>
-                <strong>{selectedClient?.onboardingStatus || "Durum bekleniyor"}</strong>
+                <span>Mükellef bilgileri</span>
+                <strong>{selectedClient?.legalName || selectedClient?.clientName || "-"}</strong>
               </div>
-              <div className="client-v13-profile-strip">
-                <div>
-                  <span>Onboarding dosyaları</span>
-                  <strong>{onboardingAttachments.length ? `${onboardingAttachments.length} dosya` : "Dosya yok"}</strong>
-                </div>
-                <div>
-                  <span>Hesap planı</span>
-                  <strong>{onboardingAttachments.some((item) => /hesap|chart/i.test(`${item.type} ${item.label} ${item.fileName}`)) ? "Dosya mevcut" : "Kontrol edin"}</strong>
-                </div>
-              </div>
+              <dl className="client-v13-fact-grid">
+                <div><dt>Vergi kimliği</dt><dd>{selectedTaxId}</dd></div>
+                <div><dt>Vergi dairesi</dt><dd>{selectedClient?.taxOffice || "—"}</dd></div>
+                <div><dt>NACE</dt><dd>{selectedClient?.naceCode || "—"}</dd></div>
+                <div><dt>Hesap planı</dt><dd>{selectedClient?.chartAccountCount ? `${selectedClient.chartAccountCount} hesap` : "Kontrol edin"}</dd></div>
+                <div className="wide"><dt>Faaliyet</dt><dd>{selectedClient?.activityDescription || "—"}</dd></div>
+                <div className="wide"><dt>İşyeri adresi</dt><dd>{selectedClient?.workplaceAddresses?.join(" · ") || "—"}</dd></div>
+              </dl>
             </article>
 
-            <article className="panel client-v13-summary-card">
+            <article className="panel client-v13-detail-card">
               <div className="section-heading">
-                <span>Portal erişimi</span>
-                <strong>{selectedClient?.portalUserId ? "Aktif" : "Henüz yok"}</strong>
-              </div>
-              <div className="client-v13-profile-strip">
-                <div>
-                  <span>Kullanıcı</span>
-                  <strong>{selectedClient?.portalUserId || "Davet oluşturulmadı"}</strong>
-                </div>
-                <div>
-                  <span>Açık talepler</span>
-                  <strong>{selectedClientRow?.cancellationCount ?? 0}</strong>
-                </div>
-              </div>
-            </article>
-          </section>
-
-          <section className="panel client-v13-operations">
-            <div className="section-heading">
-              <span>Mükellef işlemleri</span>
-              <strong>{selectedClient?.clientName ?? "-"}</strong>
-            </div>
-
-            <div className="client-v13-operation-grid">
-              <article className="settings-card">
-                <span>Hesap planı</span>
-                <strong>Yeni dosya yükle</strong>
-                <label className="file-drop-control compact-upload">
-                  <input
-                    accept=".csv,.xlsx,.xlsm"
-                    disabled={!hasSelectedClient}
-                    onChange={(event) => onExistingChartFileSelected(event.target.files)}
-                    type="file"
-                  />
-                  <span>Dosya seç</span>
-                  <small>CSV/XLSX/XLSM hesap planı</small>
-                </label>
-                {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
-              </article>
-
-              <article className="settings-card">
-                <span>Onboarding dosyaları</span>
+                <span>Kurulum dosyaları</span>
                 <strong>{onboardingAttachments.length ? `${onboardingAttachments.length} dosya` : "Dosya yok"}</strong>
-                <div className="client-document-delete-list">
-                  {onboardingAttachments.length ? onboardingAttachments.map((attachment) => (
-                    <a
-                      className="client-document-delete-row"
-                      href={onboardingAttachmentUrl(selectedClient?.clientId ?? "", attachment.ref)}
-                      key={`${attachment.type}-${attachment.ref}`}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <span>{attachment.label}</span>
-                      <small>{attachment.fileName}</small>
-                    </a>
-                  )) : <p className="empty">Vergi levhası veya hesap planı dosyası yok.</p>}
-                </div>
-              </article>
+              </div>
+              <div className="client-v13-file-list">
+                {onboardingAttachments.length ? onboardingAttachments.map((attachment) => (
+                  <a href={onboardingAttachmentUrl(selectedClient?.clientId ?? "", attachment.ref)} key={`${attachment.type}-${attachment.ref}`} rel="noreferrer" target="_blank">
+                    <span>{attachment.label}</span>
+                    <strong>{attachment.fileName}</strong>
+                  </a>
+                )) : <p className="empty">Vergi levhası veya hesap planı dosyası bulunmuyor.</p>}
+              </div>
 
-              <article className="settings-card">
+              <label className="file-drop-control compact-upload client-v13-chart-replace">
+                <input
+                  accept=".csv,.xlsx,.xlsm"
+                  disabled={!hasSelectedClient}
+                  onChange={(event) => onExistingChartFileSelected(event.target.files)}
+                  type="file"
+                />
+                <span>Hesap planını güncelle</span>
+                <small>CSV / XLSX / XLSM</small>
+              </label>
+              {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
+            </article>
+
+            <article className="panel client-v13-detail-card client-v13-portal-card">
+              <div className="section-heading">
                 <span>Portal erişimi</span>
-                <strong>{selectedClient?.portalUserId ?? "-"}</strong>
-                <div className="inline-actions">
-                  <input
-                    aria-label="Mükellef üyelik adı"
-                    onChange={(event) => setPortalUserIdDraft(event.target.value)}
-                    placeholder="Mükellef e-posta / giriş kullanıcı adı"
-                    value={portalUserIdDraft}
-                  />
-                  <button onClick={onCreateInvite} type="button">Davet linki oluştur</button>
-                </div>
-                <small>Mükellef davet linkinden kendi şifresini belirler.</small>
-                {clientPortalOpenStatus ? <p className="decision-status">{clientPortalOpenStatus}</p> : null}
-                {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
-                {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
-              </article>
+                <strong>{selectedClient?.portalUserId ? "Aktif" : "Tanımlı değil"}</strong>
+              </div>
+              {selectedClient?.portalUserId ? (
+                <>
+                  <div className="client-v13-portal-user">
+                    <span>Portal kullanıcısı</span>
+                    <strong>{selectedClient.portalUserId}</strong>
+                  </div>
+                  <button className="primary" onClick={onOpenClientPortal} type="button">Mükellef portalını aç</button>
+                  <div className="client-v13-portal-edit">
+                    <input aria-label="Mükellef üyelik adı" onChange={(event) => setPortalUserIdDraft(event.target.value)} value={portalUserIdDraft} />
+                    <button className="secondary" onClick={onUpdatePortalAccess} type="button">Girişi güncelle</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="client-v13-muted-copy">Bu mükellef için henüz portal kullanıcısı oluşturulmamış.</p>
+                  <div className="client-v13-portal-edit">
+                    <input aria-label="Mükellef üyelik adı" onChange={(event) => setPortalUserIdDraft(event.target.value)} placeholder="Mükellef e-posta / kullanıcı adı" value={portalUserIdDraft} />
+                    <button className="primary" disabled={!portalUserIdDraft.trim()} onClick={onCreateInvite} type="button">Davet oluştur</button>
+                  </div>
+                </>
+              )}
 
-              <article className="settings-card client-v13-document-ops">
-                <span>Mükellef belgeleri</span>
-                <strong>{documents.length} belge</strong>
-                <label className="bulk-document-check">
-                  <input
-                    checked={allDocumentsSelected}
-                    disabled={!selectableDocumentRefs.length}
-                    onChange={(event) => toggleAllDocuments(event.target.checked)}
-                    type="checkbox"
-                  />
-                  Tüm belgeleri seç
-                </label>
-                <div className="client-document-delete-list">
-                  {documents.length ? documents.map((document) => {
-                    const documentRef = document.originalDocumentRef || document.id;
-                    return (
-                      <label className="client-document-delete-row" key={document.id}>
-                        <input
-                          checked={selectedDocumentRefSet.has(documentRef)}
-                          onChange={(event) => toggleDocument(documentRef, event.target.checked)}
-                          type="checkbox"
-                        />
-                        <span>{document.fileName}</span>
-                        <small>{document.status}</small>
-                      </label>
-                    );
-                  }) : <p className="empty">Belge yok.</p>}
-                </div>
-                <div className="client-v13-danger-actions">
-                  <button disabled={!hasSelectedClient} onClick={onReprocessSelectedClient} type="button">
-                    Mükellefi yeniden işle
-                  </button>
-                  <label className="bulk-document-check danger">
-                    <input
-                      checked={clientDocumentDeleteConfirmed}
-                      onChange={(event) => setClientDocumentDeleteConfirmed(event.target.checked)}
-                      type="checkbox"
-                    />
-                    Seçili belgelerin dosyalarıyla birlikte silineceğini onaylıyorum
-                  </label>
-                  <button
-                    className="danger"
-                    disabled={!selectedDocumentRefs.length}
-                    onClick={onDeleteSelectedDocuments}
-                    type="button"
-                  >
-                    Seçili belgeleri sil
-                  </button>
-                </div>
-                {clientReprocessStatus ? <p className="decision-status">{clientReprocessStatus}</p> : null}
-                {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
-              </article>
-            </div>
+              <small>Mükellef davet bağlantısından kendi şifresini belirler.</small>
+              {clientPortalOpenStatus ? <p className="decision-status">{clientPortalOpenStatus}</p> : null}
+              {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
+              {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
+            </article>
           </section>
         </section>
       ) : null}

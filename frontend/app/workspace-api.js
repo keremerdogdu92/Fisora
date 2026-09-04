@@ -400,14 +400,25 @@ function normalizeBackendWorkspaces({ clients = [], workspaces = [], source = "�
 function normalizeBackendClient(clientRecord, workspace) {
   const profile = clientRecord?.profile || {};
   const clientId = clientIdFromRecord(clientRecord);
-  const portalUser = safeList(workspace?.portal_users).find((user) => user?.role === "client_user") || safeList(workspace?.portal_users)[0] || {};
+  const portalUser = safeList(workspace?.portal_users).find((user) => user?.role === "client_user") || {};
+  const onboarding = clientRecord?.onboarding || {};
+  const missingOnboarding = safeList(onboarding?.missing_fields);
   return {
     clientId,
     clientName: safeText(profile.title || clientRecord?.title, clientId || "Mükellef"),
-    taxId: safeText(profile.tax_id || clientRecord?.tax_id),
-    userLabel: safeText(portalUser.display_name || portalUser.user_id, "Mükellef kullanıcısı"),
-    portalUserId: safeText(portalUser.user_id, "mukellef-user"),
-    onboardingStatus: "Çalışma alanı",
+    taxId: safeText(profile.tax_id || profile.tax_identifier || clientRecord?.tax_id),
+    tckn: safeText(profile.tckn),
+    vkn: safeText(profile.vkn),
+    legalName: safeText(profile.legal_name),
+    tradeName: safeText(profile.trade_name),
+    taxOffice: safeText(profile.tax_office),
+    naceCode: safeText(profile.nace_code),
+    activityDescription: safeText(profile.activity_description),
+    workplaceAddresses: safeList(profile.workplace_addresses).map(String).filter(Boolean),
+    chartAccountCount: Number(workspace?.chart_accounts?.account_count || 0),
+    userLabel: safeText(portalUser.display_name || portalUser.user_id),
+    portalUserId: safeText(portalUser.user_id),
+    onboardingStatus: onboarding?.is_ready ? "Kurulum tamam" : missingOnboarding.length ? `${missingOnboarding.length} kurulum eksiği` : "Çalışma alanı",
     onboardingAttachments: normalizeOnboardingAttachments(workspace),
   };
 }

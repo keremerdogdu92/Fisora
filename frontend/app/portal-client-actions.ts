@@ -647,6 +647,10 @@ export async function openSelectedClientPortalAction({
     return;
   }
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
+  const popup = typeof window === "undefined" ? null : window.open("about:blank", "_blank");
+  if (popup) {
+    try { popup.opener = null; popup.document.title = "Fisora"; } catch { /* cross-window hardening is best-effort */ }
+  }
   setClientPortalOpenStatus(`${selectedClient.clientName} mükellef ekranı açılıyor...`);
   try {
     const delegatedSession = await createDelegatedClientSession({
@@ -660,13 +664,14 @@ export async function openSelectedClientPortalAction({
       origin: typeof window === "undefined" ? "" : window.location.origin,
       session: delegatedSession,
     });
-    const popup = typeof window === "undefined" ? null : window.open(url, "_blank", "noopener,noreferrer");
-    setClientPortalOpenStatus(
-      popup
-        ? `${selectedClient.clientName} mükellef ekranı yeni sekmede açıldı.`
-        : "Yeni sekme açılamadı. Tarayıcı popup engelini kontrol edin.",
-    );
+    if (popup) {
+      popup.location.href = url;
+      setClientPortalOpenStatus(`${selectedClient.clientName} mükellef ekranı yeni sekmede açıldı.`);
+    } else if (typeof window !== "undefined") {
+      window.location.assign(url);
+    }
   } catch (error) {
+    if (popup && !popup.closed) popup.close();
     const message = error instanceof Error ? error.message : String(error);
     setClientPortalOpenStatus(`Mükellef ekranı açılamadı. ${sessionAuthErrorMessage(message) || message}`);
   }

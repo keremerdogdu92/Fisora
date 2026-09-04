@@ -316,6 +316,13 @@ export type PilotClient = {
   taxId: string;
   tckn?: string;
   vkn?: string;
+  legalName?: string;
+  tradeName?: string;
+  taxOffice?: string;
+  naceCode?: string;
+  activityDescription?: string;
+  workplaceAddresses?: string[];
+  chartAccountCount?: number;
   userLabel: string;
   portalUserId: string;
   onboardingStatus: string;

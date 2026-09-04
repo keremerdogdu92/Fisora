@@ -115,6 +115,7 @@ class WorkspaceService:
         x_fisora_user_id: str | None,
         x_fisora_session: str | None,
         fisora_session: str | None,
+        store_only: bool = False,
     ) -> dict[str, object]:
         normalized_client_id = client_id.strip()
         if not normalized_client_id:
@@ -127,12 +128,20 @@ class WorkspaceService:
         suffix = Path(original_name).suffix.lower()
         if suffix not in {".csv", ".xlsx", ".xlsm"}:
             raise HTTPException(status_code=400, detail=f"Unsupported chart account format: {suffix or 'unknown'}")
-        try:
-            parsed_accounts = self.chart_account_parser(file_path)
-        except (RuntimeError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        accounts = [asdict(account) for account in parsed_accounts]
-        stored = self.store.replace_chart_accounts(client_id=normalized_client_id, accounts=accounts)
+        accounts: list[dict[str, object]] = []
+        if store_only:
+            current_chart = self.store.get_workspace(normalized_client_id).get("chart_accounts") or {}
+            current_accounts = current_chart.get("accounts") if isinstance(current_chart, dict) else []
+            account_count = int(current_chart.get("account_count") or len(current_accounts or [])) if isinstance(current_chart, dict) else 0
+            stored = {"client_id": normalized_client_id, "account_count": account_count}
+        else:
+            try:
+                parsed_accounts = self.chart_account_parser(file_path)
+            except (RuntimeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            accounts = [asdict(account) for account in parsed_accounts]
+            stored = self.store.replace_chart_accounts(client_id=normalized_client_id, accounts=accounts)
+            account_count = len(accounts)
         raw_document = store_document_content(
             base_dir=self.document_storage_path,
             client_id=normalized_client_id,
@@ -148,7 +157,7 @@ class WorkspaceService:
             {
                 "attachment_ref": raw_payload.get("document_id", ""),
                 "attachment_type": "chart_accounts",
-                "parsed_account_count": len(accounts),
+                "parsed_account_count": account_count,
             }
         )
         attachment = self.store.save_onboarding_attachment(client_id=normalized_client_id, attachment=raw_payload)
@@ -156,11 +165,12 @@ class WorkspaceService:
             store=self.store,
             client_id=normalized_client_id,
             event_type="chart_accounts_uploaded",
-            status="ok" if accounts else "warning",
-            message="Hesap plani import edildi.",
+            status="ok" if account_count else "warning",
+            message="Hesap plani ham dosyasi saklandi." if store_only else "Hesap plani import edildi.",
             metadata={
                 "file_name": original_name,
-                "account_count": len(accounts),
+                "account_count": account_count,
+                "store_only": store_only,
                 "raw_attachment_ref": attachment["attachment_ref"],
             },
         )
@@ -191,7 +201,8 @@ class WorkspaceService:
     ) -> dict[str, object]:
         if not payload.client.client_id.strip():
             raise HTTPException(status_code=400, detail="client_id is required for onboarding package")
-        enriched_client_payload = self._with_nace_research(payload.client)
+        # New-client creation must not block on optional NACE research.
+        enriched_client_payload = payload.client
         client = self.store.upsert_client(
             client_id=enriched_client_payload.client_id,
             profile=enriched_client_payload.model_dump(),

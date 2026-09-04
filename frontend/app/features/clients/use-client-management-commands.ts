@@ -1,3 +1,5 @@
+// File: frontend/app/features/clients/use-client-management-commands.ts
+// Summary: Owns client-management UI state and delegates onboarding, portal, and document actions.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -40,7 +42,6 @@ export function useClientManagementCommands({
   const [newClientNaceResearchPending, setNewClientNaceResearchPending] = useState(false);
   const [newClientNaceResearchProfile, setNewClientNaceResearchProfile] = useState<Record<string, unknown> | null>(null);
   const [newClientNaceResearchStatus, setNewClientNaceResearchStatus] = useState("");
-  const [newClientNaceResearchWarningAccepted, setNewClientNaceResearchWarningAccepted] = useState(false);
   const [chartUploadStatus, setChartUploadStatus] = useState("");
   const [inviteStatus, setInviteStatus] = useState("");
   const [portalPassword, setPortalPasswordDraft] = useState("");
@@ -65,18 +66,13 @@ export function useClientManagementCommands({
       loginUserId,
       newClientChartAccountsFile,
       newClientDraft,
-      newClientNaceResearchPending,
-      newClientNaceResearchProfile,
-      newClientNaceResearchWarningAccepted,
       newClientTaxCertificateFile,
-      portalPassword,
       refreshBackendPilotData,
       session,
       setNewClientDraft,
       setNewClientChartAccountsFile,
       setNewClientNaceResearchProfile,
       setNewClientNaceResearchStatus,
-      setNewClientNaceResearchWarningAccepted,
       setNewClientStatus,
       setNewClientTaxCertificateFile,
       setNewClientTaxCertificateInputKey,
@@ -91,7 +87,6 @@ export function useClientManagementCommands({
       loginUserId,
       session,
       setNewClientDraft,
-      setNewClientNaceResearchPending,
       setNewClientNaceResearchProfile,
       setNewClientNaceResearchStatus,
       setNewClientStatus,
@@ -102,7 +97,6 @@ export function useClientManagementCommands({
   };
 
   const refreshNewClientNaceResearch = () => {
-    setNewClientNaceResearchWarningAccepted(false);
     void refreshNewClientNaceResearchAction({
       force: true,
       loginUserId,

@@ -620,9 +620,13 @@ function NewClientStepper({
   taxCertificateParsePending: boolean;
   taxCertificateStage: string;
 }) {
-  const identityReady = Boolean(draft.title.trim() && (draft.vkn.trim() || draft.tckn.trim() || draft.taxId.trim()) && draft.activityDescription.trim());
+  const identityReady = Boolean(draft.title.trim() && (draft.vkn.trim() || draft.tckn.trim() || draft.taxId.trim()));
+  const activityReady = Boolean(draft.activityDescription.trim() || draft.naceCode.trim() || draft.activityTags.length);
+  const addressReady = draft.workplaceAddresses.length > 0;
+  const profileReady = identityReady && activityReady && addressReady;
+  const taxCertificateReady = Boolean(taxCertificateFile && profileReady && !taxCertificateParsePending);
   const chartReady = draft.chartAccounts.length > 0;
-  const canComplete = identityReady && chartReady;
+  const canComplete = taxCertificateReady && chartReady;
   const [taxCertificatePreviewUrl, setTaxCertificatePreviewUrl] = useState("");
   const taxCertificateIsImage = Boolean(taxCertificateFile?.type?.startsWith("image/"));
   const [taxCertificateSlow, setTaxCertificateSlow] = useState(false);
@@ -655,17 +659,17 @@ function NewClientStepper({
           <span>Yeni mükellef</span>
           <strong>İlerlemeli kayıt</strong>
         </div>
-        <small>{canComplete ? "Tamamlanmaya hazır" : "Vergi levhası ve hesap planı gerekli"}</small>
+        <small>{canComplete ? "Kontrol tamamlandı · kayda hazır" : "Vergi levhasını kontrol edin ve hesap planını yükleyin"}</small>
       </div>
 
       <div className="onboarding-steps" aria-label="Yeni mükellef adımları">
-        <span className={identityReady ? "done" : "active"}>1 Vergi levhası</span>
-        <span className={chartReady ? "done" : identityReady ? "active" : ""}>2 Hesap planı</span>
-        <span className={chartReady ? "active" : ""}>3 Portal erişimi (opsiyonel)</span>
+        <span className={taxCertificateReady ? "done" : "active"}>1 Vergi levhası</span>
+        <span className={chartReady ? "done" : "active"}>2 Hesap planı</span>
+        <span className={canComplete ? "active" : ""}>3 Portal erişimi (opsiyonel)</span>
       </div>
 
       <section className="client-onboarding-steps" aria-label="Mükellef onboarding adımları">
-        <article className={`client-step tax-certificate-step ${identityReady ? "onboarding-step done" : "onboarding-step active"}`}>
+        <article className={`client-step tax-certificate-step ${taxCertificateReady ? "onboarding-step done" : "onboarding-step active"}`}>
           <div className="tax-certificate-workspace">
             <div>
               <span>1. Vergi levhası</span>
@@ -707,9 +711,8 @@ function NewClientStepper({
               <input aria-label="Görünen unvan" onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Görünen unvan" value={draft.title} />
               <input aria-label="Adı soyadı / yasal ad" onChange={(event) => setDraft({ ...draft, legalName: event.target.value })} placeholder="Adı soyadı / yasal ad" value={draft.legalName} />
               <input aria-label="Ticaret ünvanı" onChange={(event) => setDraft({ ...draft, tradeName: event.target.value })} placeholder="Ticaret ünvanı" value={draft.tradeName} />
-              <input aria-label="Vergi kimliği" inputMode="numeric" onChange={(event) => setDraft({ ...draft, taxId: event.target.value })} pattern="[0-9]*" placeholder="Vergi kimliği" value={draft.taxId} />
-              <input aria-label="VKN" inputMode="numeric" maxLength={10} onChange={(event) => setDraft({ ...draft, vkn: event.target.value, taxId: event.target.value || draft.tckn })} pattern="[0-9]*" placeholder="VKN" value={draft.vkn} />
-              <input aria-label="TCKN" inputMode="numeric" maxLength={11} onChange={(event) => setDraft({ ...draft, tckn: event.target.value, taxId: draft.vkn || event.target.value })} pattern="[0-9]*" placeholder="TCKN" value={draft.tckn} />
+              <input aria-label="VKN" inputMode="numeric" maxLength={10} onChange={(event) => { const value = event.target.value; setDraft({ ...draft, vkn: value, taxId: value || draft.tckn, taxIdentifier: value || draft.tckn, identityType: value ? "vkn" : draft.tckn ? "tckn" : "" }); }} pattern="[0-9]*" placeholder="VKN" value={draft.vkn} />
+              <input aria-label="TCKN" inputMode="numeric" maxLength={11} onChange={(event) => { const value = event.target.value; const identifier = draft.vkn || value; setDraft({ ...draft, tckn: value, taxId: identifier, taxIdentifier: identifier, identityType: draft.vkn ? "vkn" : value ? "tckn" : "" }); }} pattern="[0-9]*" placeholder="TCKN" value={draft.tckn} />
               <input aria-label="Vergi dairesi" onChange={(event) => setDraft({ ...draft, taxOffice: event.target.value })} placeholder="Vergi dairesi" value={draft.taxOffice} />
               <input aria-label="NACE" onChange={(event) => setDraft({ ...draft, naceCode: event.target.value })} placeholder="NACE" value={draft.naceCode} />
               <textarea aria-label="Faaliyet" onChange={(event) => setDraft({ ...draft, activityDescription: event.target.value })} placeholder="Faaliyet" value={draft.activityDescription} />
@@ -733,10 +736,10 @@ function NewClientStepper({
               </div>
               {naceResearchPending ? <small>NACE araştırması yapılıyor</small> : null}
               <button disabled={!draft.naceCode.trim() || naceResearchPending} onClick={onRefreshNaceResearch} type="button">
-                NACE araştırmasını onayla
+                NACE araştırmasını çalıştır
               </button>
               <p className={naceResearchStatus.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>
-                {naceResearchStatus || "NACE kodu Gemini analizinden gelirse otomatik araştırılır; eksikse kodu doldurup onaylayın."}
+                {naceResearchStatus || "NACE araştırması isteğe bağlıdır; mükellef kaydını engellemez."}
               </p>
               {researchSummary ? <p>{researchSummary}</p> : null}
               {sourceUrls.length ? <small>Kaynak: {sourceUrls.slice(0, 2).join(", ")}</small> : null}
@@ -744,7 +747,7 @@ function NewClientStepper({
           </div>
         </article>
 
-        <article className={`client-step ${chartReady ? "onboarding-step done" : identityReady ? "onboarding-step active" : "onboarding-step locked"}`}>
+        <article className={`client-step ${chartReady ? "onboarding-step done" : "onboarding-step active"}`}>
         <div>
           <span>2. Hesap planı</span>
           <strong>{chartReady ? `${draft.chartAccountFileName} yüklendi` : "Hesap planı zorunlu"}</strong>
@@ -753,21 +756,31 @@ function NewClientStepper({
           <span>CSV/XLSX hesap planı</span>
           <input
             accept=".csv,.xlsx,.xlsm"
-            disabled={!identityReady}
             onChange={(event) => onChartFileSelected(event.target.files)}
             type="file"
           />
-          <small>{chartReady ? `${draft.chartAccounts.length} hesap okundu` : "Hesap planı yüklenmeden devam edilmez"}</small>
+          <small>{chartReady ? `${draft.chartAccounts.length} hesap okundu` : "Dosyayı şimdi yükleyebilirsiniz; vergi levhası adımından bağımsızdır."}</small>
         </label>
-        {!identityReady ? <small className="blocked-reason">Önce vergi levhası yükleyin.</small> : null}
         </article>
 
-        <article className={`client-step ${chartReady ? "onboarding-step active" : "onboarding-step locked"}`}>
+        <article className="client-step onboarding-step active">
         <div>
           <span>3. Portal erişimi</span>
-          <strong>İsteğe bağlı davet</strong>
+          <strong>İsteğe bağlı</strong>
         </div>
-        <small>{chartReady ? "Mükellefi oluşturduktan sonra davet linki gönderilebilir; şifreyi mükellef belirler." : "Önce hesap planı yükleyin."}</small>
+        <input
+          aria-label="Portal e-posta veya kullanıcı adı"
+          onChange={(event) => setDraft({ ...draft, portalUserId: event.target.value })}
+          placeholder="E-posta / kullanıcı adı"
+          value={draft.portalUserId}
+        />
+        <input
+          aria-label="Portal görünen ad"
+          onChange={(event) => setDraft({ ...draft, portalDisplayName: event.target.value })}
+          placeholder="Görünen ad (opsiyonel)"
+          value={draft.portalDisplayName}
+        />
+        <small>Boş bırakabilirsiniz. Portal daveti daha sonra da oluşturulabilir; şifreyi mükellef belirler.</small>
         </article>
       </section>
 

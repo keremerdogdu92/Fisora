@@ -1,5 +1,8 @@
+# File: backend/app/api/phase0_routes_upload_processing.py
+# Summary: Exposes authenticated upload, onboarding attachment, processing, and document-file routes.
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -235,11 +238,21 @@ async def store_client_onboarding_attachment(
     uploaded_by: str = Form(""),
     uploaded_by_user_id: str = Form(""),
     retention_policy_days: int = Form(365),
+    tax_certificate_json: str = Form(""),
     file: UploadFile = File(...),
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
+    reviewed_tax_certificate: dict[str, object] | None = None
+    if tax_certificate_json.strip():
+        try:
+            parsed_tax_certificate = json.loads(tax_certificate_json)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="tax_certificate_json must be valid JSON") from exc
+        if not isinstance(parsed_tax_certificate, dict):
+            raise HTTPException(status_code=400, detail="tax_certificate_json must be a JSON object")
+        reviewed_tax_certificate = dict(parsed_tax_certificate)
     content = await file.read()
     return get_document_service().store_onboarding_attachment(
         client_id=client_id,
@@ -251,6 +264,7 @@ async def store_client_onboarding_attachment(
         content=content,
         size_bytes=len(content),
         retention_policy_days=retention_policy_days,
+        provided_tax_certificate=reviewed_tax_certificate,
     )
 
 

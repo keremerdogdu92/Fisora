@@ -52,6 +52,29 @@ export function emptyNewClientDraft(): NewClientDraft {
   };
 }
 
+function reviewedTaxCertificatePayload(draft: NewClientDraft): Record<string, unknown> {
+  const taxIdentifier = draft.vkn.trim() || draft.tckn.trim() || draft.taxId.trim();
+  const identityType = draft.identityType.trim() || (draft.vkn.trim() ? "vkn" : draft.tckn.trim() ? "tckn" : "");
+  return {
+    title: draft.title.trim(),
+    display_title: draft.title.trim(),
+    legal_name: draft.legalName.trim(),
+    trade_name: draft.tradeName.trim(),
+    tax_id: taxIdentifier,
+    tckn: draft.tckn.trim(),
+    vkn: draft.vkn.trim(),
+    identity_type: identityType,
+    tax_identifier: taxIdentifier,
+    tax_office: draft.taxOffice.trim(),
+    activity_description: draft.activityDescription.trim(),
+    nace_code: draft.naceCode.trim(),
+    activity_tags: draft.activityTags,
+    activity_profile: draft.activityProfile,
+    workplace_addresses: draft.workplaceAddresses,
+    extraction_notes: ["reviewed_onboarding"],
+  };
+}
+
 function profileText(value: unknown): string {
   return String(value || "").trim();
 }
@@ -135,18 +158,13 @@ export async function createNewClientAction({
   loginUserId,
   newClientChartAccountsFile,
   newClientDraft,
-  newClientNaceResearchPending = false,
-  newClientNaceResearchProfile = null,
-  newClientNaceResearchWarningAccepted = false,
   newClientTaxCertificateFile,
-  portalPassword,
   refreshBackendPilotData,
   session,
   setNewClientDraft,
   setNewClientChartAccountsFile,
   setNewClientNaceResearchProfile = () => undefined,
   setNewClientNaceResearchStatus = () => undefined,
-  setNewClientNaceResearchWarningAccepted = () => undefined,
   setNewClientStatus,
   setNewClientTaxCertificateFile,
   setNewClientTaxCertificateInputKey,
@@ -155,47 +173,49 @@ export async function createNewClientAction({
 }: {
   loginUserId: string;
   newClientDraft: NewClientDraft;
-  newClientNaceResearchPending?: boolean;
-  newClientNaceResearchProfile?: Record<string, unknown> | null;
-  newClientNaceResearchWarningAccepted?: boolean;
   newClientTaxCertificateFile: File | null;
   newClientChartAccountsFile: File | null;
-  portalPassword: string;
   refreshBackendPilotData: () => Promise<boolean>;
   session: LocalSession | null;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
   setNewClientChartAccountsFile: (file: File | null) => void;
   setNewClientNaceResearchProfile?: (profile: Record<string, unknown> | null) => void;
   setNewClientNaceResearchStatus?: (status: string) => void;
-  setNewClientNaceResearchWarningAccepted?: (accepted: boolean) => void;
   setNewClientStatus: (status: string) => void;
   setNewClientTaxCertificateFile: (file: File | null) => void;
   setNewClientTaxCertificateInputKey: Dispatch<SetStateAction<number>>;
   setPortalPasswordDraft: (password: string) => void;
   setSelectedClientId: (clientId: string) => void;
 }) {
+  if (!newClientTaxCertificateFile) {
+    setNewClientStatus("Önce vergi levhasını yükleyin.");
+    return;
+  }
   if (!newClientDraft.title.trim()) {
-    setNewClientStatus("Mükellef adı gerekli.");
+    setNewClientStatus("Vergi levhasındaki unvanı kontrol edin.");
     return;
   }
   if (!newClientDraft.vkn.trim() && !newClientDraft.tckn.trim() && !newClientDraft.taxId.trim()) {
     setNewClientStatus("VKN veya TCKN gerekli.");
     return;
   }
-  if (!newClientDraft.chartAccounts.length) {
-    setNewClientStatus("Devam etmek için hesap planı yükleyin.");
+  if (!newClientDraft.activityDescription.trim() && !newClientDraft.naceCode.trim() && !newClientDraft.activityTags.length) {
+    setNewClientStatus("Faaliyet, NACE veya faaliyet etiketi bilgilerinden en az biri gerekli.");
     return;
   }
-  if (newClientDraft.naceCode.trim() && (newClientNaceResearchPending || !newClientNaceResearchProfile) && !newClientNaceResearchWarningAccepted) {
-    setNewClientNaceResearchWarningAccepted(true);
-    setNewClientStatus("NACE araştırması henüz tamamlanmadı. Kontrol edip devam etmek istiyorsanız Mükellefi oluştur düğmesine tekrar basın.");
+  if (!newClientDraft.workplaceAddresses.length) {
+    setNewClientStatus("Vergi levhasındaki işyeri adresini kontrol edin.");
+    return;
+  }
+  if (!newClientDraft.chartAccounts.length) {
+    setNewClientStatus("Devam etmek için hesap planı yükleyin.");
     return;
   }
   const payload = buildClientOnboardingPackagePayload(newClientDraft);
   const taxCertificateFile = newClientTaxCertificateFile;
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-  setNewClientStatus(taxCertificateFile ? "Mükellef kaydediliyor, vergi levhası yüklenecek." : "Mükellef kaydediliyor.");
+  setNewClientStatus("Mükellef kaydediliyor. Kontrol ettiğiniz vergi levhası bilgileri esas alınacak.");
   try {
     await createClientOnboardingPackage({
       apiBaseUrl,
@@ -204,19 +224,27 @@ export async function createNewClientAction({
       userId: actingUserId,
     });
     setSelectedClientId(payload.client.client_id);
+    let chartArchiveStatus = "";
     if (newClientChartAccountsFile) {
       setNewClientStatus("Mükellef kaydedildi. Hesap planı ham dosyası saklanıyor.");
-      await uploadChartAccountsToBackend({
-        apiBaseUrl,
-        clientId: payload.client.client_id,
-        userId: actingUserId,
-        sessionToken: session?.sessionToken,
-        file: newClientChartAccountsFile,
-      });
+      try {
+        await uploadChartAccountsToBackend({
+          apiBaseUrl,
+          clientId: payload.client.client_id,
+          userId: actingUserId,
+          sessionToken: session?.sessionToken,
+          file: newClientChartAccountsFile,
+          storeOnly: true,
+        });
+        chartArchiveStatus = " Hesap planı ham dosyası arşivlendi.";
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        chartArchiveStatus = ` Hesap planı kaydedildi; ham dosya arşivlenemedi: ${message}`;
+      }
     }
     let certificateStatus = "";
     if (taxCertificateFile) {
-      setNewClientStatus("Mükellef kaydedildi. Vergi levhası yükleniyor.");
+      setNewClientStatus("Mükellef kaydedildi. Vergi levhasının orijinal dosyası arşivleniyor.");
       try {
         await uploadTaxCertificateToBackend({
           apiBaseUrl,
@@ -225,8 +253,9 @@ export async function createNewClientAction({
           uploadedBy: actingUserId,
           sessionToken: session?.sessionToken,
           file: taxCertificateFile,
+          taxCertificate: reviewedTaxCertificatePayload(newClientDraft),
         });
-        certificateStatus = " Vergi levhası yüklendi.";
+        certificateStatus = " Vergi levhası arşivlendi; ikinci Gemini okuması yapılmadı.";
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
@@ -236,11 +265,10 @@ export async function createNewClientAction({
     setNewClientChartAccountsFile(null);
     setNewClientNaceResearchProfile(null);
     setNewClientNaceResearchStatus("");
-    setNewClientNaceResearchWarningAccepted(false);
     setPortalPasswordDraft("");
     setNewClientTaxCertificateFile(null);
     setNewClientTaxCertificateInputKey((current) => current + 1);
-    setNewClientStatus(`${payload.client.title} eklendi.${certificateStatus}`);
+    setNewClientStatus(`${payload.client.title} eklendi.${chartArchiveStatus}${certificateStatus}`);
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -253,7 +281,6 @@ export async function selectNewClientTaxCertificateAction({
   loginUserId,
   session,
   setNewClientDraft,
-  setNewClientNaceResearchPending = () => undefined,
   setNewClientNaceResearchProfile = () => undefined,
   setNewClientNaceResearchStatus = () => undefined,
   setNewClientStatus,
@@ -265,7 +292,6 @@ export async function selectNewClientTaxCertificateAction({
   loginUserId: string;
   session: LocalSession | null;
   setNewClientDraft: Dispatch<SetStateAction<NewClientDraft>>;
-  setNewClientNaceResearchPending?: (pending: boolean) => void;
   setNewClientNaceResearchProfile?: (profile: Record<string, unknown> | null) => void;
   setNewClientNaceResearchStatus?: (status: string) => void;
   setNewClientStatus: (status: string) => void;
@@ -354,23 +380,11 @@ export async function selectNewClientTaxCertificateAction({
       parseStatus,
       missingCriticalFields,
     }));
-    setNewClientTaxCertificateStage(parseStatus === "partial" ? "Eksik kritik alanlar var" : "Alanlar dolduruldu");
+    setNewClientTaxCertificateStage(parseStatus === "partial" ? "Gemini alanları kısmen doldurdu" : "Gemini alanları doldurdu");
     if (naceCode) {
-      await refreshNewClientNaceResearchAction({
-        loginUserId,
-        newClientDraft: {
-          ...emptyNewClientDraft(),
-          naceCode,
-          activityDescription,
-        },
-        session,
-        setNewClientDraft,
-        setNewClientNaceResearchPending,
-        setNewClientNaceResearchProfile,
-        setNewClientNaceResearchStatus,
-      });
+      setNewClientNaceResearchStatus("NACE kodu okundu. Araştırma isteğe bağlıdır ve mükellef kaydını engellemez.");
     } else {
-      setNewClientNaceResearchStatus("Vergi levhasından NACE kodu okunamadı. Alanı doldurunca araştırmayı onaylayın.");
+      setNewClientNaceResearchStatus("NACE kodu okunamadı. Gerekirse alanı elle doldurup araştırmayı çalıştırabilirsiniz.");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

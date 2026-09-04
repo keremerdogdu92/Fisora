@@ -1,5 +1,5 @@
 # File: backend/app/services/document_service.py
-# Summary: Stores documents and gates tax-certificate profile updates on complete critical extraction.
+# Summary: Stores documents, archives reviewed onboarding data, and gates tax-certificate profile updates on complete critical extraction.
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -320,6 +320,7 @@ class DocumentService:
         content: bytes | None = None,
         size_bytes: int | None = None,
         retention_policy_days: int = 365,
+        provided_tax_certificate: dict[str, object] | None = None,
     ) -> dict[str, object]:
         normalized_client_id = client_id.strip()
         if not normalized_client_id:
@@ -370,26 +371,40 @@ class DocumentService:
             try:
                 storage_path = Path(str(payload.get("storage_path") or ""))
                 payload["tax_certificate_fingerprint"] = file_fingerprint(storage_path)
-                extraction = parse_tax_certificate_file(storage_path)
-                tax_certificate = extraction.to_payload()
-                parse_status, missing_critical_fields = tax_certificate_parse_state(extraction)
-                payload.update(
-                    {
-                        "tax_certificate_parse_status": parse_status,
-                        "tax_certificate_parse_error": "",
-                        "tax_certificate_missing_critical_fields": list(missing_critical_fields),
-                        "tax_certificate": tax_certificate,
-                    }
-                )
-                if parse_status == "parsed":
-                    workspace = self.store.get_workspace(normalized_client_id)
-                    self._update_client_from_tax_certificate(
-                        client_id=normalized_client_id,
-                        workspace=workspace,
-                        tax_certificate=tax_certificate,
-                        nace_profile={},
+                if provided_tax_certificate is not None:
+                    tax_certificate = dict(provided_tax_certificate)
+                    parse_status, missing_critical_fields = tax_certificate_payload_parse_state(tax_certificate)
+                    payload.update(
+                        {
+                            "tax_certificate_parse_status": parse_status,
+                            "tax_certificate_parse_error": "",
+                            "tax_certificate_missing_critical_fields": list(missing_critical_fields),
+                            "tax_certificate": tax_certificate,
+                            "tax_certificate_source": "reviewed_onboarding",
+                        }
                     )
-            except Exception as exc:  # pragma: no cover - exercised through API behavior, exact OCR errors vary by runtime
+                else:
+                    extraction = parse_tax_certificate_file(storage_path)
+                    tax_certificate = extraction.to_payload()
+                    parse_status, missing_critical_fields = tax_certificate_parse_state(extraction)
+                    payload.update(
+                        {
+                            "tax_certificate_parse_status": parse_status,
+                            "tax_certificate_parse_error": "",
+                            "tax_certificate_missing_critical_fields": list(missing_critical_fields),
+                            "tax_certificate": tax_certificate,
+                            "tax_certificate_source": "parsed_on_upload",
+                        }
+                    )
+                    if parse_status == "parsed":
+                        workspace = self.store.get_workspace(normalized_client_id)
+                        self._update_client_from_tax_certificate(
+                            client_id=normalized_client_id,
+                            workspace=workspace,
+                            tax_certificate=tax_certificate,
+                            nace_profile={},
+                        )
+            except Exception as exc:  # pragma: no cover - parser/runtime failures are surfaced on the attachment
                 payload.update(
                     {
                         "tax_certificate_parse_status": "failed",
@@ -640,9 +655,10 @@ class DocumentService:
         current_fingerprint = file_fingerprint(path)
         cached_fingerprint = str(latest.get("tax_certificate_fingerprint") or "").strip()
         cached_tax_certificate = latest.get("tax_certificate") if isinstance(latest.get("tax_certificate"), dict) else {}
+        reviewed_onboarding = str(latest.get("tax_certificate_source") or "") == "reviewed_onboarding"
         if (
             cached_tax_certificate
-            and has_tax_certificate_core_fields(cached_tax_certificate)
+            and (reviewed_onboarding or has_tax_certificate_core_fields(cached_tax_certificate))
             and cached_fingerprint
             and cached_fingerprint == current_fingerprint
         ):

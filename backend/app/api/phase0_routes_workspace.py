@@ -77,6 +77,7 @@ def store_chart_accounts(
 @router.post("/store/chart-accounts/upload")
 async def store_chart_accounts_upload(
     client_id: str = Form(...),
+    store_only: bool = Form(False),
     file: UploadFile = File(...),
     x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
@@ -94,6 +95,7 @@ async def store_chart_accounts_upload(
             x_fisora_user_id=x_fisora_user_id,
             x_fisora_session=x_fisora_session,
             fisora_session=fisora_session,
+            store_only=store_only,
         )
 
 

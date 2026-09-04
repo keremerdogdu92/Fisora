@@ -91,24 +91,27 @@ function buildClientOnboardingPackagePayload({
   const normalizedChartAccounts = Array.isArray(chartAccounts) ? chartAccounts : [];
   const normalizedTckn = String(tckn || "").trim();
   const normalizedVkn = String(vkn || "").trim();
-  const normalizedTaxIdentifier = String(taxIdentifier || normalizedVkn || normalizedTckn || taxId || "").trim();
+  const normalizedTaxIdentifier = String(normalizedVkn || normalizedTckn || taxIdentifier || taxId || "").trim();
   return {
     client: {
       client_id: normalizedClientId,
       title: normalizedTitle || normalizedClientId,
-      tax_id: String(taxId || normalizedTaxIdentifier).trim(),
+      tax_id: normalizedTaxIdentifier,
       tckn: normalizedTckn,
       vkn: normalizedVkn,
       identity_type: String(identityType || (normalizedTckn && normalizedVkn ? "tckn_vkn" : normalizedVkn ? "vkn" : normalizedTckn ? "tckn" : "")).trim(),
       tax_identifier: normalizedTaxIdentifier,
       legal_name: String(legalName || "").trim(),
       trade_name: String(tradeName || "").trim(),
-      display_title: String(displayTitle || normalizedTitle || "").trim(),
+      display_title: String(normalizedTitle || displayTitle || "").trim(),
       tax_office: String(taxOffice || "").trim(),
       activity_description: String(activityDescription || "").trim(),
       nace_code: String(naceCode || "").trim(),
       activity_tags: Array.isArray(activityTags) ? activityTags.map(String).map((value) => value.trim()).filter(Boolean) : [],
       activity_profile: activityProfile && typeof activityProfile === "object" ? activityProfile : {},
+      ...(activityProfile?.nace_research_profile && typeof activityProfile.nace_research_profile === "object"
+        ? { nace_research_profile: activityProfile.nace_research_profile }
+        : {}),
       workplace_addresses: Array.isArray(workplaceAddresses) ? workplaceAddresses.map(String).map((value) => value.trim()).filter(Boolean) : [],
       has_chart_accounts: normalizedChartAccounts.length > 0,
     },
@@ -682,11 +685,13 @@ async function uploadChartAccountsToBackend({
   userId = "",
   sessionToken = "",
   file,
+  storeOnly = false,
   fetchImpl = fetch,
   FormDataCtor = FormData,
 }) {
   const formData = new FormDataCtor();
   formData.append("client_id", String(clientId || ""));
+  if (storeOnly) formData.append("store_only", "true");
   formData.append("file", file);
 
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/chart-accounts/upload`, {
@@ -744,6 +749,7 @@ function uploadTaxCertificateToBackend({
   file,
   retentionPolicyDays = 365,
   sessionToken = "",
+  taxCertificate = /** @type {Record<string, unknown> | null} */ (null),
   fetchImpl = fetch,
   FormDataCtor = FormData,
 }) {
@@ -754,6 +760,9 @@ function uploadTaxCertificateToBackend({
   formData.append("uploaded_by", String(uploadedBy || normalizedUserId));
   formData.append("uploaded_by_user_id", normalizedUserId);
   formData.append("retention_policy_days", String(retentionPolicyDays));
+  if (taxCertificate && typeof taxCertificate === "object") {
+    formData.append("tax_certificate_json", JSON.stringify(taxCertificate));
+  }
   formData.append("file", file);
 
   return fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/client-onboarding-attachment`, {

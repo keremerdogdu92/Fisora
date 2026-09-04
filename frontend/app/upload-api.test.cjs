@@ -481,6 +481,27 @@ test("uploadTaxCertificateToBackend stores the certificate outside the processin
   );
 });
 
+
+test("uploadTaxCertificateToBackend sends reviewed tax-certificate data without reparsing", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ attachment_ref: "tax-reviewed-1" }) };
+  };
+  await uploadTaxCertificateToBackend({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    uploadedBy: "Mali Musavir",
+    file: { name: "vergi-levhasi.pdf" },
+    taxCertificate: { title: "Reviewed Client", vkn: "9270740926", nace_code: "477401" },
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+  const fields = Object.fromEntries(request.init.body.fields);
+  assert.equal(fields.tax_certificate_json, JSON.stringify({ title: "Reviewed Client", vkn: "9270740926", nace_code: "477401" }));
+});
+
 test("uploadDocumentsToBackend uploads multiple files sequentially with the same intake metadata", async () => {
   const requests = [];
   const files = [{ name: "fatura-1.pdf" }, { name: "fatura-2.pdf" }];
@@ -543,6 +564,26 @@ test("uploadChartAccountsToBackend posts chart account files to parser endpoint"
       ["file", "hesap-plani.csv"],
     ],
   );
+});
+
+
+test("uploadChartAccountsToBackend can archive the raw file without reparsing", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ client_id: "client-1", account_count: 2 }) };
+  };
+  await uploadChartAccountsToBackend({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    file: { name: "hesap-plani.xlsx" },
+    storeOnly: true,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+  const fields = Object.fromEntries(request.init.body.fields);
+  assert.equal(fields.store_only, "true");
 });
 
 test("loginWithPassword posts credentials and returns a backend session", async () => {

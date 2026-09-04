@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -1661,6 +1662,132 @@ class TaxCertificateReprocessStatusTests(unittest.TestCase):
         self.assertEqual(payload["nace_research_profile"], {})
         self.assertEqual(profile.get("title"), "Original Client")
         self.assertEqual(profile.get("nace_code", ""), "")
+
+
+
+class ReviewedOnboardingContractTests(unittest.TestCase):
+    def test_reviewed_tax_certificate_bypasses_parser_and_remains_authoritative(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={
+                    "client_id": "reviewed-client",
+                    "title": "User Corrected Title",
+                    "vkn": "9270740926",
+                    "activity_description": "Medical retail",
+                    "workplace_addresses": ["Reviewed Address"],
+                    "has_chart_accounts": True,
+                },
+            )
+
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["reviewed-client"],
+                },
+            )
+            reviewed = {
+                "title": "User Corrected Title",
+                "display_title": "User Corrected Title",
+                "vkn": "9270740926",
+                "tax_id": "9270740926",
+                "tax_identifier": "9270740926",
+                "activity_description": "Medical retail",
+                "workplace_addresses": ["Reviewed Address"],
+            }
+            with patch(
+                "app.services.document_service.parse_tax_certificate_file",
+                side_effect=AssertionError("reviewed onboarding must not call Gemini parser"),
+            ):
+                upload = client.post(
+                    "/phase0/store/client-onboarding-attachment",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    data={
+
+                        "client_id": "reviewed-client",
+                        "attachment_type": "tax_certificate",
+                        "uploaded_by": "mali-musavir",
+                        "uploaded_by_user_id": "mali-musavir",
+                        "tax_certificate_json": json.dumps(reviewed),
+                    },
+                    files={"file": ("vergi-levhasi.pdf", b"%PDF-1.7 reviewed", "application/pdf")},
+                )
+                reprocess = client.post(
+                    "/phase0/store/client-reprocess",
+                    headers={"X-Fisora-User-Id": "mali-musavir"},
+                    json={"client_id": "reviewed-client", "max_jobs": 5},
+                )
+            workspace = client.get(
+                "/phase0/store/workspace/reviewed-client",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(upload.status_code, 200)
+        self.assertEqual(upload.json()["tax_certificate_source"], "reviewed_onboarding")
+        self.assertEqual(upload.json()["tax_certificate"]["title"], "User Corrected Title")
+        self.assertEqual(reprocess.status_code, 200)
+        self.assertEqual(workspace["client"]["profile"]["title"], "User Corrected Title")
+        self.assertEqual(workspace["client"]["profile"]["workplace_addresses"], ["Reviewed Address"])
+
+
+    def test_store_only_chart_upload_archives_without_reparsing(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_DOCUMENT_STORAGE_PATH = Path(temp_dir) / "documents"
+            client = TestClient(app)
+            client.post(
+                "/phase0/store/client",
+                json={"client_id": "chart-client", "title": "Chart Client", "tax_id": "9270740926"},
+            )
+            client.post(
+                "/phase0/store/portal-user",
+                json={
+                    "user_id": "mali-musavir",
+                    "display_name": "Mali Musavir",
+                    "role": "accountant",
+                    "allowed_client_ids": ["chart-client"],
+                },
+            )
+            stored = client.post(
+                "/phase0/store/chart-accounts",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                json={
+                    "client_id": "chart-client",
+                    "accounts": [{"raw_account_code": "100.01", "account_name": "Kasa"}],
+                },
+            )
+
+            upload = client.post(
+                "/phase0/store/chart-accounts/upload",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+                data={"client_id": "chart-client", "store_only": "true"},
+                files={"file": ("hesap-plani.xlsx", b"not-a-real-xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+            workspace = client.get(
+                "/phase0/store/workspace/chart-client",
+                headers={"X-Fisora-User-Id": "mali-musavir"},
+            ).json()
+
+        self.assertEqual(stored.status_code, 200)
+        self.assertEqual(upload.status_code, 200)
+        self.assertEqual(upload.json()["account_count"], 1)
+        self.assertEqual(workspace["chart_accounts"]["account_count"], 1)
+        chart_attachments = [
+            item for item in workspace["onboarding_attachments"]
+            if item.get("attachment_type") == "chart_accounts"
+        ]
+        self.assertEqual(len(chart_attachments), 1)
+        self.assertEqual(chart_attachments[0]["parsed_account_count"], 1)
 
 
 if __name__ == "__main__":

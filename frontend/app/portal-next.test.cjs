@@ -202,7 +202,12 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(workspace, /Belgeyi incele/);
   assert.match(workspace, /journalHidden/);
   assert.match(workspace, /mobilePane/);
+  assert.match(workspace, /portal-next-focus-document/);
+  assert.match(workspace, /Evrak \{selectedDocument/);
   assert.match(styles, /grid-template-columns:\s*210px minmax\(0, 1fr\)/);
+  assert.match(styles, /\.portal-next-workbench-stage\.next\.queue-hidden\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
+  assert.match(styles, /focus-mode \.portal-next-document-queue\s*\{[\s\S]*?display:\s*grid/);
+  assert.match(styles, /focus-mode\.queue-hidden \.portal-next-document-queue\s*\{\s*display:\s*none/);
   assert.match(styles, /\.portal-next-workbench-stage\.next\.focus-mode/);
   assert.match(styles, /focus-mode\.journal-hidden/);
   assert.match(styles, /portal-next-mobile-review-switch/);
@@ -219,6 +224,8 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(types, /DocumentSourceTarget/);
   assert.match(types, /sourceAmount\?: string/);
   assert.match(review, /source-review-chip/);
+  assert.match(review, /journal-remove-line/);
+  assert.match(review, /aria-label="Satırı sil"/);
   assert.match(review, /onFocusSource/);
   assert.match(review, /onHoverSource/);
   assert.match(types, /pinned\?: boolean/);
@@ -232,6 +239,8 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(pdfViewer, /TOUCH_HOLD_MS = 420/);
   assert.match(pdfViewer, /pdf-source-highlight/);
   assert.match(pdfViewer, /document-magnifier/);
+  assert.match(pdfViewer, /magnifierEnabled/);
+  assert.match(pdfViewer, /Math\.abs\(effectiveScale - 1\) < 0\.01/);
   assert.match(pdfViewer, /Tam belgeye dön/);
   assert.match(htmlViewer, /DOMParser/);
   assert.match(htmlViewer, /SOURCE_TARGET_ID/);
@@ -244,10 +253,14 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(htmlViewer, /LENS_ZOOM = 2\.2/);
   assert.match(htmlViewer, /TOUCH_HOLD_MS = 420/);
   assert.match(htmlViewer, /document-magnifier/);
+  assert.match(htmlViewer, /magnifierEnabled/);
+  assert.match(htmlViewer, /viewStateRef/);
   assert.match(htmlViewer, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(htmlViewer, /allow-scripts/);
   assert.match(styles, /document-source-focus-controls/);
   assert.match(styles, /document-magnifier/);
+  assert.match(styles, /journal-remove-line/);
+  assert.match(styles, /account-code-combobox input[\s\S]*?width:\s*11ch/);
   assert.match(styles, /source-pinned-row/);
   assert.match(styles, /journal-source-row/);
 });

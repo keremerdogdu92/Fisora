@@ -1980,8 +1980,9 @@
   min-height: 590px;
   overflow: hidden;
 }
-.portal-next-workbench-stage.next.queue-hidden { grid-template-columns: 0 minmax(0, 1fr); }
+.portal-next-workbench-stage.next.queue-hidden { grid-template-columns: minmax(0, 1fr); }
 .portal-next-workbench-stage.next.queue-hidden .portal-next-document-queue { display: none; }
+.portal-next-workbench-stage.next.queue-hidden .document-review-main { grid-column: 1; }
 .portal-next-workbench-stage.next .document-review-main {
   background: var(--border-strong);
   border: 0;
@@ -2053,7 +2054,7 @@
   background: #525659;
   border-radius: 8px;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.34);
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 210px minmax(0, 1fr);
   grid-template-rows: 42px minmax(0, 1fr);
   height: auto;
   inset: 6px;
@@ -2061,24 +2062,35 @@
   position: fixed;
   z-index: 170;
 }
+.portal-next-workbench-stage.next.focus-mode.queue-hidden { grid-template-columns: minmax(0, 1fr); }
 .portal-next-workbench-stage.next.focus-mode .portal-next-focus-toolbar {
   align-items: center;
   background: rgba(255, 255, 255, 0.98);
   border-bottom: 1px solid var(--border-strong);
   display: grid;
   gap: 10px;
+  grid-column: 1 / -1;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-row: 1;
   padding: 4px 8px 4px 11px;
 }
-.portal-next-focus-toolbar > span { color: var(--muted); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.portal-next-focus-toolbar > div { display: flex; gap: 5px; }
+.portal-next-focus-document { align-items: center; display: flex; gap: 8px; min-width: 0; }
+.portal-next-focus-document > span { color: var(--muted); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.portal-next-focus-document > strong { color: var(--accent); flex: 0 0 auto; font-size: 0.68rem; white-space: nowrap; }
+.portal-next-focus-toolbar > div:last-child { display: flex; gap: 5px; }
 .portal-next-focus-toolbar button { border-radius: 5px; min-height: 30px; padding: 4px 8px; }
-.portal-next-workbench-stage.next.focus-mode .portal-next-document-queue { display: none; }
-.portal-next-workbench-stage.next.focus-mode .document-review-main {
+.portal-next-workbench-stage.next.focus-mode .portal-next-document-queue {
+  display: grid;
   grid-column: 1;
+  grid-row: 2;
+}
+.portal-next-workbench-stage.next.focus-mode.queue-hidden .portal-next-document-queue { display: none; }
+.portal-next-workbench-stage.next.focus-mode .document-review-main {
+  grid-column: 2;
   grid-row: 2;
   grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
 }
+.portal-next-workbench-stage.next.focus-mode.queue-hidden .document-review-main { grid-column: 1; }
 .portal-next-workbench-stage.next.focus-mode.journal-hidden .document-review-main { grid-template-columns: minmax(0, 1fr); }
 .portal-next-workbench-stage.next.focus-mode.journal-hidden .journal-panel { display: none; }
 .portal-next-workbench-stage.next:fullscreen { inset: 0; }
@@ -2116,6 +2128,33 @@
 .portal-next-theme .journal-ledger th { font-size: 0.69rem; height: 34px; padding: 5px 6px; }
 .portal-next-theme .journal-ledger td { padding: 4px 6px; }
 .portal-next-theme .journal-ledger input { font-size: 0.74rem; min-height: 28px; padding: 3px 4px; }
+.portal-next-theme .journal-ledger th:nth-child(1),
+.portal-next-theme .journal-ledger td:nth-child(1) { width: calc(11ch + 16px); }
+.portal-next-theme .journal-ledger th:nth-child(2),
+.portal-next-theme .journal-ledger td:nth-child(2) { width: auto; }
+.portal-next-theme .journal-ledger th:nth-child(3),
+.portal-next-theme .journal-ledger td:nth-child(3),
+.portal-next-theme .journal-ledger th:nth-child(4),
+.portal-next-theme .journal-ledger td:nth-child(4) { width: 88px; }
+.portal-next-theme .journal-ledger th:nth-child(5),
+.portal-next-theme .journal-ledger td:nth-child(5) { padding-left: 2px; padding-right: 2px; width: 30px; }
+.portal-next-theme .journal-ledger .account-code-combobox input {
+  font-variant-numeric: tabular-nums;
+  max-width: 100%;
+  width: 11ch;
+}
+.portal-next-theme .journal-remove-line {
+  align-items: center;
+  border-radius: 4px;
+  display: inline-flex;
+  font-size: 1rem;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  min-height: 24px;
+  padding: 0;
+  width: 24px;
+}
 .portal-next-theme .journal-advanced-details {
   border: 1px solid var(--border);
   border-radius: 5px;

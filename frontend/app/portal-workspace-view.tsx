@@ -1,5 +1,5 @@
 // File: frontend/app/portal-workspace-view.tsx
-// Summary: Renders the accountant invoice workbench, progressive AI stage cards, navigation, and final-result approval gates.
+// Summary: Renders the accountant invoice workbench with reversible queue/focus layouts, document navigation, source focus, and approval gates.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -438,8 +438,14 @@ export function AccountantWorkspace({
         {nextPresentation ? (
           <header className="portal-next-focus-toolbar">
             <strong>Belge İnceleme</strong>
-            <span>{selectedDocument?.fileName || "Belge seçilmedi"}</span>
+            <div className="portal-next-focus-document">
+              <span>{selectedDocument?.fileName || "Belge seçilmedi"}</span>
+              {queueHidden ? (
+                <strong>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
+              ) : null}
+            </div>
             <div>
+              <button onClick={() => setQueueHidden((current) => !current)} type="button">{queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}</button>
               <button onClick={() => setJournalHidden((current) => !current)} type="button">{journalHidden ? "Fişi göster" : "Fişi gizle"}</button>
               <button onClick={() => void toggleWorkspaceFullscreen()} title="Tarayıcı tam ekran" type="button">⛶</button>
               <button onClick={() => { setFocusMode(false); setJournalHidden(false); }} type="button">× Kapat</button>

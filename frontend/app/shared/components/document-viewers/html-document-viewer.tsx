@@ -1,5 +1,5 @@
 // File: frontend/app/shared/components/document-viewers/html-document-viewer.tsx
-// Summary: Renders sandboxed invoice HTML with calibrated zoom/magnifier controls, content fitting, and deterministic source-evidence highlighting.
+// Summary: Renders sandboxed invoice HTML with pointer-centered magnification, 100% lens suppression, content fitting, and deterministic source-evidence highlighting.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -149,6 +149,7 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
   const touchTimerRef = useRef<number | null>(null);
   const touchActiveRef = useRef(false);
   const touchStartRef = useRef({ clientX: 0, clientY: 0 });
+  const viewStateRef = useRef({ effectiveScale: 1, magnifierEnabled: true });
   const [fitMode, setFitMode] = useState<FitMode>("page");
   const [customZoom, setCustomZoom] = useState(1);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -233,13 +234,17 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
         ? fitContentScale
         : customZoom;
   const effectiveScale = clampZoom(baseScale);
+  const magnifierEnabled = !(fitMode === "custom" && Math.abs(effectiveScale - 1) < 0.01);
   const viewportBounds = fitMode === "content"
     ? contentBounds
     : { left: 0, top: 0, width: documentSize.width, height: documentSize.height };
+  viewStateRef.current = { effectiveScale, magnifierEnabled };
 
   function applyCustomZoom(nextEffectiveScale: number) {
+    const nextScale = clampZoom(nextEffectiveScale);
+    if (Math.abs(nextScale - 1) < 0.01) hideLens();
     setFitMode("custom");
-    setCustomZoom(clampZoom(nextEffectiveScale));
+    setCustomZoom(nextScale);
   }
 
   function hideLens() {
@@ -253,16 +258,26 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
   }
 
   function updateLens(event: PointerEvent) {
-    const canvas = canvasRef.current;
-    const frameWindow = frameRef.current?.contentWindow;
-    if (!canvas || !frameWindow) return;
+    const frame = frameRef.current;
+    const frameWindow = frame?.contentWindow;
+    const stage = stageRef.current;
+    if (!frame || !frameWindow || !stage) return;
+    const { effectiveScale: currentScale, magnifierEnabled: canMagnify } = viewStateRef.current;
+    if (!canMagnify) {
+      hideLens();
+      return;
+    }
+    const frameRect = frame.getBoundingClientRect();
+    const stageRect = stage.getBoundingClientRect();
     const docX = event.clientX + frameWindow.scrollX;
     const docY = event.clientY + frameWindow.scrollY;
+    const pointerClientX = frameRect.left + event.clientX * currentScale;
+    const pointerClientY = frameRect.top + event.clientY * currentScale;
     setLens({
       docX,
       docY,
-      left: canvas.offsetLeft + (docX - viewportBounds.left) * effectiveScale,
-      top: canvas.offsetTop + (docY - viewportBounds.top) * effectiveScale,
+      left: pointerClientX - stageRect.left + stage.scrollLeft,
+      top: pointerClientY - stageRect.top + stage.scrollTop,
       visible: true,
     });
   }
@@ -393,7 +408,7 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
             title={`${fileName} izole orijinal HTML`}
           />
         </div>
-        {lens.visible ? (
+        {lens.visible && magnifierEnabled ? (
           <div
             aria-hidden="true"
             className="document-magnifier html-document-magnifier visible"

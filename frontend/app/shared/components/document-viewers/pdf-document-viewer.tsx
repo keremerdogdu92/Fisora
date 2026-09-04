@@ -1,5 +1,5 @@
 // File: frontend/app/shared/components/document-viewers/pdf-document-viewer.tsx
-// Summary: Renders PDF.js previews with shared zoom controls and source-text locator highlighting.
+// Summary: Renders PDF.js previews with pointer-centered magnification, 100% lens suppression, shared zoom controls, and source-text highlighting.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -111,6 +111,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   const [sourceMatchStatus, setSourceMatchStatus] = useState("");
   const [highlightStyle, setHighlightStyle] = useState<CSSProperties | null>(null);
   const [lens, setLens] = useState<LensState>({ left: 0, top: 0, visible: false });
+  const magnifierEnabled = !(fitMode === "custom" && Math.abs(effectiveScale - 1) < 0.01);
 
   function clearTouchTimer() {
     if (touchTimerRef.current !== null) window.clearTimeout(touchTimerRef.current);
@@ -272,6 +273,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
 
   function applyCustomZoom(nextEffectiveScale: number) {
     const scale = clampZoom(nextEffectiveScale);
+    if (Math.abs(scale - 1) < 0.01) hideLens();
     setFitMode("custom");
     setCustomZoom(scale);
   }
@@ -287,6 +289,10 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     const lensCanvas = lensCanvasRef.current;
     const stage = stageRef.current;
     if (!sourceCanvas || !lensCanvas || !stage) return;
+    if (!magnifierEnabled) {
+      hideLens();
+      return;
+    }
     const canvasRect = sourceCanvas.getBoundingClientRect();
     if (clientX < canvasRect.left || clientX > canvasRect.right || clientY < canvasRect.top || clientY > canvasRect.bottom) {
       hideLens();
@@ -295,12 +301,8 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     const stageRect = stage.getBoundingClientRect();
     const outputRatioX = sourceCanvas.width / Math.max(canvasRect.width, 1);
     const outputRatioY = sourceCanvas.height / Math.max(canvasRect.height, 1);
-    const sourceWidth = (LENS_SIZE / LENS_ZOOM) * outputRatioX;
-    const sourceHeight = (LENS_SIZE / LENS_ZOOM) * outputRatioY;
     const centerX = (clientX - canvasRect.left) * outputRatioX;
     const centerY = (clientY - canvasRect.top) * outputRatioY;
-    const sourceX = Math.max(0, Math.min(sourceCanvas.width - sourceWidth, centerX - sourceWidth / 2));
-    const sourceY = Math.max(0, Math.min(sourceCanvas.height - sourceHeight, centerY - sourceHeight / 2));
     const outputScale = Math.max(window.devicePixelRatio || 1, 1);
     const targetSize = Math.round(LENS_SIZE * outputScale);
     if (lensCanvas.width !== targetSize || lensCanvas.height !== targetSize) {
@@ -309,8 +311,18 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     }
     const context = lensCanvas.getContext("2d");
     if (!context) return;
+    const destinationScaleX = (LENS_ZOOM * outputScale) / outputRatioX;
+    const destinationScaleY = (LENS_ZOOM * outputScale) / outputRatioY;
+    const destinationX = targetSize / 2 - centerX * destinationScaleX;
+    const destinationY = targetSize / 2 - centerY * destinationScaleY;
     context.clearRect(0, 0, lensCanvas.width, lensCanvas.height);
-    context.drawImage(sourceCanvas, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, lensCanvas.width, lensCanvas.height);
+    context.drawImage(
+      sourceCanvas,
+      destinationX,
+      destinationY,
+      sourceCanvas.width * destinationScaleX,
+      sourceCanvas.height * destinationScaleY,
+    );
     setLens({
       left: clientX - stageRect.left + stage.scrollLeft,
       top: clientY - stageRect.top + stage.scrollTop,
@@ -393,7 +405,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
         ) : null}
         {!error ? <canvas aria-label={`${fileName} sayfa ${pageNumber}`} ref={canvasRef} /> : null}
         {highlightStyle && !error ? <div className={`pdf-source-highlight${sourceTarget?.pinned ? " pinned" : ""}`} aria-label="Kaynak eşleşmesi" style={highlightStyle} /> : null}
-        {!error ? (
+        {!error && magnifierEnabled ? (
           <div
             aria-hidden="true"
             className={`document-magnifier pdf-document-magnifier${lens.visible ? " visible" : ""}`}

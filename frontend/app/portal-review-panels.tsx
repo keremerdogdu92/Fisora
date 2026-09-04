@@ -1,5 +1,5 @@
 // File: frontend/app/portal-review-panels.tsx
-// Summary: Renders document preview, source rows, journal editing, review decisions, and processing-safe approval controls.
+// Summary: Renders document previews, source-linked journal editing, compact account-entry controls, review decisions, and processing-safe approval gates.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1299,7 +1299,17 @@ function ManualDraftEditor({
                     value={line.credit}
                   />
                 </td>
-                <td><button onClick={() => onRemoveLine(index)} type="button">Sil</button></td>
+                <td>
+                  <button
+                    aria-label="Satırı sil"
+                    className="journal-remove-line"
+                    onClick={() => onRemoveLine(index)}
+                    title="Satırı sil"
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </td>
               </tr>
               );
             })}

@@ -1,5 +1,5 @@
 // File: frontend/e2e/document-inspector.spec.ts
-// Summary: Verifies portal-next magnification and deterministic journal-to-source focus for real HTML and PDF viewers.
+// Summary: Verifies portal-next queue/focus layout, pointer-centered magnification, 100% lens suppression, and deterministic journal-to-source focus for real HTML and PDF viewers.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -157,8 +157,15 @@ async function expectHtmlLensCalibratedAtSource(page: Page) {
   const target = page.frameLocator(".html-viewer-frame").locator("#fisora-source-target");
   const targetBox = await target.boundingBox();
   expect(targetBox).not.toBeNull();
-  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2);
-  await expect(page.locator(".html-document-magnifier")).toBeVisible();
+  const pointerX = targetBox!.x + targetBox!.width / 2;
+  const pointerY = targetBox!.y + targetBox!.height / 2;
+  await page.mouse.move(pointerX, pointerY);
+  const lens = page.locator(".html-document-magnifier");
+  await expect(lens).toBeVisible();
+  const lensBox = await lens.boundingBox();
+  expect(lensBox).not.toBeNull();
+  expect(Math.abs(lensBox!.x + lensBox!.width / 2 - pointerX)).toBeLessThan(2);
+  expect(Math.abs(lensBox!.y + lensBox!.height / 2 - pointerY)).toBeLessThan(2);
   const documentPoint = await target.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return { x: rect.left + rect.width / 2 + window.scrollX, y: rect.top + rect.height / 2 + window.scrollY };
@@ -205,8 +212,48 @@ test("HTML invoice magnifier and journal source focus stay calibrated across zoo
   await expectHtmlLensCalibratedAtSource(page);
   await page.locator(".html-document-viewer").getByRole("button", { name: "İçerik" }).click();
   await expectHtmlLensCalibratedAtSource(page);
+  await page.locator(".html-document-viewer").getByRole("button", { name: "%100" }).click();
+  const targetBoxAtFullScale = await focusedTarget.boundingBox();
+  expect(targetBoxAtFullScale).not.toBeNull();
+  await page.mouse.move(targetBoxAtFullScale!.x + targetBoxAtFullScale!.width / 2, targetBoxAtFullScale!.y + targetBoxAtFullScale!.height / 2);
+  await expect(page.locator(".html-document-magnifier")).toHaveCount(0);
   await expect(journalRow).toHaveClass(/source-pinned-row/);
   await expect(focusedTarget).toBeVisible();
+});
+
+test("queue visibility and focus mode preserve the active workbench", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "queue-focus.html", "text/html", html);
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const stage = page.locator(".portal-next-workbench-stage.next");
+  const queue = page.locator(".portal-next-document-queue");
+  const main = page.locator(".document-review-main");
+  await expect(queue).toBeVisible();
+
+  await page.locator(".portal-next-workbench-actions").getByRole("button", { name: "Belgeyi incele" }).click();
+  await expect(stage).toHaveClass(/focus-mode/);
+  await expect(queue).toBeVisible();
+
+  const focusToolbar = page.locator(".portal-next-focus-toolbar");
+  await focusToolbar.getByRole("button", { name: "Kuyruğu gizle" }).click();
+  await expect(queue).toBeHidden();
+  await expect(focusToolbar.getByText("Evrak 1 / 1", { exact: true })).toBeVisible();
+  const focusedMainBox = await main.boundingBox();
+  expect(focusedMainBox).not.toBeNull();
+  expect(focusedMainBox!.width).toBeGreaterThan(700);
+
+  await focusToolbar.getByRole("button", { name: "Kuyruğu göster" }).click();
+  await expect(queue).toBeVisible();
+  await expect(focusToolbar.getByText("Evrak 1 / 1", { exact: true })).toHaveCount(0);
+  await focusToolbar.getByRole("button", { name: "× Kapat" }).click();
+  await expect(stage).not.toHaveClass(/focus-mode/);
+
+  await page.locator(".portal-next-workbench-actions").getByRole("button", { name: "Kuyruğu gizle" }).click();
+  await expect(queue).toBeHidden();
+  const mainBox = await main.boundingBox();
+  expect(mainBox).not.toBeNull();
+  expect(mainBox!.width).toBeGreaterThan(700);
 });
 
 test("PDF invoice magnifier and journal source focus use PDF.js text evidence", async ({ page }) => {
@@ -218,9 +265,23 @@ test("PDF invoice magnifier and journal source focus use PDF.js text evidence", 
   await expect(page.locator(".pdf-viewer-status")).toHaveCount(0);
   const rasterScale = await canvas.evaluate((element) => (element as HTMLCanvasElement).width / Math.max(element.getBoundingClientRect().width, 1));
   expect(rasterScale).toBeGreaterThan(1.5);
-  await canvas.hover({ position: { x: 120, y: 90 } });
-  await expect(page.locator(".pdf-document-magnifier")).toBeVisible();
-  await expect(page.locator(".pdf-document-magnifier")).toHaveCSS("opacity", "1");
+  const canvasBox = await canvas.boundingBox();
+  expect(canvasBox).not.toBeNull();
+  const pointerX = canvasBox!.x + 120;
+  const pointerY = canvasBox!.y + 90;
+  await page.mouse.move(pointerX, pointerY);
+  const pdfLens = page.locator(".pdf-document-magnifier");
+  await expect(pdfLens).toBeVisible();
+  await expect(pdfLens).toHaveCSS("opacity", "1");
+  const lensBox = await pdfLens.boundingBox();
+  expect(lensBox).not.toBeNull();
+  expect(Math.abs(lensBox!.x + lensBox!.width / 2 - pointerX)).toBeLessThan(2);
+  expect(Math.abs(lensBox!.y + lensBox!.height / 2 - pointerY)).toBeLessThan(2);
+  await page.locator(".pdf-document-viewer").getByRole("button", { name: "%100" }).click();
+  const fullScaleCanvasBox = await canvas.boundingBox();
+  expect(fullScaleCanvasBox).not.toBeNull();
+  await page.mouse.move(fullScaleCanvasBox!.x + 120, fullScaleCanvasBox!.y + 90);
+  await expect(page.locator(".pdf-document-magnifier")).toHaveCount(0);
 
   const journalRow = page.locator(".journal-source-row").first();
   await journalRow.hover();

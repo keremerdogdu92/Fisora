@@ -1,0 +1,494 @@
+/* File: frontend/app/portal-next/portal-next-upload.css */
+/* Summary: Styles the accountant quick-upload workspace while reusing portal-next design tokens. */
+
+/* Accountant quick-upload workspace: next-presentation only. */
+.portal-next-upload-page {
+  display: grid;
+  gap: 14px;
+}
+
+.portal-next-upload-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.portal-next-upload-heading > div:first-child > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.portal-next-upload-heading h2 {
+  color: var(--accent);
+  font-size: 1.15rem;
+  margin: 3px 0 0;
+}
+
+.portal-next-upload-heading p {
+  color: var(--muted);
+  margin: 5px 0 0;
+}
+
+.portal-next-upload-period {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 148px;
+  padding: 8px 10px;
+  text-align: right;
+}
+
+.portal-next-upload-period span,
+.portal-next-upload-period strong {
+  display: block;
+}
+
+.portal-next-upload-period span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.portal-next-upload-period strong {
+  font-size: 0.88rem;
+  margin-top: 3px;
+}
+
+.portal-next-upload-card,
+.portal-next-upload-recent {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.portal-next-upload-card {
+  padding: 14px;
+}
+
+.portal-next-upload-controls {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(260px, 1.15fr) minmax(220px, 0.85fr) auto;
+}
+
+.portal-next-upload-controls label,
+.portal-next-upload-type-field {
+  display: grid;
+  gap: 6px;
+}
+
+.portal-next-upload-controls label > span,
+.portal-next-upload-type-field > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 850;
+}
+
+.portal-next-upload-controls select {
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  min-height: 42px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.portal-next-upload-controls select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.portal-next-upload-type-switch {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+}
+
+.portal-next-upload-type-switch button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #475569;
+  font-weight: 850;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.portal-next-upload-type-switch button.active {
+  background: #ffffff;
+  border-color: var(--border-strong);
+  color: var(--accent);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.portal-next-upload-primary,
+.portal-next-upload-secondary {
+  border-radius: 7px;
+  font-weight: 850;
+  min-height: 42px;
+  padding: 8px 13px;
+}
+
+.portal-next-upload-primary {
+  align-items: center;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #ffffff;
+  display: inline-flex;
+  gap: 7px;
+  justify-content: center;
+}
+
+.portal-next-upload-primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.portal-next-upload-secondary {
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+
+.portal-next-upload-primary:disabled,
+.portal-next-upload-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.portal-next-upload-file-button svg {
+  height: 17px;
+  width: 17px;
+}
+
+.portal-next-upload-dropzone {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  display: grid;
+  gap: 13px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin-top: 12px;
+  min-height: 116px;
+  padding: 14px;
+  position: relative;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+
+.portal-next-upload-dropzone.dragging {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.portal-next-upload-dropzone input {
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+
+.portal-next-upload-drop-icon {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  display: inline-flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.portal-next-upload-drop-icon svg {
+  height: 19px;
+  width: 19px;
+}
+
+.portal-next-upload-dropzone strong,
+.portal-next-upload-dropzone span,
+.portal-next-upload-dropzone small {
+  display: block;
+}
+
+.portal-next-upload-dropzone strong {
+  font-size: 0.88rem;
+}
+
+.portal-next-upload-dropzone > div > span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin-top: 3px;
+}
+
+.portal-next-upload-dropzone small {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-top: 3px;
+}
+
+.portal-next-upload-browse {
+  background: #ffffff;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 850;
+  min-height: 36px;
+  padding: 8px 11px;
+}
+
+.portal-next-upload-pending {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.portal-next-upload-pending-row {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.portal-next-upload-pending-row > svg {
+  color: var(--accent);
+  height: 18px;
+  width: 18px;
+}
+
+.portal-next-upload-pending-row strong,
+.portal-next-upload-pending-row span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.portal-next-upload-pending-row strong {
+  font-size: 0.78rem;
+}
+
+.portal-next-upload-pending-row span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  margin-top: 2px;
+}
+
+.portal-next-upload-pending-row button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  min-height: 32px;
+  width: 32px;
+}
+
+.portal-next-upload-pending-row button svg {
+  height: 16px;
+  width: 16px;
+}
+
+.portal-next-upload-actions {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  margin-top: 12px;
+}
+
+.portal-next-upload-actions p {
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.portal-next-upload-actions .decision-status {
+  margin: 0;
+}
+
+.portal-next-upload-selection-status {
+  color: #9a5b13 !important;
+  font-weight: 750;
+  margin-bottom: 3px !important;
+}
+
+.portal-next-upload-recent {
+  overflow: hidden;
+}
+
+.portal-next-upload-recent-heading {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 13px 15px;
+}
+
+.portal-next-upload-recent-heading h2 {
+  color: var(--accent);
+  font-size: 0.96rem;
+  margin: 0;
+}
+
+.portal-next-upload-recent-heading span,
+.portal-next-upload-recent-heading > strong {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.portal-next-upload-recent-heading span {
+  display: block;
+  margin-top: 3px;
+}
+
+.portal-next-upload-table-wrap {
+  overflow-x: auto;
+}
+
+.portal-next-upload-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.portal-next-upload-table th,
+.portal-next-upload-table td {
+  border-bottom: 1px solid var(--border);
+  font-size: 0.76rem;
+  padding: 10px 13px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.portal-next-upload-table th {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.portal-next-upload-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.portal-next-upload-table td:nth-child(2) {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
+.portal-next-upload-status {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.66rem;
+  font-weight: 850;
+  padding: 4px 7px;
+  white-space: nowrap;
+}
+
+.portal-next-upload-status.ready {
+  background: #e8f5ee;
+  color: #17653f;
+}
+
+.portal-next-upload-status.waiting {
+  background: #fff4dc;
+  color: #8b5a12;
+}
+
+.portal-next-upload-status.review {
+  background: #fff0ee;
+  color: #a33a2b;
+}
+
+@media (max-width: 900px) {
+  .portal-next-upload-controls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .portal-next-upload-file-button {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .portal-next-upload-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .portal-next-upload-period {
+    text-align: left;
+    width: 100%;
+  }
+
+  .portal-next-upload-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .portal-next-upload-file-button {
+    grid-column: auto;
+    width: 100%;
+  }
+
+  .portal-next-upload-dropzone {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .portal-next-upload-browse {
+    display: none;
+  }
+
+  .portal-next-upload-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .portal-next-upload-actions > div {
+    grid-column: 1 / -1;
+  }
+
+  .portal-next-upload-actions button {
+    width: 100%;
+  }
+
+  .portal-next-upload-table thead {
+    display: none;
+  }
+
+  .portal-next-upload-table,
+  .portal-next-upload-table tbody,
+  .portal-next-upload-table tr,
+  .portal-next-upload-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .portal-next-upload-table tr {
+    border-bottom: 1px solid var(--border);
+    padding: 8px 12px;
+  }
+
+  .portal-next-upload-table td {
+    border: 0;
+    padding: 4px 0;
+  }
+
+  .portal-next-upload-table td::before {
+    color: var(--muted);
+    content: attr(data-label) " · ";
+    font-weight: 850;
+  }
+}

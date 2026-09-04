@@ -23,7 +23,7 @@ test("portal-next opts into the new presentation while legacy portal stays defau
 test("next sidebar uses the approved accountant navigation order", () => {
   const shell = source("portal-next", "portal-next-shell.tsx");
   const sidebar = shell.slice(shell.indexOf("const NEXT_SIDEBAR_ITEMS"), shell.indexOf("];", shell.indexOf("const NEXT_SIDEBAR_ITEMS")) + 2);
-  const labels = ["Ana Sayfa", "Çalışma Masası", "Onay & Çıktılar", "Mükellefler", "AI Ajanları", "Öğrenilen Kurallar", "İşlem Durumu", "Ayarlar"];
+  const labels = ["Ana Sayfa", "Çalışma Masası", "Onay & Çıktılar", "Mükellefler", "Yeni Yükleme", "AI Ajanları", "Öğrenilen Kurallar", "İşlem Durumu", "Ayarlar"];
   let previousIndex = -1;
   for (const label of labels) {
     const nextIndex = sidebar.indexOf(`label: "${label}"`);
@@ -86,4 +86,19 @@ test("next keyboard controls preserve review guards and desktop-only legend", ()
   assert.match(controls, /event\.ctrlKey && event\.key\.toLowerCase\(\) === "z" && undoAvailable/);
   assert.match(styles, /\.portal-next-shortcut-bar/);
   assert.match(styles, /@media \(max-width: 860px\)[\s\S]*?\.portal-next-shortcut-bar[\s\S]*?display: none/);
+});
+
+test("next quick upload keeps invoice staging separate from the accounting workbench", () => {
+  const portalApp = source("portal-app.tsx");
+  const uploadView = source("portal-next", "portal-next-upload-view.tsx");
+  const shell = source("portal-next", "portal-next-shell.tsx");
+
+  assert.match(shell, /label: "Yeni Yükleme", mode: "uploads"/);
+  assert.match(portalApp, /mode === "uploads" && isNextPresentation/);
+  assert.match(portalApp, /<PortalNextUploadView/);
+  assert.match(uploadView, /"purchase_invoice"/);
+  assert.match(uploadView, /"sales_invoice"/);
+  assert.match(uploadView, /accept="\.pdf,\.html,\.htm,\.xml,\.zip"/);
+  assert.match(uploadView, /onUpload\(pendingFiles\)/);
+  assert.match(uploadView, /Son yüklemeler/);
 });

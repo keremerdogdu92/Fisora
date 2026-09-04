@@ -1,4 +1,4 @@
-const ACCOUNTANT_MODES = ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"];
+const ACCOUNTANT_MODES = ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"];
 
 const LANDING_ROLE_ENTRIES = [
   {

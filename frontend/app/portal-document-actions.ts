@@ -30,7 +30,7 @@ export async function addLocalUploadsAction({
   setSelectedPeriod,
   setUploadStatus,
 }: {
-  files: FileList | null;
+  files: FileList | File[] | null;
   localFallbackAllowed: boolean;
   refreshBackendPilotData: () => Promise<boolean>;
   selectedClient?: PilotClient;
@@ -41,7 +41,7 @@ export async function addLocalUploadsAction({
   setUploadStatus: (status: string) => void;
 }) {
   const selectedFiles = Array.from(files ?? []);
-  if (!selectedFiles.length || !selectedClient) return;
+  if (!selectedFiles.length || !selectedClient) return false;
   const now = new Date();
   // TODO: Bulunulan ay yüklemelerini açma.
   const period = previousCompletedPeriod(now);
@@ -154,6 +154,7 @@ export async function addLocalUploadsAction({
         : `${selectedFiles.length} belge backend kuyruguna alindi.`,
     );
     await refreshBackendPilotData();
+    return failedUploads.length === 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setUploadStatus(
@@ -161,6 +162,7 @@ export async function addLocalUploadsAction({
         ? `Backend yukleme tamamlanamadi; belge lokal listede tutuldu. ${message}`
         : `Backend yukleme tamamlanamadi; serverda belge kaydedilmedi. ${message}`,
     );
+    return false;
   }
 }
 

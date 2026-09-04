@@ -11,6 +11,7 @@ import {
   PanelTop,
   Settings,
   Sparkles,
+  Upload,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -31,6 +32,7 @@ const NEXT_SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "workspace", label: "Çalışma Masası", mode: "documents", icon: PanelTop },
   { key: "exports", label: "Onay & Çıktılar", mode: "exports", icon: CircleCheckBig },
   { key: "clients", label: "Mükellefler", mode: "clients", icon: Users },
+  { key: "uploads", label: "Yeni Yükleme", mode: "uploads", icon: Upload },
   { key: "agents", label: "AI Ajanları", mode: "agents", icon: Bot, agentSection: "agents" },
   { key: "rules", label: "Öğrenilen Kurallar", mode: "agents", icon: Sparkles, agentSection: "rules" },
   { key: "operations", label: "İşlem Durumu", mode: "operations", icon: Activity },
@@ -128,6 +130,7 @@ function pageTitle(mode: PilotMode, agentSection: PortalNextAgentSection) {
   if (mode === "documents") return "Çalışma Masası";
   if (mode === "exports") return "Onay & Çıktılar";
   if (mode === "clients") return "Mükellefler";
+  if (mode === "uploads") return "Yeni Yükleme";
   if (mode === "agents") return agentSection === "rules" ? "Öğrenilen Kurallar" : "AI Ajanları";
   if (mode === "operations") return "İşlem Durumu";
   if (mode === "settings") return "Ayarlar";

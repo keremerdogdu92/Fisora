@@ -10,6 +10,7 @@ import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
 import { SettingsView } from "./portal-settings-view";
 import { PortalNextAgentOverview, PortalNextWorkTypeTabs, type PortalNextAgentSection } from "./portal-next/portal-next-shell";
+import { PortalNextUploadView } from "./portal-next/portal-next-upload-view";
 import { resolvePortalNextWorkspacePeriod } from "./portal-next/portal-next-workspace-model";
 import { PortalPresentationChrome, type PortalPresentation } from "./portal-presentation-chrome";
 import { AccountantWorkspace } from "./portal-workspace-view";
@@ -332,19 +333,10 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     logout();
     if (typeof window !== "undefined") window.location.assign("/");
   }
-  const addLocalUploads = (files: FileList | null) => {
-    void addLocalUploadsAction({
-      files,
-      localFallbackAllowed,
-      refreshBackendPilotData: () => refreshBackendPilotData(),
-      selectedClient,
-      selectedIntakeCategory,
-      session,
-      setData,
-      setSelectedPeriod,
-      setUploadStatus,
-    });
-  };
+  const addLocalUploads = (files: FileList | File[] | null) => addLocalUploadsAction({
+    files, localFallbackAllowed, refreshBackendPilotData: () => refreshBackendPilotData(),
+    selectedClient, selectedIntakeCategory, session, setData, setSelectedPeriod, setUploadStatus,
+  });
 
   const {
     addSelectedClientToBasket,
@@ -415,7 +407,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           cancellationDocumentId={clientCancellationDocumentId}
           documents={periodDocuments}
           onCancelReasonChange={setCancelReason}
-          onFilesSelected={addLocalUploads}
+          onFilesSelected={(files) => { void addLocalUploads(files); }}
           onOpenCancellationRequest={(document) => {
             setSelectedDocumentId(document.id);
             setClientCancellationDocumentId(document.id);
@@ -444,6 +436,11 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           }}
           uploadStatus={uploadStatus}
         />
+      ) : null}
+      {mode === "uploads" && isNextPresentation ? (
+        <PortalNextUploadView clients={clients} documents={data.documents} onUpload={addLocalUploads}
+          onClientChange={(clientId) => { setSelectedClientId(clientId); setSelectedDocumentId(""); }} onIntakeCategoryChange={setSelectedIntakeCategory}
+          selectedClient={selectedClient} selectedIntakeCategory={selectedIntakeCategory} uploadPeriod={previousCompletedPeriod()} uploadStatus={uploadStatus} />
       ) : null}
       {mode === "agents" ? (isNextPresentation && nextAgentSection === "agents" ? <PortalNextAgentOverview agentSummaries={dashboardView.agentSummaries} /> : <AgentTrainingView key={isNextPresentation ? nextAgentSection : String(routeKey)} agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} />) : null}
 

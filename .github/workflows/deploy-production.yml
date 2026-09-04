@@ -55,7 +55,7 @@ jobs:
             --instance-ids "$INSTANCE_ID" \
             --document-name "$SSM_DOCUMENT" \
             --comment "Fisora production deploy ${GITHUB_SHA}" \
-            --parameters "TargetSha=b3261a1d3a395815e03cfb3786bc42bb189228dc" \
+            --parameters "TargetSha=${GITHUB_SHA}" \
             --query 'Command.CommandId' \
             --output text)"
 

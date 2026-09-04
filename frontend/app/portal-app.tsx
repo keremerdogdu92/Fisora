@@ -4,12 +4,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { AgentTrainingView } from "./portal-agents-view";
 import { AccountantDashboard } from "./portal-dashboard-view";
+import { readDashboardOfficePeriod, readDashboardResume, writeDashboardOfficePeriod, writeDashboardResume, type DashboardResumeState } from "./portal-dashboard-resume";
 import { ClientPortal } from "./portal-client-view";
 import { ClientManagementView } from "./portal-clients-view";
 import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
 import { SettingsView } from "./portal-settings-view";
-import { PortalNextAgentOverview, PortalNextWorkTypeTabs, type PortalNextAgentSection } from "./portal-next/portal-next-shell";
+import { PortalNextWorkTypeTabs, type PortalNextAgentSection } from "./portal-next/portal-next-shell";
+import { PortalNextAgentsView, PortalNextLearnedRulesView } from "./portal-next/portal-next-agents-view";
 import { PortalNextUploadView } from "./portal-next/portal-next-upload-view";
 import { resolvePortalNextWorkspacePeriod } from "./portal-next/portal-next-workspace-model";
 import { PortalPresentationChrome, type PortalPresentation } from "./portal-presentation-chrome";
@@ -35,6 +37,7 @@ import { PORTAL_NAV_ITEMS, portalConfigForRouteKey } from "./portal-routes";
 import type {
   CancellationRequest,
   CorrectionDraft,
+  DocumentSegment,
   ExportMode,
   IntakeCategory, LocalSession,
   PilotData,
@@ -48,6 +51,7 @@ import { previousCompletedPeriod } from "./portal-periods";
 import { emptyCorrectionDraft, useReviewCommands } from "./features/review";
 import { useReviewEditLease } from "./features/review";
 type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "fisora.portal.sidebar.collapsed";
 export function FisoraPortalApp({ routeKey = "home", presentation = "legacy" }: { routeKey?: PortalRouteKey | string; presentation?: PortalPresentation }) {
   return (
     <PilotQueryProvider>
@@ -101,10 +105,34 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   const [mode, setModeState] = useState<PilotMode>(portalConfig.initialMode as PilotMode);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [selectedPeriod, setSelectedPeriod] = useState("");
+  const [officePeriod, setOfficePeriod] = useState("");
+  const [dashboardResumeState, setDashboardResumeState] = useState<DashboardResumeState | null>(null);
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
   const [clientSearch, setClientSearch] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  useEffect(() => {
+    if (!isNextPresentation || typeof window === "undefined") return;
+    try {
+      setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
+    } catch {
+      // Local preferences are optional; the portal must remain usable when storage is blocked.
+    }
+  }, [isNextPresentation]);
+
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      if (isNextPresentation && typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
+        } catch {
+          // Keep the in-memory toggle working even when local storage is unavailable.
+        }
+      }
+      return next;
+    });
+  }
   const [nextAgentSection, setNextAgentSection] = useState<PortalNextAgentSection>("agents");
   const { session, sessionHydrated, setSession } = usePortalSessionGuard({ lockedRole, portalConfig, routeKey: String(routeKey), setLocalFallbackAllowed });
   const [loginUserId, setLoginUserId] = useState(portalConfig.defaultUserId);
@@ -173,7 +201,22 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   }, [readinessQuery.data, readinessQuery.isError]);
 
   const clients = data.clients;
+  const officePeriods = useMemo(() => {
+    const periods = Array.from(new Set(data.documents.map((document) => document.period).filter(Boolean))).sort().reverse();
+    return periods.length ? periods : [previousCompletedPeriod()];
+  }, [data.documents]);
+  const resolvedOfficePeriod = officePeriod && officePeriods.includes(officePeriod) ? officePeriod : officePeriods[0] || previousCompletedPeriod();
   const selectedClient = clients.find((client) => client.clientId === selectedClientId) ?? clients[0];
+  useEffect(() => {
+    if (!isNextPresentation || !session?.userId) return;
+    const storedOfficePeriod = readDashboardOfficePeriod(session.userId);
+    if (storedOfficePeriod) setOfficePeriod(storedOfficePeriod);
+    setDashboardResumeState(readDashboardResume(session.userId));
+  }, [isNextPresentation, session?.userId]);
+  useEffect(() => {
+    if (!isNextPresentation || !session?.userId || !resolvedOfficePeriod) return;
+    writeDashboardOfficePeriod(session.userId, resolvedOfficePeriod);
+  }, [isNextPresentation, resolvedOfficePeriod, session?.userId]);
   const {
     qnbConnection, qnbStatus, qnbHealth,
     qnbPolicy,
@@ -255,6 +298,18 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     selectedClientId: selectedClient?.clientId,
   });
   useEffect(() => {
+    if (!isNextPresentation || mode !== "documents" || !session?.userId || !selectedClient?.clientId || !nextWorkspacePeriod.selectedPeriod) return;
+    const nextResume: DashboardResumeState = {
+      clientId: selectedClient.clientId,
+      period: nextWorkspacePeriod.selectedPeriod,
+      segment: selectedDocumentSegment,
+      documentId: selectedDocumentId || "",
+      updatedAt: new Date().toISOString(),
+    };
+    writeDashboardResume(session.userId, nextResume);
+    setDashboardResumeState(nextResume);
+  }, [isNextPresentation, mode, nextWorkspacePeriod.selectedPeriod, selectedClient?.clientId, selectedDocumentId, selectedDocumentSegment, session?.userId]);
+  useEffect(() => {
     setCorrectionDraft(emptyCorrectionDraft());
   }, [selectedDocument?.id]);
   const { progressiveActiveReviewDocuments, progressiveClientDocuments, progressiveSelectedDocument } = useProgressiveSelectedDocument({
@@ -268,7 +323,23 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     return clients.filter((client) => `${client.clientName} ${client.clientId} ${client.taxId}`.toLocaleLowerCase("tr-TR").includes(query));
   }, [clientSearch, clients]);
   const openCancellationRequests = data.cancellationRequests.filter((request) => request.status === "open");
-  const dashboardView = useMemo(() => buildPortalDashboardViewModels({ data, aiCapacity: aiCapacityQuery.data }), [aiCapacityQuery.data, data]);
+  const officeDocuments = useMemo(() => data.documents.filter((document) => !resolvedOfficePeriod || document.period === resolvedOfficePeriod), [data.documents, resolvedOfficePeriod]);
+  const officeCancellationRequests = useMemo(() => {
+    const officeDocumentIds = new Set(officeDocuments.map((document) => document.id));
+    return data.cancellationRequests.filter((request) => officeDocumentIds.has(request.documentId));
+  }, [data.cancellationRequests, officeDocuments]);
+  const dashboardView = useMemo(() => buildPortalDashboardViewModels({
+    data: { clients: data.clients, documents: officeDocuments, cancellationRequests: officeCancellationRequests },
+    aiCapacity: aiCapacityQuery.data,
+  }), [aiCapacityQuery.data, data.clients, officeCancellationRequests, officeDocuments]);
+  const dashboardResume = useMemo(() => {
+    if (!dashboardResumeState) return null;
+    const resumeClient = data.clients.find((client) => client.clientId === dashboardResumeState.clientId);
+    if (!resumeClient) return null;
+    const resumeDocuments = data.documents.filter((document) => document.clientId === dashboardResumeState.clientId && document.period === dashboardResumeState.period);
+    const completedCount = resumeDocuments.filter((document) => ["export_ready", "export_added", "exported"].includes(document.status)).length;
+    return { ...dashboardResumeState, clientName: resumeClient.clientName, completedCount, totalCount: resumeDocuments.length };
+  }, [dashboardResumeState, data.clients, data.documents]);
   const readinessView = useMemo(
     () => buildPilotReadinessView(readinessPayload) as PilotReadinessView,
     [readinessPayload],
@@ -280,6 +351,60 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
 
   function setMode(nextMode: PilotMode) {
     if (portalConfig.visibleModes.includes(nextMode)) setModeState(nextMode);
+  }
+
+  function dashboardSegmentForDocument(document: PilotData["documents"][number]): DocumentSegment {
+    if (document.intakeCategory === "bank_statement") return "bank_statements";
+    if (document.intakeCategory === "special_document") return "other_documents";
+    return "invoices";
+  }
+
+  function openDashboardDocument(document: PilotData["documents"][number]) {
+    setSelectedClientId(document.clientId);
+    setSelectedPeriod(document.period);
+    setSelectedDocumentSegment(dashboardSegmentForDocument(document));
+    setReviewFilter("all");
+    setSelectedDocumentId(document.id);
+    setMode("documents");
+  }
+
+  function openDashboardTask(segment: DocumentSegment) {
+    const target = officeDocuments.find((document) => {
+      if (document.status !== "review_required") return false;
+      if (segment === "bank_statements") return document.intakeCategory === "bank_statement";
+      if (segment === "other_documents") return document.intakeCategory === "special_document";
+      return document.intakeCategory === "purchase_invoice" || document.intakeCategory === "sales_invoice";
+    });
+    setSelectedDocumentSegment(segment);
+    setReviewFilter("review_required");
+    if (target) {
+      setSelectedClientId(target.clientId);
+      setSelectedPeriod(target.period);
+      setSelectedDocumentId(target.id);
+    } else {
+      setSelectedPeriod(resolvedOfficePeriod);
+      setSelectedDocumentId("");
+    }
+    setMode("documents");
+  }
+
+  function openDashboardWorkspace() {
+    const target = officeDocuments.find((document) => document.status === "review_required")
+      ?? officeDocuments.find((document) => ["uploaded", "queued", "processing"].includes(document.status))
+      ?? officeDocuments[0];
+    if (target) openDashboardDocument(target);
+    else setMode("documents");
+  }
+
+  function resumeDashboardWork() {
+    if (!dashboardResume) return;
+    setSelectedClientId(dashboardResume.clientId);
+    setSelectedPeriod(dashboardResume.period);
+    setSelectedDocumentSegment(dashboardResume.segment);
+    setReviewFilter("all");
+    const resumeDocumentExists = data.documents.some((document) => document.id === dashboardResume.documentId);
+    setSelectedDocumentId(resumeDocumentExists ? dashboardResume.documentId : "");
+    setMode("documents");
   }
 
   async function login() {
@@ -395,9 +520,12 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
         onCloseMobile={() => setMobileSidebarOpen(false)} onExit={exitPortal}
         onLegacyNavigate={(nextMode, segment) => { if (segment) setSelectedDocumentSegment(segment); setMode(nextMode); setMobileSidebarOpen(false); }}
         onNextNavigate={(nextMode, agentSection) => { if (agentSection) setNextAgentSection(agentSection); setMode(nextMode); setMobileSidebarOpen(false); }}
-        onReadNotification={notifications.markRead} onSelectClient={(clientId) => { setSelectedClientId(clientId); setSelectedPeriod(""); setSelectedDocumentId(""); }} onSelectPeriod={(period) => { setSelectedPeriod(period); setSelectedDocumentId(""); }} onToggleCollapse={() => setSidebarCollapsed((current) => !current)}
-        onToggleMobile={() => setMobileSidebarOpen((current) => !current)} periods={isNextPresentation ? nextWorkspacePeriod.periods : clientPeriods} presentation={presentation}
-        selectedClient={selectedClient} selectedPeriod={isNextPresentation ? nextWorkspacePeriod.selectedPeriod : selectedPeriod} session={session} showSidebar={showSidebar} source={source}
+        onReadNotification={notifications.markRead} onSelectClient={(clientId) => { setSelectedClientId(clientId); setSelectedPeriod(""); setSelectedDocumentId(""); }} onSelectPeriod={(period) => {
+          if (isNextPresentation && mode !== "documents") setOfficePeriod(period);
+          else { setSelectedPeriod(period); setSelectedDocumentId(""); }
+        }} onToggleCollapse={toggleSidebarCollapsed}
+        onToggleMobile={() => setMobileSidebarOpen((current) => !current)} periods={isNextPresentation ? (mode === "documents" ? nextWorkspacePeriod.periods : officePeriods) : clientPeriods} presentation={presentation}
+        selectedClient={selectedClient} selectedPeriod={isNextPresentation ? (mode === "documents" ? nextWorkspacePeriod.selectedPeriod : resolvedOfficePeriod) : selectedPeriod} session={session} showSidebar={showSidebar} source={source}
       >
       <div className="portal-route-content">
 
@@ -442,24 +570,38 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           onClientChange={(clientId) => { setSelectedClientId(clientId); setSelectedDocumentId(""); }} onIntakeCategoryChange={setSelectedIntakeCategory}
           selectedClient={selectedClient} selectedIntakeCategory={selectedIntakeCategory} uploadPeriod={previousCompletedPeriod()} uploadStatus={uploadStatus} />
       ) : null}
-      {mode === "agents" ? (isNextPresentation && nextAgentSection === "agents" ? <PortalNextAgentOverview agentSummaries={dashboardView.agentSummaries} /> : <AgentTrainingView key={isNextPresentation ? nextAgentSection : String(routeKey)} agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} />) : null}
+      {mode === "agents" ? (
+        isNextPresentation ? (
+          nextAgentSection === "agents" ? (
+            <PortalNextAgentsView agentSummaries={dashboardView.agentSummaries} documents={officeDocuments} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} onOpenDocument={openDashboardDocument} session={session} />
+          ) : (
+            <PortalNextLearnedRulesView loginUserId={loginUserId} session={session} />
+          )
+        ) : (
+          <AgentTrainingView key={String(routeKey)} agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} />
+        )
+      ) : null}
 
       {mode === "accountant" ? (
         <AccountantDashboard
-          clientRows={visibleDashboardClientRows}
+          clientRows={isNextPresentation ? dashboardView.dashboardClientRows : visibleDashboardClientRows}
           dashboardMetrics={dashboardView.dashboardMetrics}
-          documents={data.documents}
+          documents={isNextPresentation ? officeDocuments : data.documents}
           isLoading={source.status === "loading"}
+          nextPresentation={isNextPresentation}
+          officePeriod={resolvedOfficePeriod}
           onClientSelect={(clientId) => {
             setSelectedClientId(clientId);
             setSelectedDocumentId("");
           }}
-          onOpenDocument={(document) => {
-            setSelectedClientId(document.clientId);
-            setSelectedDocumentId(document.id);
-            setMode("documents");
-          }}
+          onOpenAgents={() => { setNextAgentSection("agents"); setMode("agents"); }}
+          onOpenClients={() => setMode("clients")}
+          onOpenDocument={openDashboardDocument}
+          onOpenTask={openDashboardTask}
+          onOpenWorkspace={openDashboardWorkspace}
+          onResume={resumeDashboardWork}
           priorityItems={dashboardView.priorityItems}
+          resume={dashboardResume}
           selectedClientId={selectedClient?.clientId ?? ""}
         />
       ) : null}
@@ -476,7 +618,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           capacityPending={aiCapacityQuery.isPending}
         >
         <AccountantWorkspace
-          cancellationRequests={openCancellationRequests.filter((request) => request.clientId === selectedClient?.clientId)} controlledPdfPreview={isNextPresentation} nextPresentation={isNextPresentation}
+          cancellationRequests={openCancellationRequests.filter((request) => request.clientId === selectedClient?.clientId)} controlledHtmlPreview={isNextPresentation} controlledPdfPreview={isNextPresentation} nextPresentation={isNextPresentation}
           statementAiStatus={statementAiStatus}
           clientSearch={clientSearch}
           clientRows={visibleDashboardClientRows}
@@ -496,7 +638,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           onCreateNewClient={createNewClient}
           onClientSearchChange={setClientSearch}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}
-          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onToggleSidebar={toggleSidebarCollapsed}
           onUndoLastApproval={undoLastApproval}
           onReprocessDocument={reprocessSelectedDocument}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
@@ -596,6 +738,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
       {mode === "exports" ? (
         <ExportBasketRouteView
           documents={data.documents} exportBasket={data.exportBasket} exportMode={exportMode} exportStatus={exportStatus} exportType={exportType}
+          nextPresentation={isNextPresentation}
           onMarkPackaged={markBasketPackaged} periodLabel={periodLabel} setExportMode={setExportMode} setExportType={setExportType}
         />
       ) : null}

@@ -1,3 +1,5 @@
+// File: frontend/app/features/export/use-export-commands.ts
+// Summary: Coordinates export basket actions and backend package generation for accountant workflows.
 "use client";
 
 import { useCallback } from "react";
@@ -85,28 +87,28 @@ export function useExportCommands({
     });
   }, [clientDocuments, selectedClient, selectedPeriod, setData, setExportStatus]);
 
-  const markBasketPackaged = useCallback(async () => {
+  const markBasketPackaged = useCallback(async (requestedExportType = exportType) => {
     if (!exportBasket.length) {
       setExportStatus("Cikti paketi icin once mukellef ekleyin.");
       return;
     }
     const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-    setExportStatus(`${exportBasket.length} mukellef icin ${exportType} paketi uretiliyor.`);
+    setExportStatus(`${exportBasket.length} mukellef icin ${requestedExportType} paketi uretiliyor.`);
     try {
       const packages = [];
       for (const item of exportBasket) {
         packages.push(await createWorkspaceExportPackage({
           apiBaseUrl: resolveApiBaseUrl(pageUrl()),
           clientId: item.clientId,
-          exportType,
+          exportType: requestedExportType,
           userId: actingUserId,
           sessionToken: session?.sessionToken,
         }));
       }
-      markBasketPackagedAction({ exportMode, exportType, setData, setExportStatus });
+      markBasketPackagedAction({ exportMode, exportType: requestedExportType, setData, setExportStatus });
       const firstPackage = packages[0]?.package || packages[0] || {};
       const download = String(firstPackage.download_url || "");
-      setExportStatus(download ? `${packages.length} paket hazir: ${download}` : `${packages.length} ${exportType} paketi hazir.`);
+      setExportStatus(download ? `${packages.length} paket hazir: ${download}` : `${packages.length} ${requestedExportType} paketi hazir.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setExportStatus(`Cikti paketi uretilemedi. ${sessionAuthErrorMessage(message) || message}`);

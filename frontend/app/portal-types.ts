@@ -30,6 +30,14 @@ export type SourceReviewRow = {
   role: "posting_candidate" | "group_or_subtotal" | "informational";
 };
 
+export type DocumentSourceTarget = {
+  key: string;
+  text: string;
+  pinned?: boolean;
+  sourcePosition?: string;
+  sourceLineNumbers?: number[];
+};
+
 export type DocumentSourceSnapshotSection = {
   kind: "table" | "key_value" | "fragmented";
   title: string | null;

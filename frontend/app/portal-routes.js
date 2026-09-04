@@ -4,7 +4,7 @@ const LANDING_ROLE_ENTRIES = [
   {
     role: "accountant",
     label: "Müşavir girişi",
-    href: "/portal/musavir",
+    href: "/portal-next",
     defaultUserId: "mali-musavir",
     cta: "Çalışma alanına gir",
     description: "Belge kontrolü, müşavir kararları ve çıktı listesi.",

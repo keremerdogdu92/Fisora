@@ -1,3 +1,5 @@
+// File: frontend/app/portal-formatters.ts
+// Summary: Formats accountant-facing period, status, intake, and review labels for portal views.
 import type { IntakeCategory, PilotStatus, StatementLineReview } from "./portal-types";
 import { normalizeIntakeCategory } from "./upload-intake";
 import { safeText } from "./portal-normalization";
@@ -25,6 +27,15 @@ export function periodLabel(period: string) {
   const [year, month] = period.split("-");
   if (!year || !month) return period;
   return `${month}.${year}`;
+}
+
+export function longPeriodLabel(period: string) {
+  const [year, month] = period.split("-");
+  const yearNumber = Number(year);
+  const monthNumber = Number(month);
+  if (!Number.isInteger(yearNumber) || !Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12) return periodLabel(period);
+  const label = new Intl.DateTimeFormat("tr-TR", { month: "long", year: "numeric" }).format(new Date(yearNumber, monthNumber - 1, 1));
+  return label.charAt(0).toLocaleUpperCase("tr-TR") + label.slice(1);
 }
 
 export function isInProgress(status: PilotStatus) {

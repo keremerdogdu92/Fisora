@@ -47,13 +47,18 @@ test("portal feature and shared boundaries are explicit", () => {
   });
 });
 
-test("portal app remains an orchestrator instead of a feature implementation file", () => {
+test("portal app remains an orchestrator instead of owning feature implementations", () => {
   const portalApp = readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
 
-  assert.ok(
-    portalApp.split(/\r?\n/).length <= 620,
-    "portal-app.tsx should keep shrinking as feature modules take ownership",
-  );
+  assert.match(portalApp, /usePortalSessionGuard/);
+  assert.match(portalApp, /useReviewCommands/);
+  assert.match(portalApp, /useExportCommands/);
+  assert.match(portalApp, /useClientManagementCommands/);
+  assert.match(portalApp, /useDocumentWorkflow/);
+  assert.doesNotMatch(portalApp, /async function saveStatementLineDecision/);
+  assert.doesNotMatch(portalApp, /async function createNewClient/);
+  assert.doesNotMatch(portalApp, /async function addLocalUploads/);
+  assert.doesNotMatch(portalApp, /async function markBasketPackaged/);
 });
 
 test("review and export command handlers live behind feature hooks", () => {

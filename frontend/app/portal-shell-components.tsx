@@ -127,7 +127,7 @@ export function PortalSidebar({
       <div className="portal-brand">
         <span className="brand-mark">F</span>
         <div>
-          <strong>Fisero</strong>
+          <strong>Fisora</strong>
           <small>Özel Muhasebe Operasyon Portalı</small>
         </div>
         <button

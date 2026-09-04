@@ -1,5 +1,5 @@
 // File: frontend/app/shared/components/document-viewers/document-source-match.ts
-// Summary: Provides deterministic tokenization and exact sequence matching for source-evidence text in PDF and HTML viewers.
+// Summary: Provides deterministic tokenization and exact source-text sequence matching for document viewers.
 
 export type SourceToken = {
   end: number;

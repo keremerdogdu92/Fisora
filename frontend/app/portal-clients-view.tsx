@@ -1,3 +1,5 @@
+// File: frontend/app/portal-clients-view.tsx
+// Summary: Renders accountant taxpayer management, onboarding, operational controls, and cancellation review using live portal state and callbacks.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -9,6 +11,15 @@ type ClientManagementTab = "new-client" | "client-list" | "requests";
 function onboardingAttachmentUrl(clientId: string, ref: string) {
   const pageUrl = typeof window === "undefined" ? "" : window.location.href;
   return `${resolveApiBaseUrl(pageUrl)}/phase0/store/document-file/${encodeURIComponent(clientId)}/${encodeURIComponent(ref)}`;
+}
+
+type ClientManagementSurface = "list" | "detail";
+
+function clientStatusTone(status: string) {
+  if (status === "Çıktı hazır" || status === "Takipte") return "success";
+  if (status === "Kontrol bekliyor" || status === "Talep var") return "attention";
+  if (status === "İşleniyor") return "info";
+  return "neutral";
 }
 
 export function ClientManagementView({
@@ -105,10 +116,26 @@ export function ClientManagementView({
   setSelectedClientId: (value: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<ClientManagementTab>("client-list");
+  const [clientSurface, setClientSurface] = useState<ClientManagementSurface>("list");
   const selectedDocumentRefSet = new Set(selectedDocumentRefs);
   const selectableDocumentRefs = documents.map((document) => document.originalDocumentRef || document.id).filter(Boolean);
   const allDocumentsSelected = Boolean(selectableDocumentRefs.length && selectableDocumentRefs.every((ref) => selectedDocumentRefSet.has(ref)));
   const hasSelectedClient = Boolean(selectedClient);
+  const readyClientCount = clientRows.filter((row) => (
+    row.documentCount > 0
+    && row.pendingReviewCount === 0
+    && row.inProgressCount === 0
+    && row.cancellationCount === 0
+  )).length;
+  const setupMissingCount = clientRows.filter((row) => row.documentCount === 0).length;
+  const attentionClientCount = clientRows.filter((row) => row.pendingReviewCount > 0 || row.cancellationCount > 0).length;
+  const selectedClientRow = selectedClient ? clientRows.find((row) => row.clientId === selectedClient.clientId) : undefined;
+  const invoiceCount = documents.filter((document) => document.intakeCategory === "sales_invoice" || document.intakeCategory === "purchase_invoice").length;
+  const bankCount = documents.filter((document) => document.intakeCategory === "bank_statement").length;
+  const otherCount = documents.filter((document) => document.intakeCategory === "special_document").length;
+  const selectedTaxId = selectedClient?.vkn || selectedClient?.tckn || selectedClient?.taxId || "-";
+  const onboardingAttachments = selectedClient?.onboardingAttachments ?? [];
+
   const toggleDocument = (documentRef: string, checked: boolean) => {
     if (checked) {
       setSelectedDocumentRefs(Array.from(new Set([...selectedDocumentRefs, documentRef])));
@@ -116,26 +143,49 @@ export function ClientManagementView({
     }
     setSelectedDocumentRefs(selectedDocumentRefs.filter((ref) => ref !== documentRef));
   };
+
   const toggleAllDocuments = (checked: boolean) => {
     setSelectedDocumentRefs(checked ? selectableDocumentRefs : []);
   };
-  const tabClass = (tab: ClientManagementTab) => activeTab === tab ? "active" : "";
+
+  const openClientDetail = (clientId: string) => {
+    setSelectedClientId(clientId);
+    setSelectedDocumentRefs([]);
+    setClientSurface("detail");
+  };
+
+  const switchTab = (tab: ClientManagementTab) => {
+    setActiveTab(tab);
+    if (tab === "client-list") setClientSurface("list");
+  };
 
   return (
     <section className="client-management-page client-management-tabbed">
-      <div className="client-management-tabs" role="tablist" aria-label="Mükellefler sekmeleri">
-        <button aria-selected={activeTab === "new-client"} className={tabClass("new-client")} onClick={() => setActiveTab("new-client")} role="tab" type="button">
-          Yeni mükellef
-        </button>
-        <button aria-selected={activeTab === "client-list"} className={tabClass("client-list")} onClick={() => setActiveTab("client-list")} role="tab" type="button">
-          Mükellef listesi
-          <strong>{isLoading ? "…" : clients.length}</strong>
-        </button>
-        <button aria-selected={activeTab === "requests"} className={tabClass("requests")} onClick={() => setActiveTab("requests")} role="tab" type="button">
-          İptal / düzeltme
-          <strong>{cancellationRequests.length}</strong>
-        </button>
-      </div>
+      <header className="client-v13-page-head">
+        <div>
+          <h1>Mükellefler</h1>
+          <p>Kurulum, dönem ve çalışma durumunu tek yerde yönetin.</p>
+        </div>
+        <div className={`client-v13-page-actions${activeTab === "client-list" ? " list-view" : ""}`}>
+          {activeTab === "client-list" && cancellationRequests.length ? (
+            <button className="secondary compact" onClick={() => switchTab("requests")} type="button">
+              İptal / düzeltme <strong>{cancellationRequests.length}</strong>
+            </button>
+          ) : activeTab !== "client-list" ? (
+            <button className="secondary compact" onClick={() => switchTab("client-list")} type="button">← Mükellef listesi</button>
+          ) : null}
+          {activeTab !== "new-client" ? (
+            <button className="primary" onClick={() => switchTab("new-client")} type="button">+ Yeni mükellef</button>
+          ) : null}
+        </div>
+      </header>
+
+      <section className="client-v13-metrics" aria-label="Mükellef özeti">
+        <article><span>Toplam</span><strong>{isLoading ? "…" : clientRows.length}</strong></article>
+        <article><span>Hazır</span><strong>{isLoading ? "…" : readyClientCount}</strong></article>
+        <article><span>Kurulum / yükleme eksik</span><strong>{isLoading ? "…" : setupMissingCount}</strong></article>
+        <article className={attentionClientCount ? "attention" : ""}><span>Kontrol gereken</span><strong>{isLoading ? "…" : attentionClientCount}</strong></article>
+      </section>
 
       {activeTab === "new-client" ? (
         <section className="panel client-tab-panel">
@@ -160,170 +210,265 @@ export function ClientManagementView({
         </section>
       ) : null}
 
-      {activeTab === "client-list" ? (
-        <section className="client-list-operations-grid">
-          <section className="panel">
-            <div className="section-heading">
-              <span>Mükellef listesi</span>
-              <strong>{isLoading ? "Yükleniyor" : clients.length}</strong>
-            </div>
+      {activeTab === "client-list" && clientSurface === "list" ? (
+        <section className="client-v13-list-surface">
+          <div className="client-v13-toolbar panel">
+            <input
+              className="search-input"
+              onChange={(event) => onClientSearchChange(event.target.value)}
+              placeholder="Mükellef ara"
+              value={clientSearch}
+            />
+            <button className="primary" onClick={() => switchTab("new-client")} type="button">+ Yeni mükellef</button>
+          </div>
+
+          <section className="client-v13-table-wrap panel" aria-label="Mükellef listesi">
             {isLoading ? (
               <div className="client-list-state loading" role="status" aria-live="polite">
                 <span className="workspace-status-dot" aria-hidden="true" />
                 <div>
                   <strong>Mükellefler yükleniyor</strong>
-                  <small>Çalışma alanındaki belgeler hazırlanıyor.</small>
+                  <small>Çalışma alanındaki kayıtlar hazırlanıyor.</small>
                 </div>
               </div>
-            ) : clients.length ? (
-              <>
-                <input
-                  className="search-input"
-                  onChange={(event) => onClientSearchChange(event.target.value)}
-                  placeholder="Mükellef ara"
-                  value={clientSearch}
-                />
-                <div className="client-list dashboard-client-list">
-                  {clientRows.map((row) => (
-                <button
-                  className={selectedClient?.clientId === row.clientId ? "client-row active" : "client-row"}
-                  key={row.clientId}
-                  onClick={() => setSelectedClientId(row.clientId)}
-                  type="button"
-                >
-                  <strong>{row.clientName}</strong>
-                  <span>{row.status}</span>
-                  <em>{row.documentCount} belge / {row.cancellationCount} talep</em>
-                </button>
-                  ))}
-                </div>
-              </>
+            ) : clientRows.length ? (
+              <table className="client-v13-table">
+                <thead>
+                  <tr>
+                    <th>Mükellef</th>
+                    <th>Belge</th>
+                    <th>Bekleyen</th>
+                    <th>Hazır</th>
+                    <th>Portal</th>
+                    <th>Durum</th>
+                    <th><span className="sr-only">İşlemler</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientRows.map((row) => {
+                    const client = clients.find((item) => item.clientId === row.clientId);
+                    const portalEnabled = Boolean(client?.portalUserId);
+                    return (
+                      <tr key={row.clientId}>
+                        <td data-label="Mükellef">
+                          <strong>{row.clientName}</strong>
+                          <small>{row.taxId ? `VKN / TCKN ${row.taxId}` : "Vergi kimliği yok"}</small>
+                        </td>
+                        <td data-label="Belge">{row.documentCount}</td>
+                        <td data-label="Bekleyen">
+                          {row.pendingReviewCount ? `${row.pendingReviewCount} kontrol` : row.inProgressCount ? `${row.inProgressCount} işlemde` : "—"}
+                        </td>
+                        <td data-label="Hazır">{row.exportReadyCount}</td>
+                        <td data-label="Portal">
+                          <span className={`client-state-pill ${portalEnabled ? "success" : "neutral"}`}>{portalEnabled ? "Aktif" : "Yok"}</span>
+                        </td>
+                        <td data-label="Durum">
+                          <span className={`client-state-pill ${clientStatusTone(row.status)}`}>{row.status}</span>
+                        </td>
+                        <td className="client-v13-row-actions">
+                          <button className="secondary compact" onClick={() => openClientDetail(row.clientId)} type="button">Görüntüle</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             ) : (
               <div className="client-list-state empty">
                 <strong>Henüz mükellef yok</strong>
                 <small>İlk kaydı vergi levhası ve hesap planıyla oluşturabilirsiniz.</small>
-                <button className="secondary compact" onClick={() => setActiveTab("new-client")} type="button">
+                <button className="secondary compact" onClick={() => switchTab("new-client")} type="button">
                   Yeni mükellef oluştur
                 </button>
               </div>
             )}
           </section>
-          {!isLoading && clients.length ? <section className="panel onboarding-panel client-existing-operations">
+        </section>
+      ) : null}
+
+      {activeTab === "client-list" && clientSurface === "detail" ? (
+        <section className="client-v13-detail">
+          <button className="secondary compact client-v13-back" onClick={() => setClientSurface("list")} type="button">
+            ← Mükellefler
+          </button>
+
+          <header className="client-v13-detail-head">
+            <div>
+              <h2>{selectedClient?.clientName ?? "Mükellef"}</h2>
+              <p>VKN / TCKN {selectedTaxId} · {selectedClient?.onboardingStatus || "Kurulum durumu bekleniyor"}</p>
+            </div>
+            <button
+              className="primary"
+              disabled={!selectedClient?.portalUserId}
+              onClick={onOpenClientPortal}
+              type="button"
+            >
+              Mükellef ekranına git
+            </button>
+          </header>
+
+          <nav className="client-v13-detail-tabs" aria-label="Mükellef görünümü">
+            <button className="active" type="button">Genel Bakış</button>
+            <button onClick={onOpenClientPortal} disabled={!selectedClient?.portalUserId} type="button">Mükellef Portalı</button>
+          </nav>
+
+          <section className="client-v13-metrics detail" aria-label="Mükellef belge özeti">
+            <article><span>Faturalar</span><strong>{invoiceCount}</strong><small>{selectedClientRow?.pendingReviewCount ?? 0} kontrol</small></article>
+            <article><span>Banka</span><strong>{bankCount}</strong></article>
+            <article><span>Diğer belgeler</span><strong>{otherCount}</strong></article>
+            <article><span>Çıktıya hazır</span><strong>{selectedClientRow?.exportReadyCount ?? 0}</strong></article>
+          </section>
+
+          <section className="client-v13-summary-grid">
+            <article className="panel client-v13-summary-card">
+              <div className="section-heading">
+                <span>Kurulum</span>
+                <strong>{selectedClient?.onboardingStatus || "Durum bekleniyor"}</strong>
+              </div>
+              <div className="client-v13-profile-strip">
+                <div>
+                  <span>Onboarding dosyaları</span>
+                  <strong>{onboardingAttachments.length ? `${onboardingAttachments.length} dosya` : "Dosya yok"}</strong>
+                </div>
+                <div>
+                  <span>Hesap planı</span>
+                  <strong>{onboardingAttachments.some((item) => /hesap|chart/i.test(`${item.type} ${item.label} ${item.fileName}`)) ? "Dosya mevcut" : "Kontrol edin"}</strong>
+                </div>
+              </div>
+            </article>
+
+            <article className="panel client-v13-summary-card">
+              <div className="section-heading">
+                <span>Portal erişimi</span>
+                <strong>{selectedClient?.portalUserId ? "Aktif" : "Henüz yok"}</strong>
+              </div>
+              <div className="client-v13-profile-strip">
+                <div>
+                  <span>Kullanıcı</span>
+                  <strong>{selectedClient?.portalUserId || "Davet oluşturulmadı"}</strong>
+                </div>
+                <div>
+                  <span>Açık talepler</span>
+                  <strong>{selectedClientRow?.cancellationCount ?? 0}</strong>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section className="panel client-v13-operations">
             <div className="section-heading">
-              <span>Mevcut mükellef işlemleri</span>
+              <span>Mükellef işlemleri</span>
               <strong>{selectedClient?.clientName ?? "-"}</strong>
             </div>
-            <div className="settings-card">
-              <span>Hesap planı import</span>
-              <strong>{selectedClient?.clientName ?? "-"}</strong>
-              <label className="file-drop-control compact-upload">
-                <input
-                  accept=".csv,.xlsx,.xlsm"
-                  disabled={!hasSelectedClient}
-                  onChange={(event) => onExistingChartFileSelected(event.target.files)}
-                  type="file"
-                />
-                <span>Dosya seç</span>
-                <small>CSV/XLSX hesap planı</small>
-              </label>
-              {!hasSelectedClient ? <small className="blocked-reason">Önce mükellef seçin.</small> : null}
-              {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
-            </div>
-            <div className="settings-card">
-              <span>Onboarding dosyaları</span>
-              <strong>{selectedClient?.onboardingAttachments?.length ? `${selectedClient.onboardingAttachments.length} dosya` : "Dosya yok"}</strong>
-              <div className="client-document-delete-list">
-                {selectedClient?.onboardingAttachments?.length ? selectedClient.onboardingAttachments.map((attachment) => (
-                  <a
-                    className="client-document-delete-row"
-                    href={onboardingAttachmentUrl(selectedClient.clientId, attachment.ref)}
-                    key={`${attachment.type}-${attachment.ref}`}
-                    rel="noreferrer"
-                    target="_blank"
+
+            <div className="client-v13-operation-grid">
+              <article className="settings-card">
+                <span>Hesap planı</span>
+                <strong>Yeni dosya yükle</strong>
+                <label className="file-drop-control compact-upload">
+                  <input
+                    accept=".csv,.xlsx,.xlsm"
+                    disabled={!hasSelectedClient}
+                    onChange={(event) => onExistingChartFileSelected(event.target.files)}
+                    type="file"
+                  />
+                  <span>Dosya seç</span>
+                  <small>CSV/XLSX/XLSM hesap planı</small>
+                </label>
+                {chartUploadStatus ? <p className="decision-status">{chartUploadStatus}</p> : null}
+              </article>
+
+              <article className="settings-card">
+                <span>Onboarding dosyaları</span>
+                <strong>{onboardingAttachments.length ? `${onboardingAttachments.length} dosya` : "Dosya yok"}</strong>
+                <div className="client-document-delete-list">
+                  {onboardingAttachments.length ? onboardingAttachments.map((attachment) => (
+                    <a
+                      className="client-document-delete-row"
+                      href={onboardingAttachmentUrl(selectedClient?.clientId ?? "", attachment.ref)}
+                      key={`${attachment.type}-${attachment.ref}`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <span>{attachment.label}</span>
+                      <small>{attachment.fileName}</small>
+                    </a>
+                  )) : <p className="empty">Vergi levhası veya hesap planı dosyası yok.</p>}
+                </div>
+              </article>
+
+              <article className="settings-card">
+                <span>Portal erişimi</span>
+                <strong>{selectedClient?.portalUserId ?? "-"}</strong>
+                <div className="inline-actions">
+                  <input
+                    aria-label="Mükellef üyelik adı"
+                    onChange={(event) => setPortalUserIdDraft(event.target.value)}
+                    placeholder="Mükellef e-posta / giriş kullanıcı adı"
+                    value={portalUserIdDraft}
+                  />
+                  <button onClick={onCreateInvite} type="button">Davet linki oluştur</button>
+                </div>
+                <small>Mükellef davet linkinden kendi şifresini belirler.</small>
+                {clientPortalOpenStatus ? <p className="decision-status">{clientPortalOpenStatus}</p> : null}
+                {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
+                {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
+              </article>
+
+              <article className="settings-card client-v13-document-ops">
+                <span>Mükellef belgeleri</span>
+                <strong>{documents.length} belge</strong>
+                <label className="bulk-document-check">
+                  <input
+                    checked={allDocumentsSelected}
+                    disabled={!selectableDocumentRefs.length}
+                    onChange={(event) => toggleAllDocuments(event.target.checked)}
+                    type="checkbox"
+                  />
+                  Tüm belgeleri seç
+                </label>
+                <div className="client-document-delete-list">
+                  {documents.length ? documents.map((document) => {
+                    const documentRef = document.originalDocumentRef || document.id;
+                    return (
+                      <label className="client-document-delete-row" key={document.id}>
+                        <input
+                          checked={selectedDocumentRefSet.has(documentRef)}
+                          onChange={(event) => toggleDocument(documentRef, event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>{document.fileName}</span>
+                        <small>{document.status}</small>
+                      </label>
+                    );
+                  }) : <p className="empty">Belge yok.</p>}
+                </div>
+                <div className="client-v13-danger-actions">
+                  <button disabled={!hasSelectedClient} onClick={onReprocessSelectedClient} type="button">
+                    Mükellefi yeniden işle
+                  </button>
+                  <label className="bulk-document-check danger">
+                    <input
+                      checked={clientDocumentDeleteConfirmed}
+                      onChange={(event) => setClientDocumentDeleteConfirmed(event.target.checked)}
+                      type="checkbox"
+                    />
+                    Seçili belgelerin dosyalarıyla birlikte silineceğini onaylıyorum
+                  </label>
+                  <button
+                    className="danger"
+                    disabled={!selectedDocumentRefs.length}
+                    onClick={onDeleteSelectedDocuments}
+                    type="button"
                   >
-                    <span>{attachment.label}</span>
-                    <small>{attachment.fileName}</small>
-                  </a>
-                )) : <p className="empty">Vergi levhası veya hesap planı dosyası yok.</p>}
-              </div>
+                    Seçili belgeleri sil
+                  </button>
+                </div>
+                {clientReprocessStatus ? <p className="decision-status">{clientReprocessStatus}</p> : null}
+                {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
+              </article>
             </div>
-            <div className="settings-card">
-              <span>Portal erişimi</span>
-              <strong>{selectedClient?.portalUserId ?? "-"}</strong>
-              <div className="inline-actions">
-                <button
-                  className="primary"
-                  disabled={!hasSelectedClient || !selectedClient?.portalUserId}
-                  onClick={onOpenClientPortal}
-                  type="button"
-                >
-                  Mükellef ekranına git
-                </button>
-                <input
-                  aria-label="Mükellef üyelik adı"
-                  onChange={(event) => setPortalUserIdDraft(event.target.value)}
-                  placeholder="Üyelik adı / e-posta"
-                  value={portalUserIdDraft}
-                />
-                <button onClick={onCreateInvite} type="button">Davet linki oluştur</button>
-              </div>
-              <small>Mükellef davet linkinden kendi şifresini belirler.</small>
-              {clientPortalOpenStatus ? <p className="decision-status">{clientPortalOpenStatus}</p> : null}
-              {inviteStatus ? <p className="decision-status">{inviteStatus}</p> : null}
-              {portalPasswordStatus ? <p className="decision-status">{portalPasswordStatus}</p> : null}
-            </div>
-            <div className="settings-card">
-              <span>Mükellef belgeleri</span>
-              <strong>{selectedClient?.clientName ?? "-"}</strong>
-              <label className="bulk-document-check">
-                <input
-                  checked={allDocumentsSelected}
-                  disabled={!selectableDocumentRefs.length}
-                  onChange={(event) => toggleAllDocuments(event.target.checked)}
-                  type="checkbox"
-                />
-                Tüm belgeleri seç
-              </label>
-              <div className="client-document-delete-list">
-                {documents.length ? documents.map((document) => {
-                  const documentRef = document.originalDocumentRef || document.id;
-                  return (
-                    <label className="client-document-delete-row" key={document.id}>
-                      <input
-                        checked={selectedDocumentRefSet.has(documentRef)}
-                        onChange={(event) => toggleDocument(documentRef, event.target.checked)}
-                        type="checkbox"
-                      />
-                      <span>{document.fileName}</span>
-                      <small>{document.status}</small>
-                    </label>
-                  );
-                }) : <p className="empty">Belge yok.</p>}
-              </div>
-              <button disabled={!hasSelectedClient} onClick={onReprocessSelectedClient} type="button">
-                Mükellefi yeniden işle
-              </button>
-              {clientReprocessStatus ? <p className="decision-status">{clientReprocessStatus}</p> : null}
-              <label className="bulk-document-check danger">
-                <input
-                  checked={clientDocumentDeleteConfirmed}
-                  onChange={(event) => setClientDocumentDeleteConfirmed(event.target.checked)}
-                  type="checkbox"
-                />
-                Seçili belgelerin dosyalarıyla birlikte silineceğini onaylıyorum
-              </label>
-              <button
-                className="danger"
-                disabled={!selectedDocumentRefs.length}
-                onClick={onDeleteSelectedDocuments}
-                type="button"
-              >
-                Seçili belgeleri sil
-              </button>
-              {!selectedDocumentRefs.length ? <small className="blocked-reason">Önce silinecek belgeleri seçin.</small> : null}
-              {clientDocumentDeleteStatus ? <p className="decision-status">{clientDocumentDeleteStatus}</p> : null}
-            </div>
-          </section> : null}
+          </section>
         </section>
       ) : null}
 

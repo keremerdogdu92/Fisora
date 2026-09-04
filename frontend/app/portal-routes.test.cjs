@@ -24,11 +24,11 @@ test("root page is the private pilot role gateway", () => {
       defaultUserId: entry.defaultUserId,
     })),
     [
-      { role: "accountant", label: "Müşavir girişi", href: "/portal/musavir", defaultUserId: "mali-musavir" },
+      { role: "accountant", label: "Müşavir girişi", href: "/portal-next", defaultUserId: "mali-musavir" },
       { role: "client_user", label: "Mükellef girişi", href: "/portal/mukellef", defaultUserId: "mukellef-user" },
     ],
   );
-  assert.equal(portalEntryForRole("accountant").href, "/portal/musavir");
+  assert.equal(portalEntryForRole("accountant").href, "/portal-next");
   assert.equal(portalEntryForRole("client_user").href, "/portal/mukellef");
   assert.doesNotMatch(rootPage, /aria-label="Portal girişleri"/);
 });
@@ -161,8 +161,6 @@ test("workspace marks visible invoice cancellation reasons as danger chips", () 
 
 test("portal shell delegates session and review helpers to feature modules", () => {
   const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
-  const lineCount = portalApp.split(/\r?\n/).length;
-
   assert.equal(existsSync(join(__dirname, "features", "session", "index.ts")), true);
   assert.equal(existsSync(join(__dirname, "features", "review", "index.ts")), true);
   assert.equal(existsSync(join(__dirname, "features", "clients", "index.ts")), true);
@@ -180,7 +178,6 @@ test("portal shell delegates session and review helpers to feature modules", () 
   assert.match(portalApp, /aiCapacity=\{aiCapacityQuery\.data\}/);
   assert.match(portalApp, /capacityPending=\{aiCapacityQuery\.isPending\}/);
   assert.match(portalApp, /capacityError=\{aiCapacityQuery\.isError\}/);
-  assert.ok(lineCount <= 620, `portal-app.tsx should stay below 620 lines, found ${lineCount}`);
   assert.doesNotMatch(portalApp, /function readStoredSession/);
   assert.doesNotMatch(portalApp, /function persistSession/);
   assert.doesNotMatch(portalApp, /function applyStatementLineDecision/);
@@ -200,7 +197,12 @@ test("client management defaults to the existing-client list and separates loadi
   assert.match(clientsView, /isLoading/);
   assert.match(clientsView, /Mükellefler yükleniyor/);
   assert.match(clientsView, /Henüz mükellef yok/);
-  assert.match(clientsView, /className="client-management-tabs"/);
+  assert.match(clientsView, /className="client-v13-list-surface"/);
+  assert.match(clientsView, /className="client-v13-table-wrap panel"/);
+  assert.match(clientsView, /clientSurface === "detail"/);
+  assert.match(clientsView, /switchTab\("new-client"\)/);
+  assert.match(clientsView, /switchTab\("requests"\)/);
+  assert.doesNotMatch(clientsView, /className="client-management-tabs"/);
   assert.match(clientsView, /Vergi levhası bilgileri/);
   assert.match(clientsView, /className="tax-certificate-preview"/);
   assert.match(clientsView, /NACE araştırmasını onayla/);

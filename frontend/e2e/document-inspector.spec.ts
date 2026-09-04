@@ -150,7 +150,7 @@ async function openInspectorDocument(page: Page, expectedViewerClass: string) {
   await page.goto("/portal-next");
   await page.getByRole("button", { name: "Çalışma Masası", exact: true }).click();
   await expect(page.locator(expectedViewerClass)).toBeVisible();
-  await expect(page.locator(".source-linked-row").first()).toBeVisible();
+  await expect(page.locator(".journal-source-row").first()).toBeVisible();
 }
 
 test("HTML invoice magnifier and journal source focus work without extra controls", async ({ page }) => {
@@ -161,26 +161,29 @@ test("HTML invoice magnifier and journal source focus work without extra control
   await setupInspector(page, "inspector.html", "text/html", html);
   await openInspectorDocument(page, ".html-document-viewer");
 
-  const sourceCell = page.frameLocator(".html-document-frame").locator("#source-line");
+  const sourceCell = page.frameLocator(".html-viewer-frame").locator("#source-line");
   await expect(sourceCell).toBeVisible();
-  await sourceCell.hover({ position: { x: 80, y: 10 } });
+  const frameBox = await page.locator(".html-viewer-frame").boundingBox();
+  expect(frameBox).not.toBeNull();
+  await page.mouse.move(frameBox!.x + 120, frameBox!.y + 120);
   await expect(page.locator(".html-document-magnifier")).toBeVisible();
   await expect(page.locator(".html-document-magnifier")).toHaveCSS("opacity", "1");
 
-  const journalRow = page.locator(".source-linked-row").first();
+  const journalRow = page.locator(".journal-source-row").first();
   await journalRow.hover();
-  await expect(page.locator(".document-source-highlight").first()).toBeVisible();
+  await expect(page.frameLocator(".html-viewer-frame").locator("#fisora-source-target")).toBeVisible();
+  await expect(journalRow).toHaveClass(/source-focused-row/);
 
-  await journalRow.click();
+  await journalRow.click({ position: { x: 2, y: 2 } });
   await expect(journalRow).toHaveClass(/source-pinned-row/);
-  await expect(page.locator(".document-source-highlight.pinned").first()).toBeVisible();
+  await expect(page.frameLocator(".html-viewer-frame").locator("#fisora-source-target")).toBeVisible();
 });
 
 test("PDF invoice magnifier and journal source focus use PDF.js text evidence", async ({ page }) => {
   await setupInspector(page, "inspector.pdf", "application/pdf", pdfBytes(SOURCE_TEXT));
   await openInspectorDocument(page, ".pdf-document-viewer");
 
-  const canvas = page.locator(".pdf-page-surface canvas");
+  const canvas = page.locator(".pdf-viewer-stage > canvas");
   await expect(canvas).toBeVisible();
   await expect(page.locator(".pdf-viewer-status")).toHaveCount(0);
   const rasterScale = await canvas.evaluate((element) => (element as HTMLCanvasElement).width / Math.max(element.getBoundingClientRect().width, 1));
@@ -189,11 +192,12 @@ test("PDF invoice magnifier and journal source focus use PDF.js text evidence", 
   await expect(page.locator(".pdf-document-magnifier")).toBeVisible();
   await expect(page.locator(".pdf-document-magnifier")).toHaveCSS("opacity", "1");
 
-  const journalRow = page.locator(".source-linked-row").first();
+  const journalRow = page.locator(".journal-source-row").first();
   await journalRow.hover();
-  await expect(page.locator(".document-source-highlight").first()).toBeVisible();
+  await expect(page.locator(".pdf-source-highlight")).toBeVisible();
+  await expect(journalRow).toHaveClass(/source-focused-row/);
 
-  await journalRow.click();
+  await journalRow.click({ position: { x: 2, y: 2 } });
   await expect(journalRow).toHaveClass(/source-pinned-row/);
-  await expect(page.locator(".document-source-highlight.pinned").first()).toBeVisible();
+  await expect(page.locator(".pdf-source-highlight.pinned")).toBeVisible();
 });

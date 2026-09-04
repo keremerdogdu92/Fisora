@@ -1,3 +1,5 @@
+# File: backend/tests/test_gemini_project_pool.py
+# Summary: Verifies Gemini project-slot discovery, scheduling, cooldowns, and structured-call failover behavior.
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -240,6 +242,31 @@ class GeminiProjectPoolTests(unittest.TestCase):
         self.assertEqual(result["slot"], "GEMINI_API_KEY_SLOT_2")
         self.assertEqual(providers[0].calls[0][0], "generate_structured_json")
         self.assertEqual(providers[1].calls[0][0], "generate_structured_json")
+
+    def test_structured_call_fails_over_from_transient_server_error(self) -> None:
+        providers: list[_FakeProvider] = []
+
+        def factory(config: GeminiProjectSlotConfig) -> _FakeProvider:
+            provider = _FakeProvider(config)
+            providers.append(provider)
+            return provider
+
+        pool = GeminiProjectPoolProvider(
+            [
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_1", "key-1", 15),
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_2", "key-2", 15),
+            ],
+            provider_factory=factory,
+        )
+        providers[0].error_once = GeminiProviderAttemptError(
+            "service unavailable", attempt=_attempt(http_status=503)
+        )
+
+        result = pool.generate_structured_json(schema_name="test")
+
+        self.assertEqual(result["slot"], "GEMINI_API_KEY_SLOT_2")
+        self.assertEqual(len(providers[0].calls), 1)
+        self.assertEqual(len(providers[1].calls), 1)
 
     def test_all_cooling_slots_select_earliest_expiry(self) -> None:
         now = {"value": 100.0}

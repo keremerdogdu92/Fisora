@@ -119,19 +119,36 @@ test("HTML viewer remains sandboxed and shares compact fit, width, 100 percent, 
   assert.match(workspace, /controlledHtmlPreview/);
 });
 
-test("reader quality control stays secondary to the AI Agents overview without changing the PDF viewer path", () => {
-  const agents = source("portal-agents-view.tsx");
+test("next AI Agents separates overview, reading quality, and research while keeping source focus safe", () => {
+  const agents = source("portal-next", "portal-next-agents-view.tsx");
   const portalApp = source("portal-app.tsx");
   const reviewPanels = source("portal-review-panels.tsx");
 
-  assert.match(agents, /export function HtmlReaderQualityControl/);
-  assert.match(agents, /HtmlSourceComparison/);
-  assert.doesNotMatch(agents, /agent-reader-quality-tab/);
-  assert.match(portalApp, /PortalNextAgentOverview/);
-  assert.match(portalApp, /nextAgentSection === "agents"/);
-  assert.match(portalApp, /HtmlReaderQualityControl documents=\{data\.documents\}/);
+  assert.match(agents, /Genel Bakış/);
+  assert.match(agents, /Okuma Kalitesi/);
+  assert.match(agents, /Araştırma Kayıtları/);
+  assert.match(agents, /Okuma Ajanı/);
+  assert.match(agents, /Muhasebe Ajanı/);
+  assert.match(agents, /Araştırma Ajanı/);
+  assert.match(agents, /sourceTarget=\{sourceTarget\}/);
+  assert.match(agents, /Reader/);
+  assert.match(agents, /Fisora'da/);
+  assert.match(portalApp, /PortalNextAgentsView/);
+  assert.match(portalApp, /PortalNextLearnedRulesView/);
+  assert.doesNotMatch(portalApp, /HtmlReaderQualityControl documents=/);
   assert.match(reviewPanels, /PdfDocumentViewer/);
-  assert.doesNotMatch(reviewPanels, /HtmlSourceComparison document=\{document\} previewUrl=\{previewUrl\}/);
+});
+
+test("next learned rules only presents confirmed active rules and lifecycle actions", () => {
+  const agents = source("portal-next", "portal-next-agents-view.tsx");
+  assert.match(agents, /activeRules = rules\.filter/);
+  assert.match(agents, /Etkin öğrenme/);
+  assert.match(agents, /Tedarikçi/);
+  assert.match(agents, /Ürün ailesi/);
+  assert.match(agents, /Vergi \/ işlem/);
+  assert.match(agents, /changeStatus\(rule, "pause"\)/);
+  assert.match(agents, /changeStatus\(rule, "archive"\)/);
+  assert.match(agents, /Yeni adaylar önce AI Ajanları altında doğrulama sinyali olarak görünür/);
 });
 test("next workbench prefers the latest invoice-bearing period on initial entry", () => {
   const workspaceModel = source("portal-next", "portal-next-workspace-model.ts");

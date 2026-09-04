@@ -2,7 +2,7 @@
 // Summary: Composes authenticated portal routes, workspace state, selected-document progress polling, and review commands.
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { AgentTrainingView, HtmlReaderQualityControl } from "./portal-agents-view";
+import { AgentTrainingView } from "./portal-agents-view";
 import { AccountantDashboard } from "./portal-dashboard-view";
 import { readDashboardOfficePeriod, readDashboardResume, writeDashboardOfficePeriod, writeDashboardResume, type DashboardResumeState } from "./portal-dashboard-resume";
 import { ClientPortal } from "./portal-client-view";
@@ -10,7 +10,8 @@ import { ClientManagementView } from "./portal-clients-view";
 import { DocumentProcessingWorkspace } from "./portal-documents-view";
 import { ExportBasketView as ExportBasketRouteView, OperationsView as OperationsRouteView } from "./portal-exports-view";
 import { SettingsView } from "./portal-settings-view";
-import { PortalNextAgentOverview, PortalNextWorkTypeTabs, type PortalNextAgentSection } from "./portal-next/portal-next-shell";
+import { PortalNextWorkTypeTabs, type PortalNextAgentSection } from "./portal-next/portal-next-shell";
+import { PortalNextAgentsView, PortalNextLearnedRulesView } from "./portal-next/portal-next-agents-view";
 import { resolvePortalNextWorkspacePeriod } from "./portal-next/portal-next-workspace-model";
 import { PortalPresentationChrome, type PortalPresentation } from "./portal-presentation-chrome";
 import { AccountantWorkspace } from "./portal-workspace-view";
@@ -573,19 +574,14 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
         />
       ) : null}
       {mode === "agents" ? (
-        isNextPresentation && nextAgentSection === "agents" ? (
-          <section className="portal-next-agents-with-quality">
-            <PortalNextAgentOverview agentSummaries={dashboardView.agentSummaries} />
-            <details className="portal-next-reader-quality">
-              <summary>
-                <span>Okuma Ajan? kalite kontrol?</span>
-                <small>Ge?ici ara? ? Orijinal / Reader / Kar??la?t?r</small>
-              </summary>
-              <HtmlReaderQualityControl documents={data.documents} session={session} />
-            </details>
-          </section>
+        isNextPresentation ? (
+          nextAgentSection === "agents" ? (
+            <PortalNextAgentsView agentSummaries={dashboardView.agentSummaries} documents={officeDocuments} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} onOpenDocument={openDashboardDocument} session={session} />
+          ) : (
+            <PortalNextLearnedRulesView loginUserId={loginUserId} session={session} />
+          )
         ) : (
-          <AgentTrainingView key={isNextPresentation ? nextAgentSection : String(routeKey)} agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} />
+          <AgentTrainingView key={String(routeKey)} agentSummaries={dashboardView.agentSummaries} defaultSection={routeKey === "bilgi-havuzu" ? "research" : "learning"} learningInsights={dashboardView.learningInsights} loginUserId={loginUserId} session={session} />
         )
       ) : null}
 

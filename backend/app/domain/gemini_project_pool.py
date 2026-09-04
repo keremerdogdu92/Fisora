@@ -131,6 +131,8 @@ class GeminiProjectPoolProvider:
         self._cooling_until = {config.slot_name: 0.0 for config in self._configs}
         self._selection_sequence = 0
         self.last_provider_name = ""
+        self.last_credential_slot = ""
+        self.last_attempted_credential_slots: tuple[str, ...] = ()
         self.last_capacity_snapshot: dict[str, object] = {}
         self.last_product_classification_instructions = ""
         self.product_classification_instructions = ""
@@ -197,34 +199,48 @@ class GeminiProjectPoolProvider:
 
     def _call_kwargs(self, method_name: str, kwargs: Mapping[str, object]) -> dict[str, Any]:
         last_error: GeminiProviderAttemptError | None = None
+        attempted_slots: list[str] = []
         for attempt_index in range(len(self._configs)):
             index = self._lease_slot()
             config = self._configs[index]
             provider = self._providers[index]
+            attempted_slots.append(config.slot_name)
             try:
                 result = getattr(provider, method_name)(**dict(kwargs))
                 self.last_provider_name = self.provider_name
+                self._record_structured_attempts(attempted_slots, success_slot=config.slot_name)
                 return result
             except GeminiProviderAttemptError as error:
                 last_error = error
                 status = error.attempt.http_status
-                failover_statuses = {401, 403, 429, 500, 502, 503, 504}
+                phase = str(error.attempt.error_metadata.get("phase") or "").strip().lower()
+                failover_statuses = {401, 403, 408, 429, 500, 502, 503, 504}
+                failover_phases = {"transport", "response_capture", "response_json", "structured_parse"}
+                should_failover = status in failover_statuses or status is None or phase in failover_phases
                 if status in failover_statuses:
                     with self._lock:
                         self._cooling_until[config.slot_name] = (
                             float("inf") if status in {401, 403}
                             else self._clock() + self._cooldown_seconds
                         )
-                    if attempt_index + 1 < len(self._configs):
-                        continue
+                if should_failover and attempt_index + 1 < len(self._configs):
+                    continue
+                self._record_structured_attempts(attempted_slots)
                 raise
             finally:
                 with self._lock:
                     self._copy_provider_metadata(provider)
                     self._in_flight[config.slot_name] -= 1
         if last_error is not None:
+            self._record_structured_attempts(attempted_slots)
             raise last_error
+        self._record_structured_attempts(attempted_slots)
         raise RuntimeError("Gemini project pool has no callable slot")
+
+    def _record_structured_attempts(self, attempted_slots: list[str], *, success_slot: str = "") -> None:
+        with self._lock:
+            self.last_attempted_credential_slots = tuple(attempted_slots)
+            self.last_credential_slot = success_slot
 
     def _copy_provider_metadata(self, provider: Any) -> None:
         snapshot = getattr(provider, "last_capacity_snapshot", {})

@@ -22,7 +22,7 @@ from app.domain.gemini_project_pool import (
 from app.domain.openai_provider import GeminiAttemptEnvelope, GeminiProviderAttemptError
 
 
-def _attempt(*, http_status: int | None) -> GeminiAttemptEnvelope:
+def _attempt(*, http_status: int | None, phase: str = "") -> GeminiAttemptEnvelope:
     now = datetime.now(UTC)
     return GeminiAttemptEnvelope(
         request_body=b"{}",
@@ -36,7 +36,7 @@ def _attempt(*, http_status: int | None) -> GeminiAttemptEnvelope:
         elapsed_ms=0,
         token_usage={},
         status="failed",
-        error_metadata={},
+        error_metadata={"phase": phase} if phase else {},
         credential_slot="GEMINI_API_KEY_SLOT_1",
     )
 
@@ -267,6 +267,69 @@ class GeminiProjectPoolTests(unittest.TestCase):
         self.assertEqual(result["slot"], "GEMINI_API_KEY_SLOT_2")
         self.assertEqual(len(providers[0].calls), 1)
         self.assertEqual(len(providers[1].calls), 1)
+
+    def test_structured_call_rotates_across_transport_and_server_failures(self) -> None:
+        providers: list[_FakeProvider] = []
+
+        def factory(config: GeminiProjectSlotConfig) -> _FakeProvider:
+            provider = _FakeProvider(config)
+            providers.append(provider)
+            return provider
+
+        pool = GeminiProjectPoolProvider(
+            [
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_1", "key-1", 15),
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_2", "key-2", 15),
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_3", "key-3", 15),
+            ],
+            provider_factory=factory,
+        )
+        providers[0].error_once = GeminiProviderAttemptError(
+            "timeout", attempt=_attempt(http_status=None, phase="transport")
+        )
+        providers[1].error_once = GeminiProviderAttemptError(
+            "service unavailable", attempt=_attempt(http_status=503, phase="http")
+        )
+
+        result = pool.generate_structured_json(schema_name="test")
+
+        self.assertEqual(result["slot"], "GEMINI_API_KEY_SLOT_3")
+        self.assertEqual(pool.last_credential_slot, "GEMINI_API_KEY_SLOT_3")
+        self.assertEqual(
+            pool.last_attempted_credential_slots,
+            (
+                "GEMINI_API_KEY_SLOT_1",
+                "GEMINI_API_KEY_SLOT_2",
+                "GEMINI_API_KEY_SLOT_3",
+            ),
+        )
+
+    def test_structured_parse_failure_retries_on_next_slot(self) -> None:
+        providers: list[_FakeProvider] = []
+
+        def factory(config: GeminiProjectSlotConfig) -> _FakeProvider:
+            provider = _FakeProvider(config)
+            providers.append(provider)
+            return provider
+
+        pool = GeminiProjectPoolProvider(
+            [
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_1", "key-1", 15),
+                GeminiProjectSlotConfig("GEMINI_API_KEY_SLOT_2", "key-2", 15),
+            ],
+            provider_factory=factory,
+        )
+        providers[0].error_once = GeminiProviderAttemptError(
+            "malformed structured output", attempt=_attempt(http_status=200, phase="structured_parse")
+        )
+
+        result = pool.generate_structured_json(schema_name="test")
+
+        self.assertEqual(result["slot"], "GEMINI_API_KEY_SLOT_2")
+        self.assertEqual(
+            pool.last_attempted_credential_slots,
+            ("GEMINI_API_KEY_SLOT_1", "GEMINI_API_KEY_SLOT_2"),
+        )
 
     def test_all_cooling_slots_select_earliest_expiry(self) -> None:
         now = {"value": 100.0}

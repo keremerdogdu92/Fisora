@@ -40,41 +40,10 @@ jobs:
           set -euo pipefail
           aws sts get-caller-identity
 
-      - name: Diagnose production worktree if permitted
-        shell: bash
-        run: |
-          set +e
-          diagnostic_id="$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --comment "Fisora read-only worktree diagnostic" \
-            --parameters 'commands=["cd /opt/fisora/app && git -c safe.directory=/opt/fisora/app status --porcelain --untracked-files=no"]' \
-            --query 'Command.CommandId' \
-            --output text 2>/tmp/fisora-diagnostic-error)"
-          diagnostic_status=$?
-          if [ "$diagnostic_status" -ne 0 ] || [ -z "$diagnostic_id" ]; then
-            echo "Read-only production diagnostic is not permitted for this deploy role."
-            cat /tmp/fisora-diagnostic-error || true
-          else
-            aws ssm wait command-executed --command-id "$diagnostic_id" --instance-id "$INSTANCE_ID" || true
-            aws ssm get-command-invocation \
-              --command-id "$diagnostic_id" \
-              --instance-id "$INSTANCE_ID" \
-              --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
-              --output json || true
-          fi
-
       - name: Deploy exact commit through SSM
         shell: bash
         run: |
           set -euo pipefail
-          echo "SSM document definition:"
-          aws ssm get-document \
-            --name "$SSM_DOCUMENT" \
-            --document-format YAML \
-            --query 'Content' \
-            --output text || echo "SSM document definition unavailable to deploy role."
-
           command_id="$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "$SSM_DOCUMENT" \

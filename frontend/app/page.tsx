@@ -1,10 +1,11 @@
 // File: frontend/app/page.tsx
-// Summary: Renders the shared Fisora split-screen login gateway with production authentication, password reset, and the current blue/slate product language.
+// Summary: Renders the shared Fisora split-screen login gateway with production authentication, password reset, and opt-in persistent sessions.
 "use client";
 
 import { useMemo, useState } from "react";
 import { canUseLocalPilotFallback } from "./pilot-readiness";
 import { LANDING_ROLE_ENTRIES, portalEntryForRole } from "./portal-routes";
+import { persistSession } from "./portal-session";
 import { loginWithPassword, requestPasswordReset, resolveApiBaseUrl } from "./upload-api";
 
 type LandingRole = "accountant" | "client_user";
@@ -18,24 +19,15 @@ type LandingEntry = {
   cta: string;
 };
 
-type LocalSession = {
-  userId: string;
-  role: LandingRole;
-  sessionToken?: string;
-  expiresAt?: string;
-};
-
-const SESSION_STORAGE_KEY = "fisora.office.session.v1";
-
-function persistSession(session: LocalSession) {
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-}
+const STANDARD_SESSION_TTL_HOURS = 12;
+const REMEMBERED_SESSION_TTL_HOURS = 30 * 24;
 
 export default function RoleGatewayLanding() {
   const entries = LANDING_ROLE_ENTRIES as LandingEntry[];
   const [selectedRole, setSelectedRole] = useState<LandingRole>("accountant");
   const [userId, setUserId] = useState(() => portalEntryForRole("accountant").defaultUserId);
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [status, setStatus] = useState("");
   const [resetMode, setResetMode] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
@@ -91,6 +83,7 @@ export default function RoleGatewayLanding() {
           apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
           userId: effectiveUserId,
           password: password.trim(),
+          ttlHours: rememberMe ? REMEMBERED_SESSION_TTL_HOURS : STANDARD_SESSION_TTL_HOURS,
         });
 
         persistSession({
@@ -98,6 +91,7 @@ export default function RoleGatewayLanding() {
           role: selectedRole,
           sessionToken: backendSession.sessionToken,
           expiresAt: backendSession.expiresAt,
+          storageScope: rememberMe ? "local" : "tab",
         });
 
         window.location.assign(selectedEntry.href);
@@ -119,7 +113,11 @@ export default function RoleGatewayLanding() {
       return;
     }
 
-    persistSession({ userId: effectiveUserId, role: selectedRole });
+    persistSession({
+      userId: effectiveUserId,
+      role: selectedRole,
+      storageScope: rememberMe ? "local" : "tab",
+    });
     window.location.assign(selectedEntry.href);
   }
 
@@ -194,6 +192,18 @@ export default function RoleGatewayLanding() {
                 type="password"
                 value={password}
               />
+            </label>
+
+            <label className="remember-session">
+              <input
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>Beni hatırla</strong>
+                <small>Bu cihazda 30 gün oturum açık kalsın.</small>
+              </span>
             </label>
 
             <button className="primary" onClick={enterPortal} type="button">

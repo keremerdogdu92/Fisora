@@ -292,6 +292,11 @@ test("shared login gateway uses the portal-next product language", () => {
   assert.match(page, /gateway-identity-panel/);
   assert.match(page, /gateway-login-heading/);
   assert.match(page, /Fisora&apos;ya giriş yap/);
+  assert.match(page, /Beni hatırla/);
+  assert.match(page, /REMEMBERED_SESSION_TTL_HOURS = 30 \* 24/);
+  assert.match(page, /ttlHours: rememberMe \? REMEMBERED_SESSION_TTL_HOURS : STANDARD_SESSION_TTL_HOURS/);
+  assert.match(page, /storageScope: rememberMe \? "local" : "tab"/);
+  assert.match(styles, /\.landing-login \.remember-session/);
   assert.match(styles, /\.fisora-gateway \.role-copy/);
   assert.match(styles, /--gateway-navy:\s*#1d3557/);
   assert.match(styles, /--gateway-ink:\s*#172033/);

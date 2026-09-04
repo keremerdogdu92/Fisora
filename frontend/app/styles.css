@@ -1,3 +1,6 @@
+/* File: frontend/app/styles.css */
+/* Summary: Defines responsive Fisora portal, login, workbench, and component presentation styles. */
+
 :root {
   color-scheme: light;
   --bg: #eef3f7;
@@ -210,6 +213,38 @@ button:disabled {
   border-radius: 8px;
   min-height: 42px;
   padding: 9px 11px;
+}
+
+.landing-login .remember-session {
+  align-items: flex-start;
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+}
+
+.landing-login .remember-session input {
+  accent-color: var(--blue);
+  flex: 0 0 auto;
+  height: 18px;
+  margin: 2px 0 0;
+  min-height: 18px;
+  padding: 0;
+  width: 18px;
+}
+
+.landing-login .remember-session span {
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.landing-login .remember-session small {
+  color: var(--muted);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 2px;
 }
 
 .workflow-strip {

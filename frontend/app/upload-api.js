@@ -20,8 +20,9 @@ function resolveApiBaseUrl(pageUrl, configuredBaseUrl) {
 }
 
 function pickUploadUser({ session, selectedClient, fallbackUserId = DEFAULT_UPLOAD_USER_ID }) {
-  if (session?.role === "client_user" && String(session.userId || "").trim()) {
-    return String(session.userId).trim();
+  const authenticatedUserId = String(session?.userId || "").trim();
+  if (authenticatedUserId) {
+    return authenticatedUserId;
   }
   return String(selectedClient?.portalUserId || selectedClient?.userId || fallbackUserId).trim() || fallbackUserId;
 }
@@ -356,9 +357,14 @@ async function resetTestData({
   });
 }
 
-async function ensureUploadWorkspace({ apiBaseUrl, client, userId, displayName, sessionToken = "", fetchImpl = fetch }) {
+async function ensureUploadWorkspace({ apiBaseUrl, client, userId, displayName, sessionToken = "", sessionRole = "", fetchImpl = fetch }) {
   const clientPayload = buildClientBootstrapPayload(client);
+  const normalizedRole = String(sessionRole || "").trim().toLowerCase();
   const headers = sessionToken ? { "X-Fisora-Session": String(sessionToken) } : {};
+
+  // Authenticated client users must never mutate workspace or role records during a document upload.
+  if (normalizedRole === "client_user") return;
+
   await postJson({
     apiBaseUrl,
     path: "/phase0/store/client",
@@ -366,6 +372,10 @@ async function ensureUploadWorkspace({ apiBaseUrl, client, userId, displayName, 
     headers,
     fetchImpl,
   });
+
+  // Accountant/admin sessions already identify the upload actor; do not rewrite that actor as a client user.
+  if (normalizedRole === "accountant" || normalizedRole === "admin") return;
+
   await postJson({
     apiBaseUrl,
     path: "/phase0/store/portal-user",

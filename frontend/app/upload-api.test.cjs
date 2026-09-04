@@ -65,7 +65,7 @@ test("resolveApiBaseUrl honors an explicit configured base URL", () => {
   assert.equal(resolveApiBaseUrl("http://192.168.1.101:3000", " http://api.local:9000/ "), "http://api.local:9000");
 });
 
-test("pickUploadUser uses the client session or selected client's portal user", () => {
+test("pickUploadUser prefers the authenticated session actor", () => {
   assert.equal(
     pickUploadUser({
       session: { userId: " mukellef-user ", role: "client_user" },
@@ -78,7 +78,7 @@ test("pickUploadUser uses the client session or selected client's portal user", 
       session: { userId: "mali-musavir", role: "accountant" },
       selectedClient: { portalUserId: "selected-user" },
     }),
-    "selected-user",
+    "mali-musavir",
   );
 });
 
@@ -140,6 +140,47 @@ test("ensureUploadWorkspace upserts client then portal user", async () => {
     role: "client_user",
     allowed_client_ids: ["client-1"],
   });
+});
+
+test("ensureUploadWorkspace does not rewrite an accountant as a client user", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  await ensureUploadWorkspace({
+    apiBaseUrl: "http://localhost:8000",
+    client: { clientId: "client-1", clientName: "Demo Client", taxId: "123" },
+    userId: "accountant-user",
+    displayName: "Accountant User",
+    sessionToken: "session-token",
+    sessionRole: "accountant",
+    fetchImpl,
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "http://localhost:8000/phase0/store/client");
+});
+
+test("ensureUploadWorkspace never lets a client session mutate workspace or role records", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  await ensureUploadWorkspace({
+    apiBaseUrl: "http://localhost:8000",
+    client: { clientId: "client-1", clientName: "Demo Client", taxId: "123" },
+    userId: "client-user",
+    displayName: "Client User",
+    sessionToken: "session-token",
+    sessionRole: "client_user",
+    fetchImpl,
+  });
+
+  assert.equal(requests.length, 0);
 });
 
 test("buildClientOnboardingPackagePayload builds a backend onboarding package", () => {

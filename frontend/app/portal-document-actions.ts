@@ -1,3 +1,5 @@
+// File: frontend/app/portal-document-actions.ts
+// Summary: Coordinates authenticated portal document uploads, review actions, and backend refreshes.
 import type { Dispatch, SetStateAction } from "react";
 import { statementStatusLabel, statementReviewStatus, reviewActionLabel } from "./portal-formatters";
 import { normalizeRulePrompt, normalizeStatementAiSuggestions, normalizeStatus, safeNumber, safeRecord } from "./portal-normalization";
@@ -127,7 +129,7 @@ export async function addLocalUploadsAction({
 
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const uploadUserId = pickUploadUser({ session, selectedClient });
-  const uploadDisplayName = session?.delegatedBy || selectedClient.userLabel || uploadUserId;
+  const uploadDisplayName = session?.delegatedBy || session?.userId || selectedClient.userLabel || uploadUserId;
   try {
     await ensureUploadWorkspace({
       apiBaseUrl,
@@ -135,6 +137,7 @@ export async function addLocalUploadsAction({
       userId: uploadUserId,
       displayName: uploadDisplayName,
       sessionToken: session?.sessionToken,
+      sessionRole: session?.role,
     });
     const uploadResults = await uploadDocumentsToBackend({
       apiBaseUrl,

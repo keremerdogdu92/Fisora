@@ -96,3 +96,44 @@ Retention production'da `FISORA_WORKER_RETENTION_ENABLED=false`; ben tekrar aç 
 
 Sonra güvenli document-only purge'u uygula, raw source dosyalarını yalnız doğrulanmış path'lerden sil ve post-check'te 5 client/support korunurken bütün belge graph'ının 0 olduğunu göster. Tenant genel reset kullanma. Gereksiz accounting davranışı değiştirme.
 ```
+
+## Tamamlanma kaydı — 2026-09-02
+Production document-only purge tamamlandı.
+
+Uygulanan scope:
+- target tenant: `36b0dedc-67f2-5d4a-8c67-355fcb8bea97`
+- 5 client / 180 workflow ref / 180 normalized document / 180 source file
+- protected corpus/reference/rule bağlantıları purge öncesi doğru kolonlarla `0` doğrulandı
+- 180/180 processing job `completed` durumundaydı
+
+Silinen ana graph:
+- 180 documents, 180 source_files, 180 document_sources, 180 source snapshots
+- 180 processing_jobs, 180 processing_attempts, 507 ai_attempts
+- 326 invoice_lines, 40 journal_entries, 40 journal_revisions, 135 journal_revision_lines
+- 349 document-linked workflow_events, 150 retention_batch_sources
+- workflow: 180 uploaded_document, 180 document, 180 processing_job, 1731 document_pipeline_event
+- 180 document-linked operation_event
+
+Raw source:
+- 180 path güvenli root altında ve benzersizdi
+- 88 source daha önce fiziksel olarak silinmiş ve normalized `deleted` durumundaydı
+- kalan 92 doğrulanmış exact path commit sonrasında silindi; `92 deleted / 0 remaining`
+Post-check:
+- document graph tabloları target tenant için `0`
+- document-linked workflow event: `0`
+- review/document AI/identity/provider/status/safety/edit/allocation/export-item bağlantıları: `0`
+- 5 client, 5 taxpayer, 3385 chart account korundu
+- 5 onboarding attachment DB kaydı ve 5/5 fiziksel attachment korundu
+- portal user `1`, auth credential `1`, auth session `3`, auth token `3` korundu
+- protected corpus `1` korundu; protected item/reference/rule sayıları mevcut haliyle `0`
+- diğer tenantlardaki 3 workflow document / 3 normalized document / 3 source file korunmuş durumda
+
+Bilinçli olarak korunan document dışı kayıtlar:
+- 7 `workflow_events`: tamamı `raw_sources_deleted_for_period`, `document_id = NULL`
+- 6 `operation_event`: 5 onboarding attachment upload + 1 document retention preview
+- 169 `ai_usage_event`: document ref/id taşımayan client/tenant seviyesinde usage kayıtları; document-only purge kapsamında silinmedi
+
+Retention hâlâ kapalı:
+- production env: `FISORA_WORKER_RETENTION_ENABLED=false`
+- worker env: `false`
+- kullanıcı yeniden açıkça isteyene kadar açılmamalı.

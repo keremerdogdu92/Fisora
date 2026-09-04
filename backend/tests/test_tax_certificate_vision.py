@@ -78,6 +78,40 @@ class TaxCertificateVisionTests(unittest.TestCase):
         self.assertEqual(provider.calls[0]["document_bytes"], b"%PDF-1.4\n%tax-certificate\n")
         self.assertEqual(reader.model_name, "gemini-test")
 
+    def test_complete_pdf_uses_vision_before_text_layer_parser(self) -> None:
+        vision_result = TaxCertificateVisionRead(
+            vkn="9270740926",
+            legal_name="GEMINI PRIMARY LIMITED SIRKETI",
+            display_title="GEMINI PRIMARY LIMITED SIRKETI",
+            tax_office="KADIKOY",
+            nace_code="477401",
+            activity_description="TIBBI URUNLERIN PERAKENDE TICARETI",
+            workplace_addresses=("ORNEK MAH. NO: 1 ISTANBUL",),
+            confidence=97,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "text-layer.pdf"
+            path.write_bytes(b"%PDF-1.4\n%text-layer\n")
+            with patch(
+                "app.domain.tax_certificates.extract_pdf_text",
+                side_effect=AssertionError("Gemini-complete reads must not invoke the text-layer parser"),
+            ) as extract_pdf_text, patch(
+                "app.domain.tax_certificates.ocr_pdf",
+                side_effect=AssertionError("OCR must remain fallback-only"),
+            ):
+                extraction = parse_tax_certificate_file(
+                    path,
+                    vision_reader=lambda _: vision_result,
+                )
+
+        extract_pdf_text.assert_not_called()
+        self.assertEqual(extraction.title, "GEMINI PRIMARY LIMITED SIRKETI")
+        self.assertEqual(extraction.vkn, "9270740926")
+        self.assertEqual(extraction.nace_code, "477401")
+        self.assertTrue(extraction.processing_metrics["used_ai_vision"])
+        self.assertFalse(extraction.processing_metrics["used_text_layer"])
+        self.assertFalse(extraction.processing_metrics["used_ocr"])
+
     def test_scanned_pdf_uses_vision_before_tesseract(self) -> None:
         vision_result = TaxCertificateVisionRead(
             vkn="9270740926",

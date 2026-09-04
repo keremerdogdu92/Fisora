@@ -229,16 +229,17 @@ test("export view exposes Zirve mapping adapter for field testing", () => {
   assert.match(portalApp, /const \[exportType, setExportType\]/);
 });
 
-test("client management view separates tax certificate OCR loading from NACE research", () => {
+test("client management view separates Gemini tax certificate loading from NACE research", () => {
   const clientsView = require("node:fs").readFileSync(join(__dirname, "portal-clients-view.tsx"), "utf8");
   const clientActions = require("node:fs").readFileSync(join(__dirname, "portal-client-actions.ts"), "utf8");
 
   assert.match(clientsView, /taxCertificateParsePending/);
   assert.match(clientsView, /tax-certificate-progress/);
-  assert.match(clientsView, /OCR\/parser çalışıyor/);
-  assert.match(clientsView, /Bu dosya taranmış görünüyor; OCR biraz sürebilir\./);
+  assert.match(clientsView, /Gemini vergi levhasını analiz ediyor/);
+  assert.match(clientsView, /Gemini belgeyi analiz ediyor; büyük veya taranmış dosyalarda işlem uzayabilir\./);
   assert.match(clientsView, /NACE araştırması yapılıyor/);
   assert.match(clientActions, /setNewClientTaxCertificateParsePending\(true\)/);
+  assert.match(clientActions, /setNewClientTaxCertificateStage\("Gemini vergi levhasını analiz ediyor"\)/);
   assert.match(clientActions, /setNewClientTaxCertificateStage\(parseStatus === "partial" \? "Eksik kritik alanlar var" : "Alanlar dolduruldu"\)/);
   assert.match(clientActions, /missing_critical_fields/);
 });

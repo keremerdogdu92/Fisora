@@ -1,5 +1,5 @@
 # File: backend/app/domain/tax_certificates.py
-# Summary: Uses text-layer parsing first, Gemini vision for weak/scanned certificates, and OCR as fallback.
+# Summary: Uses Gemini vision as the primary tax-certificate reader, with deterministic text and OCR fallbacks.
 from __future__ import annotations
 
 import json
@@ -1081,26 +1081,10 @@ def parse_tax_certificate_file(
     }
     suffix = path.suffix.lower()
     runtime_notes: list[str] = []
-    text = ""
-    if suffix == ".pdf":
-        text_start = time.perf_counter()
-        _, text, pdf_notes = extract_pdf_text(path)
-        metrics["text_layer_ms"] = _duration_ms(text_start)
-        if text.strip():
-            metrics["used_text_layer"] = True
-            source_notes = tuple((*pdf_notes, "pdf_text_layer"))
-        else:
-            source_notes = tuple(dict.fromkeys((*pdf_notes, "pdf_text_empty")))
-    elif suffix in {".png", ".jpg", ".jpeg", ".tif", ".tiff"}:
-        source_notes = ("image_source",)
-    else:
-        source_notes = ("unsupported_tax_certificate_file_type",)
+    extraction = TaxCertificateExtraction()
+    supported_suffixes = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff"}
 
-    parse_start = time.perf_counter()
-    extraction = parse_tax_certificate_text(text, extraction_notes=source_notes)
-    metrics["parse_ms"] = _duration_ms(parse_start)
-
-    if _should_run_tax_certificate_vision(extraction):
+    if suffix in supported_suffixes:
         resolved_vision_reader = vision_reader or build_tax_certificate_vision_reader_from_env()
         if resolved_vision_reader is None:
             runtime_notes.append("ai_vision_unavailable")
@@ -1108,15 +1092,30 @@ def parse_tax_certificate_file(
             vision_start = time.perf_counter()
             try:
                 vision_read = resolved_vision_reader(path)
-                vision_extraction = tax_certificate_extraction_from_vision(vision_read)
-                extraction = merge_tax_certificate_vision_extraction(extraction, vision_extraction)
+                extraction = tax_certificate_extraction_from_vision(vision_read)
                 metrics["used_ai_vision"] = True
                 metrics["ai_confidence"] = vision_read.confidence
                 metrics["ai_model"] = str(getattr(resolved_vision_reader, "model_name", "") or "")
-            except Exception as exc:  # noqa: BLE001 - OCR fallback must survive provider failures
+            except Exception as exc:  # noqa: BLE001 - deterministic fallbacks must survive provider failures
                 runtime_notes.append(f"ai_vision_failed:{type(exc).__name__}")
             finally:
                 metrics["ai_vision_ms"] = _duration_ms(vision_start)
+    else:
+        runtime_notes.append("unsupported_tax_certificate_file_type")
+
+    if suffix == ".pdf" and _should_run_pdf_ocr_fallback(extraction):
+        text_start = time.perf_counter()
+        _, text, pdf_notes = extract_pdf_text(path)
+        metrics["text_layer_ms"] = _duration_ms(text_start)
+        if text.strip():
+            metrics["used_text_layer"] = True
+            source_notes = tuple(dict.fromkeys((*pdf_notes, "pdf_text_layer")))
+        else:
+            source_notes = tuple(dict.fromkeys((*pdf_notes, "pdf_text_empty")))
+        parse_start = time.perf_counter()
+        supplemental = parse_tax_certificate_text(text, extraction_notes=source_notes)
+        metrics["parse_ms"] = int(metrics["parse_ms"]) + _duration_ms(parse_start)
+        extraction = merge_tax_certificate_extractions(extraction, supplemental)
 
     if _should_run_pdf_ocr_fallback(extraction):
         if suffix == ".pdf":

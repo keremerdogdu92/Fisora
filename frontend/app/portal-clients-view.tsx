@@ -1,5 +1,5 @@
 // File: frontend/app/portal-clients-view.tsx
-// Summary: Renders accountant taxpayer management, onboarding, operational controls, and cancellation review using live portal state and callbacks.
+// Summary: Renders accountant taxpayer management, Gemini tax-certificate onboarding, operational controls, and cancellation review using live portal state and callbacks.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -695,9 +695,9 @@ function NewClientStepper({
               {taxCertificateParsePending ? (
                 <div className="tax-certificate-progress" role="status" aria-live="polite">
                   <span className="tax-certificate-spinner" aria-hidden="true" />
-                  <strong>{taxCertificateStage || "OCR/parser çalışıyor"}</strong>
+                  <strong>{taxCertificateStage || "Gemini vergi levhasını analiz ediyor"}</strong>
                   <div className="tax-certificate-progress-bar" aria-hidden="true" />
-                  <small>{taxCertificateSlow ? "Bu dosya taranmış görünüyor; OCR biraz sürebilir." : "OCR/parser çalışıyor"}</small>
+                  <small>{taxCertificateSlow ? "Gemini belgeyi analiz ediyor; büyük veya taranmış dosyalarda işlem uzayabilir." : "Gemini AI ile alanlar okunuyor"}</small>
                 </div>
               ) : taxCertificateStage ? (
                 <small className="tax-certificate-stage">{taxCertificateStage}</small>
@@ -736,7 +736,7 @@ function NewClientStepper({
                 NACE araştırmasını onayla
               </button>
               <p className={naceResearchStatus.includes("tamamlanamadı") ? "decision-status error" : "decision-status"}>
-                {naceResearchStatus || "NACE kodu OCR ile gelirse otomatik araştırılır; eksikse kodu doldurup onaylayın."}
+                {naceResearchStatus || "NACE kodu Gemini analizinden gelirse otomatik araştırılır; eksikse kodu doldurup onaylayın."}
               </p>
               {researchSummary ? <p>{researchSummary}</p> : null}
               {sourceUrls.length ? <small>Kaynak: {sourceUrls.slice(0, 2).join(", ")}</small> : null}

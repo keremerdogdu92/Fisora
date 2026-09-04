@@ -1,5 +1,5 @@
 // File: frontend/app/portal-client-actions.ts
-// Summary: Handles client onboarding actions and surfaces partial tax-certificate extraction safely.
+// Summary: Handles client onboarding actions and surfaces Gemini-first tax-certificate extraction safely.
 import type { Dispatch, SetStateAction } from "react";
 import {
   buildDelegatedClientPortalUrl,
@@ -283,7 +283,7 @@ export async function selectNewClientTaxCertificateAction({
   const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
   setNewClientStatus(`${file.name} vergi levhası okunuyor.`);
   setNewClientTaxCertificateParsePending(true);
-  setNewClientTaxCertificateStage("OCR/parser çalışıyor");
+  setNewClientTaxCertificateStage("Gemini vergi levhasını analiz ediyor");
   try {
     const extraction = await parseTaxCertificateFromBackend({
       apiBaseUrl,

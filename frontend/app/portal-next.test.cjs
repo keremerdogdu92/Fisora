@@ -23,7 +23,7 @@ test("portal-next opts into the new presentation while legacy portal stays defau
 test("next sidebar uses the approved accountant navigation order", () => {
   const shell = source("portal-next", "portal-next-shell.tsx");
   const sidebar = shell.slice(shell.indexOf("const NEXT_SIDEBAR_ITEMS"), shell.indexOf("];", shell.indexOf("const NEXT_SIDEBAR_ITEMS")) + 2);
-  const labels = ["Ana Sayfa", "Çalışma Masası", "Onay & Çıktılar", "Mükellefler", "AI Ajanları", "Öğrenilen Kurallar", "İşlem Durumu", "Ayarlar"];
+  const labels = ["Ana Sayfa", "Çalışma Masası", "Onay & Çıktılar", "Mükellefler", "Yeni Yükleme", "AI Ajanları", "Öğrenilen Kurallar", "İşlem Durumu", "Ayarlar"];
   let previousIndex = -1;
   for (const label of labels) {
     const nextIndex = sidebar.indexOf(`label: "${label}"`);
@@ -245,10 +245,26 @@ test("shared login gateway uses the portal-next product language", () => {
   const styles = source("styles.css");
 
   assert.match(page, /landing-shell fisora-gateway/);
-  assert.match(page, /Belgelerden fişe, tek çalışma alanında\./);
-  assert.match(page, /gateway-feature-list/);
-  assert.match(page, /Fisora'ya giriş yap/);
+  assert.match(page, /Akıllı ve öğrenen bir yardımcıyla günlük muhasebe işi daha net\./);
+  assert.match(page, /Fisora, yapay zeka desteğini kararın yerine geçmek için değil/);
+  assert.match(page, /gateway-identity-panel/);
+  assert.match(page, /Fisora&apos;ya giriş yap/);
   assert.match(styles, /\.fisora-gateway \.role-copy/);
-  assert.match(styles, /--gateway-navy:\s*#1e3a5f/);
-  assert.match(styles, /--gateway-ink:\s*#14201f/);
+  assert.match(styles, /--gateway-navy:\s*#1d3557/);
+  assert.match(styles, /--gateway-ink:\s*#172033/);
+});
+
+test("next quick upload keeps invoice staging separate from the accounting workbench", () => {
+  const portalApp = source("portal-app.tsx");
+  const uploadView = source("portal-next", "portal-next-upload-view.tsx");
+  const shell = source("portal-next", "portal-next-shell.tsx");
+
+  assert.match(shell, /label: "Yeni Yükleme", mode: "uploads"/);
+  assert.match(portalApp, /mode === "uploads" && isNextPresentation/);
+  assert.match(portalApp, /<PortalNextUploadView/);
+  assert.match(uploadView, /"purchase_invoice"/);
+  assert.match(uploadView, /"sales_invoice"/);
+  assert.match(uploadView, /accept="\.pdf,\.html,\.htm,\.xml,\.zip"/);
+  assert.match(uploadView, /onUpload\(pendingFiles\)/);
+  assert.match(uploadView, /Son yüklemeler/);
 });

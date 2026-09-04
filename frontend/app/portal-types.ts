@@ -603,7 +603,7 @@ export type ReviewData = {
   }[];
 };
 
-export type PilotMode = "client" | "accountant" | "agents" | "documents" | "clients" | "research" | "settings" | "exports" | "operations";
+export type PilotMode = "client" | "accountant" | "agents" | "documents" | "clients" | "uploads" | "research" | "settings" | "exports" | "operations";
 export type PortalRouteKey = "home" | "mukellef" | "musavir" | "ajanlar" | "belgeler" | "mukellefler" | "bilgi-havuzu" | "ayarlar" | "cikti" | "operasyon";
 export type DocumentSegment = "sales_invoices" | "purchase_invoices" | "invoices" | "bank_statements" | "other_documents";
 export type PortalNavItem = { mode: PilotMode; label: string; href: string };

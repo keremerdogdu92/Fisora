@@ -48,7 +48,7 @@ test("same-domain portal paths open the correct private pilot screen", () => {
     defaultUserId: "mali-musavir",
     defaultRole: "accountant",
     lockedRole: "accountant",
-    visibleModes: ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"],
+    visibleModes: ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"],
   });
 });
 
@@ -60,10 +60,10 @@ test("accountant subpaths stay under the accountant link family", () => {
   assert.equal(portalConfigForPath("/portal/ayarlar").initialMode, "settings");
   assert.equal(portalConfigForPath("/portal/cikti").initialMode, "exports");
   assert.equal(portalConfigForPath("/portal/operasyon").initialMode, "operations");
-  assert.deepEqual(portalConfigForRouteKey("ajanlar").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "agents", "documents", "clients", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ajanlar").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
+  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
 });
 
 test("research knowledge is an AI agents subview, not a sidebar destination", () => {

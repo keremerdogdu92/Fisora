@@ -44,6 +44,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "SSM document definition:"
+          aws ssm get-document \
+            --name "$SSM_DOCUMENT" \
+            --document-format YAML \
+            --query 'Content' \
+            --output text || echo "SSM document definition unavailable to deploy role."
+
           command_id="$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "$SSM_DOCUMENT" \
@@ -65,6 +72,13 @@ jobs:
             --instance-id "$INSTANCE_ID" \
             --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
             --output json
+
+          echo "SSM command plugin details:"
+          aws ssm list-command-invocations \
+            --command-id "$command_id" \
+            --details \
+            --query 'CommandInvocations[0].CommandPlugins[].{Name:Name,Status:Status,ResponseCode:ResponseCode,Output:Output}' \
+            --output json || true
 
           if [ "$wait_status" -ne 0 ]; then
             echo "Production deploy failed." >&2

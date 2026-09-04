@@ -1,3 +1,5 @@
+# File: backend/app/worker.py
+# Summary: Runs concurrent document-processing workers with shared provider runtimes, HTML reader reuse, and optional retention.
 from __future__ import annotations
 
 import os
@@ -17,6 +19,7 @@ from app.integrations.html_source_reader import RestartingHtmlSourceReader, buil
 from app.persistence.store_factory import build_workflow_store
 from app.services.retention_service import RetentionService
 from app.workflows.document_processing import (
+    _three_stage_gemini_runtime,
     is_transient_persistence_error,
     process_queued_documents,
 )
@@ -65,7 +68,11 @@ def _gemini_runtime_for_worker() -> GeminiPdfRuntime | None:
     if _GEMINI_RUNTIME is None:
         with _GEMINI_RUNTIME_LOCK:
             if _GEMINI_RUNTIME is None:
-                _GEMINI_RUNTIME = build_gemini_pdf_runtime_from_env(os.environ)
+                _GEMINI_RUNTIME = (
+                    _three_stage_gemini_runtime(os.environ)
+                    if three_stage_accounting_enabled(os.environ)
+                    else build_gemini_pdf_runtime_from_env(os.environ)
+                )
     return _GEMINI_RUNTIME
 
 

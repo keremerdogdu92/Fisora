@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+import os
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -29,6 +31,31 @@ class DocumentProcessingProviderResilienceTests(unittest.TestCase):
         self.assertTrue(dedicated_v2.available)
         self.assertEqual(three_stage.provider.model, "gemini-2.5-flash-lite")
         self.assertEqual(dedicated_v2.provider.model, "gemini-3.5-flash-lite")
+
+    def test_worker_runtime_uses_general_model_when_three_stage_is_enabled(self) -> None:
+        import app.worker as worker
+
+        previous_runtime = worker._GEMINI_RUNTIME
+        try:
+            worker._GEMINI_RUNTIME = None
+            with patch.dict(
+                os.environ,
+                {
+                    "FISORA_THREE_STAGE_ACCOUNTING_ENABLED": "true",
+                    "FISORA_GEMINI_PDF_V2_ENABLED": "false",
+                    "GEMINI_API_KEY": "test-key",
+                    "FISORA_GEMINI_MODEL": "gemini-2.5-flash-lite",
+                    "FISORA_GEMINI_PDF_V2_MODEL": "gemini-3.5-flash-lite",
+                },
+                clear=False,
+            ):
+                runtime = worker._gemini_runtime_for_worker()
+
+            self.assertIsNotNone(runtime)
+            assert runtime is not None and runtime.provider is not None
+            self.assertEqual(runtime.provider.model, "gemini-2.5-flash-lite")
+        finally:
+            worker._GEMINI_RUNTIME = previous_runtime
 
     def test_http_503_and_timeout_are_retryable_but_http_400_is_not(self) -> None:
         request = httpx.Request("POST", "https://provider.test/generate")

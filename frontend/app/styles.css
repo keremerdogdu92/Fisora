@@ -2160,6 +2160,68 @@ button:disabled {
   object-fit: contain;
 }
 
+.html-document-viewer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.html-viewer-toolbar {
+  align-items: center;
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 42px;
+  padding: 5px 7px;
+}
+
+.html-viewer-toolbar button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.74rem;
+  font-weight: 800;
+  min-height: 30px;
+  padding: 4px 7px;
+}
+
+.html-viewer-toolbar button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.html-viewer-toolbar span {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  min-width: 42px;
+  text-align: center;
+}
+
+.html-viewer-stage {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.html-viewer-canvas {
+  position: relative;
+}
+
+.html-viewer-frame {
+  background: #fff;
+  border: 0;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+  display: block;
+  transform-origin: top left;
+}
+
 .html-source-comparison {
   border-top: 1px solid var(--border);
   display: grid;
@@ -2224,6 +2286,11 @@ button:disabled {
   width: 100%;
 }
 
+.html-source-compare-card .html-document-viewer {
+  height: 70vh;
+  min-height: 520px;
+}
+
 .html-source-reader-sections,
 .html-source-ui-rows {
   max-height: 70vh;
@@ -2250,6 +2317,41 @@ button:disabled {
 .html-source-ui-row > span { color: var(--muted); font-size: 0.7rem; overflow-wrap: anywhere; }
 .html-source-ui-row strong, .html-source-ui-row small { display: block; overflow-wrap: anywhere; }
 .html-source-ui-row small { color: var(--muted); margin-top: 3px; }
+
+.html-reader-quality-control {
+  gap: 12px;
+}
+
+.html-reader-quality-control .section-heading {
+  align-items: end;
+}
+
+.html-reader-quality-control h2 {
+  font-size: 1rem;
+  margin: 3px 0 0;
+}
+
+.html-reader-document-select {
+  display: grid;
+  gap: 4px;
+  min-width: min(100%, 340px);
+}
+
+.html-reader-document-select span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.html-reader-document-select select {
+  max-width: 100%;
+  min-height: 36px;
+}
+
+.html-reader-quality-control > .html-document-viewer {
+  height: 70vh;
+  min-height: 520px;
+}
 
 @media (min-width: 1100px) {
   .html-source-comparison-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }

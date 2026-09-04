@@ -45,7 +45,7 @@ export default function PasswordResetPage() {
     <main className="landing-shell">
       <header className="landing-header">
         <a className="landing-brand" href="/">
-          <span>Fisero</span>
+          <span>Fisora</span>
         </a>
       </header>
       <section className="role-gateway">

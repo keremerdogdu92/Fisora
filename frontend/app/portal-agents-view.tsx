@@ -1,8 +1,12 @@
+// File: frontend/app/portal-agents-view.tsx
+// Summary: Renders learned-rule training, research records, and the isolated HTML Reader quality-control surface for accountant workflows.
 import { Bot, CircleCheckBig, GraduationCap } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAgentRuleCommands } from "./features/agents";
+import { HtmlReaderSnapshot, HtmlSourceComparison, useOriginalDocumentPreview } from "./portal-review-panels";
 import { ResearchKnowledgeView } from "./portal-research-view";
-import type { LocalSession } from "./portal-types";
+import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
+import type { LocalSession, PilotDocument } from "./portal-types";
 
 type AgentSummary = {
   key: string;
@@ -27,6 +31,58 @@ function stageBucket(stageLabel: string) {
   if (stageLabel.includes("Kontrollü otomasyon")) return "automation";
   if (stageLabel.includes("Kural adayı")) return "candidate";
   return "note";
+}
+
+function isHtmlDocument(document: PilotDocument) {
+  const mime = String(document.originalDocumentMimeType || "").toLowerCase();
+  const fileName = String(document.fileName || "").toLowerCase();
+  return mime.includes("html") || fileName.endsWith(".html") || fileName.endsWith(".htm");
+}
+
+export function HtmlReaderQualityControl({ documents, session }: { documents: PilotDocument[]; session: LocalSession | null }) {
+  const htmlDocuments = useMemo(() => documents.filter(isHtmlDocument), [documents]);
+  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [activeView, setActiveView] = useState<"original" | "reader" | "comparison">("original");
+  const selectedDocument = htmlDocuments.find((document) => document.id === selectedDocumentId) ?? htmlDocuments[0];
+  const { previewError, previewUrl } = useOriginalDocumentPreview(selectedDocument, session);
+
+  useEffect(() => {
+    if (selectedDocument && selectedDocument.id !== selectedDocumentId) setSelectedDocumentId(selectedDocument.id);
+  }, [selectedDocument, selectedDocumentId]);
+
+  if (!htmlDocuments.length) {
+    return <section className="panel html-reader-quality-control"><p className="empty">Bu kapsamda HTML belge yok.</p></section>;
+  }
+  if (!selectedDocument) return null;
+
+  return (
+    <section className="panel html-reader-quality-control" aria-label="Okuma Ajanı Kalite Kontrolü">
+      <div className="section-heading">
+        <div>
+          <span>Geçici / pilot kalite yüzeyi</span>
+          <h2>Okuma Ajanı Kalite Kontrolü</h2>
+        </div>
+        <label className="html-reader-document-select">
+          <span>HTML belge</span>
+          <select onChange={(event) => setSelectedDocumentId(event.target.value)} value={selectedDocument.id}>
+            {htmlDocuments.map((document) => <option key={document.id} value={document.id}>{document.fileName}</option>)}
+          </select>
+        </label>
+      </div>
+      <div className="mode-tabs html-reader-quality-tabs" role="tablist" aria-label="Okuma ajanı kalite görünümleri">
+        <button aria-selected={activeView === "original"} className={activeView === "original" ? "mode-tab active" : "mode-tab"} onClick={() => setActiveView("original")} role="tab" type="button">Orijinal</button>
+        <button aria-selected={activeView === "reader"} className={activeView === "reader" ? "mode-tab active" : "mode-tab"} onClick={() => setActiveView("reader")} role="tab" type="button">Reader</button>
+        <button aria-selected={activeView === "comparison"} className={activeView === "comparison" ? "mode-tab active" : "mode-tab"} onClick={() => setActiveView("comparison")} role="tab" type="button">Karşılaştır</button>
+      </div>
+      {activeView === "original" ? (
+        previewUrl ? <HtmlDocumentViewer fileName={selectedDocument.fileName} src={previewUrl} /> : <p className="empty">{previewError || "Orijinal HTML yükleniyor."}</p>
+      ) : null}
+      {activeView === "reader" ? <HtmlReaderSnapshot document={selectedDocument} /> : null}
+      {activeView === "comparison" ? (
+        previewUrl ? <HtmlSourceComparison document={selectedDocument} previewUrl={previewUrl} /> : <p className="empty">{previewError || "Orijinal HTML yükleniyor."}</p>
+      ) : null}
+    </section>
+  );
 }
 
 export function AgentTrainingView({

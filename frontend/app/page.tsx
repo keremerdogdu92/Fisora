@@ -116,7 +116,7 @@ export default function RoleGatewayLanding() {
     <main className="landing-shell">
       <header className="landing-header">
         <a className="landing-brand" href="/">
-          <span>Fisero</span>
+          <span>Fisora</span>
         </a>
       </header>
 

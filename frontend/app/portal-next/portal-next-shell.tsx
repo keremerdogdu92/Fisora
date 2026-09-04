@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { DocumentSegment, LocalSession, PilotClient, PilotDocument, PilotMode } from "../portal-types";
+import { longPeriodLabel } from "../portal-formatters";
 
 export type PortalNextAgentSection = "agents" | "rules";
 
@@ -149,14 +150,14 @@ export function PortalNextTopbar({
   selectedClient?: PilotClient;
   selectedPeriod: string;
 }) {
-  const showContext = mode === "documents";
+  const showClientContext = mode === "documents";
   return (
-    <header className="portal-next-topbar">
+    <header className={`portal-next-topbar${showClientContext ? " workspace" : ""}`}>
       <div className="portal-next-topbar-left">
         <button className="portal-next-mobile-menu" onClick={onToggleMobile} type="button" aria-label="Menüyü aç">☰</button>
         <strong>{pageTitle(mode, agentSection)}</strong>
       </div>
-      {showContext ? (
+      {showClientContext ? (
         <div className="portal-next-context" aria-label="Çalışılan mükellef ve dönem">
           <label>
             <span>Çalışılan mükellef</span>
@@ -167,11 +168,21 @@ export function PortalNextTopbar({
           <label>
             <span>Dönem</span>
             <select className="portal-next-period-select" onChange={(event) => onSelectPeriod(event.target.value)} value={selectedPeriod}>
-              {periods.map((period) => <option key={period} value={period}>{period}</option>)}
+              {periods.map((period) => <option key={period} value={period}>{longPeriodLabel(period)}</option>)}
             </select>
           </label>
         </div>
-      ) : <div />}
+      ) : (
+        <div className="portal-next-context portal-next-office-context" aria-label="Ofis görünümü ve dönem">
+          <div><span>Ofis görünümü</span><strong>Tüm ofis</strong></div>
+          <label>
+            <span>Dönem</span>
+            <select className="portal-next-period-select" onChange={(event) => onSelectPeriod(event.target.value)} value={selectedPeriod}>
+              {periods.map((period) => <option key={period} value={period}>{longPeriodLabel(period)}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
       <div className="portal-next-topbar-status"><span>{notificationPendingCount} kontrol</span></div>
     </header>
   );

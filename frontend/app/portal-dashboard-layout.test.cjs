@@ -45,7 +45,10 @@ test("portal sidebar can collapse so document review has more workspace width", 
   assert.match(portalApp, /const \[sidebarCollapsed, setSidebarCollapsed\] = useState\(false\);/);
   assert.match(portalApp, /sidebar-collapsed/);
   assert.match(portalApp, /collapsed=\{sidebarCollapsed\}/);
-  assert.match(portalApp, /onToggleCollapse=\{\(\) => setSidebarCollapsed\(\(current\) => !current\)\}/);
+  assert.match(portalApp, /function toggleSidebarCollapsed\(\)/);
+  assert.match(portalApp, /fisora\.portal\.sidebar\.collapsed/);
+  assert.match(portalApp, /localStorage\.setItem\(SIDEBAR_COLLAPSED_STORAGE_KEY/);
+  assert.match(portalApp, /onToggleCollapse=\{toggleSidebarCollapsed\}/);
   assert.match(shell, /aria-label=\{collapsed \? "Menüyü genişlet" : "Menüyü daralt"\}/);
   assert.match(shell, /className=\{collapsed \? "portal-sidebar collapsed" : "portal-sidebar"\}/);
   assert.match(styles, /\.portal-shell\.sidebar-collapsed\s*\{[\s\S]*?grid-template-columns:\s*76px minmax\(0,\s*1fr\);/);
@@ -63,7 +66,8 @@ test("document processing workspace uses the approved bottom-list review layout"
   assert.match(workspace, /className="bottom-document-queue"/);
   assert.match(workspace, /Belge listesi/);
   assert.match(workspace, /Teknik ge/);
-  assert.match(workspace, /<DocumentPreview document=\{selectedDocument\} session=\{session\} \/>[\s\S]*<JournalPanel/);
+  assert.match(workspace, /<DocumentPreview[\s\S]*sourceTarget=\{sourceTarget\}[\s\S]*<JournalPanel/);
+  assert.match(workspace, /onFocusSource=\{focusDocumentSource\}/);
   assert.match(workspace, /<section className="document-review-main">[\s\S]*<\/section>\s*<details className="debug-accordion">/);
   assert.doesNotMatch(workspace, /<aside className="document-queue-panel"/);
   assert.match(styles, /\.accountant-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/);

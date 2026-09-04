@@ -2,7 +2,7 @@
 // Summary: Renders the accountant invoice workbench, progressive AI stage cards, navigation, and final-result approval gates.
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   documentMatchesSegment,
   nextDocumentSelection,
@@ -16,6 +16,7 @@ import type {
   CorrectionDraft,
   DashboardClientRow,
   DocumentSegment,
+  DocumentSourceTarget,
   LocalSession,
   NewClientDraft,
   PilotClient,
@@ -104,6 +105,7 @@ function DocumentAgentStrip({ document }: { document?: PilotDocument }) {
 
 export function AccountantWorkspace({
   cancellationRequests,
+  controlledHtmlPreview = false,
   controlledPdfPreview = false,
   nextPresentation = false,
   statementAiStatus,
@@ -148,6 +150,7 @@ export function AccountantWorkspace({
   setSelectedStatementLineNo,
 }: {
   cancellationRequests: CancellationRequest[];
+  controlledHtmlPreview?: boolean;
   controlledPdfPreview?: boolean;
   nextPresentation?: boolean;
   statementAiStatus: string;
@@ -215,6 +218,12 @@ export function AccountantWorkspace({
 
   const [documentQuery, setDocumentQuery] = useState("");
   const [workQueueFilter, setWorkQueueFilter] = useState<WorkQueueFilter>("all");
+  const [queueHidden, setQueueHidden] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [journalHidden, setJournalHidden] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"queue" | "preview" | "journal">("preview");
+  const [sourceTarget, setSourceTarget] = useState<DocumentSourceTarget | null>(null);
+  const focusStageRef = useRef<HTMLElement | null>(null);
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
     : undefined;
@@ -289,112 +298,184 @@ export function AccountantWorkspace({
     const target = navigationDocuments[currentIndex + direction];
     if (target) setSelectedDocumentId(target.id);
   }
+
+  useEffect(() => {
+    setSourceTarget(null);
+  }, [selectedDocument?.id]);
+
+  useEffect(() => {
+    if (!focusMode) return undefined;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setFocusMode(false);
+      setJournalHidden(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [focusMode]);
+
+  function focusDocumentSource(target: DocumentSourceTarget) {
+    setSourceTarget({ ...target, key: `${target.key}-${Date.now()}` });
+    setMobilePane("preview");
+  }
+
+  async function toggleWorkspaceFullscreen() {
+    const stage = focusStageRef.current;
+    if (!stage) return;
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+    await stage.requestFullscreen();
+  }
   return (
     <section className="accountant-workspace">
-      <section className="document-review-toolbar" aria-label="Belge kontrol araçları">
-        <div className="document-review-toolbar-fields">
-          {!nextPresentation ? (
-            <label className="compact-field">
-              <span>Mükellef</span>
-              <select
-                onChange={(event) => {
-                  setSelectedClientId(event.target.value);
-                  setSelectedDocumentId("");
-                }}
-                value={selectedClient?.clientId ?? ""}
-              >
-                {clients.map((client) => <option key={client.clientId} value={client.clientId}>{client.clientName}</option>)}
-              </select>
-            </label>
-          ) : null}          <label className="compact-field">
-            <span>Ara</span>
-            <input
-              className="search-input"
-              onChange={(event) => setDocumentQuery(event.target.value)}
-              placeholder="Belge adı, tür, tutar..."
-              value={documentQuery}
-            />
-          </label>
-        </div>
-        <div className="document-review-toolbar-tabs">
-          <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
-            {segmentOptions.map((option) => (
-              <button
-                aria-selected={selectedDocumentSegment === option.id}
-                className={selectedDocumentSegment === option.id ? "active" : ""}
-                key={option.id}
-                onClick={() => {
-                  setSelectedDocumentSegment(option.id);
-                  setSelectedDocumentId("");
-                }}
-                role="tab"
-                type="button"
-              >
+      {nextPresentation ? (
+        <section className="portal-next-workbench-commandbar" aria-label="Çalışma kuyruğu ve görünüm araçları">
+          <div className="review-cockpit-queues" aria-label="İş kuyruğu">
+            {workQueueOptions.map((option) => (
+              <button className={workQueueFilter === option.id ? "active" : ""} key={option.id} onClick={() => applyWorkQueueFilter(option.id)} type="button">
                 <span>{option.label}</span>
-                <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
+                <strong>{option.count}</strong>
               </button>
             ))}
           </div>
-        </div>
-        <div className="review-cockpit-queues" aria-label="İş kuyruğu">
-          <span>İş kuyruğu</span>
-          {workQueueOptions.map((option) => (
-            <button
-              className={workQueueFilter === option.id ? "active" : ""}
-              key={option.id}
-              onClick={() => applyWorkQueueFilter(option.id)}
-              type="button"
-            >
-              <span>{option.label}</span>
-              <strong>{option.count}</strong>
+          <div className="portal-next-workbench-actions">
+            <button onClick={() => setQueueHidden((current) => !current)} type="button">
+              {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}
             </button>
-          ))}
-        </div>
-      </section>
+            <button className="focus-action" onClick={() => { setFocusMode(true); setJournalHidden(false); }} type="button">
+              ▣ Belgeyi incele
+            </button>
+            <span>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</span>
+          </div>
+        </section>
+      ) : (
+        <section className="document-review-toolbar" aria-label="Belge kontrol araçları">
+          <div className="document-review-toolbar-fields">
+            <label className="compact-field">
+              <span>Ara</span>
+              <input className="search-input" onChange={(event) => setDocumentQuery(event.target.value)} placeholder="Belge adı, tür, tutar..." value={documentQuery} />
+            </label>
+          </div>
+          <div className="document-review-toolbar-tabs">
+            <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
+              {segmentOptions.map((option) => (
+                <button aria-selected={selectedDocumentSegment === option.id} className={selectedDocumentSegment === option.id ? "active" : ""} key={option.id} onClick={() => { setSelectedDocumentSegment(option.id); setSelectedDocumentId(""); }} role="tab" type="button">
+                  <span>{option.label}</span>
+                  <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="review-cockpit-queues" aria-label="İş kuyruğu">
+            <span>İş kuyruğu</span>
+            {workQueueOptions.map((option) => (
+              <button className={workQueueFilter === option.id ? "active" : ""} key={option.id} onClick={() => applyWorkQueueFilter(option.id)} type="button">
+                <span>{option.label}</span>
+                <strong>{option.count}</strong>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
-      <section className="document-agent-row" aria-label="Belge durumu ve gezinme">
-        <DocumentAgentStrip document={selectedDocument} />
-        <div className="queue-stepper">
-          {nextPresentation ? (
-            <>
-              <button aria-label="Önceki evrak" disabled={safeDocumentPosition <= 1} onClick={() => navigateDocument(-1)} type="button">‹</button>
-              <strong>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
-              <button aria-label="Sonraki evrak" disabled={!selectedDocument || safeDocumentPosition >= navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">›</button>
-            </>
+      {!nextPresentation ? (
+        <section className="document-agent-row" aria-label="Belge durumu ve gezinme">
+          <DocumentAgentStrip document={selectedDocument} />
+          <div className="queue-stepper">
+            <span>{selectedDocument && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
+            <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(-1)} type="button">Önceki</button>
+            <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">Sonraki</button>
+          </div>
+        </section>
+      ) : null}
+
+      {nextPresentation ? (
+        <nav className="portal-next-mobile-review-switch" aria-label="Mobil çalışma görünümü">
+          <button className={mobilePane === "queue" ? "active" : ""} onClick={() => setMobilePane("queue")} type="button">Kuyruk</button>
+          <button className={mobilePane === "preview" ? "active" : ""} onClick={() => setMobilePane("preview")} type="button">Belge</button>
+          <button className={mobilePane === "journal" ? "active" : ""} onClick={() => setMobilePane("journal")} type="button">Fiş</button>
+        </nav>
+      ) : null}
+
+      <section
+        className={`portal-next-workbench-stage${nextPresentation ? " next" : ""}${queueHidden ? " queue-hidden" : ""}${focusMode ? " focus-mode" : ""}${journalHidden ? " journal-hidden" : ""} mobile-pane-${mobilePane}`}
+        ref={focusStageRef}
+      >
+        {nextPresentation ? (
+          <header className="portal-next-focus-toolbar">
+            <strong>Belge İnceleme</strong>
+            <span>{selectedDocument?.fileName || "Belge seçilmedi"}</span>
+            <div>
+              <button onClick={() => setJournalHidden((current) => !current)} type="button">{journalHidden ? "Fişi göster" : "Fişi gizle"}</button>
+              <button onClick={() => void toggleWorkspaceFullscreen()} title="Tarayıcı tam ekran" type="button">⛶</button>
+              <button onClick={() => { setFocusMode(false); setJournalHidden(false); }} type="button">× Kapat</button>
+            </div>
+          </header>
+        ) : null}
+        {nextPresentation ? (
+          <aside className="portal-next-document-queue" aria-label="İncelenecek faturalar">
+            <div className="portal-next-queue-head">
+              <strong>İncelenecek Faturalar</strong>
+              <span>↑ ↓</span>
+            </div>
+            <div className="portal-next-queue-tools">
+              <input aria-label="Kuyrukta ara" onChange={(event) => setDocumentQuery(event.target.value)} placeholder="Ara..." value={documentQuery} />
+              <div className="portal-next-direction-tabs">
+                {segmentOptions.map((option) => (
+                  <button className={selectedDocumentSegment === option.id ? "active" : ""} key={option.id} onClick={() => { setSelectedDocumentSegment(option.id); setSelectedDocumentId(""); }} type="button">
+                    {option.label} <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <ol className="portal-next-queue-list">
+              {queueDocuments.map((queueDocument) => {
+                const active = selectedDocument?.id === queueDocument.id;
+                return (
+                  <li key={queueDocument.id}>
+                    <button className={active ? "active" : ""} onClick={() => selectDocument(queueDocument)} type="button">
+                      <span>
+                        <strong>{queueDocument.fileName}</strong>
+                        <b>{queueDocument.amount || "-"}</b>
+                      </span>
+                      <small>{queueDocument.issueDate || queueDocument.uploadedAt || "-"} · {labelForIntakeCategory(queueDocument.intakeCategory)}</small>
+                      <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          </aside>
+        ) : null}
+        <section className="document-review-main">
+          {controlledPdfPreview || controlledHtmlPreview ? (
+            <DocumentPreview controlledHtmlPreview={controlledHtmlPreview} controlledPdfPreview={controlledPdfPreview} document={selectedDocument} onClearSourceTarget={() => setSourceTarget(null)} session={session} sourceTarget={sourceTarget} />
           ) : (
-            <>
-              <span>{selectedDocument && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
-              <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(-1)} type="button">Önceki</button>
-              <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">Sonraki</button>
-            </>
+            <DocumentPreview document={selectedDocument} onClearSourceTarget={() => setSourceTarget(null)} session={session} sourceTarget={sourceTarget} />
           )}
-        </div>
-      </section>
-
-      <section className="document-review-main">
-        {controlledPdfPreview ? (
-          <DocumentPreview controlledPdfPreview document={selectedDocument} session={session} />
-        ) : (
-          <DocumentPreview document={selectedDocument} session={session} />
-        )}
-        <JournalPanel
-          correctionDraft={correctionDraft}
-          decisionStatus={decisionStatus}
-          document={selectedDocument}
-          hasUnsavedReviewChanges={hasUnsavedReviewChanges}
-          nextKeyboardShortcuts={nextPresentation}
-          onApproveAndNext={onApproveAndNext}
-          onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
-          onReprocessDocument={onReprocessDocument}
-          onRequestStatementAi={onRequestStatementAi}
-          onSaveDecision={onSaveDecision}
-          onSaveStatementDecision={onSaveStatementDecision}
-          selectedStatementLineNo={selectedStatementLineNo}
-          session={session}
-          setCorrectionDraft={setCorrectionDraft}
-          setSelectedStatementLineNo={setSelectedStatementLineNo}
-          statementAiStatus={statementAiStatus}
-        />
+          <JournalPanel
+            correctionDraft={correctionDraft}
+            decisionStatus={decisionStatus}
+            document={selectedDocument}
+            hasUnsavedReviewChanges={hasUnsavedReviewChanges}
+            nextKeyboardShortcuts={nextPresentation}
+            onApproveAndNext={onApproveAndNext}
+            onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
+            onFocusSource={focusDocumentSource}
+            onReprocessDocument={onReprocessDocument}
+            onRequestStatementAi={onRequestStatementAi}
+            onSaveDecision={onSaveDecision}
+            onSaveStatementDecision={onSaveStatementDecision}
+            selectedStatementLineNo={selectedStatementLineNo}
+            session={session}
+            setCorrectionDraft={setCorrectionDraft}
+            setSelectedStatementLineNo={setSelectedStatementLineNo}
+            statementAiStatus={statementAiStatus}
+          />
+        </section>
       </section>
 
       <details className="debug-accordion">

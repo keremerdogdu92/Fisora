@@ -6,8 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, classifyDraftAccountCode, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
+import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
-import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
+import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DocumentSourceTarget, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
 import { backendAuthHeaders, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
@@ -278,6 +279,48 @@ function safeHeaderValue(value: string) {
   return /^[\x00-\xff]*$/.test(trimmed) ? trimmed : encodeURIComponent(trimmed);
 }
 
+export function useOriginalDocumentPreview(document?: PilotDocument, session?: LocalSession | null) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewError, setPreviewError] = useState("");
+
+  useEffect(() => {
+    if (!document?.originalDocumentRef) {
+      setPreviewUrl("");
+      setPreviewError("Gerçek belge referansı yok.");
+      return;
+    }
+    let active = true;
+    let objectUrl = "";
+    const fetchPreview = async () => {
+      try {
+        const response = await fetch(
+          `${resolvePreviewApiBaseUrl()}/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`,
+          { cache: "no-store", headers: previewAuthHeaders(session, document) },
+        );
+        if (!response.ok) throw new Error(`Önizleme alınamadı: ${response.status}`);
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (active) {
+          setPreviewUrl(objectUrl);
+          setPreviewError("");
+        }
+      } catch (error) {
+        if (active) {
+          setPreviewUrl("");
+          setPreviewError(error instanceof Error ? error.message : "Gerçek belge önizlemesi alınamadı.");
+        }
+      }
+    };
+    void fetchPreview();
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [document?.clientId, document?.originalDocumentRef, session?.sessionToken, session?.userId]);
+
+  return { previewError, previewUrl };
+}
+
 export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineEvent[] }) {
   return (
     <section className="pipeline-timeline" aria-label="İşlem geçmişi">
@@ -391,7 +434,49 @@ export function AiTracePanel({ document }: { document?: PilotDocument }) {
   );
 }
 
-function HtmlSourceComparison({ document, previewUrl }: { document: PilotDocument; previewUrl: string }) {
+export function HtmlReaderSnapshot({ document }: { document: PilotDocument }) {
+  const snapshot = document.sourceSnapshot;
+  if (!snapshot) return <p className="empty">Frozen Reader snapshot henüz oluşmadı.</p>;
+
+  return (
+    <div className="html-source-reader-sections">
+      {snapshot.sections.map((section, sectionIndex) => (
+        <section className="html-source-reader-section" key={`${section.kind}-${sectionIndex}`}>
+          <div className="html-source-reader-section-title">
+            <strong>{section.title || `Bölüm ${sectionIndex + 1}`}</strong>
+            <span>{section.kind}</span>
+          </div>
+          {section.columns.length ? <div className="html-source-reader-row header">{section.columns.map((cell, index) => <span key={index}>{cell}</span>)}</div> : null}
+          {section.rows.map((row, rowIndex) => (
+            <div className="html-source-reader-row" key={rowIndex}>
+              {row.map((cell, cellIndex) => <span key={cellIndex}>{cell || "?"}</span>)}
+            </div>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+export function HtmlSourceRows({ document }: { document: PilotDocument }) {
+  const rows = document.sourceReviewRows ?? [];
+  return (
+    <div className="html-source-ui-rows">
+      {rows.length ? rows.map((row, index) => (
+        <div className="html-source-ui-row" key={`${row.sourcePosition}-${index}`}>
+          <span>{row.sourcePosition || String(index + 1)}</span>
+          <div>
+            <strong>{row.description || row.sourceText || "?"}</strong>
+            {row.sourceText && row.sourceText !== row.description ? <small>{row.sourceText}</small> : null}
+          </div>
+          <span>{row.role}</span>
+        </div>
+      )) : <p className="empty">UI satırı henüz oluşmadı.</p>}
+    </div>
+  );
+}
+
+export function HtmlSourceComparison({ document, previewUrl }: { document: PilotDocument; previewUrl: string }) {
   const snapshot = document.sourceSnapshot;
   const rows = document.sourceReviewRows ?? [];
   if (!snapshot || !previewUrl) return null;
@@ -411,95 +496,28 @@ function HtmlSourceComparison({ document, previewUrl }: { document: PilotDocumen
       <div className="html-source-comparison-grid">
         <article className="html-source-compare-card">
           <header><strong>1. Orijinal HTML</strong><span>Sandboxed görünüm</span></header>
-          <iframe
-            className="html-source-original-frame"
-            sandbox=""
-            src={previewUrl}
-            title={`${document.fileName} izole orijinal HTML`}
-          />
+          <HtmlDocumentViewer fileName={document.fileName} src={previewUrl} />
         </article>
         <article className="html-source-compare-card">
           <header><strong>2. Reader snapshot</strong><span>{snapshot.metrics.rowCount} kaynak satırı</span></header>
-          <div className="html-source-reader-sections">
-            {snapshot.sections.map((section, sectionIndex) => (
-              <section className="html-source-reader-section" key={`${section.kind}-${sectionIndex}`}>
-                <div className="html-source-reader-section-title">
-                  <strong>{section.title || `Bölüm ${sectionIndex + 1}`}</strong>
-                  <span>{section.kind}</span>
-                </div>
-                {section.columns.length ? <div className="html-source-reader-row header">{section.columns.map((cell, index) => <span key={index}>{cell}</span>)}</div> : null}
-                {section.rows.map((row, rowIndex) => (
-                  <div className="html-source-reader-row" key={rowIndex}>
-                    {row.map((cell, cellIndex) => <span key={cellIndex}>{cell || "?"}</span>)}
-                  </div>
-                ))}
-              </section>
-            ))}
-          </div>
+          <HtmlReaderSnapshot document={document} />
         </article>
         <article className="html-source-compare-card">
           <header><strong>3. Fisora UI satırları</strong><span>{rows.length} satır</span></header>
-          <div className="html-source-ui-rows">
-            {rows.length ? rows.map((row, index) => (
-              <div className="html-source-ui-row" key={`${row.sourcePosition}-${index}`}>
-                <span>{row.sourcePosition || String(index + 1)}</span>
-                <div>
-                  <strong>{row.description || row.sourceText || "?"}</strong>
-                  {row.sourceText && row.sourceText !== row.description ? <small>{row.sourceText}</small> : null}
-                </div>
-                <span>{row.role}</span>
-              </div>
-            )) : <p className="empty">UI satırı henüz oluşmadı.</p>}
-          </div>
+          <HtmlSourceRows document={document} />
         </article>
       </div>
     </section>
   );
 }
 
-export function DocumentPreview({ controlledPdfPreview = false, document, session }: { controlledPdfPreview?: boolean; document?: PilotDocument; session?: LocalSession | null }) {
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [previewError, setPreviewError] = useState("");
-
-  useEffect(() => {
-    if (!document?.originalDocumentRef) {
-      setPreviewUrl("");
-      setPreviewError("Gerçek belge referansı yok.");
-      return;
-    }
-    let active = true;
-    let objectUrl = "";
-    const fetchPreview = async () => {
-      try {
-        const response = await fetch(
-          `${resolvePreviewApiBaseUrl()}/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`,
-          { cache: "no-store", headers: previewAuthHeaders(session, document) },
-        );
-        if (!response.ok) throw new Error(`Önizleme alınamadı: ${response.status}`);
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
-        if (active) {
-          setPreviewUrl(objectUrl);
-          setPreviewError("");
-        }
-      } catch (error) {
-        if (active) {
-          setPreviewUrl("");
-          setPreviewError(error instanceof Error ? error.message : "Gerçek belge önizlemesi alınamadı.");
-        }
-      }
-    };
-    void fetchPreview();
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [document?.clientId, document?.originalDocumentRef, session?.sessionToken, session?.userId]);
+export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPreview = false, document, session, sourceTarget, onClearSourceTarget }: { controlledHtmlPreview?: boolean; controlledPdfPreview?: boolean; document?: PilotDocument; session?: LocalSession | null; sourceTarget?: DocumentSourceTarget | null; onClearSourceTarget?: () => void }) {
+  const { previewError, previewUrl } = useOriginalDocumentPreview(document, session);
 
   if (!document) {
     return (
       <section className="panel review-panel">
-        <h2>Orijinal belge</h2>
+        <h2>{controlledPdfPreview || controlledHtmlPreview ? "Kaynak Belge" : "Orijinal belge"}</h2>
         <p className="empty">İşlemek için listeden belge seçin.</p>
       </section>
     );
@@ -513,7 +531,7 @@ export function DocumentPreview({ controlledPdfPreview = false, document, sessio
     <section className="review-panel document-panel">
       <div className="panel-heading">
         <div>
-          <h2>Orijinal belge</h2>
+          <h2>{controlledPdfPreview || controlledHtmlPreview ? "Kaynak Belge" : "Orijinal belge"}</h2>
           <span>{document.fileName}</span>
         </div>
         <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
@@ -524,7 +542,9 @@ export function DocumentPreview({ controlledPdfPreview = false, document, sessio
             isImageMime(document.originalDocumentMimeType) ? (
               <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
             ) : pdfPreview ? (
-              <PdfDocumentViewer fileName={document.fileName} src={previewUrl} />
+              <PdfDocumentViewer fileName={document.fileName} onClearSourceTarget={onClearSourceTarget} sourceTarget={sourceTarget} src={previewUrl} />
+            ) : htmlPreview && controlledHtmlPreview ? (
+              <HtmlDocumentViewer fileName={document.fileName} onClearSourceTarget={onClearSourceTarget} sourceTarget={sourceTarget} src={previewUrl} />
             ) : canFramePreview ? (
               <iframe
                 className="original-document-frame"
@@ -577,9 +597,6 @@ export function DocumentPreview({ controlledPdfPreview = false, document, sessio
           <Info label="Orijinal ref" value={document.originalDocumentRef || "-"} />
         </aside>
       </div>
-      {session?.role === "accountant" && htmlPreview ? (
-        <HtmlSourceComparison document={document} previewUrl={previewUrl} />
-      ) : null}
     </section>
   );
 }
@@ -615,6 +632,7 @@ export function JournalPanel({
   nextKeyboardShortcuts = false,
   onApproveAndNext,
   onResetDraft,
+  onFocusSource,
   onReprocessDocument,
   onRequestStatementAi,
   onSaveDecision,
@@ -632,6 +650,7 @@ export function JournalPanel({
   nextKeyboardShortcuts?: boolean;
   onApproveAndNext: () => void | Promise<void>;
   onResetDraft: () => void;
+  onFocusSource?: (target: DocumentSourceTarget) => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
@@ -762,13 +781,18 @@ export function JournalPanel({
   }
 
   return (
-    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}`} onKeyDown={handleJournalShortcut}>
+    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}${nextKeyboardShortcuts ? " next-review" : ""}`} onKeyDown={handleJournalShortcut}>
       <div className="journal-scroll-area">
-        <div className="panel-heading">
+        <div className="panel-heading journal-next-heading">
           <div>
-            <h2>Muhasebe fişi</h2>
-            <span>{document.clientName} için belge, fiş ve kontrol kararları</span>
+            <h2>{nextKeyboardShortcuts ? "Mahsup Fişi Taslağı" : "Muhasebe fişi"}</h2>
+            <span>{nextKeyboardShortcuts ? (document.issueDate || document.period || "") : `${document.clientName} için belge, fiş ve kontrol kararları`}</span>
           </div>
+          {nextKeyboardShortcuts ? (
+            <span className={`next-balance-pill ${totals.balanced && activeDraftLines.length ? "balanced" : "warning"}`}>
+              {activeDraftLines.length ? (totals.balanced ? "✓ Dengeli" : "Denge kontrolü") : "Taslak yok"}
+            </span>
+          ) : null}
         </div>
         <section className={`journal-status-strip ${totals.balanced ? "" : "unbalanced"}`} aria-label="Fiş durumu">
           <div className="journal-status-primary">
@@ -779,7 +803,7 @@ export function JournalPanel({
           <div className="journal-status-metrics" aria-label="Fiş toplamları">
             <span><strong>Borç</strong> {totals.debit.toFixed(2)}</span>
             <span><strong>Alacak</strong> {totals.credit.toFixed(2)}</span>
-            <span><strong>Denge</strong> {activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"}</span>
+            {!nextKeyboardShortcuts ? <span><strong>Denge</strong> {activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"}</span> : null}
           </div>
         </section>
         {hasUnsavedReviewChanges ? (
@@ -792,7 +816,14 @@ export function JournalPanel({
           </section>
         ) : null}
         {session?.role === "accountant" ? (
-          <AccountantValidationPanel correctionDraft={correctionDraft} setCorrectionDraft={setCorrectionDraft} />
+          nextKeyboardShortcuts ? (
+            <details className="journal-advanced-details">
+              <summary>Pilot kalite doğrulama</summary>
+              <AccountantValidationPanel correctionDraft={correctionDraft} setCorrectionDraft={setCorrectionDraft} />
+            </details>
+          ) : (
+            <AccountantValidationPanel correctionDraft={correctionDraft} setCorrectionDraft={setCorrectionDraft} />
+          )
         ) : null}
         <ManualDraftEditor
           activeDraftLines={activeDraftLines}
@@ -804,10 +835,11 @@ export function JournalPanel({
           sourceReviewMode={sourceReviewMode}
           sourceReviewTotalCount={document.sourceReviewRows?.length ?? 0}
           onAddLine={addManualDraftLine}
+          onFocusSource={onFocusSource}
           onRemoveLine={removeManualDraftLine}
           onUpdateLine={setManualDraftLine}
         />
-        {!pendingDirectionConflict ? (
+        {!nextKeyboardShortcuts && !pendingDirectionConflict ? (
           <section className="journal-primary-approve" aria-label="Ana fiş kararı">
             <button disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </section>
@@ -824,7 +856,9 @@ export function JournalPanel({
             statementAiStatus={statementAiStatus}
           />
         ) : null}
-        <section className="journal-correction-panel" aria-label="Karar notu">
+        <details className={nextKeyboardShortcuts ? "journal-advanced-details journal-learning-details" : "journal-learning-details"} open={!nextKeyboardShortcuts}>
+          <summary hidden={!nextKeyboardShortcuts}>Karar notu ve öğrenme</summary>
+          <section className="journal-correction-panel" aria-label="Karar notu">
           <div className="statement-review-heading">
             <div>
               <h3>Karar notu</h3>
@@ -882,17 +916,32 @@ export function JournalPanel({
               </div>
             </section>
           ) : null}
-        </section>
+          </section>
+        </details>
         <JournalReasonDisclosure document={document} />
       </div>
-      <JournalDecisionBar
-        decisionStatus={decisionStatus}
-        document={document}
-        hasInvalidDraftAccounts={hasInvalidDraftAccounts}
-        onReprocessDocument={onReprocessDocument}
-        onSaveDecision={onSaveDecision}
-        pendingDirectionConflict={pendingDirectionConflict}
-      />
+      {nextKeyboardShortcuts ? (
+        <section className="journal-next-actions" aria-label="Belge kararı">
+          {pendingDirectionConflict ? (
+            <button className="primary" onClick={() => onSaveDecision("accept_detected_direction")} type="button">Yönü çöz</button>
+          ) : (
+            <>
+              <button disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
+              <button className="danger" onClick={() => onSaveDecision("exclude_export")} type="button">Hariç tut</button>
+              <button className="primary" disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve sonraki →</button>
+            </>
+          )}
+        </section>
+      ) : (
+        <JournalDecisionBar
+          decisionStatus={decisionStatus}
+          document={document}
+          hasInvalidDraftAccounts={hasInvalidDraftAccounts}
+          onReprocessDocument={onReprocessDocument}
+          onSaveDecision={onSaveDecision}
+          pendingDirectionConflict={pendingDirectionConflict}
+        />
+      )}
     </section>
   );
 }
@@ -1062,6 +1111,7 @@ function ManualDraftEditor({
   sourceReviewMode,
   sourceReviewTotalCount,
   onAddLine,
+  onFocusSource,
   onRemoveLine,
   onUpdateLine,
 }: {
@@ -1074,6 +1124,7 @@ function ManualDraftEditor({
   sourceReviewMode: boolean;
   sourceReviewTotalCount: number;
   onAddLine: () => void;
+  onFocusSource?: (target: DocumentSourceTarget) => void;
   onRemoveLine: (index: number) => void;
   onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
 }) {
@@ -1108,6 +1159,18 @@ function ManualDraftEditor({
     });
   }
 
+  function sourceTargetForLine(line: DraftLine, index: number): DocumentSourceTarget | null {
+    const text = String(line.source_text || line.description || "").trim();
+    const sourceLineNumbers = Array.isArray(line.source_line_numbers) ? line.source_line_numbers : [];
+    if (!text && !line.source_position && !sourceLineNumbers.length) return null;
+    return {
+      key: `${line.source_position || sourceLineNumbers.join("-") || index + 1}`,
+      text,
+      sourcePosition: line.source_position || "",
+      sourceLineNumbers,
+    };
+  }
+
   return (
     <section className="manual-draft-panel">
       <div className="statement-review-heading">
@@ -1132,8 +1195,19 @@ function ManualDraftEditor({
             </tr>
           </thead>
           <tbody>
-            {rows.map((line, index) => (
-              <tr key={index}>
+            {rows.map((line, index) => {
+              const sourceTarget = sourceTargetForLine(line, index);
+              return (
+              <tr
+                className={sourceTarget ? "journal-source-row" : undefined}
+                key={index}
+                onClick={(event) => {
+                  if (!sourceTarget || !onFocusSource) return;
+                  const target = event.target as HTMLElement;
+                  if (target.closest("input, button, select, textarea, a")) return;
+                  onFocusSource(sourceTarget);
+                }}
+              >
                 <td>
                   <AccountCodeCombobox
                     accounts={chartAccounts}
@@ -1162,12 +1236,17 @@ function ManualDraftEditor({
                     ref={(element) => { descriptionRefs.current[index] = element; }}
                     value={line.description}
                   />
-                  {line.source_text ? (
-                    <small className="field-notice source-review-evidence">
-                      Kaynak satır {line.source_position || index + 1}: {line.source_amount || "tutar yok"}
+                  {sourceTarget ? (
+                    <button
+                      className="field-notice source-review-evidence source-review-link"
+                      onClick={() => onFocusSource?.(sourceTarget)}
+                      title="Kaynak belgede bu satırı bul"
+                      type="button"
+                    >
+                      ↗ Kaynak satır {line.source_position || line.source_line_numbers?.join(", ") || index + 1}: {line.source_amount || "metni göster"}
                       {line.source_amount_label ? ` · ${line.source_amount_label}` : ""}
                       {line.source_amount_basis ? ` · ${sourceAmountBasisLabel(line.source_amount_basis)}` : ""}
-                    </small>
+                    </button>
                   ) : null}
                   {vatGroupEvidenceText(line) ? (
                     <small className="field-notice">
@@ -1201,7 +1280,8 @@ function ManualDraftEditor({
                 </td>
                 <td><button onClick={() => onRemoveLine(index)} type="button">Sil</button></td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

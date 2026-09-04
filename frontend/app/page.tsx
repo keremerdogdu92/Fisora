@@ -1,5 +1,5 @@
 // File: frontend/app/page.tsx
-// Summary: Renders the shared Fisora role gateway with production authentication and the portal-next visual language.
+// Summary: Renders the shared Fisora split-screen login gateway with production authentication, password reset, and the current blue/slate product language.
 "use client";
 
 import { useMemo, useState } from "react";
@@ -40,6 +40,7 @@ export default function RoleGatewayLanding() {
   const [resetMode, setResetMode] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetBusy, setResetBusy] = useState(false);
+
   const selectedEntry = useMemo(
     () => portalEntryForRole(selectedRole) as LandingEntry,
     [selectedRole],
@@ -61,8 +62,10 @@ export default function RoleGatewayLanding() {
       setStatus("Şifre sıfırlama bağlantısı için e-posta adresinizi girin.");
       return;
     }
+
     setResetBusy(true);
     setStatus("Şifre sıfırlama isteği gönderiliyor.");
+
     try {
       await requestPasswordReset({
         apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
@@ -79,20 +82,24 @@ export default function RoleGatewayLanding() {
 
   async function enterPortal() {
     const effectiveUserId = userId.trim() || selectedEntry.defaultUserId;
+
     if (password.trim()) {
       setStatus("Oturum açılıyor.");
+
       try {
         const backendSession = await loginWithPassword({
           apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
           userId: effectiveUserId,
           password: password.trim(),
         });
+
         persistSession({
           userId: backendSession.userId || effectiveUserId,
           role: selectedRole,
           sessionToken: backendSession.sessionToken,
           expiresAt: backendSession.expiresAt,
         });
+
         window.location.assign(selectedEntry.href);
         return;
       } catch (error) {
@@ -106,17 +113,19 @@ export default function RoleGatewayLanding() {
       pageUrl: typeof window === "undefined" ? "" : window.location.href,
       explicitAllow: process.env.NEXT_PUBLIC_FISORA_ALLOW_LOCAL_FALLBACK === "true",
     });
+
     if (!localFallbackAllowed) {
       setStatus("Bu ortamda şifresiz giriş kapalı. Kullanıcı şifresi ile girin.");
       return;
     }
+
     persistSession({ userId: effectiveUserId, role: selectedRole });
     window.location.assign(selectedEntry.href);
   }
 
   return (
-    <main className="landing-shell fisora-gateway">
-      <header className="landing-header">
+    <main className="landing-shell fisora-gateway fisora-gateway-split">
+      <section className="gateway-identity-panel" aria-label="Fisora">
         <a className="landing-brand" href="/">
           <span className="gateway-brand-mark">F</span>
           <span className="gateway-brand-copy">
@@ -124,30 +133,28 @@ export default function RoleGatewayLanding() {
             <small>Mali müşavir çalışma sistemi</small>
           </span>
         </a>
-      </header>
 
-      <section className="role-gateway">
         <div className="role-copy">
-          <span className="gateway-kicker">Mali müşavir çalışma sistemi</span>
-          <h1>Belgelerden fişe, tek çalışma alanında.</h1>
+          <h1>Akıllı ve öğrenen bir yardımcıyla günlük muhasebe işi daha net.</h1>
           <p>
-            Fisora belgeleri okur, muhasebe fişi taslağını hazırlar ve kontrolü
-            müşavirin elinde tutar. Günlük iş, kaynak belge ve fiş aynı akışta ilerler.
+            Fisora, yapay zeka desteğini kararın yerine geçmek için değil, belge okuma ve
+            taslak hazırlama sürecini kolaylaştırmak için kullanır. Sistem, zaman içinde
+            öğrenilen örnekleri ve kullanıcı tercihlerini daha iyi anlayarak iş yükünü hafifletir.
           </p>
-          <div className="gateway-feature-list" aria-label="Fisora çalışma akışı">
-            <div><span>01</span><strong>Belgeyi oku</strong><small>PDF ve HTML kaynaklarını güvenli biçimde işle.</small></div>
-            <div><span>02</span><strong>Fişi hazırla</strong><small>Kaynağı gösterilebilen muhasebe taslağı oluştur.</small></div>
-            <div><span>03</span><strong>Kontrol et</strong><small>İstisnayı incele, onayla ve çıktıya taşı.</small></div>
-          </div>
         </div>
 
+        <div className="gateway-identity-foot">Fisora</div>
+      </section>
+
+      <section className="gateway-auth-shell">
         <section className="role-entry-panel" aria-label="Rol seçimi ve giriş">
           <div className="gateway-login-heading">
             <span>Güvenli erişim</span>
-            <h2>Fisora'ya giriş yap</h2>
+            <h2>Fisora&apos;ya giriş yap</h2>
             <p>Çalışma alanınızı seçin ve hesabınızla devam edin.</p>
           </div>
-          <div className="role-card-grid">
+
+          <div className="role-card-grid" aria-label="Çalışma alanı seçimi">
             {entries.map((entry) => (
               <button
                 aria-pressed={selectedRole === entry.role}
@@ -156,39 +163,43 @@ export default function RoleGatewayLanding() {
                 onClick={() => selectRole(entry.role)}
                 type="button"
               >
-                <span>{entry.label}</span>
-                <strong>{entry.cta}</strong>
-                <small>{entry.description}</small>
+                <strong>{entry.label}</strong>
               </button>
             ))}
           </div>
 
           <div className="landing-login">
-            <div>
+            <div className="selected-entry">
               <span>Seçili giriş</span>
               <strong>{selectedEntry.label}</strong>
             </div>
+
             <label>
               <span>Kullanıcı</span>
               <input
                 aria-label="Kullanıcı"
+                autoComplete="username"
                 onChange={(event) => setUserId(event.target.value)}
                 value={userId}
               />
             </label>
+
             <label>
               <span>Şifre</span>
               <input
                 aria-label="Şifre"
+                autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Kullanıcı şifresi"
                 type="password"
                 value={password}
               />
             </label>
+
             <button className="primary" onClick={enterPortal} type="button">
-              {selectedEntry.label}
+              Çalışma alanına gir
             </button>
+
             <button
               className="secondary"
               onClick={() => {
@@ -200,8 +211,9 @@ export default function RoleGatewayLanding() {
             >
               {resetMode ? "Girişe dön" : "Şifremi unuttum"}
             </button>
+
             {resetMode ? (
-              <div className="landing-login">
+              <div className="landing-login reset-login">
                 <label>
                   <span>E-posta</span>
                   <input
@@ -218,24 +230,10 @@ export default function RoleGatewayLanding() {
                 </button>
               </div>
             ) : null}
+
             {status ? <p className="decision-status">{status}</p> : null}
           </div>
         </section>
-      </section>
-
-      <section className="workflow-strip" aria-label="Portal iş akışı">
-        <div>
-          <span>01</span>
-          <strong>Belgeyi al</strong>
-        </div>
-        <div>
-          <span>02</span>
-          <strong>Fişi hazırla</strong>
-        </div>
-        <div>
-          <span>03</span>
-          <strong>Kontrol et ve aktar</strong>
-        </div>
       </section>
     </main>
   );

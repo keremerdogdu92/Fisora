@@ -5031,220 +5031,352 @@ code {
 .validation-choice { min-height: 36px; padding: 7px 12px; border-radius: 999px; }
 .validation-choice.selected { outline: 2px solid currentColor; outline-offset: 1px; font-weight: 700; }
 
-/* The shared role gateway uses the same navy/slate and dark-green language as portal-next. */
+/* The shared role gateway uses the approved blue/slate split-screen login language. */
 .fisora-gateway {
-  --gateway-bg: #edf1f5;
-  --gateway-border: #cbd5e1;
-  --gateway-border-strong: #94a3b8;
-  --gateway-navy: #1e3a5f;
-  --gateway-navy-strong: #152942;
-  --gateway-ink: #14201f;
-  --gateway-muted: #64748b;
+  --gateway-bg: #eaf0f6;
+  --gateway-surface: #ffffff;
+  --gateway-surface-soft: #f7f9fc;
+  --gateway-border: #d6deea;
+  --gateway-border-strong: #aebbd0;
+  --gateway-navy: #1d3557;
+  --gateway-navy-strong: #152844;
+  --gateway-blue: #315d89;
+  --gateway-muted: #66758a;
+  --gateway-ink: #172033;
   background: var(--gateway-bg);
   margin: 0;
   max-width: none;
   min-height: 100vh;
-  padding: 0 24px 40px;
+  padding: 0;
   width: 100%;
 }
 
-.fisora-gateway .landing-header {
-  margin: 0 auto;
-  max-width: 1240px;
-  min-height: 74px;
-  padding: 14px 0;
+.fisora-gateway-split {
+  display: grid;
+  grid-template-columns: minmax(500px, 0.98fr) minmax(460px, 1.02fr);
 }
+
+.fisora-gateway .gateway-identity-panel {
+  background:
+    radial-gradient(circle at 78% 18%, rgba(255, 255, 255, 0.13), transparent 0 28%),
+    radial-gradient(circle at 20% 85%, rgba(126, 168, 214, 0.14), transparent 0 30%),
+    linear-gradient(145deg, #15253f, #1d3557 52%, #24476e);
+  color: #f8fbff;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-height: 100vh;
+  overflow: hidden;
+  padding: 36px 46px;
+  position: relative;
+}
+
+.fisora-gateway .gateway-identity-panel::after {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 50%;
+  bottom: -120px;
+  box-shadow:
+    0 0 0 70px rgba(255, 255, 255, 0.03),
+    0 0 0 140px rgba(255, 255, 255, 0.02);
+  content: "";
+  height: 360px;
+  pointer-events: none;
+  position: absolute;
+  right: -120px;
+  width: 360px;
+}
+
 .fisora-gateway .landing-brand {
   align-items: center;
+  color: #ffffff;
   display: inline-flex;
-  gap: 10px;
+  gap: 12px;
+  position: relative;
+  text-decoration: none;
+  width: fit-content;
+  z-index: 1;
 }
+
 .fisora-gateway .gateway-brand-mark {
   align-items: center;
-  background: #dcebe6;
-  border-radius: 9px;
-  color: #173b35;
+  background: #e7eef8;
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 1px rgba(29, 53, 87, 0.06);
+  color: var(--gateway-navy);
   display: inline-flex;
   font-size: 1.1rem;
   font-weight: 900;
-  height: 38px;
+  height: 40px;
   justify-content: center;
-  width: 38px;
+  width: 40px;
 }
-.fisora-gateway .gateway-brand-copy strong,
-.fisora-gateway .gateway-brand-copy small { display: block; }
-.fisora-gateway .gateway-brand-copy strong { color: #0f172a; font-size: 1.18rem; }
-.fisora-gateway .gateway-brand-copy small { color: var(--gateway-muted); font-size: 0.7rem; margin-top: 1px; }
 
-.fisora-gateway .role-gateway {
-  align-items: stretch;
-  gap: 18px;
-  grid-template-columns: minmax(0, 1.02fr) minmax(420px, 0.78fr);
-  margin: 18px auto 0;
-  max-width: 1240px;
+.fisora-gateway .gateway-brand-copy strong,
+.fisora-gateway .gateway-brand-copy small {
+  display: block;
 }
+
+.fisora-gateway .gateway-brand-copy strong {
+  color: #ffffff;
+  font-size: 1.18rem;
+  letter-spacing: -0.02em;
+}
+
+.fisora-gateway .gateway-brand-copy small {
+  color: #b7c6d9;
+  font-size: 0.68rem;
+  margin-top: 3px;
+}
+
 .fisora-gateway .role-copy {
-  background: var(--gateway-ink);
-  border: 1px solid #263b39;
-  border-radius: 14px;
-  color: #f8fafc;
-  display: grid;
-  align-content: center;
-  min-height: 560px;
-  padding: clamp(30px, 5vw, 58px);
+  align-self: center;
+  max-width: 590px;
+  padding: 42px 0;
+  position: relative;
+  z-index: 1;
 }
-.fisora-gateway .gateway-kicker {
-  color: #a9c0ba;
-  font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
+
 .fisora-gateway .role-copy h1 {
   color: #ffffff;
-  font-size: clamp(2.35rem, 4.5vw, 4.6rem);
-  letter-spacing: -0.045em;
-  line-height: 0.98;
-  margin: 14px 0 20px;
-  max-width: 660px;
+  font-size: clamp(2.65rem, 5.2vw, 4.65rem);
+  letter-spacing: -0.055em;
+  line-height: 0.97;
+  margin: 0 0 22px;
+  max-width: 570px;
 }
+
 .fisora-gateway .role-copy > p {
-  color: #bfd0cc;
+  color: #cad6e5;
   font-size: 1rem;
-  line-height: 1.6;
-  max-width: 610px;
+  line-height: 1.76;
+  margin: 0;
+  max-width: 550px;
 }
-.fisora-gateway .gateway-feature-list {
-  border-top: 1px solid rgba(255,255,255,0.12);
-  display: grid;
-  gap: 8px;
-  margin-top: 28px;
-  padding-top: 22px;
+
+.fisora-gateway .gateway-identity-foot {
+  color: #a7bad0;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  position: relative;
+  z-index: 1;
 }
-.fisora-gateway .gateway-feature-list > div {
-  align-items: start;
-  display: grid;
-  gap: 2px 10px;
-  grid-template-columns: 30px minmax(0, 1fr);
-  padding: 7px 0;
+
+.fisora-gateway .gateway-auth-shell {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.12));
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px;
 }
-.fisora-gateway .gateway-feature-list span {
-  color: #8fa4a0;
-  font-size: 0.68rem;
-  font-weight: 900;
-  grid-row: 1 / span 2;
-  padding-top: 2px;
-}
-.fisora-gateway .gateway-feature-list strong { color: #fff; font-size: 0.86rem; }
-.fisora-gateway .gateway-feature-list small { color: #92a7a2; font-size: 0.72rem; line-height: 1.35; }
 
 .fisora-gateway .role-entry-panel {
-  border-color: var(--gateway-border);
-  border-radius: 14px;
-  box-shadow: 0 12px 34px rgba(15,23,42,0.09);
-  padding: 22px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(174, 187, 208, 0.78);
+  border-radius: 18px;
+  box-shadow: 0 22px 58px rgba(15, 23, 42, 0.12);
+  display: grid;
+  gap: 18px;
+  padding: 30px;
+  width: min(100%, 480px);
 }
+
 .fisora-gateway .gateway-login-heading span {
   color: var(--gateway-muted);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 850;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+
 .fisora-gateway .gateway-login-heading h2 {
   color: var(--gateway-navy);
-  font-size: 1.45rem;
-  margin: 4px 0 3px;
+  font-size: 1.75rem;
+  letter-spacing: -0.03em;
+  margin: 7px 0 6px;
 }
+
 .fisora-gateway .gateway-login-heading p {
   color: var(--gateway-muted);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
+  line-height: 1.55;
   margin: 0;
 }
-.fisora-gateway .role-card-grid { gap: 8px; }
+
+.fisora-gateway .role-card-grid {
+  background: var(--gateway-surface-soft);
+  border: 1px solid var(--gateway-border);
+  border-radius: 10px;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 5px;
+}
+
 .fisora-gateway .role-card {
-  border-color: var(--gateway-border);
+  background: transparent;
+  border: 0;
   border-radius: 8px;
-  min-height: 112px;
-  padding: 12px;
+  color: #67788f;
+  min-height: 42px;
+  padding: 9px 12px;
+  text-align: center;
 }
+
 .fisora-gateway .role-card.active {
-  background: #eff6ff;
-  border-color: #6f8fb3;
-  box-shadow: inset 0 0 0 1px rgba(30,58,95,0.12);
+  background: #ffffff;
+  box-shadow: 0 3px 10px rgba(21, 40, 68, 0.08);
+  color: var(--gateway-navy);
 }
-.fisora-gateway .role-card span { color: var(--gateway-muted); font-size: 0.68rem; }
-.fisora-gateway .role-card strong { color: #0f172a; font-size: 0.95rem; margin: 8px 0 5px; }
-.fisora-gateway .role-card small { font-size: 0.72rem; line-height: 1.35; }
+
+.fisora-gateway .role-card strong {
+  display: block;
+  font-size: 0.78rem;
+  margin: 0;
+}
+
 .fisora-gateway .landing-login {
-  border-color: var(--gateway-border);
-  gap: 9px;
-  padding-top: 14px;
+  border-top: 1px solid var(--gateway-border);
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
 }
+
+.fisora-gateway .landing-login.reset-login {
+  margin-top: 4px;
+}
+
+.fisora-gateway .selected-entry {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fisora-gateway .selected-entry span,
+.fisora-gateway .landing-login label > span {
+  color: #506173;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.fisora-gateway .selected-entry strong {
+  color: var(--gateway-navy);
+  font-size: 0.76rem;
+}
+
+.fisora-gateway .landing-login label {
+  display: grid;
+  gap: 6px;
+}
+
 .fisora-gateway .landing-login input {
-  border-color: var(--gateway-border-strong);
-  border-radius: 7px;
-  min-height: 42px;
-}
-.fisora-gateway .landing-login input:focus {
-  border-color: var(--gateway-navy);
-  outline: 3px solid rgba(30,58,95,0.12);
-}
-.fisora-gateway .landing-login > .primary {
-  background: var(--gateway-navy);
-  border: 1px solid var(--gateway-navy);
-  border-radius: 6px;
-  min-height: 42px;
-}
-.fisora-gateway .landing-login > .primary:hover { background: var(--gateway-navy-strong); }
-.fisora-gateway .landing-login > .secondary {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid var(--gateway-border-strong);
-  border-radius: 6px;
+  border-radius: 9px;
+  color: var(--gateway-ink);
+  min-height: 46px;
+  outline: 0;
+  padding: 0 14px;
+  width: 100%;
+}
+
+.fisora-gateway .landing-login input:focus {
+  border-color: var(--gateway-blue);
+  box-shadow: 0 0 0 4px rgba(49, 93, 137, 0.16);
+}
+
+.fisora-gateway .landing-login > .primary {
+  background: linear-gradient(180deg, #23466d, #1d3557);
+  border: 1px solid var(--gateway-navy);
+  border-radius: 9px;
+  box-shadow: 0 8px 16px rgba(29, 53, 87, 0.18);
+  color: #ffffff;
+  min-height: 46px;
+}
+
+.fisora-gateway .landing-login > .primary:hover {
+  background: linear-gradient(180deg, #1f3d62, #172d49);
+}
+
+.fisora-gateway .landing-login > .secondary {
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
   color: var(--gateway-navy);
   min-height: 38px;
 }
-.fisora-gateway .workflow-strip {
-  background: transparent;
-  border: 0;
-  gap: 8px;
-  margin: 12px auto 0;
-  max-width: 1240px;
-  padding: 0;
-}
-.fisora-gateway .workflow-strip div {
-  background: #ffffff;
-  border-color: var(--gateway-border);
-  border-radius: 7px;
-  min-height: 58px;
+
+.fisora-gateway .decision-status {
+  background: #f5f8fc;
+  border: 1px solid #dde6f2;
+  border-radius: 9px;
+  color: #52667f;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  margin: 2px 0 0;
   padding: 10px 12px;
 }
-.fisora-gateway .workflow-strip span { color: var(--gateway-muted); font-size: 0.64rem; }
-.fisora-gateway .workflow-strip strong { color: var(--gateway-navy); font-size: 0.78rem; margin-top: 4px; }
 
-@media (max-width: 900px) {
-  .fisora-gateway { padding-inline: 14px; }
-  .fisora-gateway .role-gateway { grid-template-columns: 1fr; }
-  .fisora-gateway .role-copy { min-height: auto; padding: 30px; }
-  .fisora-gateway .role-copy h1 { font-size: clamp(2.1rem, 10vw, 3.6rem); }
-  .fisora-gateway .gateway-feature-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .fisora-gateway .gateway-feature-list > div { display: block; }
-  .fisora-gateway .gateway-feature-list span,
-  .fisora-gateway .gateway-feature-list strong,
-  .fisora-gateway .gateway-feature-list small { display: block; }
+@media (max-width: 920px) {
+  .fisora-gateway-split {
+    grid-template-columns: 1fr;
+  }
+
+  .fisora-gateway .gateway-identity-panel {
+    min-height: auto;
+    padding: 24px;
+  }
+
+  .fisora-gateway .role-copy {
+    padding: 64px 0 48px;
+  }
+
+  .fisora-gateway .role-copy h1 {
+    font-size: clamp(2.55rem, 8.5vw, 4rem);
+  }
+
+  .fisora-gateway .gateway-auth-shell {
+    min-height: auto;
+    padding: 28px 14px 40px;
+  }
 }
+
 @media (max-width: 620px) {
-  .fisora-gateway { padding: 0 10px 24px; }
-  .fisora-gateway .landing-header { min-height: 64px; padding: 10px 2px; }
-  .fisora-gateway .gateway-brand-mark { height: 34px; width: 34px; }
-  .fisora-gateway .role-gateway { margin-top: 8px; }
-  .fisora-gateway .role-copy { border-radius: 10px; padding: 24px 20px; }
-  .fisora-gateway .role-copy h1 { margin-bottom: 14px; }
-  .fisora-gateway .role-copy > p { font-size: 0.9rem; }
-  .fisora-gateway .gateway-feature-list { display: none; }
-  .fisora-gateway .role-entry-panel { border-radius: 10px; padding: 14px; }
-  .fisora-gateway .role-card-grid { grid-template-columns: 1fr; }
-  .fisora-gateway .role-card { min-height: 88px; }
-  .fisora-gateway .workflow-strip { grid-template-columns: 1fr; }
-  .fisora-gateway .workflow-strip div { min-height: 50px; }
+  .fisora-gateway .gateway-identity-panel {
+    padding: 18px;
+  }
+
+  .fisora-gateway .gateway-brand-mark {
+    height: 36px;
+    width: 36px;
+  }
+
+  .fisora-gateway .role-copy {
+    padding: 48px 0 34px;
+  }
+
+  .fisora-gateway .role-copy h1 {
+    font-size: clamp(2.2rem, 11vw, 3.15rem);
+    margin-bottom: 16px;
+  }
+
+  .fisora-gateway .role-copy > p {
+    font-size: 0.9rem;
+    line-height: 1.65;
+  }
+
+  .fisora-gateway .gateway-auth-shell {
+    padding: 18px 10px 28px;
+  }
+
+  .fisora-gateway .role-entry-panel {
+    border-radius: 12px;
+    padding: 20px;
+  }
+
+  .fisora-gateway .role-card-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
+

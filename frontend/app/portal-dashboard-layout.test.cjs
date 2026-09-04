@@ -63,7 +63,7 @@ test("document processing workspace uses the approved bottom-list review layout"
   assert.match(workspace, /className="bottom-document-queue"/);
   assert.match(workspace, /Belge listesi/);
   assert.match(workspace, /Teknik ge/);
-  assert.match(workspace, /<DocumentPreview document=\{selectedDocument\} session=\{session\} \/>[\s\S]*<JournalPanel/);
+  assert.match(workspace, /<DocumentPreview controlledPdfPreview document=\{selectedDocument\} session=\{session\} sourceFocus=\{activeSourceFocus\} \/>[\s\S]*<JournalPanel/);
   assert.match(workspace, /<section className="document-review-main">[\s\S]*<\/section>\s*<details className="debug-accordion">/);
   assert.doesNotMatch(workspace, /<aside className="document-queue-panel"/);
   assert.match(styles, /\.accountant-workspace\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/);

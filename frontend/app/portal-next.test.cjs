@@ -105,8 +105,8 @@ test("HTML viewer remains sandboxed and shares compact fit, width, 100 percent, 
   const portalApp = source("portal-app.tsx");
   const workspace = source("portal-workspace-view.tsx");
 
-  assert.match(htmlViewer, /sandbox=""/);
-  assert.doesNotMatch(htmlViewer, /allow-same-origin/);
+  assert.match(htmlViewer, /sandbox="allow-same-origin"/);
+  assert.match(htmlViewer, /allow-same-origin/);
   assert.doesNotMatch(htmlViewer, /allow-scripts/);
   assert.match(htmlViewer, /ResizeObserver/);
   assert.match(htmlViewer, /MIN_ZOOM = 0\.35/);
@@ -219,16 +219,30 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(types, /DocumentSourceTarget/);
   assert.match(review, /source-review-link/);
   assert.match(review, /onFocusSource/);
-  assert.match(workspace, /sourceTarget/);
+  assert.match(review, /onHoverSource/);
+  assert.match(types, /pinned\?: boolean/);
+  assert.match(workspace, /hoverSourceTarget/);
+  assert.match(workspace, /pinnedSourceTarget/);
+  assert.match(workspace, /150/);
   assert.match(workspace, /setMobilePane\("preview"\)/);
   assert.match(pdfViewer, /getTextContent/);
+  assert.match(pdfViewer, /findTokenSequence/);
+  assert.match(pdfViewer, /LENS_ZOOM = 2\.2/);
+  assert.match(pdfViewer, /TOUCH_HOLD_MS = 420/);
   assert.match(pdfViewer, /pdf-source-highlight/);
+  assert.match(pdfViewer, /document-magnifier/);
   assert.match(pdfViewer, /Tam belgeye dön/);
   assert.match(htmlViewer, /DOMParser/);
   assert.match(htmlViewer, /SOURCE_TARGET_ID/);
-  assert.match(htmlViewer, /sandbox=""/);
-  assert.doesNotMatch(htmlViewer, /allow-same-origin/);
+  assert.match(htmlViewer, /findTokenSequence/);
+  assert.match(htmlViewer, /LENS_ZOOM = 2\.2/);
+  assert.match(htmlViewer, /TOUCH_HOLD_MS = 420/);
+  assert.match(htmlViewer, /document-magnifier/);
+  assert.match(htmlViewer, /sandbox="allow-same-origin"/);
+  assert.doesNotMatch(htmlViewer, /allow-scripts/);
   assert.match(styles, /document-source-focus-controls/);
+  assert.match(styles, /document-magnifier/);
+  assert.match(styles, /source-pinned-row/);
   assert.match(styles, /journal-source-row/);
 });
 
@@ -248,6 +262,7 @@ test("shared login gateway uses the portal-next product language", () => {
   assert.match(page, /Akıllı ve öğrenen bir yardımcıyla günlük muhasebe işi daha net\./);
   assert.match(page, /Fisora, yapay zeka desteğini kararın yerine geçmek için değil/);
   assert.match(page, /gateway-identity-panel/);
+  assert.match(page, /gateway-login-heading/);
   assert.match(page, /Fisora&apos;ya giriş yap/);
   assert.match(styles, /\.fisora-gateway \.role-copy/);
   assert.match(styles, /--gateway-navy:\s*#1d3557/);

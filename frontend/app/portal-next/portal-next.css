@@ -2260,12 +2260,50 @@
   position: absolute;
   z-index: 4;
 }
+.portal-next-theme .pdf-source-highlight.pinned {
+  background: rgba(250, 204, 21, 0.38);
+  border-color: #92400e;
+}
+
+.portal-next-theme .document-magnifier {
+  background: #fff;
+  border: 2px solid rgba(255, 255, 255, 0.96);
+  border-radius: 50%;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.32), 0 0 0 1px rgba(15, 23, 42, 0.28);
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  transition: opacity 70ms ease;
+  z-index: 30;
+}
+.portal-next-theme .document-magnifier.visible { opacity: 1; }
+.portal-next-theme .pdf-document-magnifier canvas { display: block; height: 100%; margin: 0; width: 100%; }
+.portal-next-theme .html-document-lens-frame {
+  background: #fff;
+  border: 0;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform-origin: top left;
+}
 
 .portal-next-theme .journal-source-row {
   cursor: pointer;
 }
-.portal-next-theme .journal-source-row:hover td {
-  background: #fffdf5;
+.portal-next-theme .journal-source-row:hover td,
+.portal-next-theme .journal-source-row.source-focused-row td {
+  background: #fff9db;
+}
+.portal-next-theme .journal-source-row.source-pinned-row td {
+  background: #fff3bf;
+  box-shadow: inset 0 1px 0 rgba(180, 83, 9, 0.22), inset 0 -1px 0 rgba(180, 83, 9, 0.22);
+}
+.portal-next-theme .journal-source-row.source-pinned-row .source-review-evidence {
+  color: #92400e;
+  font-weight: 800;
 }
 .portal-next-theme .source-review-link {
   background: transparent;
@@ -2819,4 +2857,8 @@
   .portal-next-theme .portal-next-ai-help-card article { grid-template-columns: auto minmax(0, 1fr); }
   .portal-next-theme .portal-next-ai-help-card article button { grid-column: 2; justify-self: start; }
   .portal-next-theme .portal-next-reader-source .html-viewer-stage { height: 500px; min-height: 420px; }
+}
+
+@media (max-width: 720px) {
+  .portal-next-theme .document-magnifier { max-height: 210px; max-width: 210px; }
 }

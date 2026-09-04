@@ -222,7 +222,10 @@ export function AccountantWorkspace({
   const [focusMode, setFocusMode] = useState(false);
   const [journalHidden, setJournalHidden] = useState(false);
   const [mobilePane, setMobilePane] = useState<"queue" | "preview" | "journal">("preview");
-  const [sourceTarget, setSourceTarget] = useState<DocumentSourceTarget | null>(null);
+  const [hoverSourceTarget, setHoverSourceTarget] = useState<DocumentSourceTarget | null>(null);
+  const [pinnedSourceTarget, setPinnedSourceTarget] = useState<DocumentSourceTarget | null>(null);
+  const hoverSourceTimerRef = useRef<number | null>(null);
+  const sourceTarget = hoverSourceTarget ?? pinnedSourceTarget;
   const focusStageRef = useRef<HTMLElement | null>(null);
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
@@ -300,8 +303,15 @@ export function AccountantWorkspace({
   }
 
   useEffect(() => {
-    setSourceTarget(null);
+    if (hoverSourceTimerRef.current !== null) window.clearTimeout(hoverSourceTimerRef.current);
+    hoverSourceTimerRef.current = null;
+    setHoverSourceTarget(null);
+    setPinnedSourceTarget(null);
   }, [selectedDocument?.id]);
+
+  useEffect(() => () => {
+    if (hoverSourceTimerRef.current !== null) window.clearTimeout(hoverSourceTimerRef.current);
+  }, []);
 
   useEffect(() => {
     if (!focusMode) return undefined;
@@ -315,8 +325,29 @@ export function AccountantWorkspace({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [focusMode]);
 
+  function clearDocumentSource() {
+    if (hoverSourceTimerRef.current !== null) window.clearTimeout(hoverSourceTimerRef.current);
+    hoverSourceTimerRef.current = null;
+    setHoverSourceTarget(null);
+    setPinnedSourceTarget(null);
+  }
+
+  function hoverDocumentSource(target: DocumentSourceTarget | null) {
+    if (hoverSourceTimerRef.current !== null) window.clearTimeout(hoverSourceTimerRef.current);
+    hoverSourceTimerRef.current = null;
+    if (!target) {
+      setHoverSourceTarget(null);
+      return;
+    }
+    hoverSourceTimerRef.current = window.setTimeout(() => {
+      setHoverSourceTarget({ ...target, pinned: false });
+      hoverSourceTimerRef.current = null;
+    }, 150);
+  }
+
   function focusDocumentSource(target: DocumentSourceTarget) {
-    setSourceTarget({ ...target, key: `${target.key}-${Date.now()}` });
+    setHoverSourceTarget(null);
+    setPinnedSourceTarget({ ...target, pinned: true });
     setMobilePane("preview");
   }
 
@@ -452,9 +483,9 @@ export function AccountantWorkspace({
         ) : null}
         <section className="document-review-main">
           {controlledPdfPreview || controlledHtmlPreview ? (
-            <DocumentPreview controlledHtmlPreview={controlledHtmlPreview} controlledPdfPreview={controlledPdfPreview} document={selectedDocument} onClearSourceTarget={() => setSourceTarget(null)} session={session} sourceTarget={sourceTarget} />
+            <DocumentPreview controlledHtmlPreview={controlledHtmlPreview} controlledPdfPreview={controlledPdfPreview} document={selectedDocument} onClearSourceTarget={clearDocumentSource} session={session} sourceTarget={sourceTarget} />
           ) : (
-            <DocumentPreview document={selectedDocument} onClearSourceTarget={() => setSourceTarget(null)} session={session} sourceTarget={sourceTarget} />
+            <DocumentPreview document={selectedDocument} onClearSourceTarget={clearDocumentSource} session={session} sourceTarget={sourceTarget} />
           )}
           <JournalPanel
             correctionDraft={correctionDraft}
@@ -465,12 +496,14 @@ export function AccountantWorkspace({
             onApproveAndNext={onApproveAndNext}
             onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
             onFocusSource={focusDocumentSource}
+            onHoverSource={hoverDocumentSource}
             onReprocessDocument={onReprocessDocument}
             onRequestStatementAi={onRequestStatementAi}
             onSaveDecision={onSaveDecision}
             onSaveStatementDecision={onSaveStatementDecision}
             selectedStatementLineNo={selectedStatementLineNo}
             session={session}
+            sourceTarget={sourceTarget}
             setCorrectionDraft={setCorrectionDraft}
             setSelectedStatementLineNo={setSelectedStatementLineNo}
             statementAiStatus={statementAiStatus}

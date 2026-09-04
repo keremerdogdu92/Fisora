@@ -33,6 +33,7 @@ export type SourceReviewRow = {
 export type DocumentSourceTarget = {
   key: string;
   text: string;
+  pinned?: boolean;
   sourcePosition?: string;
   sourceLineNumbers?: number[];
 };

@@ -633,12 +633,14 @@ export function JournalPanel({
   onApproveAndNext,
   onResetDraft,
   onFocusSource,
+  onHoverSource,
   onReprocessDocument,
   onRequestStatementAi,
   onSaveDecision,
   onSaveStatementDecision,
   selectedStatementLineNo,
   session,
+  sourceTarget,
   setCorrectionDraft,
   setSelectedStatementLineNo,
   statementAiStatus,
@@ -651,12 +653,14 @@ export function JournalPanel({
   onApproveAndNext: () => void | Promise<void>;
   onResetDraft: () => void;
   onFocusSource?: (target: DocumentSourceTarget) => void;
+  onHoverSource?: (target: DocumentSourceTarget | null) => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
   onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   selectedStatementLineNo: number;
   session: LocalSession | null;
+  sourceTarget?: DocumentSourceTarget | null;
   setCorrectionDraft: (value: CorrectionDraft) => void;
   setSelectedStatementLineNo: (value: number) => void;
   statementAiStatus: string;
@@ -836,8 +840,10 @@ export function JournalPanel({
           sourceReviewTotalCount={document.sourceReviewRows?.length ?? 0}
           onAddLine={addManualDraftLine}
           onFocusSource={onFocusSource}
+          onHoverSource={onHoverSource}
           onRemoveLine={removeManualDraftLine}
           onUpdateLine={setManualDraftLine}
+          sourceTarget={sourceTarget}
         />
         {!nextKeyboardShortcuts && !pendingDirectionConflict ? (
           <section className="journal-primary-approve" aria-label="Ana fiş kararı">
@@ -1112,8 +1118,10 @@ function ManualDraftEditor({
   sourceReviewTotalCount,
   onAddLine,
   onFocusSource,
+  onHoverSource,
   onRemoveLine,
   onUpdateLine,
+  sourceTarget,
 }: {
   activeDraftLines: DraftLine[];
   chartAccounts: ChartAccountOption[];
@@ -1125,8 +1133,10 @@ function ManualDraftEditor({
   sourceReviewTotalCount: number;
   onAddLine: () => void;
   onFocusSource?: (target: DocumentSourceTarget) => void;
+  onHoverSource?: (target: DocumentSourceTarget | null) => void;
   onRemoveLine: (index: number) => void;
   onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
+  sourceTarget?: DocumentSourceTarget | null;
 }) {
   const descriptionRefs = useRef<Array<HTMLInputElement | null>>([]);
   const debitRefs = useRef<Array<HTMLInputElement | null>>([]);
@@ -1164,8 +1174,9 @@ function ManualDraftEditor({
     const sourceLineNumbers = Array.isArray(line.source_line_numbers) ? line.source_line_numbers : [];
     if (!text && !line.source_position && !sourceLineNumbers.length) return null;
     return {
-      key: `${line.source_position || sourceLineNumbers.join("-") || index + 1}`,
+      key: `${line.source_position || sourceLineNumbers.join("-") || index + 1}::${text.replace(/\s+/g, " ").trim()}`,
       text,
+      pinned: false,
       sourcePosition: line.source_position || "",
       sourceLineNumbers,
     };
@@ -1196,17 +1207,20 @@ function ManualDraftEditor({
           </thead>
           <tbody>
             {rows.map((line, index) => {
-              const sourceTarget = sourceTargetForLine(line, index);
+              const lineSourceTarget = sourceTargetForLine(line, index);
+              const sourceFocused = Boolean(lineSourceTarget && sourceTarget?.key === lineSourceTarget.key);
               return (
               <tr
-                className={sourceTarget ? "journal-source-row" : undefined}
+                className={`${lineSourceTarget ? "journal-source-row" : ""}${sourceFocused ? " source-focused-row" : ""}${sourceFocused && sourceTarget?.pinned ? " source-pinned-row" : ""}`.trim() || undefined}
                 key={index}
                 onClick={(event) => {
-                  if (!sourceTarget || !onFocusSource) return;
+                  if (!lineSourceTarget || !onFocusSource) return;
                   const target = event.target as HTMLElement;
                   if (target.closest("input, button, select, textarea, a")) return;
-                  onFocusSource(sourceTarget);
+                  onFocusSource({ ...lineSourceTarget, pinned: true });
                 }}
+                onMouseEnter={() => { if (lineSourceTarget) onHoverSource?.(lineSourceTarget); }}
+                onMouseLeave={() => onHoverSource?.(null)}
               >
                 <td>
                   <AccountCodeCombobox
@@ -1236,10 +1250,10 @@ function ManualDraftEditor({
                     ref={(element) => { descriptionRefs.current[index] = element; }}
                     value={line.description}
                   />
-                  {sourceTarget ? (
+                  {lineSourceTarget ? (
                     <button
                       className="field-notice source-review-evidence source-review-link"
-                      onClick={() => onFocusSource?.(sourceTarget)}
+                      onClick={() => onFocusSource?.({ ...lineSourceTarget, pinned: true })}
                       title="Kaynak belgede bu satırı bul"
                       type="button"
                     >

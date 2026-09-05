@@ -65,7 +65,8 @@ tutulur.
 sh deploy/scripts/fisora-prod.sh check
 ```
 
-5. Stack deploy:
+5. Stack deploy. Bu komut yalnızca ilk kurulum veya yetkili recovery içindir;
+rutin production release yolu değildir:
 
 ```bash
 sh deploy/scripts/fisora-prod.sh deploy
@@ -79,24 +80,41 @@ sh deploy/scripts/fisora-prod.sh smoke
 
 ## Kanonik Production Deploy
 
-Routine production release icin tek yetkili yol GitHub Actions -> AWS OIDC -> `FisoraProductionDeploy` SSM document akışıdır. Production checkout üzerinde normal operasyon sırasında doğrudan `git checkout`, `git reset`, `docker compose up --build` veya genel `AWS-RunShellScript` ile release yapılmaz.
+**2026-09-05 itibarıyla bundan sonraki tüm rutin production deployları bu akışla yapılır.** Tek yetkili normal release yolu:
 
-1. Release edilecek de?i?iklikleri do?rula ve `main` branch'ine `[deploy]` ile ba?layan bir commit mesaj?yla publish et. Bu push **Deploy Production** workflow'unu otomatik tetikler:
+`[deploy] main commit -> GitHub Actions Deploy Production -> latest-main SHA gate -> AWS OIDC -> restricted FisoraProductionDeploy SSM document -> exact GITHUB_SHA`
+
+Normal release için yerel AWS SSO oturumu, tarayıcıdan workflow butonuna basılması, doğrudan SSH, production üzerinde `git checkout` / `git reset`, ad-hoc `docker compose up --build` veya genel `AWS-RunShellScript` kullanılmaz.
+
+1. Release edilecek değişiklikleri doğrula. İlgili diffleri incele, gerekli test/build kontrollerini ve `git diff --check` kontrolünü çalıştır. Paralel çalışmalar varsa yalnızca bu release'e ait dosyaları commit et.
+
+2. Release commit'ini `main` branch'ine **`[deploy]` ile başlayan commit mesajıyla** publish et. Bu push **Deploy Production** workflow'unu otomatik tetikler:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-publish.ps1 -Branch main -Json
 ```
 
-Kod zaten `main` ?zerindeyse yeni dosya de?i?ikli?i ?retmeden release tetiklemek i?in bo? bir release-marker commit kullan?labilir:
+Kod zaten `main` üzerindeyse yeni dosya değişikliği üretmeden release tetiklemek için boş bir release-marker commit kullanılabilir:
 
 ```powershell
 git commit --allow-empty -m "[deploy] Release current main"
 git push origin main
 ```
 
-2. Workflow ?nce tetiklenen `GITHUB_SHA` de?erinin h?l? g?ncel `main` SHA's? oldu?unu do?rular. Paralel push nedeniyle daha yeni bir `main` commit'i varsa eski run production'a dokunmadan ba?ar?yla skip edilir. G?ncel SHA ise restricted SSM document ?zerinden exact-SHA deploy edilir. `workflow_dispatch` yaln?zca yetkili manuel retry/fallback olarak korunur.
+3. Workflow tetiklenen `GITHUB_SHA` değerinin hâlâ güncel `main` SHA'sı olduğunu doğrular. Paralel push nedeniyle daha yeni bir `main` commit'i varsa eski run production'a dokunmadan başarıyla skip edilir. Güncel SHA ise GitHub OIDC ile `FisoraGitHubDeployRole` rolünü alır ve restricted `FisoraProductionDeploy` SSM document üzerinden **exact-SHA** deploy edilir.
 
-3. SSM document source-of-truth'u repodad?r:
+4. `workflow_dispatch` yalnızca yetkili manuel retry/fallback olarak korunur. Normal akışta coding agent `[deploy]` commit'iyle release'i kendi başına tetikler; local AWS credential veya browser workflow click gerekmez.
+
+5. Deploy sonrası doğrulama zorunludur:
+
+- GitHub Actions run sonucu `success` olmalı.
+- Deploy edilen SHA, release edilen güncel `main` SHA ile aynı olmalı.
+- Frontend ve backend erişilebilir olmalı.
+- `/api/phase0/store/system/readiness` HTTP 200 dönmeli ve beklenen readiness durumunu göstermeli.
+- `FISORA_WORKER_RETENTION_ENABLED=false`, Kerem açıkça değiştirmedikçe korunmalı.
+- Bir smoke veya guard hatası varsa release tamamlanmış sayılmaz; sebep loglardan doğrulanır.
+
+6. SSM document source-of-truth'u repodadır:
 
 ```text
 deploy/aws/fisora-production-deploy-document.json

@@ -3,6 +3,29 @@
 Bu liste yerel Docker smoke testinden sonra gercek Turkiye lokasyonlu sunucuya
 gecis icin kullanilir.
 
+## 0. Kanonik Rutin Production Deploy
+
+**2026-09-05 itibariyla bundan sonraki tum rutin production deploylari bu kontrata gore yapilir.** Ayrintili source-of-truth `docs/production-ops-runbook.md` dosyasindaki **Kanonik Production Deploy** bolumudur.
+
+Tek yetkili normal release yolu:
+
+`[deploy] main commit -> GitHub Actions Deploy Production -> latest-main SHA gate -> AWS OIDC -> restricted FisoraProductionDeploy SSM document -> exact GITHUB_SHA`
+
+Kontrol listesi:
+
+- Release edilecek diffler incelendi; paralel calismalardan gelen ilgisiz dosyalar commit'e alinmadi.
+- Gerekli hedefli testler, ilgili full testler/build ve `git diff --check` basarili.
+- Release commit'i `main` branch'ine `[deploy]` ile baslayan commit mesaji ile pushlandi; bu push workflow'u otomatik tetikler.
+- Kod zaten `main` uzerindeyse yeni dosya degisikligi yaratmadan `git commit --allow-empty -m "[deploy] Release current main"` ile release marker olusturulabilir.
+- Workflow tetiklenen SHA'nin halen latest `main` SHA oldugunu dogrular; daha yeni `main` varsa stale run production'a dokunmadan skip edilir.
+- AWS erisimi local credential veya AWS SSO ile degil, GitHub OIDC uzerinden `FisoraGitHubDeployRole` ile alinir.
+- Deploy restricted `FisoraProductionDeploy` SSM document ile exact `GITHUB_SHA` icin yapilir.
+- `workflow_dispatch` yalnizca yetkili manuel retry/fallback'tir; normal deploy browser click gerektirmez.
+- Rutin release icin direct SSH, production checkout uzerinde `git checkout` / `git reset`, ad-hoc `docker compose up --build`, genel `AWS-RunShellScript` veya local AWS session kullanilmaz.
+- Deploy sonrasi GitHub Actions sonucu, exact deployed SHA, frontend/backend erisimi ve `/api/phase0/store/system/readiness` kontrol edilir.
+- `FISORA_WORKER_RETENTION_ENABLED=false`, Kerem acikca degistirene kadar korunur.
+- Canonical GitHub/OIDC yolu bozulursa direct release ancak acik incident onayi ile `deploy/scripts/fisora-release.ps1 -EmergencyOverride` kullanilarak yapilabilir; normal yolun yerine kalici alternatif sayilmaz.
+
 ## 1. Sunucu Hazirligi
 
 - Ubuntu LTS kurulumu tamamlandi.
@@ -66,7 +89,9 @@ gecis icin kullanilir.
   yeniden eklenir. `session_required` modunda backend kendi session cookie'sini
   dogrular.
 
-## 5. Ilk Smoke Komutlari
+## 5. Ilk Kurulum / Recovery Smoke Komutlari
+
+Asagidaki `deploy` komutu rutin release yolu degildir; yalnizca ilk kurulum veya yetkili recovery senaryosunda kullanilir. Normal release icin bolum 0'daki GitHub Actions/OIDC/SSM akisi kullanilir.
 
 ```bash
 sh deploy/scripts/fisora-prod.sh check

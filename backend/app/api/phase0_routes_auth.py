@@ -335,7 +335,7 @@ def store_auth_password_reset_request(payload: AuthPasswordResetRequestPayload, 
         return generic
     store.invalidate_auth_tokens_for_user(user_id=user_id, purpose="password_reset")
     token = create_auth_action_token()
-    expires_at = action_token_expires_at(ttl_hours=1)
+    expires_at = action_token_expires_at()
     action_url = _portal_action_url("/portal/password-reset", token.raw_token)
     store.create_auth_token(purpose="password_reset", user_id=user_id, token_hash=token.token_hash, expires_at=expires_at, payload={"email": email})
     _auth_email_delivery(recipient=email, subject="Fisora sifre sifirlama", body_text=f"Fisora sifre sifirlama linkiniz: {action_url or token.raw_token}", action_url=action_url)

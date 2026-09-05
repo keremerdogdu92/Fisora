@@ -400,7 +400,7 @@ class AuthPasswordResetRequestPayload(BaseModel):
 class AuthPasswordResetPayload(BaseModel):
     user_id: str
     email: str = ""
-    ttl_hours: int = 24
+    ttl_hours: int = 48
 
 
 class AuthPasswordResetConfirmPayload(BaseModel):

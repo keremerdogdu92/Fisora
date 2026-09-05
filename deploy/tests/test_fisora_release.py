@@ -1,3 +1,6 @@
+# File: deploy/tests/test_fisora_release.py
+# Summary: Validates Fisora publish and incident-only direct release wrappers, including production safety gates.
+
 from __future__ import annotations
 
 import json
@@ -55,6 +58,7 @@ class FisoraReleaseScriptTests(unittest.TestCase):
         self.assertFalse(payload["local_verify_enabled"])
         self.assertTrue(payload["sudo_enabled"])
         self.assertIn("ssh_key_configured", payload)
+        self.assertTrue(payload["emergency_override_required"])
         self.assertIn("git fetch origin", payload["remote_script"])
         self.assertIn("git pull --ff-only origin main", payload["remote_script"])
         self.assertIn("sh deploy/scripts/fisora-prod.sh check", payload["remote_script"])
@@ -68,6 +72,7 @@ class FisoraReleaseScriptTests(unittest.TestCase):
         self.assertIn("SkipLocalVerify", content)
         self.assertIn("SkipSmoke", content)
         self.assertIn("NoSudo", content)
+        self.assertIn("EmergencyOverride", content)
         self.assertIn("Json", content)
         self.assertIn("Assert-OriginParity", content)
 

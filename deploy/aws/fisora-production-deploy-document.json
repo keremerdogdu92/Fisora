@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Deploy one exact Fisora main-branch commit to the production EC2 instance.",
+  "parameters": {
+    "TargetSha": {
+      "type": "String",
+      "description": "Exact Git commit SHA to deploy.",
+      "allowedPattern": "^[0-9a-f]{40}$"
+    }
+  },
+  "mainSteps": [
+    {
+      "action": "aws:runShellScript",
+      "name": "deployFisora",
+      "inputs": {
+        "timeoutSeconds": "2100",
+        "runCommand": [
+          "set -eu",
+          "ROOT_DIR=/opt/fisora/app",
+          "cd \"$ROOT_DIR\"",
+          "printf 'FISORA_DEPLOY_START target=%s\\n' '{{ TargetSha }}'",
+          "dirty=\"$(sudo -u ubuntu git -C \"$ROOT_DIR\" status --porcelain --untracked-files=no)\"",
+          "if [ -n \"$dirty\" ]; then echo 'FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes' >&2; printf '%s\\n' \"$dirty\" >&2; exit 20; fi",
+          "sudo -u ubuntu git -C \"$ROOT_DIR\" fetch origin main",
+          "sudo -u ubuntu git -C \"$ROOT_DIR\" cat-file -e '{{ TargetSha }}^{commit}' || { echo 'FISORA_DEPLOY_BLOCKED reason=target_commit_missing' >&2; exit 21; }",
+          "sudo -u ubuntu git -C \"$ROOT_DIR\" merge-base --is-ancestor '{{ TargetSha }}' origin/main || { echo 'FISORA_DEPLOY_BLOCKED reason=target_not_on_origin_main' >&2; exit 22; }",
+          "sudo -u ubuntu git -C \"$ROOT_DIR\" switch --detach '{{ TargetSha }}'",
+          "sh deploy/scripts/github-actions-prod-deploy.sh '{{ TargetSha }}'"
+        ]
+      }
+    }
+  ]
+}

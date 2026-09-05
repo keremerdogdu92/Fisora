@@ -77,38 +77,47 @@ sh deploy/scripts/fisora-prod.sh deploy
 sh deploy/scripts/fisora-prod.sh smoke
 ```
 
-## Gunluk Operasyon Komutlari
+## Kanonik Production Deploy
 
-GitHub'a sessiz publish:
+Routine production release icin tek yetkili yol GitHub Actions -> AWS OIDC -> `FisoraProductionDeploy` SSM document akışıdır. Production checkout üzerinde normal operasyon sırasında doğrudan `git checkout`, `git reset`, `docker compose up --build` veya genel `AWS-RunShellScript` ile release yapılmaz.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-publish.ps1 -Branch main -Json
-```
-
-Tek komutla local dogrulama, server deploy ve live health/readiness kontrolu:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -Branch main -Json
-```
-
-Kisa gunluk akis:
+1. `main` branch'ini publish et:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-publish.ps1 -Branch main -Json
-powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -Branch main -Json
 ```
 
-Daha hizli bir server-only release icin local test/build atlanabilir:
+2. GitHub Actions içinden **Deploy Production** workflow'unu `main` için çalıştır. Workflow yalnızca tetiklenen `GITHUB_SHA` commit'ini restricted SSM document üzerinden deploy eder.
+
+3. SSM document source-of-truth'u repodadır:
+
+```text
+deploy/aws/fisora-production-deploy-document.json
+```
+
+Bu document değiştiğinde yetkili AWS oturumuyla bir kez senkronize edilir; bu günlük deploy adımı değildir:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -SkipLocalVerify
+powershell -ExecutionPolicy Bypass -File deploy/scripts/sync-production-deploy-document.ps1
 ```
 
-Komutun ne yapacagini server'a dokunmadan JSON olarak gormek:
+Tracked production worktree değişikliği varsa deploy otomatik reset atmaz. `FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes` ile değişen dosyaları loglar ve güvenli şekilde durur.
+
+## Acil Durum Direct SSH Release
+
+`deploy/scripts/fisora-release.ps1` rutin production deploy için devre dışıdır. Yalnızca GitHub/OIDC yolu kullanılamayan yetkili bir incident response sırasında açık onayla kullanılabilir:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -EmergencyOverride -Branch main -Json
+```
+
+Server'a dokunmadan acil durum planını görmek için:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File deploy/scripts/fisora-release.ps1 -PlanOnly -Json
 ```
+
+## Gunluk Operasyon Komutlari
 
 Servisleri gormek:
 

@@ -1,3 +1,6 @@
+# File: deploy/scripts/fisora-release.ps1
+# Summary: Provides an incident-only direct SSH release path; routine production deploys must use GitHub Actions and the restricted SSM document.
+
 param(
     [string]$Server = $env:FISORA_RELEASE_SERVER,
     [string]$SshKey = $env:FISORA_RELEASE_SSH_KEY,
@@ -8,6 +11,7 @@ param(
     [switch]$SkipSmoke,
     [switch]$AllowDirty,
     [switch]$NoSudo,
+    [switch]$EmergencyOverride,
     [switch]$PlanOnly,
     [switch]$Json
 )
@@ -151,6 +155,7 @@ if ($PlanOnly) {
         smoke_enabled = -not [bool]$SkipSmoke
         sudo_enabled = -not [bool]$NoSudo
         ssh_key_configured = [bool]$SshKey
+        emergency_override_required = $true
         remote_script = $remoteScript
     }
     if ($Json) {
@@ -159,6 +164,10 @@ if ($PlanOnly) {
         $payload
     }
     exit 0
+}
+
+if (-not $EmergencyOverride) {
+    throw "Direct SSH production releases are disabled for routine operations. Use the GitHub Actions 'Deploy Production' workflow. Use -EmergencyOverride only for an authorized incident response."
 }
 
 $summary = [ordered]@{

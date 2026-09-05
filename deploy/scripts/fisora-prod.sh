@@ -1,4 +1,7 @@
 #!/bin/sh
+# File: deploy/scripts/fisora-prod.sh
+# Summary: Manages validated Fisora production Compose lifecycle operations, release receipts, backups, and recovery checks.
+
 set -eu
 
 ROOT_DIR="${FISORA_ROOT_DIR:-$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)}"
@@ -8,6 +11,10 @@ PROJECT_NAME="${FISORA_COMPOSE_PROJECT:-fisora}"
 
 compose() {
   docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -p "$PROJECT_NAME" "$@"
+}
+
+git_repo() {
+  git -c safe.directory="$ROOT_DIR" -C "$ROOT_DIR" "$@"
 }
 
 require_env_file() {
@@ -108,7 +115,7 @@ case "$cmd" in
     require_env_file
     production_preflight
     read_backup_mode
-    before_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    before_sha="$(git_repo rev-parse HEAD 2>/dev/null || echo unknown)"
     migration_version="$(find "$ROOT_DIR/backend/db/migrations" -maxdepth 1 -type f -name '*.sql' -printf '%f\n' 2>/dev/null | sort | tail -n 1)"
     config_fingerprint="$(
       for key in FISORA_ENV FISORA_STORE_BACKEND FISORA_AUTH_MODE FISORA_QNB_ADAPTER FISORA_QNB_SCHEDULER_ENABLED FISORA_REAL_DATA_PILOT_ENABLED FISORA_REAL_DATA_ACCESS_MODE FISORA_BACKUP_MODE; do
@@ -124,7 +131,7 @@ case "$cmd" in
       compose stop backup >/dev/null 2>&1 || true
     fi
     compose --profile backup ps
-    after_sha="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+    after_sha="$(git_repo rev-parse HEAD 2>/dev/null || echo unknown)"
     printf 'FISORA_RELEASE_RECEIPT {"before_sha":"%s","after_sha":"%s","migration_version":"%s","config_fingerprint":"%s"}\n' \
       "$before_sha" "$after_sha" "$migration_version" "$config_fingerprint"
     ;;
@@ -136,9 +143,9 @@ case "$cmd" in
       echo "Usage: $0 rollback-code <known-good-sha>" >&2
       exit 2
     fi
-    git -C "$ROOT_DIR" cat-file -e "$target_sha^{commit}"
-    rollback_from="$(git -C "$ROOT_DIR" rev-parse HEAD)"
-    git -C "$ROOT_DIR" switch --detach "$target_sha"
+    git_repo cat-file -e "$target_sha^{commit}"
+    rollback_from="$(git_repo rev-parse HEAD)"
+    git_repo switch --detach "$target_sha"
     compose --profile backup build backend worker qnb-scheduler frontend
     compose up -d backend worker qnb-scheduler frontend nginx
     printf 'FISORA_RELEASE_RECEIPT {"rollback_from":"%s","rollback_to":"%s","database_migration":"forward_compatible_not_reverted"}\n' \

@@ -1,5 +1,15 @@
 # Current Handoff
 
+### 2026-09-05 canonical production deployment contract
+
+- Routine production deploy has exactly one authorized path: GitHub Actions **Deploy Production** -> AWS OIDC -> restricted `FisoraProductionDeploy` SSM document -> exact `GITHUB_SHA`.
+- The SSM document source of truth is tracked at `deploy/aws/fisora-production-deploy-document.json`; infrastructure changes are synchronized with `deploy/scripts/sync-production-deploy-document.ps1` under an authorized AWS operator session.
+- Direct production `git checkout`, `git reset`, ad-hoc `docker compose up --build`, and general `AWS-RunShellScript` release flows are not routine deployment paths.
+- `deploy/scripts/fisora-release.ps1` is incident-only and refuses execution unless `-EmergencyOverride` is explicitly supplied.
+- The SSM worktree guard never auto-resets tracked changes. It emits `FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes`, includes the changed paths, and exits safely.
+- Production Git operations run as the repository owner (`ubuntu`) in the restricted SSM document; production lifecycle release receipts use a safe-directory Git wrapper so SHA evidence is no longer silently recorded as `unknown` under root.
+- Historical deployment commands later in this handoff predate this contract and must not override the canonical production runbook in `docs/production-ops-runbook.md`.
+
 ### 2026-08-25 repository cleanup, tax-certificate release, and next execution gate
 
 - Git/worktree cleanup completed: the authoritative local and remote branch is only `main`; the only active worktree is `C:\Users\kerem\Documents\Fisero`.

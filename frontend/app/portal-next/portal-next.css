@@ -1973,11 +1973,60 @@
   min-height: 38px;
   padding: 3px 8px;
 }
+.portal-next-workbench-filter-cluster {
+  align-items: center;
+  background: #f7f9fc;
+  border: 1px solid #dbe4ec;
+  border-radius: 8px;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px;
+}
+.portal-next-command-direction {
+  align-items: center;
+  border-right: 1px solid #d6e0e8;
+  display: flex;
+  gap: 3px;
+  padding-right: 6px;
+}
+.portal-next-command-direction button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #c7d4df;
+  border-radius: 6px;
+  color: #294c66;
+  display: inline-flex;
+  font-weight: 900;
+  gap: 6px;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 4px 10px;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+.portal-next-command-direction button:hover { transform: translateY(-1px); }
+.portal-next-command-direction button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 2px 6px rgba(27, 76, 111, 0.18);
+  color: #fff;
+}
+.portal-next-command-direction button span { font-size: 0.76rem; }
+.portal-next-command-direction button strong { font-size: 0.82rem; }
 .portal-next-workbench-commandbar .review-cockpit-queues {
   display: flex;
-  gap: 5px;
+  gap: 4px;
 }
-.portal-next-workbench-commandbar .review-cockpit-queues button,
+.portal-next-workbench-commandbar .review-cockpit-queues button {
+  border-radius: 6px;
+  min-height: 30px;
+  padding: 3px 8px;
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+.portal-next-workbench-filter-cluster .review-cockpit-queues button.active {
+  background: #edf4f9;
+  border-color: #b9ccdc;
+}
 .portal-next-workbench-actions button {
   border-radius: 6px;
   min-height: 32px;
@@ -2041,9 +2090,6 @@
 .portal-next-queue-head span { color: var(--muted); font-size: 0.68rem; }
 .portal-next-queue-tools { border-bottom: 1px solid var(--border); display: grid; gap: 5px; padding: 6px; }
 .portal-next-queue-tools input { border: 1px solid var(--border); border-radius: 5px; min-height: 30px; padding: 4px 7px; width: 100%; }
-.portal-next-direction-tabs { display: grid; gap: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.portal-next-direction-tabs button { border-radius: 4px; font-size: 0.69rem; min-height: 28px; padding: 3px 5px; }
-.portal-next-direction-tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 .portal-next-queue-list { list-style: none; margin: 0; min-height: 0; overflow-y: auto; padding: 6px; }
 .portal-next-queue-list li + li { margin-top: 5px; }
 .portal-next-queue-list button {
@@ -2094,13 +2140,34 @@
   display: grid;
   gap: 10px;
   grid-column: 1 / -1;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(100px, 1fr) auto auto;
   grid-row: 1;
   padding: 4px 8px 4px 11px;
 }
 .portal-next-focus-document { align-items: center; display: flex; gap: 8px; min-width: 0; }
 .portal-next-focus-document > span { color: var(--muted); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .portal-next-focus-document > strong { color: var(--accent); flex: 0 0 auto; font-size: 0.68rem; white-space: nowrap; }
+.portal-next-focus-toolbar .portal-next-workbench-filter-cluster {
+  background: transparent;
+  border: 0;
+  gap: 4px;
+  justify-self: start;
+  padding: 0;
+}
+.portal-next-focus-toolbar .portal-next-command-direction { gap: 2px; padding-right: 4px; }
+.portal-next-focus-toolbar .portal-next-command-direction button {
+  min-height: 28px;
+  padding: 3px 7px;
+}
+.portal-next-focus-toolbar .portal-next-command-direction button span,
+.portal-next-focus-toolbar .portal-next-command-direction button strong { font-size: 0.68rem; }
+.portal-next-focus-toolbar .review-cockpit-queues { display: flex; gap: 2px; }
+.portal-next-focus-toolbar .review-cockpit-queues button {
+  min-height: 28px;
+  padding: 3px 6px;
+}
+.portal-next-focus-toolbar .review-cockpit-queues button span { font-size: 0.66rem; }
+.portal-next-focus-toolbar .review-cockpit-queues button strong { font-size: 0.72rem; }
 .portal-next-focus-toolbar > div:last-child { display: flex; gap: 5px; }
 .portal-next-focus-toolbar button {
   align-items: center;
@@ -2327,6 +2394,9 @@
   .portal-next-theme .portal-next-work-tabs,
   .portal-next-theme .portal-next-work-tabs button { min-height: 38px; }
   .portal-next-workbench-commandbar { align-items: stretch; flex-direction: column; gap: 4px; padding: 4px 6px; }
+  .portal-next-workbench-filter-cluster { align-items: stretch; display: grid; gap: 4px; grid-template-columns: 1fr; width: 100%; }
+  .portal-next-command-direction { border-right: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-right: 0; }
+  .portal-next-command-direction button { width: 100%; }
   .portal-next-workbench-commandbar .review-cockpit-queues { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .portal-next-workbench-actions { justify-content: space-between; }
   .portal-next-workbench-actions .focus-action,

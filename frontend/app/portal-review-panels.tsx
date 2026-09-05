@@ -216,6 +216,26 @@ type OriginalDocumentPreviewDebug = {
 
 function normalizePreviewMime(value?: string) { return String(value || "").split(";", 1)[0].trim().toLowerCase(); }
 function previewMimeIsSupported(value?: string) { const mime = normalizePreviewMime(value); return Boolean(mime) && (isImageMime(mime) || isFramePreviewMime(mime)); }
+function previewMimeFromFileName(fileName?: string) {
+  const normalized = String(fileName || "").trim().toLowerCase();
+  if (normalized.endsWith(".pdf")) return "application/pdf";
+  if (normalized.endsWith(".html") || normalized.endsWith(".htm")) return "text/html";
+  if (normalized.endsWith(".xml")) return "application/xml";
+  if (normalized.endsWith(".csv")) return "text/csv";
+  if (normalized.endsWith(".png")) return "image/png";
+  if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+  if (normalized.endsWith(".webp")) return "image/webp";
+  if (normalized.endsWith(".gif")) return "image/gif";
+  return "";
+}
+function resolvedPreviewMime(document: PilotDocument, debug?: OriginalDocumentPreviewDebug) {
+  const candidates = [debug?.responseContentType, debug?.blobContentType, document.originalDocumentMimeType]
+    .map((value) => normalizePreviewMime(value))
+    .filter(Boolean);
+  const supported = candidates.find((value) => previewMimeIsSupported(value));
+  if (supported) return supported;
+  return previewMimeFromFileName(document.fileName) || candidates[0] || "";
+}
 function previewRenderFailureReason(document: PilotDocument, debug?: OriginalDocumentPreviewDebug) {
   const storedMime = normalizePreviewMime(document.originalDocumentMimeType);
   const servedMime = normalizePreviewMime(debug?.responseContentType) || normalizePreviewMime(debug?.blobContentType);
@@ -578,9 +598,10 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
   }
   const pipelineProblem = latestPipelineProblem(document);
   const errorMessage = previewError || pipelineProblem?.messageTr || "Gerçek belge henüz önizlenemiyor.";
-  const canFramePreview = isFramePreviewMime(document.originalDocumentMimeType);
-  const pdfPreview = controlledPdfPreview && isPdfPreview(document);
-  const htmlPreview = isHtmlPreview(document);
+  const previewMime = resolvedPreviewMime(document, previewDebug);
+  const canFramePreview = isFramePreviewMime(previewMime);
+  const pdfPreview = controlledPdfPreview && (previewMime.includes("pdf") || isPdfPreview(document));
+  const htmlPreview = previewMime.includes("html") || isHtmlPreview(document);
   const renderFailureReason = previewRenderFailureReason(document, previewDebug);
   return (
     <section className="review-panel document-panel">
@@ -594,7 +615,7 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
       <div className="document-preview-layout">
         <div className="document-canvas">
           {previewUrl ? (
-            isImageMime(document.originalDocumentMimeType) ? (
+            isImageMime(previewMime) ? (
               <img alt={`${document.fileName} orijinal belge`} className="original-document-image" src={previewUrl} />
             ) : pdfPreview ? (
               <PdfDocumentViewer fileName={document.fileName} onClearSourceTarget={onClearSourceTarget} sourceTarget={sourceTarget} src={previewUrl} />

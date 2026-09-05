@@ -43,6 +43,52 @@ const statusLabels: Record<PilotStatus, string> = {
 };
 
 type WorkQueueFilter = "all" | "oneClickApproval" | "minorEdit" | "manualRisk" | "review";
+type WorkbenchSegmentOption = { id: DocumentSegment; label: string; count: number };
+type WorkbenchQueueOption = { id: WorkQueueFilter; label: string; count: number };
+
+function WorkbenchQueueFilters({
+  onSelectQueue,
+  onSelectSegment,
+  selectedDocumentSegment,
+  segmentOptions,
+  workQueueFilter,
+  workQueueOptions,
+}: {
+  onSelectQueue: (filter: WorkQueueFilter) => void;
+  onSelectSegment: (segment: DocumentSegment) => void;
+  selectedDocumentSegment: DocumentSegment;
+  segmentOptions: WorkbenchSegmentOption[];
+  workQueueFilter: WorkQueueFilter;
+  workQueueOptions: WorkbenchQueueOption[];
+}) {
+  return (
+    <div className="portal-next-workbench-filter-cluster">
+      <div className="portal-next-command-direction" role="tablist" aria-label="Fatura yönü">
+        {segmentOptions.map((option) => (
+          <button
+            aria-selected={selectedDocumentSegment === option.id}
+            className={selectedDocumentSegment === option.id ? "active" : ""}
+            key={option.id}
+            onClick={() => onSelectSegment(option.id)}
+            role="tab"
+            type="button"
+          >
+            <span>{option.label}</span>
+            <strong>{option.count}</strong>
+          </button>
+        ))}
+      </div>
+      <div className="review-cockpit-queues" aria-label="İş kuyruğu">
+        {workQueueOptions.map((option) => (
+          <button className={workQueueFilter === option.id ? "active" : ""} key={option.id} onClick={() => onSelectQueue(option.id)} type="button">
+            <span>{option.label}</span>
+            <strong>{option.count}</strong>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
@@ -232,9 +278,9 @@ export function AccountantWorkspace({
   const selectedRequest = selectedDocument
     ? cancellationRequests.find((request) => request.documentId === selectedDocument.id)
     : undefined;
-  const segmentOptions: { id: DocumentSegment; label: string }[] = [
-    { id: "purchase_invoices", label: "Alış" },
-    { id: "sales_invoices", label: "Satış" },
+  const segmentOptions: WorkbenchSegmentOption[] = [
+    { id: "purchase_invoices", label: "Alış", count: allClientDocuments.filter((document) => documentMatchesSegment(document, "purchase_invoices")).length },
+    { id: "sales_invoices", label: "Satış", count: allClientDocuments.filter((document) => documentMatchesSegment(document, "sales_invoices")).length },
   ];
   const filteredSegmentDocuments = useMemo(() => {
     const query = documentQuery.trim().toLocaleLowerCase("tr-TR");
@@ -267,7 +313,7 @@ export function AccountantWorkspace({
     ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
     : 0;
   const safeDocumentPosition = Math.max(selectedDocumentPosition, 1);
-  const workQueueOptions: { id: WorkQueueFilter; label: string; count: number }[] = nextPresentation
+  const workQueueOptions: WorkbenchQueueOption[] = nextPresentation
     ? [
         { id: "all", label: "Tümü", count: filteredSegmentDocuments.length },
         { id: "review", label: "Kontrol", count: reviewQueueDocuments.length },
@@ -279,6 +325,11 @@ export function AccountantWorkspace({
         { id: "manualRisk", label: "Manuel / riskli", count: cockpitQueues.manualRisk.length },
         { id: "all", label: "Tümü", count: filteredSegmentDocuments.length },
       ];
+
+  function applyDocumentSegment(nextSegment: DocumentSegment) {
+    setSelectedDocumentSegment(nextSegment);
+    setSelectedDocumentId("");
+  }
 
   function applyWorkQueueFilter(nextFilter: WorkQueueFilter) {
     setWorkQueueFilter(nextFilter);
@@ -383,14 +434,14 @@ export function AccountantWorkspace({
     <section className="accountant-workspace">
       {nextPresentation ? (
         <section className="portal-next-workbench-commandbar" aria-label="Çalışma kuyruğu ve görünüm araçları">
-          <div className="review-cockpit-queues" aria-label="İş kuyruğu">
-            {workQueueOptions.map((option) => (
-              <button className={workQueueFilter === option.id ? "active" : ""} key={option.id} onClick={() => applyWorkQueueFilter(option.id)} type="button">
-                <span>{option.label}</span>
-                <strong>{option.count}</strong>
-              </button>
-            ))}
-          </div>
+          <WorkbenchQueueFilters
+            onSelectQueue={applyWorkQueueFilter}
+            onSelectSegment={applyDocumentSegment}
+            selectedDocumentSegment={selectedDocumentSegment}
+            segmentOptions={segmentOptions}
+            workQueueFilter={workQueueFilter}
+            workQueueOptions={workQueueOptions}
+          />
           <div className="portal-next-workbench-actions">
             <button className={`queue-action${queueHidden ? " active" : ""}`} onClick={() => setQueueHidden((current) => !current)} type="button">
               <span aria-hidden="true">☰</span> {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}
@@ -415,9 +466,9 @@ export function AccountantWorkspace({
           <div className="document-review-toolbar-tabs">
             <div className="queue-segment-tabs" role="tablist" aria-label="Belge türleri">
               {segmentOptions.map((option) => (
-                <button aria-selected={selectedDocumentSegment === option.id} className={selectedDocumentSegment === option.id ? "active" : ""} key={option.id} onClick={() => { setSelectedDocumentSegment(option.id); setSelectedDocumentId(""); }} role="tab" type="button">
+                <button aria-selected={selectedDocumentSegment === option.id} className={selectedDocumentSegment === option.id ? "active" : ""} key={option.id} onClick={() => applyDocumentSegment(option.id)} role="tab" type="button">
                   <span>{option.label}</span>
-                  <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
+                  <strong>{option.count}</strong>
                 </button>
               ))}
             </div>
@@ -466,6 +517,14 @@ export function AccountantWorkspace({
                 <strong>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
               ) : null}
             </div>
+            <WorkbenchQueueFilters
+              onSelectQueue={applyWorkQueueFilter}
+              onSelectSegment={applyDocumentSegment}
+              selectedDocumentSegment={selectedDocumentSegment}
+              segmentOptions={segmentOptions}
+              workQueueFilter={workQueueFilter}
+              workQueueOptions={workQueueOptions}
+            />
             <div>
               <button className={`queue-action${queueHidden ? " active" : ""}`} onClick={() => setQueueHidden((current) => !current)} type="button"><span aria-hidden="true">☰</span> {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}</button>
               <button onClick={() => setJournalHidden((current) => !current)} type="button">{journalHidden ? "Fişi göster" : "Fişi gizle"}</button>
@@ -482,13 +541,6 @@ export function AccountantWorkspace({
             </div>
             <div className="portal-next-queue-tools">
               <input aria-label="Kuyrukta ara" onChange={(event) => setDocumentQuery(event.target.value)} placeholder="Ara..." value={documentQuery} />
-              <div className="portal-next-direction-tabs">
-                {segmentOptions.map((option) => (
-                  <button className={selectedDocumentSegment === option.id ? "active" : ""} key={option.id} onClick={() => { setSelectedDocumentSegment(option.id); setSelectedDocumentId(""); }} type="button">
-                    {option.label} <strong>{allClientDocuments.filter((document) => documentMatchesSegment(document, option.id)).length}</strong>
-                  </button>
-                ))}
-              </div>
             </div>
             <ol className="portal-next-queue-list">
               {queueDocuments.map((queueDocument) => {

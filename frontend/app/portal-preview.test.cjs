@@ -105,3 +105,16 @@ test("document preview errors distinguish access from binary transport failures"
   assert.match(reviewPanels, /Önizleme tanısı/);
   assert.doesNotMatch(reviewPanels, /Mock belge çizimi kapalı/);
 });
+
+
+test("document preview trusts the served MIME type when stored metadata is missing", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /function resolvedPreviewMime/);
+  assert.match(reviewPanels, /debug\?\.responseContentType/);
+  assert.match(reviewPanels, /debug\?\.blobContentType/);
+  assert.match(reviewPanels, /const previewMime = resolvedPreviewMime\(document, previewDebug\)/);
+  assert.match(reviewPanels, /isFramePreviewMime\(previewMime\)/);
+  assert.match(reviewPanels, /isImageMime\(previewMime\)/);
+  assert.match(reviewPanels, /previewMime\.includes\("pdf"\)/);
+});

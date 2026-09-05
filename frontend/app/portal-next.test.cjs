@@ -197,6 +197,9 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   const styles = source("portal-next", "portal-next.css");
 
   assert.match(workspace, /portal-next-workbench-commandbar/);
+  assert.match(workspace, /portal-next-workbench-filter-cluster/);
+  assert.match(workspace, /portal-next-command-direction/);
+  assert.doesNotMatch(workspace, /portal-next-direction-tabs/);
   assert.match(workspace, /portal-next-document-queue/);
   assert.match(workspace, /portal-next-workbench-stage/);
   assert.match(workspace, /Kuyruğu gizle/);
@@ -218,6 +221,8 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(styles, /focus-mode \.portal-next-document-queue\s*\{[\s\S]*?display:\s*grid/);
   assert.match(styles, /focus-mode\.queue-hidden \.portal-next-document-queue\s*\{\s*display:\s*none/);
   assert.match(styles, /\.portal-next-workbench-stage\.next\.focus-mode/);
+  assert.match(styles, /\.portal-next-command-direction button\.active/);
+  assert.match(styles, /\.portal-next-focus-toolbar \.portal-next-workbench-filter-cluster/);
   assert.match(styles, /focus-mode\.journal-hidden/);
   assert.match(styles, /portal-next-mobile-review-switch/);
 });

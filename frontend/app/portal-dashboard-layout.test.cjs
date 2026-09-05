@@ -90,8 +90,8 @@ test("invoice review first viewport removes duplicate context and keeps invoice 
   assert.match(shell, /label: "Faturalar"/);
   assert.doesNotMatch(shell, /label: "Belgeler"/);
   assert.match(workflow, /useState<DocumentSegment>\("purchase_invoices"\)/);
-  assert.match(workspace, /\{ id: "purchase_invoices", label: "Alış" \}/);
-  assert.match(workspace, /\{ id: "sales_invoices", label: "Satış" \}/);
+  assert.match(workspace, /\{ id: "purchase_invoices", label: "Alış", count:/);
+  assert.match(workspace, /\{ id: "sales_invoices", label: "Satış", count:/);
   assert.doesNotMatch(workspace, /\{ id: "invoices", label: "Faturalar" \}/);
   assert.doesNotMatch(workspace, /\{ id: "bank_statements", label: "Ekstreler" \}/);
   assert.doesNotMatch(workspace, /\{ id: "other_documents", label: "Diğer" \}/);

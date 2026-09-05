@@ -140,6 +140,8 @@ class ThreeStageStageContractTests(unittest.TestCase):
         self.assertIn("Independently determine the current-invoice posting basis", ACCOUNTANT_INSTRUCTIONS)
         self.assertIn("discount_or_reduction rows normally reduce the related purchase or expense amount", ACCOUNTANT_INSTRUCTIONS)
         self.assertIn("Do not use sales contra-revenue accounts such as 610, 611 or 612", ACCOUNTANT_INSTRUCTIONS)
+        self.assertIn("Copy every account_code character-for-character from chart_accounts", ACCOUNTANT_INSTRUCTIONS)
+        self.assertIn("never add or remove zeros", ACCOUNTANT_INSTRUCTIONS)
 
 
 if __name__ == "__main__":

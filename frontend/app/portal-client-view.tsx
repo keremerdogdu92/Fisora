@@ -96,7 +96,7 @@ export function ClientPortal({
   const selectedIntake = buildUploadIntakeMetadata(selectedIntakeCategory);
   const uploadedCount = activeDocuments.length;
   const processingCount = activeDocuments.filter((document) => isInProgress(document.status)).length;
-  const handledCount = activeDocuments.filter((document) => document.status === "review_required" || document.status === "export_ready" || document.status === "export_added" || document.status === "exported").length;
+  const handledCount = activeDocuments.filter((document) => document.status === "no_posting_required" || document.status === "review_required" || document.status === "export_ready" || document.status === "export_added" || document.status === "exported").length;
   const cancelCount = activeDocuments.filter((document) => isCancelStatus(document.status)).length;
   const cancellationView = buildClientCancellationViewModel({
     documents: activeDocuments,

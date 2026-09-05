@@ -8,6 +8,7 @@ import unittest
 
 from app.workflows.three_stage_accounting_pipeline import (
     _compose_journal,
+    _is_explicit_zero_money,
     _money,
     run_three_stage_accounting_pipeline,
     three_stage_accounting_enabled,
@@ -154,6 +155,15 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
     def test_money_parser_supports_turkish_and_us_grouping(self) -> None:
         self.assertEqual(str(_money("1.641,20 TRY")), "1641.20")
         self.assertEqual(str(_money("1,641.20 TRY")), "1641.20")
+
+    def test_explicit_zero_money_rejects_missing_or_non_numeric_values(self) -> None:
+        self.assertTrue(_is_explicit_zero_money("0,00 TL"))
+        self.assertTrue(_is_explicit_zero_money("0.00"))
+        self.assertTrue(_is_explicit_zero_money("+000,00 TRY"))
+        self.assertFalse(_is_explicit_zero_money(""))
+        self.assertFalse(_is_explicit_zero_money("—"))
+        self.assertFalse(_is_explicit_zero_money("N/A"))
+        self.assertFalse(_is_explicit_zero_money("0,0,0"))
 
     def test_feature_flag_is_independent(self) -> None:
         self.assertTrue(three_stage_accounting_enabled({"FISORA_THREE_STAGE_ACCOUNTING_ENABLED": "true"}))
@@ -411,6 +421,23 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(missing_run.result["draft_status"], "review_required")
         self.assertEqual(missing_run.result["export_status"], "review_required")
         self.assertNotEqual(missing_run.result["status"], "no_posting_required")
+
+        non_numeric_reader = dict(reader_payload)
+        non_numeric_reader["printed_summary_lines"] = [{"label": "ÖDENECEK TOPLAM", "value": "N/A"}]
+        non_numeric_final = dict(zero_final)
+        non_numeric_final["posting_basis_amount"] = "—"
+        non_numeric_run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(non_numeric_reader, PLANNER),
+            final_provider=FakeFinalProvider(non_numeric_final),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="ghi",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+        self.assertEqual(non_numeric_run.result["draft_status"], "review_required")
+        self.assertEqual(non_numeric_run.result["export_status"], "review_required")
+        self.assertNotEqual(non_numeric_run.result["status"], "no_posting_required")
 
 
     def test_unbalanced_final_gets_one_ai_self_repair_and_uses_balanced_result(self) -> None:

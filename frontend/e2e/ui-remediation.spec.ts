@@ -1,3 +1,5 @@
+// File: frontend/e2e/ui-remediation.spec.ts
+// Summary: Verifies responsive accountant portal remediation, client list/detail onboarding flows, dialogs, research navigation, and delegated client access.
 import { expect, test, type Page } from "@playwright/test";
 
 const readyForRealDataPayload = {
@@ -117,7 +119,7 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/portal/belgeler");
-  await expect(page.getByLabel("Mükellef")).toHaveValue("pilot-client");
+  await expect(page.locator(".document-review-toolbar")).toBeVisible();
   const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(desktopOverflow).toBeLessThanOrEqual(0);
 
@@ -126,6 +128,7 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(mobileOverflow).toBeLessThanOrEqual(0);
 });
+
 
 test("workspace backend failure does not stay as loading copy", async ({ page }) => {
   await setupAccountantSession(page);
@@ -170,28 +173,29 @@ test("mobile portal starts with content visible and opens menu as drawer", async
   await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
 });
 
-test("client management shows onboarding steps and readable blocked actions", async ({ page }) => {
+test("client management uses list/detail navigation and clear onboarding sections", async ({ page }) => {
   await setupPilotRoutes(page);
   await page.goto("/portal/mukellefler");
-  const tabs = page.locator(".client-management-tabs button");
-  await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-  await expect(page.locator(".client-existing-operations")).toBeVisible();
-  await tabs.nth(0).click();
-  await expect(page.locator(".tax-certificate-preview")).toBeVisible();
-  await expect(page.getByLabel("Vergi levhası alanları")).toBeVisible();
 
+  await expect(page.getByLabel(/M.kellef listesi/)).toBeVisible();
+  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
+
+  await page.getByRole("button", { name: /Yeni m.kellef/ }).first().click();
+  await expect(page.locator(".tax-certificate-preview")).toBeVisible();
   await expect(page.locator(".client-onboarding-steps")).toBeVisible();
   await expect(page.locator(".client-step")).toHaveCount(3);
-  await expect(page.locator(".client-step").nth(0)).toContainText(/Vergi levhas/i);
-  await expect(page.locator(".client-step").nth(1)).toContainText(/Hesap plan/i);
-  await expect(page.locator(".client-step").nth(2)).toContainText(/Portal eri/i);
+  await expect(page.locator(".client-step").nth(0)).toContainText(/Vergi levhas/);
+  await expect(page.locator(".client-step").nth(1)).toContainText(/Hesap plan/);
+  await expect(page.locator(".client-step").nth(2)).toContainText(/Portal eri/);
   await expect(page.locator(".file-drop-control").first()).toBeVisible();
-  await tabs.nth(1).click();
-  await expect(page.locator(".client-existing-operations")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Seçili belgeleri sil|SeÃ§ili belgeleri sil/i })).toBeDisabled();
-  await expect(page.locator(".client-row").first().locator("strong")).toHaveText("Pilot Test AS");
-  await expect(page.locator(".client-row").first().locator("span")).toContainText(/Kontrol|Bekliyor/i);
-  await expect(page.locator(".blocked-reason").first()).toContainText(/nce|Önce|Ã–nce/i);
+
+  await page.getByRole("button", { name: /M.kellef listesi/ }).click();
+  await expect(page.getByLabel(/M.kellef listesi/)).toBeVisible();
+  await page.getByRole("button", { name: /G.r.nt.le/ }).click();
+  await expect(page.locator(".client-v13-detail")).toBeVisible();
+  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
+  await expect(page.locator(".client-v13-chart-replace")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Se.ili belgeleri sil/i })).toHaveCount(0);
 });
 
 test("Bilgi Havuzu uses Turkish fallback copy for English-only profiles", async ({ page }) => {
@@ -245,10 +249,10 @@ test("accountant opens selected client portal in a delegated tab without return 
   });
 
   await page.goto("/portal/mukellefler");
-  await page.locator(".client-management-tabs button").nth(1).click();
+  await page.getByRole("button", { name: /G.r.nt.le/ }).click();
 
   const popupPromise = page.waitForEvent("popup");
-  await page.getByRole("button", { name: /Mükellef ekranına git|MÃ¼kellef ekranÄ±na git|MÃƒÂ¼kellef ekran/i }).click();
+  await page.getByRole("button", { name: /M.kellef portal.n. a./ }).click();
   const popup = await popupPromise;
   await popup.waitForLoadState("domcontentloaded");
 

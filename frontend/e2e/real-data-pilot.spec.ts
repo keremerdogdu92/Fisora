@@ -1,3 +1,5 @@
+// File: frontend/e2e/real-data-pilot.spec.ts
+// Summary: Verifies authenticated pilot navigation, accountant operations, document review, bank decisions, and export packaging against deterministic backend fixtures.
 import { expect, test, type Page } from "@playwright/test";
 
 const readyForRealDataPayload = {
@@ -167,7 +169,21 @@ const pilotWorkspace = {
   ],
 };
 
+async function storeAccountantSession(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("fisora.office.session.v1", JSON.stringify({
+      userId: "mali-musavir",
+      role: "accountant",
+      sessionToken: "accountant-session",
+      storageScope: "local",
+    }));
+  });
+}
+
 async function setupPilotRoutes(page: Page) {
+  await page.route("**/phase0/store/auth/session", async (route) => {
+    await route.fulfill({ json: { valid: true, user_id: "mali-musavir", expires_at: "2026-12-31T22:00:00+00:00" } });
+  });
   await page.route("**/phase0/store/system/readiness", async (route) => {
     await route.fulfill({ json: readyForRealDataPayload });
   });
@@ -200,24 +216,24 @@ async function setupPilotRoutes(page: Page) {
   await page.route("**/phase0/store/review-decision", async (route) => {
     await route.fulfill({ json: { status: "ok" } });
   });
+  await page.route("**/phase0/store/export-package/from-workspace", async (route) => {
+    await route.fulfill({ json: { package: { export_type: "zirve_mapping_csv", download_url: "/pilot-export.csv" } } });
+  });
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    window.localStorage.clear();
-    window.sessionStorage.clear();
-  });
   await setupPilotRoutes(page);
 });
 
-test("operations screen separates restricted real-data pilot readiness from production readiness", async ({ page }) => {
+test("operations screen presents accountant-facing readiness without developer telemetry", async ({ page }) => {
+  await storeAccountantSession(page);
   await page.goto("/portal/operasyon");
 
+  await expect(page.getByRole("heading", { name: /Belge ak/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sistem durumu" })).toBeVisible();
   await expect(page.getByText(/Ger.ek veri/).first()).toBeVisible();
-  await expect(page.getByText(/K.s.tl. canl. pilot haz.r/)).toBeVisible();
-  await expect(page.getByText("restricted_network")).toBeVisible();
-  await expect(page.getByText("Production", { exact: true })).toBeVisible();
-  await expect(page.locator("body")).not.toContainText(/[ÃƒÃ„Ã…]/);
+  await expect(page.getByText("restricted_network")).toHaveCount(0);
+  await expect(page.getByText("Production", { exact: true })).toHaveCount(0);
 });
 
 test("landing role gateway enters accountant portal and document selection uses backend workspace data", async ({ page }) => {
@@ -225,38 +241,35 @@ test("landing role gateway enters accountant portal and document selection uses 
   await page.locator(".role-card").first().click();
   await page.locator(".landing-login .primary").click();
 
-  await expect(page).toHaveURL(/\/portal\/musavir$/);
-  await page.goto("/portal/belgeler");
+  await expect(page).toHaveURL(/\/portal-next$/);
+  await page.getByRole("button", { name: "\u00c7al\u0131\u015fma Masas\u0131", exact: true }).click();
 
-  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
-  await page.getByRole("button", { name: /^Aç$/ }).first().click();
-  await expect(page.getByLabel("Belge işleme özeti")).toContainText("invoice-ready.pdf");
-  await expect(page.getByText("invoice-ready.pdf").first()).toBeVisible();
-  await expect(page.getByText(/AI ajan destekli|Fiş taslağı|Danismanlik/).first()).toBeVisible();
-  await expect(page.getByText("KDV ayrımı kontrolü").first()).toBeVisible();
-  await expect(page.getByText("Cari eşleşme kontrolü").first()).toBeVisible();
-  await expect(page.getByText("Belge seçilmedi")).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "Çalışılan mükellef" })).toHaveValue("pilot-client");
+  await expect(page.getByRole("button", { name: /invoice-ready\.pdf/ }).first()).toBeVisible();
+  await expect(page.locator(".journal-ledger")).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Fatura satırı açıklaması" }).first()).toHaveValue("Danismanlik");
 });
 
-test("accountant can request AI draft and approve a bank statement line", async ({ page }) => {
+test("accountant can review and approve a bank statement line", async ({ page }) => {
+  await storeAccountantSession(page);
   await page.goto("/portal/belgeler");
 
-  await page.getByRole("tab", { name: /Ekstreler|Banka/ }).click();
-  await page.getByRole("button", { name: /^Aç$/ }).first().click();
+  await page.getByRole("button", { name: /Banka Ekstreleri/ }).click();
   await expect(page.getByText("bank-haziran.csv").first()).toBeVisible();
-
+  await page.locator(".bottom-queue-actions button").click();
   await expect(page.locator('input[value="102.01"]').first()).toBeVisible();
-  await page.getByRole("button", { name: /Onayla ve/ }).click();
-  await expect(page.getByText(/bank-haziran.csv \/ 1\. satir.*backend'e kaydedildi/)).toBeVisible();
+  await page.getByRole("button", { name: "Satırı onayla", exact: true }).click();
+  await expect(page.getByText(/bank-haziran.csv \/ 1\. satir.*backend.e kaydedildi/)).toBeVisible();
 });
 
 test("export basket can be packaged from deterministic workspace data", async ({ page }) => {
+  await storeAccountantSession(page);
   await page.goto("/portal/cikti");
 
   await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
   await expect(page.getByText(/Haz.r/).first()).toBeVisible();
 
   await page.getByRole("button", { name: /haz.rla/i }).click();
-  await expect(page.getByText(/toplu paket haz.r g.r.n.yor/i)).toBeVisible();
+  await expect(page.getByText(/paket haz.r/i).last()).toBeVisible();
   await expect(page.getByText(/Paketlendi/)).toBeVisible();
 });

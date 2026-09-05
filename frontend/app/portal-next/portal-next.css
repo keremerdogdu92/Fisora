@@ -2158,6 +2158,18 @@
   padding: 4px 7px;
 }
 .portal-next-theme .next-balance-pill.balanced { background: #ecfdf3; border-color: #75d39d; color: #08723f; }
+.portal-next-theme .next-balance-pill.no-posting { background: #f2f6f5; border-color: #c9d8d4; color: #3d6258; }
+.portal-next-theme .journal-status-strip.no-posting { background: #f8fbfa; border-color: #d8e4e0; }
+.portal-next-theme .journal-no-posting {
+  background: #f8fbfa;
+  border: 1px solid #d8e4e0;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+.portal-next-theme .journal-no-posting strong { color: #315a4f; font-size: 0.84rem; }
+.portal-next-theme .journal-no-posting span { color: #61716c; font-size: 0.7rem; line-height: 1.45; }
 .portal-next-theme .journal-scroll-area { gap: 5px; padding: 0 7px 6px; }
 .portal-next-theme .journal-status-strip { gap: 5px; padding: 5px 7px; }
 .portal-next-theme .journal-status-primary strong { font-size: 0.86rem; }
@@ -2243,6 +2255,10 @@
 }
 .portal-next-theme .journal-next-actions button.danger { background: #fff; border-color: #e4c7c7; color: #8b3b35; }
 .portal-next-theme .journal-next-actions button:disabled { opacity: 0.5; }
+.portal-next-theme .journal-next-actions.no-posting-actions { grid-template-columns: 1fr; }
+.portal-next-theme .journal-no-posting-action { align-items: baseline; display: flex; gap: 8px; min-height: 32px; padding: 4px 6px; }
+.portal-next-theme .journal-no-posting-action strong { color: #315a4f; font-size: 0.76rem; }
+.portal-next-theme .journal-no-posting-action span { color: #66756f; font-size: 0.68rem; }
 .portal-next-theme .next-review .journal-decision-bar { display: none; }
 .portal-next-theme .next-review .journal-correction-panel { margin-top: 0; }
 .portal-next-theme .next-review .journal-reason-disclosure { margin-top: 0; }

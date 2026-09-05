@@ -188,7 +188,7 @@ ACCOUNTANT_INSTRUCTIONS = (
     "Do not select or invent any customer/supplier/counterparty account code. Counterparty identity/account ownership belongs exclusively to semantic_plan. Do not emit a warning merely because semantic_plan intentionally reports no exact current account; the product will handle new-counterparty review separately. "
     "Put the balancing receivable/payable amount and direction only in counterparty_posting, which intentionally has no account_code. "
     "operating_journal_lines may contain only business, asset/inventory, expense/revenue, VAT and other tax/fee postings; never use them as a substitute counterparty receivable/payable. "
-    "Independently select exact operating/tax accounts from chart_accounts. Use semantic_plan tax_components only as tax-type hints while source text remains amount authority. When a tax hint is non_vat_tax and a suitable distinct tax/levy account exists, do not bury that levy inside an operating expense. Use only real chart codes and treat each chart account name as authoritative semantic evidence. A code is not suitable merely because it exists or has a vaguely related numeric family; do not choose an account whose name implies a different event or counterparty type, such as a bank-interest/commission account for a non-bank supplier charge. If no suitable business or tax account exists, leave account_code empty instead of choosing a merely similar account. vat_input should use suitable 191 when available; vat_output suitable 391; non_vat_tax must not be treated as VAT. "
+    "Independently select exact operating/tax accounts from chart_accounts. Use semantic_plan tax_components only as tax-type hints while source text remains amount authority. When a tax hint is non_vat_tax and a suitable distinct tax/levy account exists, do not bury that levy inside an operating expense. Use only real chart codes and treat each chart account name as authoritative semantic evidence. Copy every account_code character-for-character from chart_accounts; never add or remove zeros, punctuation, segments or padding, and never normalize, abbreviate or synthesize a chart code. A code is not suitable merely because it exists or has a vaguely related numeric family; do not choose an account whose name implies a different event or counterparty type, such as a bank-interest/commission account for a non-bank supplier charge. If no suitable business or tax account exists, leave account_code empty instead of choosing a merely similar account. vat_input should use suitable 191 when available; vat_output suitable 391; non_vat_tax must not be treated as VAT. "
     "Raw rows may contain gross values, discounts and net values for the same economic event. row_decisions must cover every visible SATIR, but journal lines do not need one posting per raw row. "
     "For purchase invoices, discount_or_reduction rows normally reduce the related purchase or expense amount. Do not use sales contra-revenue accounts such as 610, 611 or 612 merely to represent a supplier invoice discount. Create a separate discount posting only when the source shows a distinct accounting event and the chosen chart account has purchase-side semantics. "
     "Return exactly one row_decision for every visible SATIR, even when multiple rows aggregate into one journal line or a row is discount/informational. row_decisions are audit coverage, not a requirement for separate postings. Copy only the source position marker such as 1 or SATIR 1; do not append the row description to source_position. Use canonical decimal strings. Current-invoice posting basis must exclude prior/next settlement balances when the source distinguishes them."
@@ -214,6 +214,14 @@ def _money(value: object) -> Decimal:
 
 def _money_text(value: object) -> str:
     return f"{_money(value):.2f}"
+
+
+def _is_explicit_zero_money(value: object) -> bool:
+    text = str(value or "").strip().upper()
+    if not text:
+        return False
+    compact = text.replace("TRY", "").replace("TL", "").replace("₺", "").replace(" ", "")
+    return bool(re.fullmatch(r"[+-]?0+(?:[.,]0+)?", compact))
 
 
 def _workspace_accounts(workspace: Mapping[str, object]) -> list[dict[str, object]]:
@@ -579,8 +587,8 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         and payable_raw
         and debit == Decimal("0.00")
         and credit == Decimal("0.00")
-        and _money(posting_basis_raw) == Decimal("0.00")
-        and _money(payable_raw) == Decimal("0.00")
+        and _is_explicit_zero_money(posting_basis_raw)
+        and _is_explicit_zero_money(payable_raw)
         and str(line_decision_coverage.get("status") or "") == "valid"
         and not _invalid_account_warnings(reason_codes)
     )

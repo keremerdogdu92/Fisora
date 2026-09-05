@@ -222,6 +222,24 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(styles, /portal-next-mobile-review-switch/);
 });
 
+test("no-posting invoices stay informational and never expose journal approval actions", () => {
+  const review = source("portal-review-panels.tsx");
+  const workspace = source("portal-workspace-view.tsx");
+  const clientView = source("portal-client-view.tsx");
+  const styles = source("portal-next", "portal-next.css");
+
+  assert.match(review, /const noPosting = document\.status === "no_posting_required" \|\| document\.draftStatus === "no_posting_required"/);
+  assert.match(review, /journal-no-posting/);
+  assert.match(review, /Sıfır tutarlı belge ve kaynak satırları saklandı; muhasebe fişi oluşturulmadı/);
+  assert.match(review, /!noPosting && !nextKeyboardShortcuts/);
+  assert.match(review, /noPosting \? \([\s\S]*?journal-next-actions no-posting-actions/);
+  assert.match(workspace, /document\.status === "no_posting_required" \|\| document\.draftStatus === "no_posting_required"/);
+  assert.match(workspace, /Fiş gerekmiyor/);
+  assert.match(clientView, /document\.status === "no_posting_required" \|\| document\.status === "review_required"/);
+  assert.match(styles, /\.journal-no-posting/);
+  assert.match(styles, /\.journal-next-actions\.no-posting-actions/);
+});
+
 test("journal source links locate and highlight the matching PDF or sandboxed HTML evidence", () => {
   const workspace = source("portal-workspace-view.tsx");
   const review = source("portal-review-panels.tsx");

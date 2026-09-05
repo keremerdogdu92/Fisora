@@ -81,6 +81,7 @@ function formatDraftStatus(status: string) {
     manual_draft_required: "Manuel fiş gerekli",
     manual_draft_unbalanced: "Fiş dengesi kontrol edilmeli",
     processing: "İşleniyor",
+    no_posting_required: "Fiş gerekmiyor",
     review_required: "Müşavir onayı bekliyor",
     provider_failed: "AI taslak alınamadı",
     ai_retry_required: "AI yeniden denenecek",
@@ -735,17 +736,18 @@ export function JournalPanel({
   }
   const activeDocument = document;
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
+  const noPosting = document.status === "no_posting_required" || document.draftStatus === "no_posting_required";
   const sourceReviewMode = !isStatement && Boolean(document.sourceReviewRows?.length);
   const accountingDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
   const sourceReviewDraftLines = sourceReviewDraftLinesForDocument(document);
   const generatedDraftLines = sourceReviewMode ? sourceReviewDraftLines : accountingDraftLines;
-  const activeDraftLines = correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines;
+  const activeDraftLines = noPosting ? [] : (correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines);
   const totals = draftTotals(activeDraftLines);
-  const needsManualDraft = !sourceReviewMode && (!generatedDraftLines.length || document.draftStatus === "manual_draft_required");
+  const needsManualDraft = !noPosting && !sourceReviewMode && (!generatedDraftLines.length || document.draftStatus === "manual_draft_required");
   const invalidAccountCodes = invalidDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const newCounterpartyAccountCodes = newCounterpartyDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const hasInvalidDraftAccounts = invalidAccountCodes.length > 0;
-  const sourceReviewNeedsAccounting = sourceReviewMode && (
+  const sourceReviewNeedsAccounting = !noPosting && sourceReviewMode && (
     !activeDraftLines.length ||
     activeDraftLines.some((line) => !normalizeAccountCodeInput(line.account_code)) ||
     activeDraftLines.every((line) => parseAmount(line.debit) === 0 && parseAmount(line.credit) === 0) ||
@@ -757,7 +759,7 @@ export function JournalPanel({
   const processingIncomplete = ["queued", "processing"].includes(document.status)
     || document.draftStatus === "processing"
     || Boolean(document.processingStages && !htmlSourceReady && document.processingStages.final.status !== "completed");
-  const blocksApproval = processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
+  const blocksApproval = noPosting || processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
   const pendingDirectionConflict = hasPendingDirectionConflict(document);
@@ -849,21 +851,27 @@ export function JournalPanel({
             <span>{nextKeyboardShortcuts ? (document.issueDate || document.period || "") : `${document.clientName} için belge, fiş ve kontrol kararları`}</span>
           </div>
           {nextKeyboardShortcuts ? (
-            <span className={`next-balance-pill ${totals.balanced && activeDraftLines.length ? "balanced" : "warning"}`}>
-              {activeDraftLines.length ? (totals.balanced ? "✓ Dengeli" : "Denge kontrolü") : "Taslak yok"}
+            <span className={`next-balance-pill ${noPosting ? "no-posting" : totals.balanced && activeDraftLines.length ? "balanced" : "warning"}`}>
+              {noPosting ? "Fiş gerekmiyor" : activeDraftLines.length ? (totals.balanced ? "✓ Dengeli" : "Denge kontrolü") : "Taslak yok"}
             </span>
           ) : null}
         </div>
-        <section className={`journal-status-strip ${totals.balanced ? "" : "unbalanced"}`} aria-label="Fiş durumu">
+        <section className={`journal-status-strip ${noPosting ? "no-posting" : totals.balanced ? "" : "unbalanced"}`} aria-label="Fiş durumu">
           <div className="journal-status-primary">
             <span>Fiş durumu</span>
-            <strong>{sourceReviewMode ? "Kaynak satırlar hazır" : formatDraftStatus(document.draftStatus)}</strong>
+            <strong>{noPosting ? "Fiş gerekmiyor" : sourceReviewMode ? "Kaynak satırlar hazır" : formatDraftStatus(document.draftStatus)}</strong>
             <small>{directionSummary}</small>
           </div>
           <div className="journal-status-metrics" aria-label="Fiş toplamları">
-            <span><strong>Borç</strong> {totals.debit.toFixed(2)}</span>
-            <span><strong>Alacak</strong> {totals.credit.toFixed(2)}</span>
-            {!nextKeyboardShortcuts ? <span><strong>Denge</strong> {activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"}</span> : null}
+            {noPosting ? (
+              <span><strong>Fiş</strong> oluşturulmadı</span>
+            ) : (
+              <>
+                <span><strong>Borç</strong> {totals.debit.toFixed(2)}</span>
+                <span><strong>Alacak</strong> {totals.credit.toFixed(2)}</span>
+                {!nextKeyboardShortcuts ? <span><strong>Denge</strong> {activeDraftLines.length ? (totals.balanced ? "Dengeli" : "Dengesiz") : "Taslak yok"}</span> : null}
+              </>
+            )}
           </div>
         </section>
         {hasUnsavedReviewChanges ? (
@@ -875,7 +883,7 @@ export function JournalPanel({
             <button onClick={onResetDraft} type="button">İlk taslağa dön</button>
           </section>
         ) : null}
-        {session?.role === "accountant" ? (
+        {session?.role === "accountant" && !noPosting ? (
           nextKeyboardShortcuts ? (
             <details className="journal-advanced-details">
               <summary>Pilot kalite doğrulama</summary>
@@ -885,23 +893,30 @@ export function JournalPanel({
             <AccountantValidationPanel correctionDraft={correctionDraft} setCorrectionDraft={setCorrectionDraft} />
           )
         ) : null}
-        <ManualDraftEditor
-          activeDraftLines={activeDraftLines}
-          chartAccounts={document.chartAccounts}
-          generatedDraftLines={generatedDraftLines}
-          invalidAccountCodes={invalidAccountCodes}
-          newCounterpartyAccountCodes={newCounterpartyAccountCodes}
-          needsManualDraft={needsManualDraft}
-          sourceReviewMode={sourceReviewMode}
-          sourceReviewTotalCount={document.sourceReviewRows?.length ?? 0}
-          onAddLine={addManualDraftLine}
-          onFocusSource={onFocusSource}
-          onHoverSource={onHoverSource}
-          onRemoveLine={removeManualDraftLine}
-          onUpdateLine={setManualDraftLine}
-          sourceTarget={sourceTarget}
-        />
-        {!nextKeyboardShortcuts && !pendingDirectionConflict ? (
+        {noPosting ? (
+          <section className="journal-no-posting" aria-label="Fiş gerekmiyor">
+            <strong>Fiş gerekmiyor</strong>
+            <span>Sıfır tutarlı belge ve kaynak satırları saklandı; muhasebe fişi oluşturulmadı.</span>
+          </section>
+        ) : (
+          <ManualDraftEditor
+            activeDraftLines={activeDraftLines}
+            chartAccounts={document.chartAccounts}
+            generatedDraftLines={generatedDraftLines}
+            invalidAccountCodes={invalidAccountCodes}
+            newCounterpartyAccountCodes={newCounterpartyAccountCodes}
+            needsManualDraft={needsManualDraft}
+            sourceReviewMode={sourceReviewMode}
+            sourceReviewTotalCount={document.sourceReviewRows?.length ?? 0}
+            onAddLine={addManualDraftLine}
+            onFocusSource={onFocusSource}
+            onHoverSource={onHoverSource}
+            onRemoveLine={removeManualDraftLine}
+            onUpdateLine={setManualDraftLine}
+            sourceTarget={sourceTarget}
+          />
+        )}
+        {!noPosting && !nextKeyboardShortcuts && !pendingDirectionConflict ? (
           <section className="journal-primary-approve" aria-label="Ana fiş kararı">
             <button disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve geç</button>
           </section>
@@ -918,7 +933,7 @@ export function JournalPanel({
             statementAiStatus={statementAiStatus}
           />
         ) : null}
-        <details className={nextKeyboardShortcuts ? "journal-advanced-details journal-learning-details" : "journal-learning-details"} open={!nextKeyboardShortcuts}>
+        {!noPosting ? <details className={nextKeyboardShortcuts ? "journal-advanced-details journal-learning-details" : "journal-learning-details"} open={!nextKeyboardShortcuts}>
           <summary hidden={!nextKeyboardShortcuts}>Karar notu ve öğrenme</summary>
           <section className="journal-correction-panel" aria-label="Karar notu">
           <div className="statement-review-heading">
@@ -979,21 +994,30 @@ export function JournalPanel({
             </section>
           ) : null}
           </section>
-        </details>
+        </details> : null}
         <JournalReasonDisclosure document={document} />
       </div>
       {nextKeyboardShortcuts ? (
-        <section className="journal-next-actions" aria-label="Belge kararı">
-          {pendingDirectionConflict ? (
-            <button className="primary" onClick={() => onSaveDecision("accept_detected_direction")} type="button">Yönü çöz</button>
-          ) : (
-            <>
-              <button className="secondary" disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
-              <button className="secondary danger" onClick={() => onSaveDecision("exclude_export")} type="button">Hariç tut</button>
-              <button className="primary" disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve sonraki →</button>
-            </>
-          )}
-        </section>
+        noPosting ? (
+          <section className="journal-next-actions no-posting-actions" aria-label="Belge kararı">
+            <div className="journal-no-posting-action">
+              <strong>Fiş gerekmiyor</strong>
+              <span>Belge kaynak kaydı olarak saklandı.</span>
+            </div>
+          </section>
+        ) : (
+          <section className="journal-next-actions" aria-label="Belge kararı">
+            {pendingDirectionConflict ? (
+              <button className="primary" onClick={() => onSaveDecision("accept_detected_direction")} type="button">Yönü çöz</button>
+            ) : (
+              <>
+                <button className="secondary" disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
+                <button className="secondary danger" onClick={() => onSaveDecision("exclude_export")} type="button">Hariç tut</button>
+                <button className="primary" disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve sonraki →</button>
+              </>
+            )}
+          </section>
+        )
       ) : (
         <JournalDecisionBar
           decisionStatus={decisionStatus}

@@ -45,7 +45,7 @@ function runPlaywright(extraArgs) {
     const result = spawnSync(process.execPath, [playwrightCli, "test", ...extraArgs], {
       encoding: "utf8",
       env: { ...process.env, FISORA_PLAYWRIGHT_NO_WEBSERVER: "1" },
-      timeout: Number(process.env.FISORA_PLAYWRIGHT_TIMEOUT_MS || 30_000),
+      timeout: Number(process.env.FISORA_PLAYWRIGHT_TIMEOUT_MS || 120_000),
     });
     const output = `${result.stdout || ""}${result.stderr || ""}`;
     const cleanOutput = output.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");

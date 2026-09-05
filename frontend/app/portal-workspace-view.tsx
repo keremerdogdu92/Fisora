@@ -602,7 +602,9 @@ export function AccountantWorkspace({
                 </div>
                 <div className="bottom-queue-actions">
                   {isActive ? (
-                    !documentProcessingComplete(document) ? (
+                    document.status === "no_posting_required" || document.draftStatus === "no_posting_required" ? (
+                      <button disabled type="button">Fiş gerekmiyor</button>
+                    ) : !documentProcessingComplete(document) ? (
                       <button disabled type="button">Final bekleniyor</button>
                     ) : document.directionConflict?.status === "needs_review" ? (
                       <button disabled type="button">Önce yönü yanıtla</button>

@@ -2,7 +2,7 @@
 
 ### 2026-09-05 canonical production deployment contract
 
-- Routine production deploy has exactly one authorized path: GitHub Actions **Deploy Production** -> AWS OIDC -> restricted `FisoraProductionDeploy` SSM document -> exact `GITHUB_SHA`.
+- Routine production deploy has exactly one authorized path: an explicit `[deploy]` main-branch commit (or authorized manual retry) -> GitHub Actions **Deploy Production** -> latest-main SHA gate -> AWS OIDC -> restricted `FisoraProductionDeploy` SSM document -> exact `GITHUB_SHA`. This lets an authorized coding agent deploy after its validation pass without a local AWS session or a browser workflow click, while stale queued pushes are skipped before AWS credentials are requested.
 - The SSM document source of truth is tracked at `deploy/aws/fisora-production-deploy-document.json`; infrastructure changes are synchronized with `deploy/scripts/sync-production-deploy-document.ps1` under an authorized AWS operator session.
 - Direct production `git checkout`, `git reset`, ad-hoc `docker compose up --build`, and general `AWS-RunShellScript` release flows are not routine deployment paths.
 - `deploy/scripts/fisora-release.ps1` is incident-only and refuses execution unless `-EmergencyOverride` is explicitly supplied.

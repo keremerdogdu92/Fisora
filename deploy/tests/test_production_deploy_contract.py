@@ -46,6 +46,13 @@ class ProductionDeployContractTests(unittest.TestCase):
 
     def test_workflow_only_invokes_the_restricted_document_with_exact_sha(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("push:", workflow)
+        self.assertIn("- main", workflow)
+        self.assertIn("startsWith(github.event.head_commit.message, '[deploy]')", workflow)
+        self.assertIn("Verify target is latest main", workflow)
+        self.assertIn("git/ref/heads/main", workflow)
+        self.assertIn("Skipping stale production deploy because a newer main commit exists.", workflow)
         self.assertIn("SSM_DOCUMENT: FisoraProductionDeploy", workflow)
         self.assertIn('--parameters "TargetSha=${GITHUB_SHA}"', workflow)
         self.assertIn("github.ref == 'refs/heads/main'", workflow)

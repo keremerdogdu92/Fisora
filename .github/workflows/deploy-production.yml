@@ -1,10 +1,13 @@
 # File: .github/workflows/deploy-production.yml
-# Summary: Manually deploys the exact main-branch Fisora commit to production through AWS OIDC and a restricted SSM document.
+# Summary: Automatically deploys explicitly release-marked main-branch commits to production through AWS OIDC and a restricted exact-SHA SSM document.
 
 name: Deploy Production
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   id-token: write
@@ -23,11 +26,38 @@ env:
 
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, '[deploy]'))
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - name: Verify target is latest main
+        id: release_gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest_ref="$(curl --fail --silent --show-error --location \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${GH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/git/ref/heads/main")"
+          latest_sha="$(printf '%s' "$latest_ref" | python -c 'import json, sys; print(json.load(sys.stdin)["object"]["sha"])')"
+
+          echo "Requested SHA: ${GITHUB_SHA}"
+          echo "Latest main SHA: ${latest_sha}"
+          if [ "${GITHUB_SHA}" != "${latest_sha}" ]; then
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping stale production deploy because a newer main commit exists."
+            exit 0
+          fi
+
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+
       - name: Configure AWS credentials
+        if: steps.release_gate.outputs.should_deploy == 'true'
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ env.DEPLOY_ROLE_ARN }}
@@ -36,11 +66,13 @@ jobs:
           allowed-account-ids: ${{ env.AWS_ACCOUNT_ID }}
 
       - name: Verify AWS identity
+        if: steps.release_gate.outputs.should_deploy == 'true'
         run: |
           set -euo pipefail
           aws sts get-caller-identity
 
       - name: Deploy exact commit through SSM
+        if: steps.release_gate.outputs.should_deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail

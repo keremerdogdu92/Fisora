@@ -1,3 +1,5 @@
+// File: frontend/app/portal-shell-components.tsx
+// Summary: Renders shared portal navigation, status labels, shell controls, and accountant-facing layout primitives.
 import {
   Activity,
   Bot,
@@ -49,6 +51,7 @@ const statusLabels: Record<PilotStatus, string> = {
   queued: "Kuyrukta",
   processing: "İşleniyor",
   review_required: "Kontrol gerekli",
+  no_posting_required: "Fiş gerekmiyor",
   export_ready: "Aktarıma hazır",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",

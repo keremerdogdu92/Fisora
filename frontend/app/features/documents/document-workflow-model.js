@@ -1,3 +1,5 @@
+// File: frontend/app/features/documents/document-workflow-model.js
+// Summary: Derives document segments, filters, selections, and accountant review cockpit queues for the portal workspace.
 function segmentForDocument(document) {
   if (document.intakeCategory === "bank_statement") return "bank_statements";
   if (document.intakeCategory === "special_document") return "other_documents";
@@ -50,6 +52,7 @@ function reviewCockpitQueues(documents) {
     manualRisk: [],
   };
   for (const document of documents) {
+    if (document.status === "no_posting_required") continue;
     const reasons = documentReviewReasons(document);
     const hasOnlyApprovalGate =
       reasons.length === 0 ||

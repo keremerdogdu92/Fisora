@@ -1095,19 +1095,29 @@ class NormalizedAccountingRepository:
             raise NormalizedAccountingError("normalized invoice canonical line ids must be unique")
         raw_draft_lines = result.get("draft_lines")
         raw_has_draft_lines = isinstance(raw_draft_lines, (list, tuple)) and bool(raw_draft_lines)
+        no_posting_requested = str(result.get("posting_status") or result.get("draft_status") or "") == "no_posting_required"
+        no_posting_required = no_posting_requested and not raw_has_draft_lines
+        if no_posting_requested and raw_has_draft_lines:
+            result["simulated_status"] = "review_required"
+            result["draft_status"] = "review_required"
+            result["review_status"] = "review_required"
+            result["export_status"] = "review_required"
+            result["review_reason_codes"] = list(
+                dict.fromkeys([*(result.get("review_reason_codes") or []), "no_posting_draft_conflict"])
+            )
         draft_validation_error = ""
         if raw_has_draft_lines:
             draft_lines, total_debit, total_credit, draft_validation_error = _best_effort_draft_lines(raw_draft_lines)
         else:
             draft_lines, total_debit, total_credit = [], Decimal("0.00"), Decimal("0.00")
         has_draft_lines = bool(draft_lines)
-        if has_draft_lines:
+        if has_draft_lines or no_posting_required:
             result["is_balanced"] = True
         elif draft_validation_error:
             result["normalized_is_balanced"] = False
         else:
             result["is_balanced"] = False
-        if not has_draft_lines:
+        if not has_draft_lines and not no_posting_required:
             result["export_status"] = "review_required"
             existing_review_reasons = list(result.get("review_reason_codes") or [])
             if draft_validation_error:
@@ -1337,6 +1347,19 @@ class NormalizedAccountingRepository:
                             ]
                         )
                     )
+                if no_posting_required and (allocation_invalid or not line_decision_valid):
+                    no_posting_required = False
+                    result["simulated_status"] = "review_required"
+                    result["draft_status"] = "review_required"
+                    result["review_status"] = "review_required"
+                    result["export_status"] = "review_required"
+                    result["review_reason_codes"] = list(
+                        dict.fromkeys([*(result.get("review_reason_codes") or []), "no_posting_evidence_incomplete"])
+                    )
+                    cursor.execute(
+                        "update documents set status = 'review_required', updated_at = now() where id = %s",
+                        (document_id,),
+                    )
                 ai_trace = [item for item in result.get("ai_trace") or [] if isinstance(item, dict)]
                 if not ai_trace and result.get("ai_classification_provider"):
                     ai_trace = [
@@ -1398,6 +1421,64 @@ class NormalizedAccountingRepository:
                     journal_state = cursor.fetchone()
                     approved_revision_no = journal_state[0] if journal_state else None
                     current_revision_status = str(journal_state[1] or "") if journal_state else ""
+                if no_posting_required:
+                    revision_no = int(current_revision_no or 0)
+                    result["normalized_revision"] = revision_no
+                    result["normalized_journal_persisted"] = False
+                    if current_journal_id:
+                        result["normalized_revision_status"] = "review_required"
+                        result["status"] = "review_required"
+                        result["simulated_status"] = "review_required"
+                        result["draft_status"] = "review_required"
+                        result["review_status"] = "review_required"
+                        result["export_status"] = "review_required"
+                        result["review_reason_codes"] = list(
+                            dict.fromkeys([*(result.get("review_reason_codes") or []), "no_posting_reprocess_existing_journal"])
+                        )
+                        cursor.execute(
+                            "update documents set status = 'reprocess_review_required', updated_at = now() where id = %s",
+                            (document_id,),
+                        )
+                        self._append_event(
+                            cursor,
+                            taxpayer_id=taxpayer_id,
+                            document_id=document_id,
+                            event_type="normalized_no_posting_reprocess_held",
+                            status="warning",
+                            actor="document_worker",
+                            details={
+                                "revision_no": revision_no,
+                                "journal_entry_id": str(current_journal_id),
+                                "canonical_line_count": len(canonical_line_ids),
+                            },
+                        )
+                        return {
+                            "revision_no": revision_no,
+                            "journal_entry_id": str(current_journal_id),
+                            "journal_saved": False,
+                        }
+                    result["normalized_revision_status"] = "no_posting_required"
+                    cursor.execute(
+                        "update documents set status = 'no_posting_required', updated_at = now() where id = %s",
+                        (document_id,),
+                    )
+                    self._append_event(
+                        cursor,
+                        taxpayer_id=taxpayer_id,
+                        document_id=document_id,
+                        event_type="normalized_no_posting_evidence_saved",
+                        status="ok",
+                        actor="document_worker",
+                        details={
+                            "revision_no": revision_no,
+                            "canonical_line_count": len(canonical_line_ids),
+                        },
+                    )
+                    return {
+                        "revision_no": revision_no,
+                        "journal_entry_id": "",
+                        "journal_saved": False,
+                    }
                 if approved_revision_no is not None and current_revision_status == "approved":
                     revision_no = int(current_revision_no or approved_revision_no or 0)
                     result["normalized_revision"] = revision_no

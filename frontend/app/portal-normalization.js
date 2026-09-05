@@ -1,3 +1,5 @@
+// File: frontend/app/portal-normalization.js
+// Summary: Normalizes backend portal statuses, statements, review reasons, and safe primitive values for accountant-facing views.
 function safeText(value, fallback = "") {
   return value == null || value === "" ? fallback : String(value);
 }
@@ -131,6 +133,7 @@ function normalizeRulePrompt(value) {
 
 function normalizeStatus(value) {
   if (value === "export_ready" || value === "auto_ready") return "export_ready";
+  if (value === "no_posting_required") return "no_posting_required";
   if (value === "processing") return "processing";
   if (value === "queued" || value === "stored") return "queued";
   if (value === "uploaded") return "uploaded";

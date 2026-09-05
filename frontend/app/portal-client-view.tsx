@@ -1,3 +1,5 @@
+// File: frontend/app/portal-client-view.tsx
+// Summary: Renders the client portal document list, upload surface, preview, and cancellation actions with normalized workflow statuses.
 "use client";
 
 import { buildClientCancellationViewModel } from "./portal-dashboard";
@@ -11,6 +13,7 @@ const statusLabels: Record<PilotStatus, string> = {
   queued: "Kuyrukta",
   processing: "İşleniyor",
   review_required: "Kontrol gerekli",
+  no_posting_required: "Fiş gerekmiyor",
   export_ready: "Aktarıma hazır",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",

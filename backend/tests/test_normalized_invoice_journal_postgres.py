@@ -1,3 +1,5 @@
+# File: backend/tests/test_normalized_invoice_journal_postgres.py
+# Summary: Verifies normalized PostgreSQL invoice evidence, journal revision, review, and no-posting persistence behavior.
 from __future__ import annotations
 
 from copy import deepcopy
@@ -273,6 +275,176 @@ class NormalizedInvoiceJournalPostgresTests(unittest.TestCase):
         self.assertEqual(saved["result"]["draft_lines"], [])
         self.assertEqual(canonical_line_count, 1)
         self.assertEqual(journal_count, 0)
+
+    def test_explicit_no_posting_persists_source_evidence_without_creating_journal(self) -> None:
+        suffix = uuid4().hex
+        client_id = f"client-{suffix}"
+        document_ref = f"document-{suffix}"
+        canonical_line_id = f"line-{suffix}"
+        store = PostgresWorkflowStore(
+            POSTGRES_DSN,
+            tenant_key=f"normalized-no-posting-{suffix}",
+            accounting_store_target="normalized",
+        )
+        store.upsert_client(
+            client_id=client_id,
+            profile={"title": "Alici Ltd", "tax_id": "2222222222"},
+            onboarding={},
+        )
+        store.save_uploaded_document(
+            client_id=client_id,
+            document={
+                "document_id": document_ref,
+                "original_file_name": "zero.pdf",
+                "storage_path": f"/tmp/{document_ref}.pdf",
+                "document_type": "invoice",
+                "status": "stored",
+                "storage_status": "stored",
+                "size_bytes": 512,
+                "sha256": uuid4().hex,
+            },
+        )
+
+        saved = store.save_simulation_result(
+            client_id=client_id,
+            document_ref=document_ref,
+            result={
+                "file_name": "zero.pdf",
+                "accounting_direction": "purchase",
+                "issue_date": "2026-09-05",
+                "status": "no_posting_required",
+                "simulated_status": "no_posting_required",
+                "draft_status": "no_posting_required",
+                "review_status": "no_posting_required",
+                "export_status": "no_posting_required",
+                "posting_status": "no_posting_required",
+                "three_stage_accounting_used": True,
+                "canonical_validation_status": "source_reconstruction",
+                "line_decision_coverage": {"status": "valid"},
+                "line_decisions": [{"canonical_line_id": canonical_line_id, "account_code": ""}],
+                "review_reason_codes": [],
+                "risk_flags": [],
+                "draft_lines": [],
+                "canonical_invoice": {
+                    "header": {"invoice_no": f"ZERO-{suffix}", "issue_date": "2026-09-05", "currency": "TRY"},
+                    "supplier_party": {"title": "Satici Ltd", "tax_id": "1111111111"},
+                    "customer_party": {"title": "Alici Ltd", "tax_id": "2222222222"},
+                    "totals": {"goods_services_total": "0.00", "vat_total": "0.00", "payable_total": "0.00"},
+                    "line_items": [{
+                        "canonical_line_id": canonical_line_id,
+                        "source_position": "pdf:1",
+                        "description": "Sıfır tutarlı bilgi satırı",
+                        "quantity": "1",
+                        "taxable_amount": "0.00",
+                        "vat_rate": "0",
+                        "tax_amount": "0.00",
+                        "gross_amount": "0.00",
+                    }],
+                },
+            },
+        )
+
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select
+                        (select count(*) from invoice_lines where tenant_id = %s and superseded_at is null),
+                        (select count(*) from journal_entries where tenant_id = %s),
+                        (select status from documents where tenant_id = %s and source_ref = %s)
+                    """,
+                    (store.tenant_id, store.tenant_id, store.tenant_id, document_ref),
+                )
+                canonical_line_count, journal_count, document_status = cursor.fetchone()
+
+        self.assertEqual(saved["status"], "no_posting_required")
+        self.assertEqual(saved["result"]["normalized_revision"], 0)
+        self.assertEqual(saved["result"]["normalized_revision_status"], "no_posting_required")
+        self.assertFalse(saved["result"]["normalized_journal_persisted"])
+        self.assertEqual(saved["result"]["review_reason_codes"], [])
+        self.assertTrue(saved["result"]["is_balanced"])
+        self.assertEqual(canonical_line_count, 1)
+        self.assertEqual(journal_count, 0)
+        self.assertEqual(document_status, "no_posting_required")
+
+    def test_no_posting_reprocess_with_existing_journal_holds_for_review_without_mutating_journal(self) -> None:
+        store, client_id, document_ref = self._prepare_draft()
+        existing = store._get_record(client_id, "document", document_ref)
+        self.assertIsNotNone(existing)
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select j.id, j.status, j.total_debit, j.total_credit, j.export_status,
+                           j.current_revision_no, j.approved_revision_no,
+                           (select count(*) from journal_revisions r where r.journal_entry_id = j.id),
+                           (select count(*) from journal_revision_lines l where l.journal_revision_id in
+                               (select r.id from journal_revisions r where r.journal_entry_id = j.id))
+                    from documents d
+                    join journal_entries j on j.id = d.current_journal_entry_id
+                    where d.tenant_id = %s and d.source_ref = %s
+                    """,
+                    (store.tenant_id, document_ref),
+                )
+                journal_before = cursor.fetchone()
+
+        zero_result = deepcopy(existing["result"])
+        zero_result.update(
+            {
+                "status": "no_posting_required",
+                "simulated_status": "no_posting_required",
+                "draft_status": "no_posting_required",
+                "review_status": "no_posting_required",
+                "export_status": "no_posting_required",
+                "posting_status": "no_posting_required",
+                "three_stage_accounting_used": True,
+                "review_reason_codes": [],
+                "risk_flags": [],
+                "draft_lines": [],
+                "line_decision_coverage": {"status": "valid"},
+            }
+        )
+        zero_result["canonical_invoice"]["totals"].update(
+            {"goods_services_total": "0.00", "vat_total": "0.00", "payable_total": "0.00"}
+        )
+        zero_result["canonical_invoice"]["line_items"][0].update(
+            {"taxable_amount": "0.00", "tax_amount": "0.00", "gross_amount": "0.00"}
+        )
+
+        saved = store.save_simulation_result(
+            client_id=client_id,
+            document_ref=document_ref,
+            result=zero_result,
+        )
+
+        with store._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select j.id, j.status, j.total_debit, j.total_credit, j.export_status,
+                           j.current_revision_no, j.approved_revision_no,
+                           (select count(*) from journal_revisions r where r.journal_entry_id = j.id),
+                           (select count(*) from journal_revision_lines l where l.journal_revision_id in
+                               (select r.id from journal_revisions r where r.journal_entry_id = j.id))
+                    from documents d
+                    join journal_entries j on j.id = d.current_journal_entry_id
+                    where d.tenant_id = %s and d.source_ref = %s
+                    """,
+                    (store.tenant_id, document_ref),
+                )
+                journal_after = cursor.fetchone()
+                cursor.execute(
+                    "select status from documents where tenant_id = %s and source_ref = %s",
+                    (store.tenant_id, document_ref),
+                )
+                document_status = cursor.fetchone()[0]
+
+        self.assertEqual(journal_after, journal_before)
+        self.assertEqual(saved["status"], "review_required")
+        self.assertEqual(saved["result"]["normalized_revision_status"], "review_required")
+        self.assertFalse(saved["result"]["normalized_journal_persisted"])
+        self.assertIn("no_posting_reprocess_existing_journal", saved["result"]["review_reason_codes"])
+        self.assertEqual(document_status, "reprocess_review_required")
 
     def test_reprocessing_approved_journal_preserves_history_and_blocks_export_until_review(self) -> None:
         store, client_id, document_ref = self._prepare_draft()

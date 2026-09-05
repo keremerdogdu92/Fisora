@@ -118,6 +118,23 @@ class ThreeStageStageContractTests(unittest.TestCase):
         counterparty_properties = provider.calls[0]["schema"]["properties"]["counterparty_posting"]["properties"]
         self.assertNotIn("account_code", counterparty_properties)
 
+    def test_invalid_account_retry_prompt_requires_exact_chart_code_strings(self) -> None:
+        provider = CaptureFinalProvider(FINAL_RESPONSE)
+        run_final_accountant_stage(
+            provider=provider,
+            source_text="# FATURA\nSATIR 1: İnternet 100,00\n",
+            semantic_plan=PLANNER_RESPONSE,
+            chart_text="191.01.10 | Yüzde 10 İndirilecek KDV",
+            repair_context={
+                "reason": "invalid_account_code",
+                "invalid_account_warnings": ["account_not_in_chart:191.01.010"],
+            },
+        )
+        call = provider.calls[0]
+        self.assertIn("Copy account_code values exactly from chart_accounts", call["instructions"])
+        self.assertIn("do not zero-pad", call["instructions"])
+        self.assertEqual(call["user_payload"]["repair_context"]["reason"], "invalid_account_code")
+
     def test_final_prompt_keeps_purchase_discount_as_netting_semantics(self) -> None:
         self.assertIn("journal lines do not need one posting per raw row", ACCOUNTANT_INSTRUCTIONS)
         self.assertIn("Independently determine the current-invoice posting basis", ACCOUNTANT_INSTRUCTIONS)

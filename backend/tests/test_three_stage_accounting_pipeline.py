@@ -263,6 +263,155 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(len(run.result["line_decision_coverage"]["missing_ids"]), 1)
         self.assertEqual(run.result["export_status"], "review_required")
 
+    def test_clean_balanced_ai_draft_stays_one_click_review_required(self) -> None:
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(READER, PLANNER),
+            final_provider=FakeFinalProvider(FINAL),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+        self.assertTrue(run.result["is_balanced"])
+        self.assertEqual(run.result["draft_status"], "review_required")
+        self.assertEqual(run.result["review_status"], "review_required")
+        self.assertEqual(run.result["export_status"], "review_required")
+        self.assertEqual(run.result["automation_eligibility"], "not_eligible")
+        self.assertIn("tek tıkla", run.result["accountant_action_hint"])
+
+    def test_invalid_chart_code_gets_one_targeted_ai_account_retry(self) -> None:
+        workspace = {
+            **WORKSPACE,
+            "chart_accounts": {"accounts": [
+                *WORKSPACE["chart_accounts"]["accounts"],
+                account("191.01.10", "Yüzde 10 İndirilecek KDV"),
+            ]},
+        }
+        invalid = dict(FINAL)
+        invalid_lines = [dict(line) for line in FINAL["operating_journal_lines"]]
+        invalid_lines[2] = {**invalid_lines[2], "account_code": "191.01.010"}
+        invalid["operating_journal_lines"] = invalid_lines
+        repaired = dict(FINAL)
+        repaired_lines = [dict(line) for line in FINAL["operating_journal_lines"]]
+        repaired_lines[2] = {**repaired_lines[2], "account_code": "191.01.10"}
+        repaired["operating_journal_lines"] = repaired_lines
+        provider = SequenceFinalProvider([invalid, repaired])
+
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(READER, PLANNER),
+            final_provider=provider,
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=workspace,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+
+        self.assertEqual(len(provider.calls), 2)
+        retry_call = provider.calls[1]
+        self.assertEqual(retry_call["user_payload"]["repair_context"]["reason"], "invalid_account_code")
+        self.assertIn("Copy account_code values exactly from chart_accounts", retry_call["instructions"])
+        self.assertEqual(run.result["selected_vat_account"], "191.01.10")
+        self.assertTrue(run.result["three_stage_account_repair_attempted"])
+        self.assertEqual(run.result["three_stage_account_repair_status"], "successful")
+        self.assertEqual(run.result["three_stage_account_repair_reason_codes"], ["account_not_in_chart:191.01.010"])
+        self.assertIn("account_not_in_chart:191.01.010", run.result["pipeline_warnings"])
+        self.assertNotIn("account_not_in_chart:191.01.010", run.result["review_reason_codes"])
+        self.assertEqual(run.result["ai_trace"][-1]["stage"], "final_accountant_account_repair")
+
+    def test_second_out_of_chart_retry_stays_blocked_without_persistable_bad_code(self) -> None:
+        workspace = {
+            **WORKSPACE,
+            "chart_accounts": {"accounts": [
+                *WORKSPACE["chart_accounts"]["accounts"],
+                account("191.01.10", "Yüzde 10 İndirilecek KDV"),
+            ]},
+        }
+        invalid = dict(FINAL)
+        invalid_lines = [dict(line) for line in FINAL["operating_journal_lines"]]
+        invalid_lines[2] = {**invalid_lines[2], "account_code": "191.01.010"}
+        invalid["operating_journal_lines"] = invalid_lines
+        invalid_decisions = [dict(item) for item in FINAL["row_decisions"]]
+        invalid_decisions[0] = {**invalid_decisions[0], "account_code": "770.02.000"}
+        invalid["row_decisions"] = invalid_decisions
+        provider = SequenceFinalProvider([invalid, invalid])
+
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(READER, PLANNER),
+            final_provider=provider,
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=workspace,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+
+        self.assertEqual(len(provider.calls), 2)
+        self.assertEqual(run.result["three_stage_account_repair_status"], "invalid_account_code")
+        self.assertIn("account_not_in_chart:191.01.010", run.result["review_reason_codes"])
+        self.assertIn("invalid_account_self_repair_invalid_account_code", run.result["review_reason_codes"])
+        self.assertEqual(run.result["export_status"], "review_required")
+        self.assertFalse(any(line["account_code"] == "191.01.010" for line in run.result["draft_lines"]))
+        self.assertFalse(any(item["account_code"] == "770.02.000" for item in run.result["line_decisions"]))
+        self.assertEqual(run.result["line_decisions"][0]["account_code"], "")
+        self.assertIn("row_decision_account_not_in_chart:770.02.000", run.result["pipeline_warnings"])
+        self.assertEqual(run.result["selected_vat_account"], "")
+
+    def test_zero_value_invoice_has_explicit_no_posting_required_state(self) -> None:
+        reader_payload = dict(READER)
+        reader_payload["invoice_table_rows"] = [{
+            "source_position": "1",
+            "source_text": "Bedelsiz işlem 0,00",
+            "description": "Bedelsiz işlem",
+            "ui_amount": "0,00",
+            "ui_amount_label": "Toplam",
+            "ui_amount_basis": "line_total_inc_tax",
+            "ui_role": "informational",
+        }]
+        reader_payload["printed_summary_lines"] = [{"label": "ÖDENECEK TOPLAM", "value": "0,00"}]
+        zero_final = dict(FINAL)
+        zero_final["row_decisions"] = [{"source_position": "1", "role": "non_posting_info", "account_code": "", "reason": "Zero-value invoice"}]
+        zero_final["operating_journal_lines"] = []
+        zero_final["counterparty_posting"] = {"description": "Sıfır tutarlı belge", "debit": "0", "credit": "0", "source_positions": ["1"]}
+        zero_final["posting_basis_label"] = "ÖDENECEK TOPLAM"
+        zero_final["posting_basis_amount"] = "0.00"
+        zero_final["warnings"] = ["Fatura tutarı sıfır olduğu için muhasebe kaydı gerekmiyor."]
+
+        run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(reader_payload, PLANNER),
+            final_provider=FakeFinalProvider(zero_final),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="abc",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+
+        self.assertEqual(run.result["status"], "no_posting_required")
+        self.assertEqual(run.result["simulated_status"], "no_posting_required")
+        self.assertEqual(run.result["draft_status"], "no_posting_required")
+        self.assertEqual(run.result["export_status"], "no_posting_required")
+        self.assertEqual(run.result["posting_status"], "no_posting_required")
+        self.assertEqual(run.result["draft_lines"], [])
+        self.assertEqual(run.result["review_reason_codes"], [])
+        self.assertIn("Fatura tutarı sıfır", run.result["pipeline_warnings"][0])
+
+        missing_basis = dict(zero_final)
+        missing_basis.pop("posting_basis_amount")
+        missing_run = run_three_stage_accounting_pipeline(
+            reader_provider=FakeReaderPlanner(reader_payload, PLANNER),
+            final_provider=FakeFinalProvider(missing_basis),
+            source_bytes=b"%PDF-1.7 test",
+            source_sha256="def",
+            workspace=WORKSPACE,
+            tenant_tax_id="29021276942",
+            expected_direction="purchase",
+        )
+        self.assertEqual(missing_run.result["draft_status"], "review_required")
+        self.assertEqual(missing_run.result["export_status"], "review_required")
+        self.assertNotEqual(missing_run.result["status"], "no_posting_required")
+
 
     def test_unbalanced_final_gets_one_ai_self_repair_and_uses_balanced_result(self) -> None:
         first = dict(FINAL)

@@ -92,6 +92,21 @@ class FakeFinalProvider:
         return dict(self.payload)
 
 
+class SequenceFinalProvider:
+    provider_name = "xkiro"
+    model = "final-test"
+
+    def __init__(self, payloads: list[dict[str, object]]) -> None:
+        self.payloads = list(payloads)
+        self.calls: list[dict[str, object]] = []
+
+    def _post_structured_json(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(dict(kwargs))
+        if not self.payloads:
+            raise AssertionError("unexpected final provider call")
+        return dict(self.payloads.pop(0))
+
+
 WORKSPACE = {
     "client": {"profile": {"title": "CLIENT LTD.", "tax_id": "2222222222"}},
     "chart_accounts": {"accounts": [
@@ -233,6 +248,43 @@ class HtmlSourceAccountingAdapterTests(unittest.TestCase):
         self.assertEqual(run.result["ai_trace"][0]["provider"], "prepared_source")
         self.assertIn("TEXT SUPPLIER A.S.", planner.calls[0]["user_payload"]["invoice_source_text"])
         self.assertIn("SATIR 1: [SOURCE 1:1]", final.calls[0]["user_payload"]["invoice_source_text"])
+
+    def test_prepared_source_runner_uses_same_targeted_account_code_retry(self) -> None:
+        package = build_html_accounting_source_package(SNAPSHOT, EVIDENCE)
+        workspace = {
+            **WORKSPACE,
+            "chart_accounts": {"accounts": [
+                *WORKSPACE["chart_accounts"]["accounts"],
+                {"normalized_account_code": "191.01.10", "account_name": "INPUT VAT 10", "is_detail_account": True},
+            ]},
+        }
+        invalid = dict(FINAL)
+        invalid_lines = [dict(line) for line in FINAL["operating_journal_lines"]]
+        invalid_lines[1] = {**invalid_lines[1], "account_code": "191.01.010"}
+        invalid["operating_journal_lines"] = invalid_lines
+        repaired = dict(FINAL)
+        repaired_lines = [dict(line) for line in FINAL["operating_journal_lines"]]
+        repaired_lines[1] = {**repaired_lines[1], "account_code": "191.01.10"}
+        repaired["operating_journal_lines"] = repaired_lines
+        final = SequenceFinalProvider([invalid, repaired])
+
+        run = run_prepared_source_accounting_pipeline(
+            planner_provider=FakePlannerProvider(PLANNER),
+            final_provider=final,
+            source_package=package,
+            planner_source_text=render_html_planner_source_text(EVIDENCE),
+            accountant_source_text=render_html_accountant_source_text(SNAPSHOT, EVIDENCE),
+            source_sha256="b" * 64,
+            workspace=workspace,
+            tenant_tax_id="2222222222",
+            expected_direction="purchase",
+        )
+
+        self.assertEqual(len(final.calls), 2)
+        self.assertEqual(final.calls[1]["user_payload"]["repair_context"]["reason"], "invalid_account_code")
+        self.assertEqual(run.result["selected_vat_account"], "191.01.10")
+        self.assertEqual(run.result["three_stage_account_repair_status"], "successful")
+        self.assertNotIn("account_not_in_chart:191.01.010", run.result["review_reason_codes"])
 
 
 if __name__ == "__main__":

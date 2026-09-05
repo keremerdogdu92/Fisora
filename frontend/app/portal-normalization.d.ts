@@ -1,9 +1,12 @@
+// File: frontend/app/portal-normalization.d.ts
+// Summary: Declares normalized portal status, statement, review, and utility helper contracts used by frontend data mappers.
 export type StatementLineDirection = "in" | "out" | "";
 export type NormalizedPilotStatus =
   | "uploaded"
   | "queued"
   | "processing"
   | "review_required"
+  | "no_posting_required"
   | "export_ready"
   | "cancel_requested"
   | "cancel_approved"

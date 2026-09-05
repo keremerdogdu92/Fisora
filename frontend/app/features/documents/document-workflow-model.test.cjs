@@ -1,3 +1,5 @@
+// File: frontend/app/features/documents/document-workflow-model.test.cjs
+// Summary: Verifies document selection, filtering, segmentation, and review cockpit queue behavior without React state.
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
@@ -109,6 +111,13 @@ test("review cockpit queues separate one-click, minor-edit, and manual-risk docu
       isBalanced: true,
       reviewReasons: [],
       draftLines: [{ account_code: "770.01" }],
+    },
+    {
+      id: "no-posting",
+      status: "no_posting_required",
+      isBalanced: true,
+      reviewReasons: [],
+      draftLines: [],
     },
   ]);
 

@@ -3677,6 +3677,7 @@ tbody tr:last-child td {
   color: var(--amber);
 }
 
+.status.no_posting_required,
 .status.export_ready,
 .status.export_added,
 .status.exported,

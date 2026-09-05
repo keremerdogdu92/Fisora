@@ -1,3 +1,5 @@
+// File: frontend/app/portal-normalization.test.cjs
+// Summary: Verifies portal normalization helpers, status preservation, statement projection, and accountant-readable review labels.
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
@@ -18,6 +20,7 @@ test("portal normalization helpers map review records without React state", () =
   assert.equal(safeText("", "fallback"), "fallback");
   assert.equal(periodFromDate("03.06.2026"), "2026-06");
   assert.equal(normalizeStatus("stored"), "queued");
+  assert.equal(normalizeStatus("no_posting_required"), "no_posting_required");
   assert.equal(agentSourceLabel("groq"), "AI ajan önerisi");
 
   assert.deepEqual(

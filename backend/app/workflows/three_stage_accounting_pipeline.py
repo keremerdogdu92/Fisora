@@ -359,6 +359,12 @@ def _call_structured(provider: object, *, schema_name: str, instructions: str, p
     return private(schema_name=schema_name, instructions=instructions, user_payload=payload, schema=schema)
 def _compose_journal(final_output: Mapping[str, object], plan: Mapping[str, object], account_names: Mapping[str, str]) -> tuple[list[dict[str, object]], list[str]]:
     warnings: list[str] = []
+    for raw in final_output.get("row_decisions") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        code = normalize_account_code(str(raw.get("account_code") or ""))
+        if code and code not in account_names:
+            warnings.append(f"row_decision_account_not_in_chart:{code}")
     lines: list[dict[str, object]] = []
     for raw in final_output.get("operating_journal_lines") or []:
         if not isinstance(raw, Mapping):
@@ -457,6 +463,7 @@ def _row_coverage_warning(package: Mapping[str, object], final_output: Mapping[s
 def _canonical_line_decisions(
     canonical: Mapping[str, object],
     final_output: Mapping[str, object],
+    account_names: Mapping[str, str],
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
     canonical_rows = [item for item in canonical.get("line_items") or [] if isinstance(item, Mapping)]
     rows_by_position: dict[str, list[Mapping[str, object]]] = {}
@@ -477,6 +484,8 @@ def _canonical_line_decisions(
         if not isinstance(raw, Mapping):
             continue
         decision = dict(raw)
+        account_code = normalize_account_code(str(raw.get("account_code") or ""))
+        decision["account_code"] = account_code if account_code in account_names else ""
         position = _normalized_source_position(raw.get("source_position"))
         matches = rows_by_position.get(position, [])
         canonical_line_id = ""
@@ -538,7 +547,7 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         canonical["supplier_party"], canonical["customer_party"] = own, counterparty
     else:
         canonical["supplier_party"], canonical["customer_party"] = counterparty, own
-    line_decisions, line_decision_coverage = _canonical_line_decisions(canonical, final_output)
+    line_decisions, line_decision_coverage = _canonical_line_decisions(canonical, final_output, account_names)
     draft_lines = _draft_lines(journal_lines)
     debit, credit = _totals(journal_lines)
     reason_codes = list(dict.fromkeys(str(item) for item in warnings if str(item).strip()))
@@ -556,6 +565,30 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
     invoice_no = _find_labeled(header, "FATURA NO", "FATURA ID", "INVOICE NO")
     issue_date = _find_labeled(header, "FATURA TARIH", "TARIH", "ISSUE DATE")
     payable = _find_labeled(summaries, "ODENECEK TOPLAM", "ODENECEK TUTAR", "PAYABLE")
+    pipeline_warnings = list(
+        dict.fromkeys([
+            *reason_codes,
+            *[str(item) for item in final_output.get("_account_repair_trigger_warnings") or []],
+        ])
+    )
+    posting_basis_raw = str(final_output.get("posting_basis_amount") or "").strip()
+    payable_raw = str(payable or "").strip()
+    no_posting_required = bool(
+        not final_failed
+        and posting_basis_raw
+        and payable_raw
+        and debit == Decimal("0.00")
+        and credit == Decimal("0.00")
+        and _money(posting_basis_raw) == Decimal("0.00")
+        and _money(payable_raw) == Decimal("0.00")
+        and str(line_decision_coverage.get("status") or "") == "valid"
+        and not _invalid_account_warnings(reason_codes)
+    )
+    if no_posting_required:
+        reason_codes = []
+        draft_lines = []
+        first_business = {}
+        first_vat = {}
     journal_vat_total = sum(
         max(_money(line.get("debit")), _money(line.get("credit")))
         for line in draft_lines
@@ -564,6 +597,8 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
     printed_vat_total = _find_labeled(summaries, "HESAPLANAN KDV", "KDV TUTAR", "VAT TOTAL", "VAT AMOUNT")
     vat_total = f"{journal_vat_total:.2f}" if journal_vat_total else _money_text(printed_vat_total)
     summary = str(final_output.get("summary") or "Üç aşamalı AI muhasebe taslağı hazırlandı.")
+    if no_posting_required:
+        summary = "Sıfır tutarlı fatura; muhasebe fişi gerekmiyor. Belge ve kaynak satırları saklandı."
     final_model = str(getattr(final_provider, "model", "") or "")
     return {
         "invoice_no": invoice_no,
@@ -607,24 +642,33 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
         "selected_supplier_account": party_code if direction != "sales" else "",
         "selected_customer_account": party_code if direction == "sales" else "",
         "counterparty_match_code": party_code,
-        "status": "complete" if debit == credit and not reason_codes else "partial",
-        "draft_status": "review_required",
+        "status": "no_posting_required" if no_posting_required else ("complete" if debit == credit and not reason_codes else "partial"),
+        "simulated_status": "no_posting_required" if no_posting_required else "review_required",
+        "draft_status": "no_posting_required" if no_posting_required else "review_required",
         "processing_status": "completed",
         "extraction_validation_status": "source_reconstruction",
-        "reconciliation_status": "warning" if reason_codes else "not_required",
-        "accounting_decision_status": "best_effort",
-        "draft_balance_status": "balanced" if debit == credit else "unbalanced",
-        "review_status": "review_required",
-        "export_status": "review_required",
+        "reconciliation_status": "not_applicable" if no_posting_required else ("warning" if reason_codes else "not_required"),
+        "accounting_decision_status": "no_posting_required" if no_posting_required else "best_effort",
+        "draft_balance_status": "not_applicable" if no_posting_required else ("balanced" if debit == credit else "unbalanced"),
+        "review_status": "no_posting_required" if no_posting_required else "review_required",
+        "export_status": "no_posting_required" if no_posting_required else "review_required",
+        "automation_eligibility": "not_applicable" if no_posting_required else "not_eligible",
+        "posting_status": "no_posting_required" if no_posting_required else "draft_created",
         "ai_resolution_status": "ai_retry_required" if final_failed else "",
         "ai_retry_reason": "final_accountant_unavailable" if final_failed else "",
+        "three_stage_account_repair_attempted": bool(final_output.get("_account_repair_attempted")),
+        "three_stage_account_repair_status": str(final_output.get("_account_repair_status") or ""),
+        "three_stage_account_repair_elapsed_ms": int(final_output.get("_account_repair_elapsed_ms") or 0),
+        "three_stage_account_repair_reason_codes": [str(item) for item in final_output.get("_account_repair_trigger_warnings") or []],
+        "three_stage_account_repair_error_type": str(final_output.get("_account_repair_error_type") or ""),
         "three_stage_self_repair_attempted": bool(final_output.get("_repair_attempted")),
         "three_stage_self_repair_status": str(final_output.get("_repair_status") or ""),
         "three_stage_self_repair_elapsed_ms": int(final_output.get("_repair_elapsed_ms") or 0),
-        "pipeline_warnings": reason_codes,
+        "pipeline_warnings": pipeline_warnings,
         "review_reason_codes": reason_codes,
         "risk_flags": reason_codes,
-        "confidence_label": "Müşavir onayı gereken üç aşamalı AI taslağı",
+        "confidence_label": "Fiş gerektirmeyen sıfır tutarlı belge" if no_posting_required else "Müşavir onayı gereken üç aşamalı AI taslağı",
+        "accountant_action_hint": "Fiş oluşturulmadı; belge kaynak kaydı olarak saklandı." if no_posting_required else "Taslak hazır; müşavir tek tıkla onaylayabilir.",
         "accountant_summary": summary,
         "accountant_explanation_tr": summary,
         "decision_narrative": {
@@ -649,7 +693,7 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
             {"stage": "source_reader", "provider": str(getattr(reader_attempt, "provider", "gemini") or "gemini"), "model": str(getattr(reader_attempt, "resolved_model", "") or getattr(reader_attempt, "model_alias", "") or ""), "status": str(getattr(reader_attempt, "status", "successful") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("reader", 0))},
             {"stage": "identity_planner", "provider": str(getattr(planner_attempt, "provider", "gemini") or "gemini"), "model": str(getattr(planner_attempt, "resolved_model", "") or getattr(planner_attempt, "model_alias", "") or ""), "status": str(getattr(planner_attempt, "status", "successful") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("planner", 0))},
             {"stage": "final_accountant", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_stage_status") or "successful"), "elapsed_ms": int(stage_elapsed_ms.get("accountant", 0))},
-        ] + ([{"stage": "final_accountant_repair", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_repair_status") or "failed"), "elapsed_ms": int(final_output.get("_repair_elapsed_ms") or 0)}] if final_output.get("_repair_attempted") else []),
+        ] + ([{"stage": "final_accountant_account_repair", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_account_repair_status") or "failed"), "elapsed_ms": int(final_output.get("_account_repair_elapsed_ms") or 0)}] if final_output.get("_account_repair_attempted") else []) + ([{"stage": "final_accountant_repair", "provider": str(getattr(final_provider, "provider_name", "xkiro") or "xkiro"), "model": final_model, "status": str(final_output.get("_repair_status") or "failed"), "elapsed_ms": int(final_output.get("_repair_elapsed_ms") or 0)}] if final_output.get("_repair_attempted") else []),
     }
 
 
@@ -695,7 +739,11 @@ def run_final_accountant_stage(*, provider: object, source_text: str, semantic_p
     payload: dict[str, object] = {"client": dict(client or {}), "expected_direction": expected_direction, "invoice_source_text": source_text, "semantic_plan": dict(semantic_plan), "chart_accounts": chart_text}
     if repair_context:
         payload["repair_context"] = dict(repair_context)
-        instructions += " A previous draft was rejected because debit and credit were not equal. Re-evaluate the same source facts and return a complete corrected draft. Do not invent amounts, do not add an unsupported balancing line, and do not alter printed source totals merely to force balance."
+        repair_reason = str(repair_context.get("reason") or "unbalanced")
+        if repair_reason == "invalid_account_code":
+            instructions += " A previous draft used one or more account codes that are not exact members of chart_accounts. Re-evaluate the same source facts and return a complete corrected draft. Copy account_code values exactly from chart_accounts; do not zero-pad, abbreviate, normalize, synthesize or otherwise rewrite a chart code. If no suitable exact chart account exists, leave account_code empty."
+        else:
+            instructions += " A previous draft was rejected because debit and credit were not equal. Re-evaluate the same source facts and return a complete corrected draft. Do not invent amounts, do not add an unsupported balancing line, and do not alter printed source totals merely to force balance."
     for final_attempt_no in range(2):
         try:
             raw = _call_structured(
@@ -713,6 +761,93 @@ def run_final_accountant_stage(*, provider: object, source_text: str, semantic_p
                 raise
     assert final_error is not None
     raise final_error
+
+
+def _invalid_account_warnings(warnings: Sequence[str]) -> list[str]:
+    return [
+        str(warning)
+        for warning in warnings
+        if str(warning).startswith(("account_not_in_chart:", "row_decision_account_not_in_chart:"))
+    ]
+
+
+def _repaired_output_uses_exact_chart_codes(
+    final_output: Mapping[str, object],
+    account_names: Mapping[str, str],
+) -> bool:
+    for section in ("operating_journal_lines", "row_decisions"):
+        for raw in final_output.get(section) or []:
+            if not isinstance(raw, Mapping):
+                continue
+            code = str(raw.get("account_code") or "").strip()
+            if code and code not in account_names:
+                return False
+    for raw in final_output.get("operating_journal_lines") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        has_amount = _money(raw.get("debit")) > 0 or _money(raw.get("credit")) > 0
+        if has_amount and not str(raw.get("account_code") or "").strip():
+            return False
+    return True
+
+
+def _repair_invalid_account_codes(
+    *,
+    provider: object,
+    source_text: str,
+    semantic_plan: Mapping[str, object],
+    chart_text: str,
+    account_names: Mapping[str, str],
+    client: Mapping[str, object],
+    expected_direction: str,
+    final_output: dict[str, Any],
+    journal_lines: list[dict[str, object]],
+    composition_warnings: list[str],
+) -> tuple[dict[str, Any], list[dict[str, object]], list[str], int]:
+    invalid_warnings = _invalid_account_warnings(composition_warnings)
+    if not invalid_warnings:
+        return final_output, journal_lines, composition_warnings, 0
+
+    started = perf_counter()
+    status = "failed"
+    error_type = ""
+    elapsed_ms = 0
+    try:
+        repaired_output, elapsed_ms = run_final_accountant_stage(
+            provider=provider,
+            source_text=source_text,
+            semantic_plan=semantic_plan,
+            chart_text=chart_text,
+            client=client,
+            expected_direction=expected_direction,
+            repair_context={
+                "reason": "invalid_account_code",
+                "invalid_account_warnings": invalid_warnings,
+                "previous_draft": dict(final_output),
+            },
+        )
+        repaired_lines, repaired_warnings = _compose_journal(repaired_output, semantic_plan, account_names)
+        if _invalid_account_warnings(repaired_warnings):
+            status = "invalid_account_code"
+        elif not _repaired_output_uses_exact_chart_codes(repaired_output, account_names):
+            status = "account_code_not_exact"
+        else:
+            final_output = repaired_output
+            journal_lines = repaired_lines
+            composition_warnings = repaired_warnings
+            status = "successful"
+    except Exception as exc:
+        error_type = type(exc).__name__
+        elapsed_ms = round((perf_counter() - started) * 1000)
+
+    final_output["_account_repair_attempted"] = True
+    final_output["_account_repair_status"] = status
+    final_output["_account_repair_elapsed_ms"] = elapsed_ms
+    final_output["_account_repair_trigger_warnings"] = invalid_warnings
+    final_output["_account_repair_error_type"] = error_type
+    if status != "successful":
+        composition_warnings = [*composition_warnings, f"invalid_account_self_repair_{status}"]
+    return final_output, journal_lines, composition_warnings, elapsed_ms
 
 
 def run_prepared_source_accounting_pipeline(
@@ -780,16 +915,29 @@ def run_prepared_source_accounting_pipeline(
         accountant_ms = round((perf_counter() - final_started) * 1000)
         final_output = {
             "warnings": ["final_accountant_unavailable"],
-            "summary": "Kaynak sat?rlar haz?r; muhasebe ?nerisi al?namad?.",
+            "summary": "Kaynak satırlar hazır; muhasebe önerisi alınamadı.",
             "_stage_status": "failed",
             "_stage_error_type": type(exc).__name__,
         }
 
+    account_repair_ms = 0
     repair_ms = 0
     if str(final_output.get("_stage_status") or "") == "failed":
         journal_lines, composition_warnings = [], []
     else:
         journal_lines, composition_warnings = _compose_journal(final_output, semantic_plan, account_names)
+        final_output, journal_lines, composition_warnings, account_repair_ms = _repair_invalid_account_codes(
+            provider=final_provider,
+            source_text=accountant_source_text,
+            semantic_plan=semantic_plan,
+            chart_text=chart_text,
+            account_names=account_names,
+            client=client,
+            expected_direction=expected_direction,
+            final_output=final_output,
+            journal_lines=journal_lines,
+            composition_warnings=composition_warnings,
+        )
         debit_before_repair, credit_before_repair = _totals(journal_lines)
         if journal_lines and debit_before_repair != credit_before_repair:
             repair_started = perf_counter()
@@ -812,7 +960,20 @@ def run_prepared_source_accounting_pipeline(
                 )
                 repaired_lines, repaired_warnings = _compose_journal(repaired_output, semantic_plan, account_names)
                 repaired_debit, repaired_credit = _totals(repaired_lines)
-                if repaired_lines and repaired_debit == repaired_credit:
+                repaired_invalid_accounts = _invalid_account_warnings(repaired_warnings)
+                if repaired_invalid_accounts or not _repaired_output_uses_exact_chart_codes(repaired_output, account_names):
+                    composition_warnings = [*composition_warnings, *repaired_invalid_accounts]
+                    repair_status = "invalid_account_code"
+                elif repaired_lines and repaired_debit == repaired_credit:
+                    for key in (
+                        "_account_repair_attempted",
+                        "_account_repair_status",
+                        "_account_repair_elapsed_ms",
+                        "_account_repair_trigger_warnings",
+                        "_account_repair_error_type",
+                    ):
+                        if key in final_output:
+                            repaired_output[key] = final_output[key]
                     final_output, journal_lines, composition_warnings = repaired_output, repaired_lines, repaired_warnings
                     repair_status = "successful"
                 else:
@@ -830,7 +991,7 @@ def run_prepared_source_accounting_pipeline(
             "final_completed",
             {
                 "status": "failed" if str(final_output.get("_stage_status") or "") == "failed" else "completed",
-                "elapsed_ms": accountant_ms + repair_ms,
+                "elapsed_ms": accountant_ms + account_repair_ms + repair_ms,
             },
         )
     warnings = [
@@ -842,8 +1003,9 @@ def run_prepared_source_accounting_pipeline(
         "reader": max(int(reader_elapsed_ms), 0),
         "planner": planner_ms,
         "accountant": accountant_ms,
+        "accountant_account_repair": account_repair_ms,
         "accountant_repair": repair_ms,
-        "total": max(int(reader_elapsed_ms), 0) + planner_ms + accountant_ms + repair_ms,
+        "total": max(int(reader_elapsed_ms), 0) + planner_ms + accountant_ms + account_repair_ms + repair_ms,
     }
     prepared_reader_attempt = reader_attempt or SimpleNamespace(provider="prepared_source", resolved_model="", model_alias="", status="successful")
     result = _compatibility_result(
@@ -929,11 +1091,24 @@ def run_three_stage_accounting_pipeline(
             "_stage_error_type": type(exc).__name__,
         }
 
+    account_repair_ms = 0
     repair_ms = 0
     if str(final_output.get("_stage_status") or "") == "failed":
         journal_lines, composition_warnings = [], []
     else:
         journal_lines, composition_warnings = _compose_journal(final_output, semantic_plan, account_names)
+        final_output, journal_lines, composition_warnings, account_repair_ms = _repair_invalid_account_codes(
+            provider=final_provider,
+            source_text=source_text,
+            semantic_plan=semantic_plan,
+            chart_text=chart_text,
+            account_names=account_names,
+            client=client,
+            expected_direction=expected_direction,
+            final_output=final_output,
+            journal_lines=journal_lines,
+            composition_warnings=composition_warnings,
+        )
         debit_before_repair, credit_before_repair = _totals(journal_lines)
         if journal_lines and debit_before_repair != credit_before_repair:
             repair_started = perf_counter()
@@ -943,7 +1118,20 @@ def run_three_stage_accounting_pipeline(
                 repaired_output, repair_ms = run_final_accountant_stage(provider=final_provider, source_text=source_text, semantic_plan=semantic_plan, chart_text=chart_text, client=client, expected_direction=expected_direction, repair_context=repair_context)
                 repaired_lines, repaired_warnings = _compose_journal(repaired_output, semantic_plan, account_names)
                 repaired_debit, repaired_credit = _totals(repaired_lines)
-                if repaired_lines and repaired_debit == repaired_credit:
+                repaired_invalid_accounts = _invalid_account_warnings(repaired_warnings)
+                if repaired_invalid_accounts or not _repaired_output_uses_exact_chart_codes(repaired_output, account_names):
+                    composition_warnings = [*composition_warnings, *repaired_invalid_accounts]
+                    repair_status = "invalid_account_code"
+                elif repaired_lines and repaired_debit == repaired_credit:
+                    for key in (
+                        "_account_repair_attempted",
+                        "_account_repair_status",
+                        "_account_repair_elapsed_ms",
+                        "_account_repair_trigger_warnings",
+                        "_account_repair_error_type",
+                    ):
+                        if key in final_output:
+                            repaired_output[key] = final_output[key]
                     final_output, journal_lines, composition_warnings = repaired_output, repaired_lines, repaired_warnings
                     repair_status = "successful"
                 else:
@@ -959,14 +1147,14 @@ def run_three_stage_accounting_pipeline(
         stage_observer(
             "final_completed",
             {"status": "failed" if str(final_output.get("_stage_status") or "") == "failed" else "completed",
-             "elapsed_ms": accountant_ms + repair_ms},
+             "elapsed_ms": accountant_ms + account_repair_ms + repair_ms},
         )
     warnings = [
         *[str(item) for item in final_output.get("warnings") or [] if str(item).strip()],
         *composition_warnings,
         *_row_coverage_warning(source_package, final_output),
     ]
-    stage_elapsed_ms = {"reader": reader_ms, "planner": planner_ms, "accountant": accountant_ms, "accountant_repair": repair_ms, "total": reader_ms + planner_ms + accountant_ms + repair_ms}
+    stage_elapsed_ms = {"reader": reader_ms, "planner": planner_ms, "accountant": accountant_ms, "accountant_account_repair": account_repair_ms, "accountant_repair": repair_ms, "total": reader_ms + planner_ms + accountant_ms + account_repair_ms + repair_ms}
     result = _compatibility_result(
         package=source_package,
         plan=semantic_plan,

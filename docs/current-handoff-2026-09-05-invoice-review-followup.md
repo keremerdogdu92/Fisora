@@ -6,10 +6,15 @@ Continue the production invoice-pipeline cleanup after the 50-document APEX UI t
 ## Production baseline
 - Repo: `C:\Users\kerem\Documents\Fisero`
 - Production repo: `/opt/fisora/app`
-- Canonical deploy path: GitHub Actions -> AWS OIDC -> restricted SSM `FisoraProductionDeploy` -> exact SHA.
+- Canonical routine deploy path as of 2026-09-05: explicit `[deploy]` commit on `main` -> GitHub Actions **Deploy Production** -> latest-main SHA gate -> AWS OIDC -> restricted SSM `FisoraProductionDeploy` -> exact `GITHUB_SHA`.
+- This is the permanent normal deploy contract going forward. Routine releases must not depend on a local AWS SSO/session, a browser workflow click, direct SSH, production-side `git checkout` / `git reset`, ad-hoc `docker compose up --build`, or general `AWS-RunShellScript`.
+- If the desired code is already the latest `main`, use an empty release marker such as `git commit --allow-empty -m "[deploy] Release current main"` and push it. `workflow_dispatch` remains only an authorized manual retry/fallback.
+- The workflow must verify that its `GITHUB_SHA` is still the latest `main` before requesting AWS credentials; stale queued releases are skipped without touching production.
+- After every release, verify the GitHub Actions conclusion, exact deployed SHA, frontend/backend reachability, `/api/phase0/store/system/readiness`, and `FISORA_WORKER_RETENTION_ENABLED=false` unless Kerem explicitly changes that policy.
 - Current deployed SHA at handoff start: `7288e91`.
 - `FISORA_WORKER_RETENTION_ENABLED=false` must remain false until Kerem explicitly changes it.
 - GitHub deploy infrastructure was repaired: root-owned `.git` metadata was normalized safely and the restricted SSM document is version-controlled/self-diagnosing.
+- Canonical deploy documentation source-of-truth: `docs/production-ops-runbook.md` and `docs/production-deploy-checklist.md`.
 - Remember-me feature is already in production; new checked logins use a 30-day persistent session.
 
 ## 50-document production test
@@ -80,7 +85,7 @@ Do not assume the implementation is complete. It has NOT yet been fully tested, 
 5. Add/extend backend tests for: zero-value invoice; no journal creation; existing-journal reprocess hold; out-of-chart code -> targeted AI retry -> exact valid chart member; failed retry remains review; normal one-click approval policy unchanged.
 6. Add frontend tests for `normalizeStatus('no_posting_required')`, label/rendering, and queue classification.
 7. Run targeted tests, full relevant backend suite, frontend node tests/build, and `git diff --check`.
-8. Only after review of the mixed worktree: commit the intended files without swallowing unrelated changes, push main, deploy through canonical GitHub/OIDC workflow, verify production smoke/retention=false.
+8. Only after review of the mixed worktree: commit the intended files without swallowing unrelated changes. For a production release, publish the final latest-main commit with the canonical `[deploy]` release marker so the autonomous GitHub/OIDC/SSM exact-SHA workflow runs; then verify production smoke/readiness and `retention=false`.
 9. Re-run the 5 DEMANT zero-value invoices and Multinet through the UI or an equivalent production reprocess flow, then verify DB/telemetry behavior.
 
 ## Non-negotiable behavioral decisions
@@ -88,3 +93,4 @@ Do not assume the implementation is complete. It has NOT yet been fully tested, 
 - Missing/unmatched current accounts remain blank/review; do NOT invent them.
 - Do not add deterministic account-code correction that mutates one unknown chart code into another.
 - Retention remains disabled.
+- All routine production releases use the autonomous `[deploy]` main -> GitHub Actions -> latest-main gate -> AWS OIDC -> restricted SSM exact-SHA contract. Direct/manual server release is incident-only.

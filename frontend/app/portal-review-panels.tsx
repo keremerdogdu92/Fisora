@@ -1,5 +1,5 @@
 // File: frontend/app/portal-review-panels.tsx
-// Summary: Renders document previews, source-linked journal editing, compact account-entry controls, review decisions, and processing-safe approval gates.
+// Summary: Renders document previews with transport/render diagnostics, source-linked journal editing, compact account-entry controls, review decisions, and processing-safe approval gates.
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -206,6 +206,42 @@ function isHtmlPreview(document: PilotDocument) {
   return mime.includes("html") || fileName.endsWith(".html") || fileName.endsWith(".htm");
 }
 
+type OriginalDocumentPreviewDebug = {
+  requestPath: string;
+  responseStatus?: number;
+  responseStatusText?: string;
+  responseContentType?: string;
+  blobContentType?: string;
+  blobSize?: number;
+};
+
+function normalizePreviewMime(value?: string) {
+  return String(value || "").split(";", 1)[0].trim().toLowerCase();
+}
+
+function previewMimeIsSupported(value?: string) {
+  const mime = normalizePreviewMime(value);
+  return Boolean(mime) && (isImageMime(mime) || isFramePreviewMime(mime));
+}
+
+function previewRenderFailureReason(document: PilotDocument, debug?: OriginalDocumentPreviewDebug) {
+  const storedMime = normalizePreviewMime(document.originalDocumentMimeType);
+  const responseMime = normalizePreviewMime(debug?.responseContentType);
+  const blobMime = normalizePreviewMime(debug?.blobContentType);
+  const servedMime = responseMime || blobMime;
+
+  if (servedMime && previewMimeIsSupported(servedMime) && !previewMimeIsSupported(storedMime)) {
+    return `Belge sunucudan ${servedMime} olarak geliyor ancak kayıttaki MIME türü ${storedMime || "boş"}. Önizleme kararı kayıt MIME türüne göre verildiği için görüntüleyici seçilemedi.`;
+  }
+  if (!storedMime) {
+    return "Belge kaydında MIME türü yok. Dosya indirildi ancak Fisora hangi görüntüleyiciyi kullanacağını belirleyemedi.";
+  }
+  if (storedMime === "application/octet-stream") {
+    return "Belge genel binary türü (application/octet-stream) olarak kayıtlı. Dosya indirildi ancak PDF, HTML veya görsel olarak doğrulanamadığı için tarayıcı içi görüntüleyici açılmadı.";
+  }
+  return `Belge indirildi ancak kayıtlı MIME türü (${storedMime}) mevcut tarayıcı içi görüntüleyiciler tarafından desteklenmiyor.`;
+}
+
 function latestPipelineProblem(document: PilotDocument) {
   return [...(document.pipelineEvents ?? [])].reverse().find((event) => event.status === "error" || event.status === "warning");
 }
@@ -289,32 +325,53 @@ function safeHeaderValue(value: string) {
 export function useOriginalDocumentPreview(document?: PilotDocument, session?: LocalSession | null) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewError, setPreviewError] = useState("");
+  const [previewDebug, setPreviewDebug] = useState<OriginalDocumentPreviewDebug>();
 
   useEffect(() => {
     if (!document?.originalDocumentRef) {
       setPreviewUrl("");
       setPreviewError("Gerçek belge referansı yok.");
+      setPreviewDebug(undefined);
       return;
     }
     let active = true;
     let objectUrl = "";
+    const requestPath = `/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`;
+    setPreviewDebug({ requestPath });
+
     const fetchPreview = async () => {
+      let diagnostic: OriginalDocumentPreviewDebug = { requestPath };
       try {
         const response = await fetch(
-          `${resolvePreviewApiBaseUrl()}/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`,
+          `${resolvePreviewApiBaseUrl()}${requestPath}`,
           { cache: "no-store", headers: previewAuthHeaders(session, document) },
         );
-        if (!response.ok) throw new Error(`Önizleme alınamadı: ${response.status}`);
+        diagnostic = {
+          ...diagnostic,
+          responseStatus: response.status,
+          responseStatusText: response.statusText,
+          responseContentType: response.headers.get("content-type") || "",
+        };
+        if (!response.ok) {
+          throw new Error(`Önizleme isteği başarısız: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`);
+        }
         const blob = await response.blob();
+        diagnostic = {
+          ...diagnostic,
+          blobContentType: blob.type,
+          blobSize: blob.size,
+        };
         objectUrl = URL.createObjectURL(blob);
         if (active) {
           setPreviewUrl(objectUrl);
           setPreviewError("");
+          setPreviewDebug(diagnostic);
         }
       } catch (error) {
         if (active) {
           setPreviewUrl("");
           setPreviewError(error instanceof Error ? error.message : "Gerçek belge önizlemesi alınamadı.");
+          setPreviewDebug(diagnostic);
         }
       }
     };
@@ -325,7 +382,7 @@ export function useOriginalDocumentPreview(document?: PilotDocument, session?: L
     };
   }, [document?.clientId, document?.originalDocumentRef, session?.sessionToken, session?.userId]);
 
-  return { previewError, previewUrl };
+  return { previewDebug, previewError, previewUrl };
 }
 
 export function DocumentPipelineTimeline({ events }: { events: DocumentPipelineEvent[] }) {
@@ -518,8 +575,30 @@ export function HtmlSourceComparison({ document, previewUrl }: { document: Pilot
   );
 }
 
+function PreviewDebugDetails({ debug, document }: { debug?: OriginalDocumentPreviewDebug; document: PilotDocument }) {
+  const blobSize = typeof debug?.blobSize === "number"
+    ? `${debug.blobSize.toLocaleString("tr-TR")} bayt`
+    : "-";
+
+  return (
+    <details className="preview-debug-details">
+      <summary>Teknik debug</summary>
+      <dl>
+        <div><dt>Kayıt MIME</dt><dd>{document.originalDocumentMimeType || "boş"}</dd></div>
+        <div><dt>HTTP Content-Type</dt><dd>{debug?.responseContentType || "-"}</dd></div>
+        <div><dt>Blob MIME</dt><dd>{debug?.blobContentType || "-"}</dd></div>
+        <div><dt>HTTP durum</dt><dd>{typeof debug?.responseStatus === "number" ? `${debug.responseStatus}${debug.responseStatusText ? ` ${debug.responseStatusText}` : ""}` : "-"}</dd></div>
+        <div><dt>Dosya boyutu</dt><dd>{blobSize}</dd></div>
+        <div><dt>Dosya adı</dt><dd>{document.fileName || "-"}</dd></div>
+        <div><dt>Belge ref</dt><dd>{document.originalDocumentRef || "-"}</dd></div>
+        <div><dt>İstem yolu</dt><dd>{debug?.requestPath || "-"}</dd></div>
+      </dl>
+    </details>
+  );
+}
+
 export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPreview = false, document, session, sourceTarget, onClearSourceTarget }: { controlledHtmlPreview?: boolean; controlledPdfPreview?: boolean; document?: PilotDocument; session?: LocalSession | null; sourceTarget?: DocumentSourceTarget | null; onClearSourceTarget?: () => void }) {
-  const { previewError, previewUrl } = useOriginalDocumentPreview(document, session);
+  const { previewDebug, previewError, previewUrl } = useOriginalDocumentPreview(document, session);
 
   if (!document) {
     return (
@@ -534,6 +613,7 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
   const canFramePreview = isFramePreviewMime(document.originalDocumentMimeType);
   const pdfPreview = controlledPdfPreview && isPdfPreview(document);
   const htmlPreview = isHtmlPreview(document);
+  const renderFailureReason = previewRenderFailureReason(document, previewDebug);
   return (
     <section className="review-panel document-panel">
       <div className="panel-heading">
@@ -561,15 +641,18 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
               />
             ) : (
               <div className="preview-error-panel">
-                <strong>Bu dosya tarayıcı içinde önizlenemiyor.</strong>
-                <p>Gerçek belge indirilebilir; mock belge gösterilmedi.</p>
+                <strong>Belge sunucudan geldi ama görüntüleyici seçilemedi.</strong>
+                <p>{renderFailureReason}</p>
+                <p>Dosyanın kendisi mevcut. Bu hata yalnızca çalışma masasındaki tarayıcı içi önizleme katmanını etkiliyor.</p>
+                <PreviewDebugDetails debug={previewDebug} document={document} />
                 <a href={previewUrl} download={document.fileName}>Belgeyi indir</a>
               </div>
             )
           ) : (
             <div className="preview-error-panel">
               <strong>{errorMessage}</strong>
-              <p>Mock belge çizimi kapalı. Hangi adımda kırıldığını işlem geçmişinden takip edin.</p>
+              <p>Belge önizleme isteği tamamlanamadı. HTTP yanıtını ve dosya kimliğini aşağıdaki teknik debug alanından kontrol edebilirsiniz.</p>
+              <PreviewDebugDetails debug={previewDebug} document={document} />
             </div>
           )}
         </div>

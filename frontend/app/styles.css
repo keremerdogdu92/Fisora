@@ -2421,6 +2421,50 @@ button:disabled {
   font-weight: 800;
 }
 
+.preview-debug-details {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.preview-debug-details summary {
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.preview-debug-details dl {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.preview-debug-details dl > div {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(110px, 0.38fr) minmax(0, 1fr);
+}
+
+.preview-debug-details dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.preview-debug-details dd {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .preview-debug-details dl > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 .pipeline-timeline {
   background: #fff;
   border: 1px solid var(--border);

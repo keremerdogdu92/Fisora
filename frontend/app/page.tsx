@@ -133,11 +133,11 @@ export default function RoleGatewayLanding() {
         </a>
 
         <div className="role-copy">
-          <h1>Akıllı ve öğrenen bir yardımcıyla günlük muhasebe işi daha net.</h1>
+          <h1>Akıllı ve öğrenen bir ekiple günlük muhasebe işi daha net.</h1>
           <p>
-            Fisora, yapay zeka desteğini kararın yerine geçmek için değil, belge okuma ve
-            taslak hazırlama sürecini kolaylaştırmak için kullanır. Sistem, zaman içinde
-            öğrenilen örnekleri ve kullanıcı tercihlerini daha iyi anlayarak iş yükünü hafifletir.
+            Fisora’nın yapay zekâ ajanları günlük işleri üstlenir, senin çalışma biçimini öğrenir
+            ve verdiğin kurallarla çalışır. Sen kontrol edersin; onlar işi taşır. İş büyüdükçe
+            ekibini büyütmek zorunda kalmadan daha fazla mükellefi aynı düzenle yönetebilirsin.
           </p>
         </div>
 

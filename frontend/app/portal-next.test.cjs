@@ -321,8 +321,8 @@ test("shared login gateway uses the portal-next product language", () => {
   const styles = source("styles.css");
 
   assert.match(page, /landing-shell fisora-gateway/);
-  assert.match(page, /Akıllı ve öğrenen bir yardımcıyla günlük muhasebe işi daha net\./);
-  assert.match(page, /Fisora, yapay zeka desteğini kararın yerine geçmek için değil/);
+  assert.match(page, /Akıllı ve öğrenen bir ekiple günlük muhasebe işi daha net\./);
+  assert.match(page, /Fisora’nın yapay zekâ ajanları günlük işleri üstlenir/);
   assert.match(page, /gateway-identity-panel/);
   assert.match(page, /gateway-login-heading/);
   assert.match(page, /Fisora&apos;ya giriş yap/);

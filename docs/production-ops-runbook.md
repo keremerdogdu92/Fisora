@@ -101,7 +101,7 @@ Bu document değiştiğinde yetkili AWS oturumuyla bir kez senkronize edilir; bu
 powershell -ExecutionPolicy Bypass -File deploy/scripts/sync-production-deploy-document.ps1
 ```
 
-Tracked production worktree değişikliği varsa deploy otomatik reset atmaz. `FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes` ile değişen dosyaları loglar ve güvenli şekilde durur.
+Bilinmeyen tracked production worktree değişikliklerinde deploy otomatik reset atmaz. `FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes` ile değişen dosyaları loglar ve güvenli şekilde durur. Yalnızca OIDC geçişinden kalmış, blob hash'i `7001c451a720f682b5334f97d10dab9643c38180` olan eski `.github/workflows/deploy-production.yml` sürümü tek kirli tracked dosyaysa HEAD sürümüne geri alınır ve `FISORA_DEPLOY_REPAIRED reason=known_legacy_workflow_blob` kaydı üretilir.
 
 ## Acil Durum Direct SSH Release
 

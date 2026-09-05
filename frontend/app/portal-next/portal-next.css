@@ -385,6 +385,7 @@
 
 .portal-next-theme .accountant-workspace {
   gap: 8px;
+  padding-bottom: 38px;
 }
 
 .portal-next-theme .document-review-toolbar {
@@ -1999,8 +2000,8 @@
   border: 1px solid var(--border-strong);
   display: grid;
   grid-template-columns: 210px minmax(0, 1fr);
-  height: calc(100vh - 158px);
-  min-height: 590px;
+  height: calc(100vh - 196px);
+  min-height: min(590px, calc(100vh - 196px));
   overflow: hidden;
 }
 .portal-next-workbench-stage.next.queue-hidden { grid-template-columns: minmax(0, 1fr); }
@@ -2080,7 +2081,7 @@
   grid-template-columns: 210px minmax(0, 1fr);
   grid-template-rows: 42px minmax(0, 1fr);
   height: auto;
-  inset: 6px;
+  inset: 6px 6px 44px;
   min-height: 0;
   position: fixed;
   z-index: 170;
@@ -2171,39 +2172,31 @@
 .portal-next-theme .journal-ledger th { font-size: 0.69rem; height: 34px; padding: 5px 6px; }
 .portal-next-theme .journal-ledger td { padding: 4px 6px; }
 .portal-next-theme .journal-ledger input { font-size: 0.74rem; min-height: 28px; padding: 3px 4px; }
-.portal-next-theme .journal-account-caption {
-  align-items: baseline;
-  display: flex;
-  gap: 6px;
-  margin-bottom: 3px;
+.portal-next-theme .journal-account-line {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(92px, 11ch) minmax(0, 1fr);
+  margin-bottom: 4px;
   min-width: 0;
-  white-space: nowrap;
 }
-.portal-next-theme .journal-account-caption span {
-  color: #294e69;
-  flex: 0 0 auto;
-  font-size: 0.65rem;
-  font-variant-numeric: tabular-nums;
-  font-weight: 900;
-}
-.portal-next-theme .journal-account-caption strong {
+.portal-next-theme .journal-account-name {
   color: #465564;
-  font-size: 0.65rem;
-  font-weight: 800;
+  font-size: 0.68rem;
+  font-weight: 850;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .portal-next-theme .journal-ledger th:nth-child(1),
-.portal-next-theme .journal-ledger td:nth-child(1) { width: calc(11ch + 16px); }
+.portal-next-theme .journal-ledger td:nth-child(1) { width: auto; }
 .portal-next-theme .journal-ledger th:nth-child(2),
-.portal-next-theme .journal-ledger td:nth-child(2) { width: auto; }
+.portal-next-theme .journal-ledger td:nth-child(2),
 .portal-next-theme .journal-ledger th:nth-child(3),
-.portal-next-theme .journal-ledger td:nth-child(3),
+.portal-next-theme .journal-ledger td:nth-child(3) { width: 94px; }
 .portal-next-theme .journal-ledger th:nth-child(4),
-.portal-next-theme .journal-ledger td:nth-child(4) { width: 88px; }
-.portal-next-theme .journal-ledger th:nth-child(5),
-.portal-next-theme .journal-ledger td:nth-child(5) { padding-left: 2px; padding-right: 2px; width: 30px; }
+.portal-next-theme .journal-ledger td:nth-child(4) { padding-left: 2px; padding-right: 2px; width: 30px; }
 .portal-next-theme .journal-ledger .account-code-combobox input {
   font-variant-numeric: tabular-nums;
   max-width: 100%;
@@ -2229,16 +2222,26 @@
 .portal-next-theme .journal-advanced-details > summary { color: var(--muted); cursor: pointer; font-size: 0.68rem; font-weight: 800; padding: 6px 8px; }
 .portal-next-theme .journal-advanced-details .accountant-validation-panel { border: 0; margin: 0; }
 .portal-next-theme .journal-next-actions {
+  align-items: center;
   background: rgba(255, 255, 255, 0.98);
   border-top: 1px solid var(--border-strong);
   display: grid;
   gap: 6px;
-  grid-template-columns: auto auto minmax(150px, 1fr);
+  grid-template-columns: max-content max-content minmax(220px, 1.7fr);
   padding: 7px;
 }
-.portal-next-theme .journal-next-actions button { border-radius: 5px; font-weight: 850; min-height: 36px; padding: 5px 9px; }
-.portal-next-theme .journal-next-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.portal-next-theme .journal-next-actions button.danger { background: #fff7f7; border-color: #f0a0a0; color: #b42318; }
+.portal-next-theme .journal-next-actions button { border-radius: 5px; min-height: 32px; padding: 4px 8px; }
+.portal-next-theme .journal-next-actions button.secondary { color: #5b6773; font-size: 0.68rem; font-weight: 760; }
+.portal-next-theme .journal-next-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 3px 9px rgba(27, 76, 111, 0.2);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 900;
+  min-height: 42px;
+}
+.portal-next-theme .journal-next-actions button.danger { background: #fff; border-color: #e4c7c7; color: #8b3b35; }
 .portal-next-theme .journal-next-actions button:disabled { opacity: 0.5; }
 .portal-next-theme .next-review .journal-decision-bar { display: none; }
 .portal-next-theme .next-review .journal-correction-panel { margin-top: 0; }
@@ -2350,7 +2353,7 @@
   min-width: 0;
 }
 .portal-next-theme .document-source-focus-controls span {
-  color: #9a5d00;
+  color: #64748b;
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2415,7 +2418,7 @@
 .portal-next-theme .source-review-link {
   background: transparent;
   border: 0;
-  color: #9a5d00;
+  color: #64748b;
   display: block;
   font: inherit;
   font-size: 0.62rem;
@@ -2438,10 +2441,10 @@
   margin-top: 3px;
 }
 .portal-next-theme .source-review-chip {
-  background: #fff8e6;
-  border: 1px solid #e7c77d;
+  background: #f4f6f8;
+  border: 1px solid #d7dee6;
   border-radius: 999px;
-  color: #805000;
+  color: #52606d;
   font-size: 0.61rem;
   font-weight: 850;
   line-height: 1.2;
@@ -2449,7 +2452,7 @@
   padding: 2px 7px;
   white-space: nowrap;
 }
-.portal-next-theme .source-review-chip:hover { background: #fff1c7; border-color: #cc9c3d; }
+.portal-next-theme .source-review-chip:hover { background: #edf2f6; border-color: #c4ced8; }
 .portal-next-theme .source-review-details { color: var(--muted); font-size: 0.61rem; }
 .portal-next-theme .source-review-details > summary { cursor: pointer; font-weight: 750; }
 .portal-next-theme .source-review-details > div {

@@ -3341,25 +3341,38 @@ button:disabled {
 
 .journal-ledger th:nth-child(1),
 .journal-ledger td:nth-child(1) {
-  width: 25%;
+  width: auto;
 }
 
 .journal-ledger th:nth-child(2),
-.journal-ledger td:nth-child(2) {
-  width: 31%;
-}
-
+.journal-ledger td:nth-child(2),
 .journal-ledger th:nth-child(3),
-.journal-ledger td:nth-child(3),
-.journal-ledger th:nth-child(4),
-.journal-ledger td:nth-child(4) {
+.journal-ledger td:nth-child(3) {
   width: 17%;
 }
 
-.journal-ledger th:nth-child(5),
-.journal-ledger td:nth-child(5) {
+.journal-ledger th:nth-child(4),
+.journal-ledger td:nth-child(4) {
   text-align: center;
   width: 10%;
+}
+
+.journal-account-line {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(110px, 0.34fr) minmax(0, 1fr);
+  margin-bottom: 5px;
+}
+
+.journal-account-name {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .journal-ledger th {
@@ -3381,8 +3394,8 @@ button:disabled {
   width: 100%;
 }
 
-.journal-ledger td:nth-child(3) input,
-.journal-ledger td:nth-child(4) input {
+.journal-ledger td:nth-child(2) input,
+.journal-ledger td:nth-child(3) input {
   padding-left: 4px;
   padding-right: 4px;
   text-align: right;

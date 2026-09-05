@@ -501,7 +501,7 @@ export function AccountantWorkspace({
                         <b>{queueDocument.amount || "-"}</b>
                       </span>
                       <small>{queueDocument.issueDate || queueDocument.uploadedAt || "-"} · {labelForIntakeCategory(queueDocument.intakeCategory)}</small>
-                      <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>
+                      {queueDocument.status === "review_required" ? null : <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>}
                     </button>
                   </li>
                 );
@@ -590,17 +590,13 @@ export function AccountantWorkspace({
                 <div>{labelForIntakeCategory(document.intakeCategory)}</div>
                 <div>{document.amount || "-"}</div>
                 <div>
-                  <em>{formatStatus(document.status)}</em>
+                  <em>{document.status === "review_required" ? "Müşavir onayı" : formatStatus(document.status)}</em>
                   {document.reviewReasons.length ? (
                     <div className="review-reason-chips" aria-label="Kontrol gerekçeleri">
                       {document.reviewReasons.slice(0, 3).map((reason) => (
                         <span className={reason === "cancelled_invoice_visible" ? "danger" : undefined} key={reason}>{reviewReasonLabel(reason)}</span>
                       ))}
                       {document.reviewReasons.length > 3 ? <span>+{document.reviewReasons.length - 3}</span> : null}
-                    </div>
-                  ) : document.status === "review_required" ? (
-                    <div className="review-reason-chips" aria-label="Kontrol gerekçeleri">
-                      <span>Ek kontrol gerekli</span>
                     </div>
                   ) : null}
                 </div>

@@ -22,12 +22,16 @@ function focusJournalEditor() {
   const input = document.querySelector<HTMLElement>(".portal-next-theme .journal-ledger input");
   input?.scrollIntoView({ block: "nearest", inline: "nearest" });
   input?.focus();
-}function focusClientPeriod() {
+}
+
+function focusClientPeriod() {
   document.querySelector<HTMLSelectElement>(".portal-next-client-select")?.focus();
 }
 
 function approveCurrentDocument() {
-  document.querySelector<HTMLButtonElement>(".portal-next-theme .journal-primary-approve button:not(:disabled)")?.click();
+  document.querySelector<HTMLButtonElement>(
+    ".portal-next-theme .journal-next-actions .primary:not(:disabled), .portal-next-theme .journal-primary-approve button:not(:disabled)",
+  )?.click();
 }
 
 export function PortalNextWorkspaceControls({

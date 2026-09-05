@@ -81,7 +81,7 @@ function formatDraftStatus(status: string) {
     manual_draft_required: "Manuel fiş gerekli",
     manual_draft_unbalanced: "Fiş dengesi kontrol edilmeli",
     processing: "İşleniyor",
-    review_required: "Kontrol gerekli",
+    review_required: "Müşavir onayı bekliyor",
     provider_failed: "AI taslak alınamadı",
     ai_retry_required: "AI yeniden denenecek",
     ai_correction_required: "AI hesap düzeltmesi gerekli",
@@ -588,7 +588,7 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
           <h2>{controlledPdfPreview || controlledHtmlPreview ? "Kaynak Belge" : "Orijinal belge"}</h2>
           <span>{document.fileName}</span>
         </div>
-        <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
+        {document.status === "review_required" ? null : <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>}
       </div>
       <div className="document-preview-layout">
         <div className="document-canvas">
@@ -988,8 +988,8 @@ export function JournalPanel({
             <button className="primary" onClick={() => onSaveDecision("accept_detected_direction")} type="button">Yönü çöz</button>
           ) : (
             <>
-              <button disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
-              <button className="danger" onClick={() => onSaveDecision("exclude_export")} type="button">Hariç tut</button>
+              <button className="secondary" disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
+              <button className="secondary danger" onClick={() => onSaveDecision("exclude_export")} type="button">Hariç tut</button>
               <button className="primary" disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve sonraki →</button>
             </>
           )}
@@ -1255,8 +1255,7 @@ function ManualDraftEditor({
         <table>
           <thead>
             <tr>
-              <th>Hesap</th>
-              <th>Açıklama</th>
+              <th>Hesap / Açıklama</th>
               <th>Borç</th>
               <th>Alacak</th>
               <th></th>
@@ -1281,12 +1280,17 @@ function ManualDraftEditor({
                 onMouseLeave={() => onHoverSource?.(null)}
               >
                 <td>
-                  <AccountCodeCombobox
-                    accounts={chartAccounts}
-                    onChange={(value) => onUpdateLine(index, { account_code: value })}
-                    onSelect={(account) => selectAccount(index, account)}
-                    value={line.account_code}
-                  />
+                  <div className="journal-account-line">
+                    <AccountCodeCombobox
+                      accounts={chartAccounts}
+                      onChange={(value) => onUpdateLine(index, { account_code: value })}
+                      onSelect={(account) => selectAccount(index, account)}
+                      value={line.account_code}
+                    />
+                    <strong className="journal-account-name" title={accountName || undefined}>
+                      {accountName || "Hesap planından seçim bekleniyor"}
+                    </strong>
+                  </div>
                   {invalidAccountCodes.includes(normalizeAccountCodeInput(line.account_code)) ? (
                     <small className="field-warning">Hesap planında olmayan veya seçilemeyen kod.</small>
                   ) : null}
@@ -1295,12 +1299,6 @@ function ManualDraftEditor({
                       Yeni cari hesabı önerisi. Hesap planında henüz yok; mevcut cariyi seçin veya müşavir onayıyla yeni cari açın.
                     </small>
                   ) : null}
-                </td>
-                <td>
-                  <div className="journal-account-caption" title={accountName || undefined}>
-                    <span>{line.account_code || "Hesap seçilmedi"}</span>
-                    <strong>{accountName || "Hesap planından seçim bekleniyor"}</strong>
-                  </div>
                   <input
                     aria-label="Fatura satırı açıklaması"
                     onChange={(event) => onUpdateLine(index, { description: event.target.value })}

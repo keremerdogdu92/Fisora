@@ -1,5 +1,5 @@
 // File: frontend/e2e/document-inspector.spec.ts
-// Summary: Verifies portal-next queue/focus layout, mode-aware pointer-centered magnification, and deterministic journal-to-source focus for real HTML and PDF viewers.
+// Summary: Verifies portal-next queue/focus layout, approval hierarchy, shortcut-bar clearance, mode-aware magnification, and deterministic journal-to-source focus for real HTML and PDF viewers.
 
 import { expect, test, type Page } from "@playwright/test";
 
@@ -260,6 +260,44 @@ test("queue visibility and focus mode preserve the active workbench", async ({ p
   const mainBox = await main.boundingBox();
   expect(mainBox).not.toBeNull();
   expect(mainBox!.width).toBeGreaterThan(700);
+});
+
+test("ledger hierarchy keeps approval dominant and shortcut help clear of decisions", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sira No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "approval-hierarchy.html", "text/html", html);
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  await expect(page.locator(".journal-ledger thead th")).toHaveCount(4);
+  await expect(page.locator(".journal-ledger thead th").first()).toContainText("Hesap");
+  await expect(page.locator(".journal-account-line").first()).toBeVisible();
+
+  const sourceChip = page.locator(".source-review-chip").first();
+  await expect(sourceChip).toBeVisible();
+  await expect(sourceChip).toHaveCSS("background-color", "rgb(244, 246, 248)");
+
+  const actionBar = page.locator(".journal-next-actions");
+  const approve = actionBar.locator("button.primary");
+  const hold = actionBar.locator("button.secondary:not(.danger)");
+  const exclude = actionBar.locator("button.secondary.danger");
+  await expect(approve).toBeVisible();
+  await expect(hold).toBeVisible();
+  await expect(exclude).toBeVisible();
+
+  const approveBox = await approve.boundingBox();
+  const holdBox = await hold.boundingBox();
+  const excludeBox = await exclude.boundingBox();
+  expect(approveBox).not.toBeNull();
+  expect(holdBox).not.toBeNull();
+  expect(excludeBox).not.toBeNull();
+  expect(approveBox!.height).toBeGreaterThan(holdBox!.height);
+  expect(approveBox!.height).toBeGreaterThan(excludeBox!.height);
+  expect(approveBox!.width).toBeGreaterThan(holdBox!.width * 1.5);
+
+  const actionBox = await actionBar.boundingBox();
+  const shortcutBox = await page.locator(".portal-next-shortcut-bar").boundingBox();
+  expect(actionBox).not.toBeNull();
+  expect(shortcutBox).not.toBeNull();
+  expect(actionBox!.y + actionBox!.height).toBeLessThanOrEqual(shortcutBox!.y + 1);
 });
 
 test("PDF invoice magnifier and journal source focus use PDF.js text evidence", async ({ page }) => {

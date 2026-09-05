@@ -186,6 +186,7 @@ test("next keyboard controls preserve review guards and desktop-only legend", ()
   assert.match(controls, /button:not\(:disabled\)/);
   assert.match(controls, /event\.key === "F10"/);
   assert.match(controls, /event\.ctrlKey && event\.key === "Enter"/);
+  assert.match(controls, /journal-next-actions \.primary:not\(:disabled\)/);
   assert.match(controls, /event\.ctrlKey && event\.key\.toLowerCase\(\) === "z" && undoAvailable/);
   assert.match(styles, /\.portal-next-shortcut-bar/);
   assert.match(styles, /@media \(max-width: 860px\)[\s\S]*?\.portal-next-shortcut-bar[\s\S]*?display: none/);
@@ -208,6 +209,11 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(workspace, /portal-next-focus-document/);
   assert.match(workspace, /Evrak \{selectedDocument/);
   assert.match(styles, /grid-template-columns:\s*210px minmax\(0, 1fr\)/);
+  assert.match(styles, /height:\s*calc\(100vh - 196px\)/);
+  assert.match(styles, /min-height:\s*min\(590px, calc\(100vh - 196px\)\)/);
+  assert.match(styles, /inset:\s*6px 6px 44px/);
+  assert.match(styles, /grid-template-columns:\s*max-content max-content minmax\(220px, 1\.7fr\)/);
+  assert.match(workspace, /queueDocument\.status === "review_required" \? null/);
   assert.match(styles, /\.portal-next-workbench-stage\.next\.queue-hidden\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(styles, /focus-mode \.portal-next-document-queue\s*\{[\s\S]*?display:\s*grid/);
   assert.match(styles, /focus-mode\.queue-hidden \.portal-next-document-queue\s*\{\s*display:\s*none/);
@@ -227,7 +233,10 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(types, /DocumentSourceTarget/);
   assert.match(types, /sourceAmount\?: string/);
   assert.match(review, /source-review-chip/);
-  assert.match(review, /journal-account-caption/);
+  assert.match(review, /journal-account-line/);
+  assert.match(review, /journal-account-name/);
+  assert.match(review, /className="secondary"/);
+  assert.match(review, /className="secondary danger"/);
   assert.match(review, /chartAccountNameForCode/);
   assert.match(review, /aria-label="Fatura satırı açıklaması"/);
   assert.match(review, /journal-remove-line/);
@@ -268,7 +277,9 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(styles, /document-source-focus-controls/);
   assert.match(styles, /document-magnifier/);
   assert.match(styles, /journal-remove-line/);
-  assert.match(styles, /journal-account-caption/);
+  assert.match(styles, /journal-account-line/);
+  assert.match(styles, /journal-account-name/);
+  assert.match(styles, /source-review-chip[\s\S]*?background:\s*#f4f6f8/);
   assert.match(styles, /account-code-combobox input[\s\S]*?width:\s*11ch/);
   assert.match(styles, /source-pinned-row/);
   assert.match(styles, /journal-source-row/);

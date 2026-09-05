@@ -20,7 +20,7 @@
           "cd \"$ROOT_DIR\"",
           "printf 'FISORA_DEPLOY_START target=%s\\n' '{{ TargetSha }}'",
           "dirty=\"$(sudo -u ubuntu git -C \"$ROOT_DIR\" status --porcelain --untracked-files=no)\"",
-          "if [ -n \"$dirty\" ]; then echo 'FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes' >&2; printf '%s\\n' \"$dirty\" >&2; exit 20; fi",
+          "if [ -n \"$dirty\" ]; then echo 'FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes' >&2; printf '%s\\n' \"$dirty\" >&2; if [ -f .github/workflows/deploy-production.yml ]; then printf 'FISORA_DIRTY_WORKTREE_BLOB=' >&2; sudo -u ubuntu git -C \"$ROOT_DIR\" hash-object .github/workflows/deploy-production.yml >&2; printf 'FISORA_DIRTY_HEAD_BLOB=' >&2; sudo -u ubuntu git -C \"$ROOT_DIR\" rev-parse HEAD:.github/workflows/deploy-production.yml >&2; fi; exit 20; fi",
           "sudo -u ubuntu git -C \"$ROOT_DIR\" fetch origin main",
           "sudo -u ubuntu git -C \"$ROOT_DIR\" cat-file -e '{{ TargetSha }}^{commit}' || { echo 'FISORA_DEPLOY_BLOCKED reason=target_commit_missing' >&2; exit 21; }",
           "sudo -u ubuntu git -C \"$ROOT_DIR\" merge-base --is-ancestor '{{ TargetSha }}' origin/main || { echo 'FISORA_DEPLOY_BLOCKED reason=target_not_on_origin_main' >&2; exit 22; }",

@@ -27,6 +27,8 @@ class ProductionDeployContractTests(unittest.TestCase):
         self.assertIn("sudo -u ubuntu git -C", commands)
         self.assertIn("--untracked-files=no", commands)
         self.assertIn("FISORA_DEPLOY_BLOCKED reason=tracked_worktree_changes", commands)
+        self.assertIn("FISORA_DIRTY_WORKTREE_BLOB=", commands)
+        self.assertIn("FISORA_DIRTY_HEAD_BLOB=", commands)
         self.assertIn("merge-base --is-ancestor", commands)
         self.assertIn("github-actions-prod-deploy.sh", commands)
         self.assertNotIn("reset --hard", commands)

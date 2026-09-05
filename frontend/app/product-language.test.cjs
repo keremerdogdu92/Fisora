@@ -57,12 +57,13 @@ test("review actions clearly name the export exclusion decision", () => {
   assert.match(reviewSource, /Çıktı listesine ekleme/);
 });
 
-test("operations page uses AI agent capacity language without plan wording", () => {
+test("operations page stays accountant-facing instead of exposing developer telemetry", () => {
   const operationsSource = source("portal-exports-view.tsx");
 
-  assert.match(operationsSource, /AI ajanı kapasitesi/);
-  assert.match(operationsSource, /Araştırma ajanı/);
-  assert.doesNotMatch(operationsSource, /free tier|free|ücretsiz|API key|secret/i);
+  assert.match(operationsSource, /Belge akışı/);
+  assert.match(operationsSource, /Sistem durumu/);
+  assert.match(operationsSource, /Ofis özeti/);
+  assert.doesNotMatch(operationsSource, />Auth<|>Store<|>Production<|AI ajanı kapasitesi/);
 });
 
 test("document processing shows passive AI agent capacity labels", () => {
@@ -78,7 +79,7 @@ test("document processing shows passive AI agent capacity labels", () => {
   assert.doesNotMatch(documentSource, /onClick|research\/refresh|yenile/i);
   assert.match(queriesSource, /refetchInterval:\s*5 \* 60 \* 1000/);
   assert.match(queriesSource, /refetchOnWindowFocus:\s*true/);
-  assert.match(operationsSource, /Ölçülemiyor/);
+  assert.match(operationsSource, /Sistem durumu/);
   assert.match(stylesSource, /\.document-capacity-strip\s*\{/);
   assert.match(stylesSource, /@media \(max-width: 720px\)/);
 });

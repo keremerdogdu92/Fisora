@@ -3,7 +3,7 @@
 "use client";
 
 import { FileText, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { IntakeCategory, PilotClient, PilotDocument, PilotStatus } from "../portal-types";
 
 const invoiceCategories = new Set<IntakeCategory>(["purchase_invoice", "sales_invoice"]);
@@ -78,7 +78,6 @@ export function PortalNextUploadView({
   clients, documents, onClientChange, onIntakeCategoryChange, onUpload,
   selectedClient, selectedIntakeCategory, uploadPeriod, uploadStatus,
 }: UploadWorkspaceProps) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [selectionStatus, setSelectionStatus] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -133,7 +132,7 @@ export function PortalNextUploadView({
         </div>
         <div className="portal-next-upload-period">
           <span>Yükleme dönemi</span>
-          <strong>{periodLabel(uploadPeriod)}</strong>
+          <strong>{periodLabel(uploadPeriod)}</strong><small>Bu ekrandaki faturalar bu döneme kaydedilir.</small>
         </div>
       </div>
 
@@ -171,9 +170,6 @@ export function PortalNextUploadView({
             </div>
           </div>
 
-          <button className="portal-next-upload-primary portal-next-upload-file-button" disabled={!selectedClient || isUploading} onClick={() => inputRef.current?.click()} type="button">
-            <Upload aria-hidden="true" /> Dosya Seç
-          </button>
         </div>
         <label
           className={isDragging ? "portal-next-upload-dropzone dragging" : "portal-next-upload-dropzone"}
@@ -187,7 +183,6 @@ export function PortalNextUploadView({
           }}
         >
           <input
-            ref={inputRef}
             accept=".pdf,.html,.htm,.xml,.zip"
             disabled={!selectedClient || isUploading}
             multiple

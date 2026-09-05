@@ -154,6 +154,7 @@ export function PortalNextTopbar({
   selectedPeriod: string;
 }) {
   const showClientContext = mode === "documents";
+  const showOfficeContext = mode !== "uploads";
   return (
     <header className={`portal-next-topbar${showClientContext ? " workspace" : ""}`}>
       <div className="portal-next-topbar-left">
@@ -162,30 +163,15 @@ export function PortalNextTopbar({
       </div>
       {showClientContext ? (
         <div className="portal-next-context" aria-label="Çalışılan mükellef ve dönem">
-          <label>
-            <span>Çalışılan mükellef</span>
-            <select className="portal-next-client-select" onChange={(event) => onSelectClient(event.target.value)} value={selectedClient?.clientId || ""}>
-              {clients.map((client) => <option key={client.clientId} value={client.clientId}>{client.clientName}</option>)}
-            </select>
-          </label>
-          <label>
-            <span>Dönem</span>
-            <select className="portal-next-period-select" onChange={(event) => onSelectPeriod(event.target.value)} value={selectedPeriod}>
-              {periods.map((period) => <option key={period} value={period}>{longPeriodLabel(period)}</option>)}
-            </select>
-          </label>
+          <label><span>Çalışılan mükellef</span><select className="portal-next-client-select" onChange={(event) => onSelectClient(event.target.value)} value={selectedClient?.clientId || ""}>{clients.map((client) => <option key={client.clientId} value={client.clientId}>{client.clientName}</option>)}</select></label>
+          <label><span>Dönem</span><select className="portal-next-period-select" onChange={(event) => onSelectPeriod(event.target.value)} value={selectedPeriod}>{periods.map((period) => <option key={period} value={period}>{longPeriodLabel(period)}</option>)}</select></label>
         </div>
-      ) : (
+      ) : showOfficeContext ? (
         <div className="portal-next-context portal-next-office-context" aria-label="Ofis görünümü ve dönem">
           <div><span>Ofis görünümü</span><strong>Tüm ofis</strong></div>
-          <label>
-            <span>Dönem</span>
-            <select className="portal-next-period-select" onChange={(event) => onSelectPeriod(event.target.value)} value={selectedPeriod}>
-              {periods.map((period) => <option key={period} value={period}>{longPeriodLabel(period)}</option>)}
-            </select>
-          </label>
+          <label><span>Dönem</span><select className="portal-next-period-select" onChange={(event) => onSelectPeriod(event.target.value)} value={selectedPeriod}>{periods.map((period) => <option key={period} value={period}>{longPeriodLabel(period)}</option>)}</select></label>
         </div>
-      )}
+      ) : null}
       <div className="portal-next-topbar-status"><span>{notificationPendingCount} kontrol</span></div>
     </header>
   );

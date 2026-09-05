@@ -205,7 +205,7 @@ test("client management defaults to the existing-client list and separates loadi
   assert.doesNotMatch(clientsView, /className="client-management-tabs"/);
   assert.match(clientsView, /Vergi levhası bilgileri/);
   assert.match(clientsView, /className="tax-certificate-preview"/);
-  assert.match(clientsView, /NACE araştırmasını onayla/);
+  assert.match(clientsView, /NACE araştırmasını çalıştır/);
 });
 
 test("initial workspace loading is not blocked by the separate readiness request", () => {
@@ -240,7 +240,7 @@ test("client management view separates Gemini tax certificate loading from NACE 
   assert.match(clientsView, /NACE araştırması yapılıyor/);
   assert.match(clientActions, /setNewClientTaxCertificateParsePending\(true\)/);
   assert.match(clientActions, /setNewClientTaxCertificateStage\("Gemini vergi levhasını analiz ediyor"\)/);
-  assert.match(clientActions, /setNewClientTaxCertificateStage\(parseStatus === "partial" \? "Eksik kritik alanlar var" : "Alanlar dolduruldu"\)/);
+  assert.match(clientActions, /setNewClientTaxCertificateStage\(parseStatus === "partial" \? "Gemini alanları kısmen doldurdu" : "Gemini alanları doldurdu"\)/);
   assert.match(clientActions, /missing_critical_fields/);
 });
 

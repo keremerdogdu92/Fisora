@@ -173,9 +173,9 @@ test("next outputs preserve the approved v13 target composition while marking fu
   assert.match(exportsView, /Excel çalışma dosyası/);
   assert.match(exportsView, /CSV çıktı paketi/);
   assert.match(exportsView, /Kontrol paketi/);
-  assert.match(exportsView, /Zirve’ye otomatik gönder/);
-  assert.match(exportsView, /HTML DEMO/);
-  assert.match(exportsView, /portal-next-zirve-button/);
+  assert.match(exportsView, /Zirve entegrasyonu/);
+  assert.match(exportsView, /Planlanıyor/);
+  assert.doesNotMatch(exportsView, /portal-next-zirve-button/);
   assert.match(styles, /\.portal-next-export-grid/);
 });
 

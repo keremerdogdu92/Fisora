@@ -95,3 +95,13 @@ test("HTML diagnostic remains an isolated three-way quality-control surface", ()
   assert.match(agentsView, /Reader/);
   assert.match(agentsView, /Karşılaştır/);
 });
+
+test("document preview errors distinguish access from binary transport failures", () => {
+  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
+
+  assert.match(reviewPanels, /document-pipeline/);
+  assert.match(reviewPanels, /pipelineProbeStatus/);
+  assert.match(reviewPanels, /Oturum \/ erişim doğrulandı/);
+  assert.match(reviewPanels, /Önizleme tanısı/);
+  assert.doesNotMatch(reviewPanels, /Mock belge çizimi kapalı/);
+});

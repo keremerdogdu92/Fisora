@@ -49,34 +49,29 @@ function SessionPanel({
         <strong>{session ? `${session.userId} / ${roleLabels[session.role]}` : "Oturum yok"}</strong>
         <p>
           {loginStatus ||
-            (session?.sessionToken
-              ? `Oturum aktif${session.expiresAt ? ` / ${formatDateText(session.expiresAt)}` : ""}.`
+            (session
+              ? session.sessionToken
+                ? `Oturum aktif${session.expiresAt ? ` / ${formatDateText(session.expiresAt)}` : ""}.`
+                : "Ofis oturumu aktif."
               : localFallbackAllowed
-                ? "Lokal geliştirme için şifresiz ofis oturumu açılabilir."
+                ? "Şifresiz yerel oturum kullanılabilir."
                 : "Kullanıcı şifresiyle giriş zorunlu.")}
         </p>
       </div>
-      <div className="session-controls">
-        <input aria-label="Kullanıcı" onChange={(event) => setLoginUserId(event.target.value)} value={loginUserId} />
-        <input
-          aria-label="Şifre"
-          onChange={(event) => setLoginPassword(event.target.value)}
-          placeholder="Kullanıcı şifresi"
-          type="password"
-          value={loginPassword}
-        />
-        <select
-          aria-label="Rol"
-          disabled={Boolean(lockedRole)}
-          onChange={(event) => setLoginRole(event.target.value as "client_user" | "accountant")}
-          value={lockedRole ?? loginRole}
-        >
-          <option value="accountant">Müşavir</option>
-          <option value="client_user">Mükellef</option>
-        </select>
-        <button onClick={onLogin} type="button">Giriş</button>
-        <button className="secondary" onClick={onLogout} type="button">Çıkış</button>
-      </div>
+      {session ? (
+        <div className="session-controls session-controls-compact">
+          <button className="secondary" onClick={onLogout} type="button">Çıkış yap</button>
+        </div>
+      ) : (
+        <div className="session-controls">
+          <input aria-label="Kullanıcı" onChange={(event) => setLoginUserId(event.target.value)} value={loginUserId} />
+          <input aria-label="Şifre" onChange={(event) => setLoginPassword(event.target.value)} placeholder="Kullanıcı şifresi" type="password" value={loginPassword} />
+          <select aria-label="Rol" disabled={Boolean(lockedRole)} onChange={(event) => setLoginRole(event.target.value as "client_user" | "accountant")} value={lockedRole ?? loginRole}>
+            <option value="accountant">Müşavir</option><option value="client_user">Mükellef</option>
+          </select>
+          <button onClick={onLogin} type="button">Giriş</button>
+        </div>
+      )}
     </section>
   );
 }
@@ -196,26 +191,24 @@ export function SettingsView({
         setLoginRole={setLoginRole}
         setLoginUserId={setLoginUserId}
       />
-      <section className="panel settings-grid">
-        <Info label="Veri kaynağı" value={source} />
-        <Info label="Oturum" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Oturum kapalı"} />
-        <Info label="Saha kullanımı" value={readinessView.statusLabel} />
-        <Info label="Production" value={readinessView.productionLabel} />
-        <Info label="Auth" value={readinessView.authLabel} />
-        <Info label="Store" value={readinessView.storeLabel} />
-        <Info label="AI" value={readinessView.aiLabel} />
-        <Info label="Çıktı" value={readinessView.exportLabel} />
-        <Info label="Lokal veri" value={localFallbackAllowed ? "Geliştirme ortamı" : "Kapalı"} />
-        <Info label="Mükellef" value={String(dashboardMetrics.totalClients)} />
-        <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
+      <section className="panel settings-card settings-overview-card">
+        <div className="section-heading">
+          <span>Ofis ayarları</span><strong>Genel görünüm</strong>
+        </div>
+        <div className="settings-grid">
+          <Info label="Hesap" value={session ? `${roleLabels[session.role]} / ${session.userId}` : "Oturum kapalı"} />
+          <Info label="Mükellef" value={String(dashboardMetrics.totalClients)} />
+          <Info label="Kontrol bekleyen" value={String(dashboardMetrics.pendingReviewDocuments)} />
+          <Info label="Çıktı" value={readinessView.exportLabel} />
+        </div>
       </section>
       {session?.role === "accountant" ? (
         <section className="panel settings-card" aria-label="QNB gelen e-Fatura">
-          <div>
-            <span>QNB gelen e-Fatura</span>
+          <div className="section-heading">
+            <span>Entegrasyonlar · QNB e-Fatura</span>
             <strong>{selectedClient ? selectedClient.clientName : "Mükellef seçilmedi"}</strong>
-            <p>{qnbStatus.message || (qnbStatus.status ? `Bağlantı durumu: ${qnbStatus.status}` : "Gelen e-Fatura UBL belgelerini mükellefin belge kuyruğuna alır.")}</p>
           </div>
+          <p>{qnbStatus.message || (qnbStatus.status ? `Bağlantı durumu: ${qnbStatus.status}` : "Gelen e-Fatura UBL belgelerini mükellefin belge kuyruğuna alır.")}</p>
           <div className="qnb-settings-form">
             <input
               aria-label="QNB servis adresi"
@@ -283,33 +276,7 @@ export function SettingsView({
             <Info label="Son başarılı" value={qnbHealth.lastSuccessAt || "-"} />
             <Info label="Son deneme" value={qnbHealth.lastAttemptAt || "-"} />
             <Info label="Sonraki çalışma" value={qnbHealth.nextRunAt || "-"} />
-            <Info label="Cursor" value={qnbHealth.cursor || "Henüz oluşmadı"} />
             <Info label="Son sonuç" value={`${qnbHealth.listedCount} listelendi / ${qnbHealth.downloadedCount} alındı / ${qnbHealth.duplicateCount} tekrar / ${qnbHealth.failedCount} hata`} />
-          </div>
-        </section>
-      ) : null}
-      {session?.role === "accountant" ? (
-        <section className="panel settings-danger-panel" aria-label="Test verisi temizleme">
-          <div>
-            <span>Test verisi</span>
-            <strong>Mükellefleri ve yüklenen dosyaları temizle</strong>
-            <p>{resetStatus || "Müşavir hesabı ve şifresi korunur; mükellefler, dosyalar, işler ve çıktılar silinir."}</p>
-          </div>
-          <div className="session-controls">
-            <input
-              aria-label="Temizleme onayı"
-              onChange={(event) => setResetConfirmation(event.target.value)}
-              placeholder="TEMIZLE"
-              value={resetConfirmation}
-            />
-            <button
-              className="danger-action"
-              disabled={resetConfirmation.trim() !== "TEMIZLE"}
-              onClick={onResetTestData}
-              type="button"
-            >
-              Temizle
-            </button>
           </div>
         </section>
       ) : null}

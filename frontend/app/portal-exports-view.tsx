@@ -80,7 +80,7 @@ export function ExportBasketView({
         <header className="portal-next-export-head">
           <div>
             <h1>Onay & Çıktılar</h1>
-            <p>Onaylanan kayıtları dosya paketi olarak hazırla veya demo akışında Zirve’ye gönder.</p>
+            <p>Onaylanan kayıtları kontrollü XLSX / CSV paketleri olarak hazırlayın.</p>
           </div>
         </header>
 
@@ -132,18 +132,17 @@ export function ExportBasketView({
 
           <article className="portal-next-export-card portal-next-zirve-card">
             <header>
-              <strong>2 · Zirve’ye otomatik gönder</strong>
-              <span className="portal-next-export-pill demo">HTML DEMO</span>
+              <strong>Zirve entegrasyonu</strong>
+              <span className="portal-next-export-pill demo">Planlanıyor</span>
             </header>
             <div className="portal-next-export-card-body">
-              <h3>{totalDocuments} fiş gönderime hazır</h3>
-              <p>Bu alan hedef ürün akışını gösterir. Production’da doğrudan Zirve bağlantısı henüz tamamlanmadı.</p>
+              <h3>Doğrudan aktarım sonraki aşamada</h3>
+              <p>Şimdilik onaylanan kayıtları XLSX / CSV olarak hazırlayın. Zirve bağlantısı tamamlandığında aynı onay akışından doğrudan aktarım açılacak.</p>
               <div className="portal-next-export-profile">
                 <div><span>Mükellef</span><strong>{clientValue}</strong></div>
                 <div><span>Dönem</span><strong>{periodValue}</strong></div>
-                <div><span>Kayıt</span><strong>{totalDocuments ? `${totalDocuments} dengeli fiş` : "Paket bekleniyor"}</strong></div>
+                <div><span>Kayıt</span><strong>{totalDocuments ? `${totalDocuments} fiş` : "Paket bekleniyor"}</strong></div>
               </div>
-              <button className="primary portal-next-zirve-button" disabled title="Zirve backend entegrasyonu henüz bağlı değil." type="button">Zirve’ye gönder</button>
             </div>
           </article>
         </section>
@@ -226,114 +225,28 @@ export function OperationsView({
   retentionStatus: string;
   source: string;
 }) {
-  const agents = aiCapacity?.agents ?? [];
-  const documentQueries = aiCapacity?.totals?.document_queries ?? "Ölçülemiyor";
-  const internetResearches = aiCapacity?.totals?.internet_researches ?? "Ölçülemiyor";
+  const inProgressCount = data.documents.filter((document) => ["uploaded", "queued", "processing"].includes(document.status)).length;
+  const reviewCount = data.documents.filter((document) => document.status === "review_required").length;
+  const readyCount = data.documents.filter((document) => ["export_ready", "export_added", "exported"].includes(document.status)).length;
+
   return (
-    <section className="operations-grid">
+    <section className="operations-grid operations-user-view">
       <div className="panel">
-        <h2>AI ajanı kapasitesi</h2>
+        <h2>Belge akışı</h2>
         <div className="summary-grid compact">
-          <Metric label="Belge taslağı" value={documentQueries} />
-          <Metric label="İnternet araştırması" value={internetResearches} />
+          <Metric label="İşlemde" value={inProgressCount} /><Metric label="Kontrol" value={reviewCount} /><Metric label="Hazır" value={readyCount} />
         </div>
-        <div className="basket-list">
-          {agents.length ? agents.map((agent) => (
-            <div className="basket-row" key={agent.slot || agent.label}>
-              <div>
-                <strong>{agent.label}</strong>
-                <span>{agentCapacityText(agent)}</span>
-              </div>
-              <span className={`status ${agentStatusClass(agent.status)}`}>{agentStatusLabel(agent.status)}</span>
-            </div>
-          )) : (
-            <div className="basket-row">
-              <div>
-                <strong>Ajan kapasitesi</strong>
-                <span>Sunucu bilgisi bekleniyor.</span>
-              </div>
-              <span className="status queued">Bekleniyor</span>
-            </div>
-          )}
-        </div>
-        <p className="decision-status">
-          {aiCapacity?.generated_at ? `Son güncelleme: ${formatCapacityDate(aiCapacity.generated_at)}.` : "Kapasite bilgisi alınamadı."}
-        </p>
+        <p className="decision-status">{inProgressCount ? "Belgeler arka planda işleniyor." : reviewCount ? "Müşavir kontrolü bekleyen kayıtlar var." : "Bekleyen işlem yok."}</p>
       </div>
       <div className="panel">
-        <h2>Kapalı kullanım durumu</h2>
-        <Info label="Saha kullanımı" value={readinessView.statusLabel} />
-        <Info label="Production" value={readinessView.productionLabel} />
+        <h2>Sistem durumu</h2>
+        <Info label="Günlük çalışma" value={readinessView.statusLabel} />
         <Info label="Gerçek veri" value={readinessView.realDataLabel} />
-        <Info label="Erişim" value={readinessView.realDataAccessLabel} />
-        <Info label="Teklif" value={readinessView.offerLabel} />
         <Info label="Çıktı" value={readinessView.exportLabel} />
-        <Info label="Zirve" value={readinessView.zirveLabel} />
       </div>
       <div className="panel">
-        <h2>Okunan kaynak</h2>
-        <Info label="Kaynak" value={source} />
-        <Info label="Mükellef" value={String(data.clients.length)} />
-        <Info label="Belge" value={String(data.documents.length)} />
-        <Info label="İptal talebi" value={String(data.cancellationRequests.length)} />
-      </div>
-      <div className="panel">
-        <h2>Operasyon kapıları</h2>
-        <Info label="Auth" value={readinessView.authLabel} />
-        <Info label="Store" value={readinessView.storeLabel} />
-        <Info label="AI" value={readinessView.aiLabel} />
-        <Info
-          label="Gerçek veri blokajı"
-          value={readinessView.realDataBlocking.length ? readinessView.realDataBlocking.join(", ") : "Yok"}
-        />
-        <Info label="Blokaj" value={readinessView.blocking.length ? readinessView.blocking.join(", ") : "Yok"} />
-        <Info label="Uyarı" value={readinessView.warnings.length ? readinessView.warnings.join(", ") : "Yok"} />
-        {localFallbackAllowed ? (
-          <p className="decision-status">Lokal çalışma verisi açık.</p>
-        ) : null}
-      </div>
-      <div className="panel">
-        <div className="panel-heading">
-          <div>
-            <h2>Belge saklama</h2>
-            <span>90 gun sonunda silme veya 90 gun uzatma karari.</span>
-          </div>
-          <button className="secondary" onClick={onPreviewRetention} type="button">Onizle</button>
-        </div>
-        <div className="summary-grid compact">
-          <Metric label="Aksiyon bekleyen" value={retentionDocuments.length} />
-          <Metric label="Toplam belge" value={data.documents.length} />
-        </div>
-        <div className="basket-list">
-          {retentionDocuments.slice(0, 6).map((document) => {
-            const documentKey = String(document.document_key || document.document_ref || "");
-            return (
-              <div className="basket-row" key={documentKey}>
-                <div>
-                  <strong>{String(document.original_file_name || documentKey || "Belge")}</strong>
-                  <span>{String(document.client_id || "")} / {String(document.expires_at || "")}</span>
-                </div>
-                <span className={`status ${document.storage_status === "expired" ? "cancel_requested" : "queued"}`}>
-                  {String(document.storage_status || "bekliyor")}
-                </span>
-              </div>
-            );
-          })}
-          {!retentionDocuments.length ? (
-            <div className="basket-row">
-              <div>
-                <strong>Saklama onizlemesi bekleniyor</strong>
-                <span>Once sureci gorelim; silme veya uzatma ondan sonra uygulanir.</span>
-              </div>
-              <span className="status queued">Bekliyor</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="inline-actions">
-          <button className="secondary" disabled={!retentionDocuments.length} onClick={onExtendRetentionDocuments} type="button">90 gun uzat</button>
-          <button className="danger" disabled={!retentionDocuments.length} onClick={onDeleteRetentionDocuments} type="button">Onayla sil</button>
-        </div>
-        <p className="decision-status">{retentionStatus || "Musteri indirme yetkisi acilmadan, operasyon tarafinda kontrollu saklama karari verilir."}</p>
+        <h2>Ofis özeti</h2>
+        <Info label="Mükellef" value={String(data.clients.length)} /><Info label="Belge" value={String(data.documents.length)} /><Info label="İptal / düzeltme" value={String(data.cancellationRequests.length)} />
       </div>
     </section>
   );

@@ -207,39 +207,19 @@ function isHtmlPreview(document: PilotDocument) {
 }
 
 type OriginalDocumentPreviewDebug = {
-  requestPath: string;
-  responseStatus?: number;
-  responseStatusText?: string;
-  responseContentType?: string;
-  blobContentType?: string;
-  blobSize?: number;
+  requestPath: string; requestUrl?: string; responseStatus?: number; responseStatusText?: string;
+  responseContentType?: string; blobContentType?: string; blobSize?: number;
+  transportErrorName?: string; transportErrorMessage?: string; pipelineProbeStatus?: number; pipelineProbeError?: string;
 };
 
-function normalizePreviewMime(value?: string) {
-  return String(value || "").split(";", 1)[0].trim().toLowerCase();
-}
-
-function previewMimeIsSupported(value?: string) {
-  const mime = normalizePreviewMime(value);
-  return Boolean(mime) && (isImageMime(mime) || isFramePreviewMime(mime));
-}
-
+function normalizePreviewMime(value?: string) { return String(value || "").split(";", 1)[0].trim().toLowerCase(); }
+function previewMimeIsSupported(value?: string) { const mime = normalizePreviewMime(value); return Boolean(mime) && (isImageMime(mime) || isFramePreviewMime(mime)); }
 function previewRenderFailureReason(document: PilotDocument, debug?: OriginalDocumentPreviewDebug) {
   const storedMime = normalizePreviewMime(document.originalDocumentMimeType);
-  const responseMime = normalizePreviewMime(debug?.responseContentType);
-  const blobMime = normalizePreviewMime(debug?.blobContentType);
-  const servedMime = responseMime || blobMime;
-
-  if (servedMime && previewMimeIsSupported(servedMime) && !previewMimeIsSupported(storedMime)) {
-    return `Belge sunucudan ${servedMime} olarak geliyor ancak kayıttaki MIME türü ${storedMime || "boş"}. Önizleme kararı kayıt MIME türüne göre verildiği için görüntüleyici seçilemedi.`;
-  }
-  if (!storedMime) {
-    return "Belge kaydında MIME türü yok. Dosya indirildi ancak Fisora hangi görüntüleyiciyi kullanacağını belirleyemedi.";
-  }
-  if (storedMime === "application/octet-stream") {
-    return "Belge genel binary türü (application/octet-stream) olarak kayıtlı. Dosya indirildi ancak PDF, HTML veya görsel olarak doğrulanamadığı için tarayıcı içi görüntüleyici açılmadı.";
-  }
-  return `Belge indirildi ancak kayıtlı MIME türü (${storedMime}) mevcut tarayıcı içi görüntüleyiciler tarafından desteklenmiyor.`;
+  const servedMime = normalizePreviewMime(debug?.responseContentType) || normalizePreviewMime(debug?.blobContentType);
+  if (servedMime && previewMimeIsSupported(servedMime) && !previewMimeIsSupported(storedMime)) return `Belge ${servedMime} olarak geldi ancak kayıttaki tür ${storedMime || "boş"}.`;
+  if (!storedMime) return "Belge türü kaydında görüntüleyici seçmek için yeterli bilgi yok.";
+  return `Bu belge türü (${storedMime}) tarayıcı içi önizleyiciyle açılamıyor.`;
 }
 
 function latestPipelineProblem(document: PilotDocument) {
@@ -328,58 +308,45 @@ export function useOriginalDocumentPreview(document?: PilotDocument, session?: L
   const [previewDebug, setPreviewDebug] = useState<OriginalDocumentPreviewDebug>();
 
   useEffect(() => {
-    if (!document?.originalDocumentRef) {
-      setPreviewUrl("");
-      setPreviewError("Gerçek belge referansı yok.");
-      setPreviewDebug(undefined);
-      return;
-    }
-    let active = true;
-    let objectUrl = "";
+    if (!document?.originalDocumentRef) { setPreviewUrl(""); setPreviewError("Gerçek belge referansı yok."); setPreviewDebug(undefined); return; }
+    let active = true; let objectUrl = "";
+    const baseUrl = resolvePreviewApiBaseUrl();
     const requestPath = `/phase0/store/document-file/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`;
-    setPreviewDebug({ requestPath });
+    const probePath = `/phase0/store/document-pipeline/${encodeURIComponent(document.clientId)}/${encodeURIComponent(document.originalDocumentRef)}`;
+    const authHeaders = previewAuthHeaders(session, document);
+    setPreviewDebug({ requestPath, requestUrl: `${baseUrl}${requestPath}` });
 
     const fetchPreview = async () => {
-      let diagnostic: OriginalDocumentPreviewDebug = { requestPath };
+      let diagnostic: OriginalDocumentPreviewDebug = { requestPath, requestUrl: `${baseUrl}${requestPath}` };
       try {
-        const response = await fetch(
-          `${resolvePreviewApiBaseUrl()}${requestPath}`,
-          { cache: "no-store", headers: previewAuthHeaders(session, document) },
-        );
-        diagnostic = {
-          ...diagnostic,
-          responseStatus: response.status,
-          responseStatusText: response.statusText,
-          responseContentType: response.headers.get("content-type") || "",
-        };
-        if (!response.ok) {
-          throw new Error(`Önizleme isteği başarısız: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`);
-        }
+        const response = await fetch(`${baseUrl}${requestPath}`, { cache: "no-store", headers: authHeaders });
+        diagnostic = { ...diagnostic, responseStatus: response.status, responseStatusText: response.statusText, responseContentType: response.headers.get("content-type") || "" };
+        if (!response.ok) throw new Error(`Önizleme isteği başarısız: HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`);
         const blob = await response.blob();
-        diagnostic = {
-          ...diagnostic,
-          blobContentType: blob.type,
-          blobSize: blob.size,
-        };
+        diagnostic = { ...diagnostic, blobContentType: blob.type, blobSize: blob.size };
         objectUrl = URL.createObjectURL(blob);
-        if (active) {
-          setPreviewUrl(objectUrl);
-          setPreviewError("");
-          setPreviewDebug(diagnostic);
-        }
+        if (active) { setPreviewUrl(objectUrl); setPreviewError(""); setPreviewDebug(diagnostic); }
       } catch (error) {
-        if (active) {
-          setPreviewUrl("");
-          setPreviewError(error instanceof Error ? error.message : "Gerçek belge önizlemesi alınamadı.");
-          setPreviewDebug(diagnostic);
+        const errorName = error instanceof Error ? error.name : "Error";
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        diagnostic = { ...diagnostic, transportErrorName: errorName, transportErrorMessage: errorMessage };
+        try {
+          const probe = await fetch(`${baseUrl}${probePath}`, { cache: "no-store", headers: authHeaders });
+          diagnostic = { ...diagnostic, pipelineProbeStatus: probe.status };
+        } catch (probeError) {
+          diagnostic = { ...diagnostic, pipelineProbeError: probeError instanceof Error ? probeError.message : String(probeError) };
         }
+        let userMessage = "Kaynak belge önizlemesi alınamadı.";
+        if (diagnostic.responseStatus === 401 || diagnostic.responseStatus === 403) userMessage = "Belgeye erişim izni doğrulanamadı.";
+        else if (diagnostic.responseStatus === 404) userMessage = "Kaynak dosya depoda bulunamadı.";
+        else if (diagnostic.pipelineProbeStatus === 401 || diagnostic.pipelineProbeStatus === 403) userMessage = "Oturum veya mükellef erişimi doğrulanamadı.";
+        else if (diagnostic.pipelineProbeStatus === 200 && diagnostic.responseStatus === undefined) userMessage = "Belge kaydı erişilebilir, ancak dosya aktarımı tamamlanamadı.";
+        else if (diagnostic.pipelineProbeError && diagnostic.responseStatus === undefined) userMessage = "Belge sunucusuna bağlantı kurulamadı.";
+        if (active) { setPreviewUrl(""); setPreviewError(userMessage); setPreviewDebug(diagnostic); }
       }
     };
     void fetchPreview();
-    return () => {
-      active = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [document?.clientId, document?.originalDocumentRef, session?.sessionToken, session?.userId]);
 
   return { previewDebug, previewError, previewUrl };
@@ -576,22 +543,21 @@ export function HtmlSourceComparison({ document, previewUrl }: { document: Pilot
 }
 
 function PreviewDebugDetails({ debug, document }: { debug?: OriginalDocumentPreviewDebug; document: PilotDocument }) {
-  const blobSize = typeof debug?.blobSize === "number"
-    ? `${debug.blobSize.toLocaleString("tr-TR")} bayt`
-    : "-";
-
+  if (!debug) return null;
+  const probeLabel = typeof debug.pipelineProbeStatus === "number"
+    ? debug.pipelineProbeStatus === 200 ? "Oturum / erişim doğrulandı" : `Kontrol isteği HTTP ${debug.pipelineProbeStatus}`
+    : debug.pipelineProbeError ? "Kontrol isteği de ulaşılamadı" : "Henüz ölçülmedi";
   return (
     <details className="preview-debug-details">
-      <summary>Teknik debug</summary>
+      <summary>Önizleme tanısı</summary>
       <dl>
-        <div><dt>Kayıt MIME</dt><dd>{document.originalDocumentMimeType || "boş"}</dd></div>
-        <div><dt>HTTP Content-Type</dt><dd>{debug?.responseContentType || "-"}</dd></div>
-        <div><dt>Blob MIME</dt><dd>{debug?.blobContentType || "-"}</dd></div>
-        <div><dt>HTTP durum</dt><dd>{typeof debug?.responseStatus === "number" ? `${debug.responseStatus}${debug.responseStatusText ? ` ${debug.responseStatusText}` : ""}` : "-"}</dd></div>
-        <div><dt>Dosya boyutu</dt><dd>{blobSize}</dd></div>
-        <div><dt>Dosya adı</dt><dd>{document.fileName || "-"}</dd></div>
-        <div><dt>Belge ref</dt><dd>{document.originalDocumentRef || "-"}</dd></div>
-        <div><dt>İstem yolu</dt><dd>{debug?.requestPath || "-"}</dd></div>
+        <div><dt>Belge türü</dt><dd>{document.originalDocumentMimeType || "boş"}</dd></div>
+        <div><dt>HTTP</dt><dd>{typeof debug.responseStatus === "number" ? `${debug.responseStatus} ${debug.responseStatusText || ""}`.trim() : "Yanıt alınamadı"}</dd></div>
+        <div><dt>Content-Type</dt><dd>{debug.responseContentType || debug.blobContentType || "-"}</dd></div>
+        <div><dt>Dosya boyutu</dt><dd>{typeof debug.blobSize === "number" ? `${debug.blobSize.toLocaleString("tr-TR")} bayt` : "-"}</dd></div>
+        <div><dt>Erişim kontrolü</dt><dd>{probeLabel}</dd></div>
+        <div><dt>Hata</dt><dd>{debug.transportErrorMessage || debug.pipelineProbeError || "-"}</dd></div>
+        <div><dt>İstek</dt><dd>{debug.requestPath}</dd></div>
       </dl>
     </details>
   );
@@ -641,9 +607,8 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
               />
             ) : (
               <div className="preview-error-panel">
-                <strong>Belge sunucudan geldi ama görüntüleyici seçilemedi.</strong>
+                <strong>Belge geldi ancak görüntüleyici seçilemedi.</strong>
                 <p>{renderFailureReason}</p>
-                <p>Dosyanın kendisi mevcut. Bu hata yalnızca çalışma masasındaki tarayıcı içi önizleme katmanını etkiliyor.</p>
                 <PreviewDebugDetails debug={previewDebug} document={document} />
                 <a href={previewUrl} download={document.fileName}>Belgeyi indir</a>
               </div>
@@ -651,7 +616,7 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
           ) : (
             <div className="preview-error-panel">
               <strong>{errorMessage}</strong>
-              <p>Belge önizleme isteği tamamlanamadı. HTTP yanıtını ve dosya kimliğini aşağıdaki teknik debug alanından kontrol edebilirsiniz.</p>
+              <p>Kaynak belge alınamadı. Aşağıdaki tanı, sorunun erişimden mı yoksa dosya aktarımından mı kaynaklandığını gösterir.</p>
               <PreviewDebugDetails debug={previewDebug} document={document} />
             </div>
           )}

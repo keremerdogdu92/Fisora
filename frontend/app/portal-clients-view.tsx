@@ -154,7 +154,7 @@ export function ClientManagementView({
         <div className={`client-v13-page-actions${activeTab === "client-list" ? " list-view" : ""}`}>
           {activeTab === "client-list" && cancellationRequests.length ? (
             <button className="secondary compact" onClick={() => switchTab("requests")} type="button">
-              İptal / düzeltme <strong>{cancellationRequests.length}</strong>
+              İptal / düzeltme · <strong>{cancellationRequests.length}</strong>
             </button>
           ) : activeTab !== "client-list" ? (
             <button className="secondary compact" onClick={() => switchTab("client-list")} type="button">← Mükellef listesi</button>
@@ -204,7 +204,6 @@ export function ClientManagementView({
               placeholder="Mükellef ara"
               value={clientSearch}
             />
-            <button className="primary" onClick={() => switchTab("new-client")} type="button">+ Yeni mükellef</button>
           </div>
 
           <section className="client-v13-table-wrap panel" aria-label="Mükellef listesi">
@@ -354,7 +353,6 @@ export function ClientManagementView({
                     <span>Portal kullanıcısı</span>
                     <strong>{selectedClient.portalUserId}</strong>
                   </div>
-                  <button className="primary" onClick={onOpenClientPortal} type="button">Mükellef portalını aç</button>
                   <div className="client-v13-portal-edit">
                     <input aria-label="Mükellef üyelik adı" onChange={(event) => setPortalUserIdDraft(event.target.value)} value={portalUserIdDraft} />
                     <button className="secondary" onClick={onUpdatePortalAccess} type="button">Girişi güncelle</button>
@@ -564,22 +562,17 @@ function NewClientStepper({
       <div className="stepper-heading">
         <div>
           <span>Yeni mükellef</span>
-          <strong>İlerlemeli kayıt</strong>
+          <strong>Mükellef kurulumu</strong>
         </div>
         <small>{canComplete ? "Kontrol tamamlandı · kayda hazır" : "Vergi levhasını kontrol edin ve hesap planını yükleyin"}</small>
       </div>
 
-      <div className="onboarding-steps" aria-label="Yeni mükellef adımları">
-        <span className={taxCertificateReady ? "done" : "active"}>1 Vergi levhası</span>
-        <span className={chartReady ? "done" : "active"}>2 Hesap planı</span>
-        <span className={canComplete ? "active" : ""}>3 Portal erişimi (opsiyonel)</span>
-      </div>
 
       <section className="client-onboarding-steps" aria-label="Mükellef onboarding adımları">
         <article className={`client-step tax-certificate-step ${taxCertificateReady ? "onboarding-step done" : "onboarding-step active"}`}>
           <div className="tax-certificate-workspace">
             <div>
-              <span>1. Vergi levhası</span>
+              <span>Vergi levhası</span>
               <strong>Vergi levhası bilgileri</strong>
             </div>
             <label className="file-drop-control tax-certificate-drop">
@@ -656,7 +649,7 @@ function NewClientStepper({
 
         <article className={`client-step ${chartReady ? "onboarding-step done" : "onboarding-step active"}`}>
         <div>
-          <span>2. Hesap planı</span>
+          <span>Hesap planı</span>
           <strong>{chartReady ? `${draft.chartAccountFileName} yüklendi` : "Hesap planı zorunlu"}</strong>
         </div>
         <label className="file-drop-control">
@@ -672,7 +665,7 @@ function NewClientStepper({
 
         <article className="client-step onboarding-step active">
         <div>
-          <span>3. Portal erişimi</span>
+          <span>Portal erişimi</span>
           <strong>İsteğe bağlı</strong>
         </div>
         <input

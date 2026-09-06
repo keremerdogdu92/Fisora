@@ -21,6 +21,7 @@ test("portal normalization helpers map review records without React state", () =
   assert.equal(periodFromDate("03.06.2026"), "2026-06");
   assert.equal(normalizeStatus("stored"), "queued");
   assert.equal(normalizeStatus("no_posting_required"), "no_posting_required");
+  assert.equal(normalizeStatus("rejected"), "excluded");
   assert.equal(agentSourceLabel("groq"), "AI ajan önerisi");
 
   assert.deepEqual(

@@ -46,3 +46,16 @@ test("manual journal editor is wired for chart-plan keyboard entry", () => {
   assert.match(reviewPanels, /event\.key === "F2"/);
   assert.match(reviewPanels, /event\.key === "Enter" && event\.ctrlKey/);
 });
+
+
+test("review undo is operation-based and does not expire on a timer", () => {
+  const reviewCommands = readFileSync(join(__dirname, "features", "review", "use-review-commands.ts"), "utf8");
+  const controls = readFileSync(join(__dirname, "portal-next", "portal-next-workspace-controls.tsx"), "utf8");
+
+  assert.match(reviewCommands, /const undoAvailable = Boolean\(undoableReviewAction\)/);
+  assert.doesNotMatch(reviewCommands, /expiresAt/);
+  assert.doesNotMatch(reviewCommands, /setTimeout/);
+  assert.match(reviewCommands, /if \(!result\?\.ok\) return;/);
+  assert.match(reviewCommands, /setSelectedDocumentId\(reviewAction\.documentId\)/);
+  assert.match(controls, /!editable && event\.ctrlKey && event\.key\.toLowerCase\(\) === "z"/);
+});

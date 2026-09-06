@@ -14,6 +14,7 @@ const statusLabels: Record<PilotStatus, string> = {
   processing: "İşleniyor",
   review_required: "Kontrol gerekli",
   no_posting_required: "Fiş gerekmiyor",
+  excluded: "Hariç tutuldu",
   export_ready: "Aktarıma hazır",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",

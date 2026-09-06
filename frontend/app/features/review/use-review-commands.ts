@@ -1,8 +1,8 @@
 // File: frontend/app/features/review/use-review-commands.ts
-// Summary: Coordinates review persistence, adjacent-document navigation, approval, and revision-safe short-window undo against the existing review APIs.
+// Summary: Coordinates review persistence, adjacent-document navigation, approval, and revision-safe operation-based undo against the existing review APIs.
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   reprocessSelectedDocumentAction,
@@ -10,16 +10,23 @@ import {
   saveDecisionAction,
   saveStatementLineDecisionAction,
 } from "../../portal-document-actions";
-import type { CorrectionDraft, LocalSession, PilotData, PilotDocument, ReviewLearningDecisionOptions } from "../../portal-types";
-import { reopenJournal, resolveApiBaseUrl } from "../../upload-api";
+import { reviewActionLabel } from "../../portal-formatters";
+import type { CorrectionDraft, LocalSession, PilotData, PilotDocument, PilotStatus, ReviewLearningDecisionOptions } from "../../portal-types";
+import { reopenJournal, resolveApiBaseUrl, storeReviewDecision } from "../../upload-api";
 
-type UndoableApproval = {
+type ReviewRestoreAction = "reopen_approval" | "approve" | "review_required" | "exclude_export";
+
+type UndoableReviewAction = {
+  amount: string;
+  category: string;
   clientId: string;
   documentId: string;
   documentRef: string;
-  expiresAt: number;
   fileName: string;
+  provider: string;
+  restoreAction: ReviewRestoreAction;
   revisionNo: number;
+  summary: string;
 };
 
 function pageUrl() {
@@ -31,6 +38,36 @@ function normalizedReviewFromPayload(payload: Record<string, unknown> | null) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function formatReviewAmount(value: string) {
+  const parsed = Number(String(value || "").replace(",", "."));
+  if (!Number.isFinite(parsed)) return String(value || "").trim();
+  return `${new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parsed)} TL`;
+}
+
+function reviewActionSummaryParts(provider: string, fileName: string, amount: string, label: string) {
+  const subject = String(provider || fileName || "Belge").trim();
+  const formattedAmount = formatReviewAmount(amount);
+  return [subject, formattedAmount, label].filter(Boolean).join(" · ");
+}
+
+function reviewActionSummary(document: PilotDocument, label: string) {
+  return reviewActionSummaryParts(document.provider, document.fileName, document.amount, label);
+}
+
+function restoreActionFor(previousStatus: PilotStatus, action: string, normalizedReview: Record<string, unknown> | null): ReviewRestoreAction | null {
+  const normalizedStatus = String(normalizedReview?.status || "");
+  if ((action === "approve" || action === "approve_with_changes") && normalizedReview?.approved === true) return "reopen_approval";
+  if (action === "exclude_export" && normalizedStatus === "rejected") {
+    if (previousStatus === "export_ready") return "approve";
+    if (previousStatus === "review_required") return "review_required";
+  }
+  if (action === "review_required" && normalizedStatus === "review_required") {
+    if (previousStatus === "export_ready") return "approve";
+    if (previousStatus === "excluded") return "exclude_export";
+  }
+  return null;
 }
 
 export function emptyCorrectionDraft(): CorrectionDraft {
@@ -77,21 +114,9 @@ export function useReviewCommands({
   setSelectedStatementLineNo: (lineNo: number) => void;
   setStatementAiStatus: (status: string) => void;
 }) {
-  const [undoableApproval, setUndoableApproval] = useState<UndoableApproval | null>(null);
-  const [undoAvailable, setUndoAvailable] = useState(false);
-
-  useEffect(() => {
-    if (!undoableApproval) {
-      setUndoAvailable(false);
-      return;
-    }
-    setUndoAvailable(true);
-    const timeoutId = window.setTimeout(() => {
-      setUndoAvailable(false);
-      setUndoableApproval(null);
-    }, Math.max(0, undoableApproval.expiresAt - Date.now()));
-    return () => window.clearTimeout(timeoutId);
-  }, [undoableApproval]);
+  const [undoableReviewAction, setUndoableReviewAction] = useState<UndoableReviewAction | null>(null);
+  const [lastReviewActionLabel, setLastReviewActionLabel] = useState("");
+  const undoAvailable = Boolean(undoableReviewAction);
 
   const selectAdjacentReviewDocument = useCallback(
     (direction: 1 | -1 = 1) => {
@@ -173,9 +198,39 @@ export function useReviewCommands({
 
   const saveDecision = useCallback(
     async (action: string, options: ReviewLearningDecisionOptions = {}) => {
-      return persistDecision(action, options);
+      const document = selectedDocument;
+      if (!document) return undefined;
+      const previousStatus = document.status;
+      const result = await persistDecision(action, options);
+      if (!result?.ok) return result;
+
+      const normalizedReview = normalizedReviewFromPayload(result.payload);
+      const revisionNo = Number(normalizedReview?.revision_no || 0);
+      const actionLabel = action === "review_required" && (previousStatus === "export_ready" || previousStatus === "excluded")
+        ? "Kontrole geri alındı"
+        : reviewActionLabel(action);
+      const summary = reviewActionSummary(document, actionLabel);
+      setLastReviewActionLabel(summary);
+      setUndoableReviewAction(null);
+
+      const restoreAction = revisionNo > 0 ? restoreActionFor(previousStatus, action, normalizedReview) : null;
+      if (restoreAction) {
+        setUndoableReviewAction({
+          amount: document.amount,
+          category: document.productCategory,
+          clientId: document.clientId,
+          documentId: document.id,
+          documentRef: document.id,
+          fileName: document.fileName,
+          provider: document.provider,
+          restoreAction,
+          revisionNo,
+          summary,
+        });
+      }
+      return result;
     },
-    [persistDecision],
+    [persistDecision, selectedDocument],
   );
 
   const reprocessSelectedDocument = useCallback(() => {
@@ -211,20 +266,7 @@ export function useReviewCommands({
       return;
     }
     const result = await saveDecision(approveAction);
-    const normalizedReview = result?.ok ? normalizedReviewFromPayload(result.payload) : null;
-    const revisionNo = Number(normalizedReview?.revision_no || 0);
-    if (normalizedReview?.approved === true && revisionNo > 0) {
-      setUndoableApproval({
-        clientId: selectedDocument.clientId,
-        documentId: selectedDocument.id,
-        documentRef: selectedDocument.id,
-        expiresAt: Date.now() + 8000,
-        fileName: selectedDocument.fileName,
-        revisionNo,
-      });
-    } else {
-      setUndoableApproval(null);
-    }
+    if (!result?.ok) return;
     selectAdjacentReviewDocument(1);
   }, [
     hasUnsavedReviewChanges,
@@ -236,32 +278,51 @@ export function useReviewCommands({
     setSelectedStatementLineNo,
   ]);
 
-  const undoLastApproval = useCallback(async () => {
-    const approval = undoableApproval;
-    if (!approval || Date.now() > approval.expiresAt) return false;
+  const undoLastReviewAction = useCallback(async () => {
+    const reviewAction = undoableReviewAction;
+    if (!reviewAction) return false;
     const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim();
-    setDecisionStatus(`${approval.fileName}: son onay geri alınıyor.`);
+    setDecisionStatus(`${reviewAction.fileName}: son işlem geri alınıyor.`);
     try {
-      await reopenJournal({
-        apiBaseUrl: resolveApiBaseUrl(pageUrl()),
-        clientId: approval.clientId,
-        documentRef: approval.documentRef,
-        expectedRevision: approval.revisionNo,
-        reason: "Son onay 8 saniye içinde geri alındı.",
-        userId: reviewer,
-        sessionToken: session?.sessionToken || "",
-      });
+      if (reviewAction.restoreAction === "reopen_approval") {
+        await reopenJournal({
+          apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+          clientId: reviewAction.clientId,
+          documentRef: reviewAction.documentRef,
+          expectedRevision: reviewAction.revisionNo,
+          reason: "Son müşavir onayı işlem bazlı geri alındı.",
+          userId: reviewer,
+          sessionToken: session?.sessionToken || "",
+        });
+      } else {
+        await storeReviewDecision({
+          apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+          clientId: reviewAction.clientId,
+          userId: reviewer,
+          documentRef: reviewAction.documentRef,
+          action: reviewAction.restoreAction,
+          reviewer,
+          category: reviewAction.category,
+          reason: "Son müşavir işlemi geri alındı.",
+          decisionNote: "Son müşavir işlemi geri alındı.",
+          expectedRevision: reviewAction.revisionNo,
+          sessionToken: session?.sessionToken || "",
+        });
+      }
       await refreshBackendPilotData();
-      setSelectedDocumentId(approval.documentId);
-      setDecisionStatus(`${approval.fileName}: onay geri alındı; belge yeniden kontrolde.`);
-      setUndoableApproval(null);
+      setSelectedDocumentId(reviewAction.documentId);
+      setDecisionStatus(`${reviewAction.fileName}: son işlem geri alındı; belge yeniden açıldı.`);
+      setLastReviewActionLabel(reviewActionSummaryParts(reviewAction.provider, reviewAction.fileName, reviewAction.amount, "Geri alındı"));
+      setUndoableReviewAction(null);
       return true;
     } catch (error) {
+      await refreshBackendPilotData();
       setDecisionStatus(error instanceof Error ? error.message : String(error));
-      setUndoableApproval(null);
+      setLastReviewActionLabel(`${reviewAction.summary} · Geri alma tamamlanamadı`);
+      setUndoableReviewAction(null);
       return false;
     }
-  }, [loginUserId, refreshBackendPilotData, session, setDecisionStatus, setSelectedDocumentId, undoableApproval]);
+  }, [loginUserId, refreshBackendPilotData, session, setDecisionStatus, setSelectedDocumentId, undoableReviewAction]);
 
   return {
     approveSelectedAndMoveNext,
@@ -270,7 +331,8 @@ export function useReviewCommands({
     saveDecision,
     saveStatementLineDecision,
     selectAdjacentReviewDocument,
+    lastReviewActionLabel,
     undoAvailable,
-    undoLastApproval,
+    undoLastReviewAction,
   };
 }

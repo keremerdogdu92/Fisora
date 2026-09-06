@@ -33,6 +33,7 @@ const statusLabels: Record<PilotStatus, string> = {
   processing: "İşleniyor",
   review_required: "Kontrol gerekli",
   no_posting_required: "Fiş gerekmiyor",
+  excluded: "Hariç tutuldu",
   export_ready: "Aktarıma hazır",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",
@@ -180,7 +181,8 @@ export function AccountantWorkspace({
   onSaveStatementDecision,
   onTaxCertificateFileChange,
   onToggleSidebar,
-  onUndoLastApproval,
+  onUndoLastReviewAction,
+  lastReviewActionLabel,
   reviewFilter,
   selectedClient,
   selectedDocument,
@@ -232,7 +234,8 @@ export function AccountantWorkspace({
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   onTaxCertificateFileChange: (file: File | null) => void | Promise<void>;
   onToggleSidebar: () => void;
-  onUndoLastApproval: () => void | Promise<boolean>;
+  onUndoLastReviewAction: () => void | Promise<boolean>;
+  lastReviewActionLabel?: string;
   reviewFilter: ReviewFilter;
   selectedClient?: PilotClient;
   selectedDocument?: PilotDocument;
@@ -604,7 +607,8 @@ export function AccountantWorkspace({
         active={nextPresentation}
         onNavigateDocument={navigateDocument}
         onToggleSidebar={onToggleSidebar}
-        onUndoLastApproval={onUndoLastApproval}
+        onUndoLastReviewAction={onUndoLastReviewAction}
+        lastReviewActionLabel={lastReviewActionLabel}
         undoAvailable={undoAvailable}
       />
 

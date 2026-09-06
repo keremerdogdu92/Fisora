@@ -1643,11 +1643,48 @@ class NormalizedAccountingRepository:
     ) -> dict[str, Any]:
         taxpayer_id = _uuid_for("taxpayer", f"{self.tenant_id}:{client_id}")
         expected = int(decision.get("expected_revision") or 0)
-        draft_lines, total_debit, total_credit = _validated_draft_lines(corrected_result.get("draft_lines"))
-        corrected_result["draft_lines"] = draft_lines
-        corrected_result["total_debit"] = f"{total_debit:.2f}"
-        corrected_result["total_credit"] = f"{total_credit:.2f}"
-        corrected_result["is_balanced"] = True
+        action = str(decision.get("action") or "")
+        requested_approval = action in {"approve", "approve_with_changes"}
+        requested_exclusion = action in {
+            "exclude_export",
+            "exclude_from_export",
+            "out_of_scope",
+            "business_out_of_scope",
+        }
+        state_only_review = requested_exclusion or action in {
+            "review_required",
+            "wrong_account",
+            "wrong_counterparty",
+        }
+        if requested_approval:
+            draft_lines, total_debit, total_credit = _validated_draft_lines(corrected_result.get("draft_lines"))
+            corrected_result["draft_lines"] = draft_lines
+            corrected_result["total_debit"] = f"{total_debit:.2f}"
+            corrected_result["total_credit"] = f"{total_credit:.2f}"
+            corrected_result["is_balanced"] = True
+        elif state_only_review:
+            draft_lines, total_debit, total_credit, draft_validation_error = _best_effort_draft_lines(
+                corrected_result.get("draft_lines")
+            )
+            if draft_validation_error:
+                stored_debit = _decimal(corrected_result.get("total_debit"))
+                stored_credit = _decimal(corrected_result.get("total_credit"))
+                if stored_debit == stored_credit:
+                    total_debit, total_credit = stored_debit, stored_credit
+                else:
+                    total_debit = total_credit = Decimal("0.00")
+                draft_lines = []
+            else:
+                corrected_result["draft_lines"] = draft_lines
+                corrected_result["total_debit"] = f"{total_debit:.2f}"
+                corrected_result["total_credit"] = f"{total_credit:.2f}"
+                corrected_result["is_balanced"] = total_debit == total_credit and total_debit > 0
+        else:
+            draft_lines, total_debit, total_credit = _validated_draft_lines(corrected_result.get("draft_lines"))
+            corrected_result["draft_lines"] = draft_lines
+            corrected_result["total_debit"] = f"{total_debit:.2f}"
+            corrected_result["total_credit"] = f"{total_credit:.2f}"
+            corrected_result["is_balanced"] = True
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 document_id, journal_id, current_revision = self._locked_current_journal(
@@ -1809,7 +1846,6 @@ class NormalizedAccountingRepository:
                     bool(canonical_lines)
                     and str(corrected_result.get("canonical_validation_status") or "") == "valid"
                 )
-                requested_approval = str(decision.get("action") or "") in {"approve", "approve_with_changes"}
                 allocation_valid = three_stage_source_reconstruction or allocation_coverage["status"] == "valid"
                 approved = (
                     requested_approval
@@ -1825,8 +1861,17 @@ class NormalizedAccountingRepository:
                     "status": "valid" if not unusable_accounts else "invalid",
                     "unusable_accounts": unusable_accounts,
                 }
-                corrected_result["export_status"] = "export_ready" if approved else "review_required"
-                if not approved:
+                if approved:
+                    export_status = "export_ready"
+                    status = "approved"
+                elif requested_exclusion:
+                    export_status = "rejected"
+                    status = "rejected"
+                else:
+                    export_status = "review_required"
+                    status = "review_required"
+                corrected_result["export_status"] = export_status
+                if not approved and not requested_exclusion:
                     corrected_result["review_reason_codes"] = list(
                         dict.fromkeys(
                             [
@@ -1843,8 +1888,6 @@ class NormalizedAccountingRepository:
                             ]
                         )
                     )
-                export_status = str(corrected_result["export_status"])
-                status = "approved" if approved else "review_required"
                 revision_no = current_revision + 1
                 revision_id = uuid4()
                 corrected_result["normalized_revision"] = revision_no
@@ -1940,6 +1983,7 @@ class NormalizedAccountingRepository:
         return {
             "revision_no": revision_no,
             "approved": approved,
+            "status": status,
             "result": corrected_result,
             "review_decision_id": str(review_decision_id),
         }

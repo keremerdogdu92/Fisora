@@ -7,6 +7,7 @@ export type NormalizedPilotStatus =
   | "processing"
   | "review_required"
   | "no_posting_required"
+  | "excluded"
   | "export_ready"
   | "cancel_requested"
   | "cancel_approved"

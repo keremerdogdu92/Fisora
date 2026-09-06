@@ -85,6 +85,6 @@ export function reviewActionLabel(action: string) {
   if (action === "approve") return "Onaylandı";
   if (action === "approve_with_changes") return "Düzeltilip onaylandı";
   if (action === "suggest_for_similar") return "Kural adayı yapıldı";
-  if (action === "exclude_export") return "Çıktı dışı bırakıldı";
+  if (action === "exclude_export") return "Hariç tutuldu";
   return "Kontrolde tutuldu";
 }

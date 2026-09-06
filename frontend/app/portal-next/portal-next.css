@@ -732,6 +732,39 @@
   gap: 4px;
 }
 .portal-next-shortcut-bar span.undo-ready { color: #0f7a45; font-weight: 850; }
+.portal-next-shortcut-bar .portal-next-last-action {
+  border-left: 1px solid var(--border-strong);
+  color: var(--text);
+  gap: 6px;
+  margin-left: 2px;
+  max-width: min(520px, 42vw);
+  overflow: hidden;
+  padding-left: 10px;
+}
+.portal-next-shortcut-bar .portal-next-last-action > b {
+  color: var(--text);
+  font-size: 0.66rem;
+  font-weight: 900;
+}
+.portal-next-shortcut-bar .portal-next-last-action > span {
+  color: inherit;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.portal-next-shortcut-bar .portal-next-inline-undo {
+  align-items: center;
+  background: #f5fbf7;
+  border: 1px solid #b7dcc7;
+  border-radius: 5px;
+  color: #0f7a45;
+  display: inline-flex;
+  font-size: 0.66rem;
+  font-weight: 900;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 7px;
+}
 .portal-next-shortcut-bar kbd,
 .portal-next-shortcut-modal kbd {
   background: #f3f6f9;
@@ -2326,6 +2359,10 @@
 .portal-next-theme .journal-no-posting-action { align-items: baseline; display: flex; gap: 8px; min-height: 32px; padding: 4px 6px; }
 .portal-next-theme .journal-no-posting-action strong { color: #315a4f; font-size: 0.76rem; }
 .portal-next-theme .journal-no-posting-action span { color: #66756f; font-size: 0.68rem; }
+.portal-next-theme .journal-next-actions.excluded-actions { grid-template-columns: minmax(0, 1fr) max-content; }
+.portal-next-theme .journal-excluded-action { display: grid; gap: 2px; min-width: 0; padding: 3px 6px; }
+.portal-next-theme .journal-excluded-action strong { color: #7a3c35; font-size: 0.76rem; }
+.portal-next-theme .journal-excluded-action span { color: #6f625f; font-size: 0.68rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .portal-next-theme .next-review .journal-decision-bar { display: none; }
 .portal-next-theme .next-review .journal-correction-panel { margin-top: 0; }
 .portal-next-theme .next-review .journal-reason-disclosure { margin-top: 0; }

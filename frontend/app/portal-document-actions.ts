@@ -329,7 +329,11 @@ export async function saveDecisionAction({
     (line) => line.account_code.trim() || line.description.trim() || line.debit.trim() || line.credit.trim(),
   );
   const applyToSimilar = Boolean(correctionDraft.applyToSimilar || action === "suggest_for_similar");
-  const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar" ? "export_ready" : "review_required";
+  const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar"
+    ? "export_ready"
+    : action === "exclude_export" || action === "exclude_from_export" || action === "out_of_scope"
+      ? "excluded"
+      : "review_required";
   const label = reviewActionLabel(action);
   setData((current) => ({
     ...current,

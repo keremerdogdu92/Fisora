@@ -876,6 +876,33 @@ class NormalizedInvoiceJournalPostgresTests(unittest.TestCase):
             },
         )
 
+    def test_exclude_export_persists_rejected_revision_instead_of_review_required(self) -> None:
+        store, client_id, document_ref = self._prepare_draft()
+        stored_document = store._get_record(client_id, "document", document_ref)
+        self.assertIsNotNone(stored_document)
+        stored_document["result"]["draft_lines"] = []
+        store._upsert_record(client_id, "document", document_ref, stored_document)
+
+        review = store.save_review_decision(
+            client_id=client_id,
+            decision={
+                "document_ref": document_ref,
+                "action": "exclude_export",
+                "reviewer": "accountant-1",
+                "reason": "Bu belge muhasebelestirilmeyecek.",
+                "expected_revision": 1,
+            },
+            learning_event={
+                "document_ref": document_ref,
+                "reason": "Bu belge muhasebelestirilmeyecek.",
+            },
+        )
+
+        self.assertFalse(review["normalized_review"]["approved"])
+        self.assertEqual(review["normalized_review"]["status"], "rejected")
+        self.assertEqual(review["corrected_document"]["result"]["export_status"], "rejected")
+        self.assertEqual(review["corrected_document"]["result"]["normalized_revision_status"], "rejected")
+
     def test_reopen_preserves_canonical_line_allocations(self) -> None:
         store, client_id, document_ref = self._prepare_draft()
         review = self._approve(

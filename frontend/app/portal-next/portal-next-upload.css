@@ -414,6 +414,11 @@
   color: #a33a2b;
 }
 
+.portal-next-upload-status.excluded {
+  background: #f1f3f5;
+  color: #56616d;
+}
+
 @media (max-width: 900px) {
   .portal-next-upload-controls {
     grid-template-columns: 1fr 1fr;

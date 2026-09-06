@@ -119,6 +119,13 @@ test("review cockpit queues separate one-click, minor-edit, and manual-risk docu
       reviewReasons: [],
       draftLines: [],
     },
+    {
+      id: "excluded",
+      status: "excluded",
+      isBalanced: true,
+      reviewReasons: [],
+      draftLines: [{ account_code: "770.01" }],
+    },
   ]);
 
   assert.deepEqual(queues.oneClickApproval.map((document) => document.id), ["one-click", "ready"]);

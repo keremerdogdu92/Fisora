@@ -3704,6 +3704,11 @@ tbody tr:last-child td {
   color: var(--bad);
 }
 
+.status.excluded {
+  background: #f1f3f5;
+  color: #56616d;
+}
+
 .client-row,
 .document-row {
   background: var(--surface);

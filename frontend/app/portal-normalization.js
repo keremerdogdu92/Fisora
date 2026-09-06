@@ -134,6 +134,7 @@ function normalizeRulePrompt(value) {
 function normalizeStatus(value) {
   if (value === "export_ready" || value === "auto_ready") return "export_ready";
   if (value === "no_posting_required") return "no_posting_required";
+  if (value === "rejected" || value === "excluded") return "excluded";
   if (value === "processing") return "processing";
   if (value === "queued" || value === "stored") return "queued";
   if (value === "uploaded") return "uploaded";

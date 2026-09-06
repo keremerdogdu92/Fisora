@@ -17,6 +17,7 @@ const statusLabels: Record<PilotStatus, string> = {
   processing: "İşleniyor",
   review_required: "Kontrol gerekli",
   no_posting_required: "Fiş gerekmiyor",
+  excluded: "Hariç tutuldu",
   export_ready: "Aktarıma hazır",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",
@@ -758,6 +759,7 @@ export function JournalPanel({
   const activeDocument = document;
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const noPosting = document.status === "no_posting_required" || document.draftStatus === "no_posting_required";
+  const excluded = document.status === "excluded";
   const sourceReviewMode = !isStatement && Boolean(document.sourceReviewRows?.length);
   const accountingDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
   const sourceReviewDraftLines = sourceReviewDraftLinesForDocument(document);
@@ -780,7 +782,7 @@ export function JournalPanel({
   const processingIncomplete = ["queued", "processing"].includes(document.status)
     || document.draftStatus === "processing"
     || Boolean(document.processingStages && !htmlSourceReady && document.processingStages.final.status !== "completed");
-  const blocksApproval = noPosting || processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
+  const blocksApproval = noPosting || excluded || processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
   const pendingDirectionConflict = hasPendingDirectionConflict(document);
@@ -1019,7 +1021,15 @@ export function JournalPanel({
         <JournalReasonDisclosure document={document} />
       </div>
       {nextKeyboardShortcuts ? (
-        noPosting ? (
+        excluded ? (
+          <section className="journal-next-actions excluded-actions" aria-label="Belge karar?">
+            <div className="journal-excluded-action">
+              <strong>Hariç tutuldu</strong>
+              <span>Belge silinmedi; yeniden kontrole alınabilir.</span>
+            </div>
+            <button className="primary" onClick={() => onSaveDecision("review_required")} type="button">Kontrole geri al</button>
+          </section>
+        ) : noPosting ? (
           <section className="journal-next-actions no-posting-actions" aria-label="Belge kararı">
             <div className="journal-no-posting-action">
               <strong>Fiş gerekmiyor</strong>
@@ -1032,7 +1042,7 @@ export function JournalPanel({
               <button className="primary" onClick={() => onSaveDecision("accept_detected_direction")} type="button">Yönü çöz</button>
             ) : (
               <>
-                <button className="secondary" disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrolde tut</button>
+                <button className="secondary" onClick={() => onSaveDecision("review_required")} type="button">{document.status === "export_ready" ? "Kontrole geri al" : "Kontrolde tut"}</button>
                 <button className="secondary danger" onClick={() => onSaveDecision("exclude_export")} type="button">Hariç tut</button>
                 <button className="primary" disabled={blocksApproval} onClick={onApproveAndNext} type="button">Onayla ve sonraki →</button>
               </>
@@ -1076,7 +1086,11 @@ function JournalDecisionBar({
           <span>{decisionStatus || "Bu belge için henüz müşavir kararı verilmedi."}</span>
         </div>
       </div>
-      {pendingDirectionConflict ? (
+      {document.status === "excluded" ? (
+        <div className="decision-actions secondary-actions">
+          <button onClick={() => onSaveDecision("review_required")} type="button">Kontrole geri al</button>
+        </div>
+      ) : pendingDirectionConflict ? (
         <>
           <div className="accountant-guidance">
             <strong>Yön çakışması</strong>
@@ -1089,7 +1103,7 @@ function JournalDecisionBar({
         </>
       ) : (
         <div className="decision-actions secondary-actions">
-          <button disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
+          <button onClick={() => onSaveDecision("review_required")} type="button">Kontrol için beklet</button>
           <button disabled={hasInvalidDraftAccounts} onClick={() => onSaveDecision("suggest_for_similar")} type="button">Benzerleri için öneri yap</button>
           <button onClick={onReprocessDocument} type="button">Yeniden işle</button>
           <button onClick={() => onSaveDecision("exclude_export")} type="button">Çıktı listesine ekleme</button>

@@ -8,7 +8,8 @@ type WorkspaceControlsProps = {
   active: boolean;
   onNavigateDocument: (direction: 1 | -1) => void;
   onToggleSidebar: () => void;
-  onUndoLastApproval: () => void | Promise<boolean>;
+  onUndoLastReviewAction: () => void | Promise<boolean>;
+  lastReviewActionLabel?: string;
   undoAvailable: boolean;
 };
 
@@ -38,7 +39,8 @@ export function PortalNextWorkspaceControls({
   active,
   onNavigateDocument,
   onToggleSidebar,
-  onUndoLastApproval,
+  onUndoLastReviewAction,
+  lastReviewActionLabel = "",
   undoAvailable,
 }: WorkspaceControlsProps) {
   const [helpOpen, setHelpOpen] = useState(false);
@@ -80,7 +82,7 @@ export function PortalNextWorkspaceControls({
       }
       if (!editable && event.ctrlKey && event.key.toLowerCase() === "z" && undoAvailable) {
         event.preventDefault();
-        void onUndoLastApproval();
+        void onUndoLastReviewAction();
         return;
       }      if (event.key === "Escape" && helpOpen) {
         event.preventDefault();
@@ -89,7 +91,7 @@ export function PortalNextWorkspaceControls({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [active, helpOpen, onNavigateDocument, onToggleSidebar, onUndoLastApproval, undoAvailable]);
+  }, [active, helpOpen, onNavigateDocument, onToggleSidebar, onUndoLastReviewAction, undoAvailable]);
 
   if (!active) return null;
   return (
@@ -103,7 +105,17 @@ export function PortalNextWorkspaceControls({
           <span><kbd>F10</kbd> Menüyü daralt / aç</span>
           <span><kbd>↑ ↓</kbd> Evrak değiştir</span>
           <span><kbd>Ctrl + Enter</kbd> Onayla</span>
-          <span className={undoAvailable ? "undo-ready" : ""}><kbd>Ctrl + Z</kbd> Geri al</span>
+          {lastReviewActionLabel ? (
+            <span className={`portal-next-last-action${undoAvailable ? " undo-ready" : ""}`} aria-live="polite">
+              <b>Son işlem</b>
+              <span>{lastReviewActionLabel}</span>
+              {undoAvailable ? (
+                <button className="portal-next-inline-undo" onClick={() => { void onUndoLastReviewAction(); }} type="button">Geri al <kbd>Ctrl + Z</kbd></button>
+              ) : null}
+            </span>
+          ) : (
+            <span><kbd>Ctrl + Z</kbd> Son işlemi geri al</span>
+          )}
           <span><kbd>Esc</kbd> Kapat</span>
           <button onClick={() => setLegendVisible(false)} type="button">Gizle</button>
         </div>
@@ -123,7 +135,7 @@ export function PortalNextWorkspaceControls({
               <div><dt><kbd>F10</kbd></dt><dd>Ana menüyü daralt veya aç</dd></div>
               <div><dt><kbd>↑ / ↓</kbd></dt><dd>Evraklar arasında geçiş yap</dd></div>
               <div><dt><kbd>Ctrl + Enter</kbd></dt><dd>Onayla ve sonraki evraka geç</dd></div>
-              <div><dt><kbd>Ctrl + Z</kbd></dt><dd>Desteklenen son onayı 8 saniye içinde geri al</dd></div>
+              <div><dt><kbd>Ctrl + Z</kbd></dt><dd>Son geri alınabilir müşavir işlemini geri al</dd></div>
               <div><dt><kbd>Esc</kbd></dt><dd>Açık pencereyi veya düzenlemeyi kapat</dd></div>
             </dl>
           </section>

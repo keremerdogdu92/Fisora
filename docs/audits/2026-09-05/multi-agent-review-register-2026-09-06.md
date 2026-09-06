@@ -68,25 +68,39 @@
 # B — Onay, undo, kontrolde tut, hariç tut
 
 ## REV-B01 — Ctrl+Z geri alma görünür sonuç üretmedi
-**Status:** KONTROL EDİLECEK.
+**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
 **Audit refs:** [CG-02](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-02--ctrlz-undo-did-not-visibly-work) · [CX Post-authorization validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation)
+**Kerem kararı (2026-09-06):** Ctrl+Z süre bazlı değil işlem bazlı olacak; son geri alınabilir müşavir işlemini geri alacak. Eski bir belge ayrıca açık `Kontrole geri al` aksiyonuyla yeniden açılabilecek.
+**Implementation refs:** `frontend/app/features/review/use-review-commands.ts`, `frontend/app/portal-next/portal-next-workspace-controls.tsx`, `frontend/app/portal-review-performance.test.cjs`, `frontend/app/portal-next.test.cjs`.
 
 ## REV-B02 — Hariç tut görünür state transition üretmedi
-**Status:** KONTROL EDİLECEK.
+**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
 **Audit refs:** [CG-09](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-09--hariç-tut-showed-no-visible-transition) · [CX UXR-011](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-011--p1--hariç-tut-aksiyonu-görünür-sonuç-üretmiyor)
+**Kerem kararı (2026-09-06):** `Hariç tut` = bu belgeyi işlemeyeceğiz; hard delete değildir. Belge ve geçmişi korunur ve tekrar kontrole alınabilir.
+**Root cause:** Backend `rejected` üretse de frontend bunu `review_required`a normalize ediyordu; normalized persistence da exclusion kararını bazı akışlarda review state'ine eziyordu.
+**Implementation refs:** `backend/app/persistence/normalized_accounting_repository.py`, `backend/app/persistence/postgres_workflow_store.py`, `frontend/app/portal-normalization.js`, `frontend/app/portal-document-actions.ts`, `frontend/app/portal-review-panels.tsx`, `frontend/app/features/documents/document-workflow-model.js`.
 
 ## REV-B03 — Hariç tutulanlar görünümü / geri getir
-**Status:** ÜRÜN KARARI.
+**Status:** KISMEN KABUL EDİLDİ / UYGULANDI — ayrı `Hariç tutulanlar` filtresi henüz kararlaştırılmadı.
 **Source context:** CG recommendation derived from CG-09; CX UXR-011 confirms current ambiguity.
+**Kerem kararı (2026-09-06):** Hariç tutma geri alınabilir olacak. Uygulamada belge `Hariç tutuldu` state'inde korunuyor ve `Kontrole geri al` aksiyonu sunuluyor; ayrıca özel bir filtre gerekip gerekmediğine sonra karar verilecek.
 
 ## REV-B04 — Kontrolde tut state'i geri döndürürken provenance eski kalabiliyor
 **Status:** KONTROL EDİLECEK.
 **Audit refs:** [CG-06](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-06--returning-to-control-did-not-restore-provenance) · [CX validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation)
 
 ## REV-B05 — Onay başarı feedback'i yeterli mi?
-**Status:** ÜRÜN KARARI / TEKRAR TEST.
+**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
 **Audit refs:** [AG FINDING-04](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-04-onayla-ve-sonraki-işleminde-kuyruk-rozetinin-güncellenmemesi) · [CX validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation) · [CG-04](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-04--contradictory-workflow-labels)
-**Conflict:** State değişimi CG/CX tarafından görüldü; AG feedback'in kullanıcıya yeterince kesin ulaşmadığını gördü. `Hiç state değişmiyor` şeklinde otomatik bug kabul edilmeyecek.
+**Conflict note:** State değişimi CG/CX tarafından görüldü; AG feedback'in kullanıcıya yeterince kesin ulaşmadığını gördü. `Hiç state değişmiyor` şeklinde kabul edilmedi.
+**Kerem kararı (2026-09-06):** Yeni toast/modal eklenmeden mevcut alt kısayol barı içinde son işlem açıkça gösterilecek; geri alınabiliyorsa `Geri al / Ctrl+Z` aynı yerde görünecek.
+**Implementation refs:** `frontend/app/portal-next/portal-next-workspace-controls.tsx`, `frontend/app/portal-next/portal-next.css`, `frontend/app/features/review/use-review-commands.ts`.
+
+## REV-B06 — `Kontrolde tut` semantiği
+**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
+**Decision source:** 2026-09-06 multi-agent audit review discussion.
+**Kerem kararı:** `Kontrolde tut` = bu belge sonradan işlenecek. Hata/terminal state değildir; eksik veya yarım fiş yüzünden bu aksiyonun kendisi bloklanmamalıdır. Onaylanmış belge için aynı geri dönüş davranışı `Kontrole geri al` adıyla sunulur.
+**Implementation refs:** `frontend/app/portal-review-panels.tsx`, `backend/app/persistence/normalized_accounting_repository.py`, `frontend/app/features/review/use-review-commands.ts`.
 
 # C — Muhasebe güvenlik kapıları
 

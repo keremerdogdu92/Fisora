@@ -188,7 +188,12 @@ test("next keyboard controls preserve review guards and desktop-only legend", ()
   assert.match(controls, /event\.ctrlKey && event\.key === "Enter"/);
   assert.match(controls, /journal-next-actions \.primary:not\(:disabled\)/);
   assert.match(controls, /event\.ctrlKey && event\.key\.toLowerCase\(\) === "z" && undoAvailable/);
+  assert.match(controls, /onUndoLastReviewAction/);
+  assert.doesNotMatch(controls, /8 saniye/);
+  assert.match(controls, /portal-next-last-action/);
+  assert.match(controls, /portal-next-inline-undo/);
   assert.match(styles, /\.portal-next-shortcut-bar/);
+  assert.match(styles, /\.portal-next-last-action/);
   assert.match(styles, /@media \(max-width: 860px\)[\s\S]*?\.portal-next-shortcut-bar[\s\S]*?display: none/);
 });
 
@@ -243,6 +248,18 @@ test("no-posting invoices stay informational and never expose journal approval a
   assert.match(clientView, /document\.status === "no_posting_required" \|\| document\.status === "review_required"/);
   assert.match(styles, /\.journal-no-posting/);
   assert.match(styles, /\.journal-next-actions\.no-posting-actions/);
+});
+
+test("excluded invoices stay visible, reversible, and outside active review cockpit queues", () => {
+  const review = source("portal-review-panels.tsx");
+  const normalization = source("portal-normalization.js");
+  const workflow = source("features", "documents", "document-workflow-model.js");
+
+  assert.match(normalization, /value === "rejected" \|\| value === "excluded"/);
+  assert.match(review, /journal-excluded-action/);
+  assert.match(review, /Kontrole geri al/);
+  assert.match(review, /document\.status === "excluded"/);
+  assert.match(workflow, /document\.status === "no_posting_required" \|\| document\.status === "excluded"/);
 });
 
 test("journal source links locate and highlight the matching PDF or sandboxed HTML evidence", () => {

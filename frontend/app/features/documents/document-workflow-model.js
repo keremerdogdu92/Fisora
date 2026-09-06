@@ -52,7 +52,7 @@ function reviewCockpitQueues(documents) {
     manualRisk: [],
   };
   for (const document of documents) {
-    if (document.status === "no_posting_required") continue;
+    if (document.status === "no_posting_required" || document.status === "excluded") continue;
     const reasons = documentReviewReasons(document);
     const hasOnlyApprovalGate =
       reasons.length === 0 ||

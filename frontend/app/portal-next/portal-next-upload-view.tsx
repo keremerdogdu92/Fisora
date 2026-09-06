@@ -28,6 +28,7 @@ const statusLabels: Record<PilotStatus, string> = {
   processing: "İşleniyor",
   review_required: "Kontrol gerekli",
   no_posting_required: "Fiş gerekmiyor",
+  excluded: "Hariç tutuldu",
   export_ready: "Hazır",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",
@@ -57,6 +58,7 @@ function isAcceptedFile(file: File) {
 function statusTone(status: PilotStatus) {
   if (["uploaded", "queued", "processing"].includes(status)) return "waiting";
   if (["review_required", "cancel_requested", "post_export_correction_requested"].includes(status)) return "review";
+  if (status === "excluded") return "excluded";
   return "ready";
 }
 

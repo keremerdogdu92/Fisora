@@ -483,7 +483,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   const hasUnsavedReviewChanges = useMemo(() => Boolean(correctionDraft.accountCode.trim() || correctionDraft.counterpartyCode.trim() || correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim() || correctionDraft.applyToSimilar || correctionDraft.manualDraftLines.length), [correctionDraft]);
   useReviewEditLease({ correctionDraft, hasUnsavedReviewChanges, loginUserId, selectedDocument, session, onStatus: (status) => { if (status !== "idle") setDecisionStatus(status); } });
   const { approveSelectedAndMoveNext, reprocessSelectedDocument, requestStatementAiForSelectedDocument,
-    saveDecision, saveStatementLineDecision, undoAvailable, undoLastApproval } = useReviewCommands({
+    saveDecision, saveStatementLineDecision, lastReviewActionLabel, undoAvailable, undoLastReviewAction } = useReviewCommands({
     activeReviewDocuments,
     correctionDraft,
     hasUnsavedReviewChanges,
@@ -643,7 +643,8 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           onClientSearchChange={setClientSearch}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}
           onToggleSidebar={toggleSidebarCollapsed}
-          onUndoLastApproval={undoLastApproval}
+          onUndoLastReviewAction={undoLastReviewAction}
+          lastReviewActionLabel={lastReviewActionLabel}
           onReprocessDocument={reprocessSelectedDocument}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
           onResolveCancellation={resolveCancellation}

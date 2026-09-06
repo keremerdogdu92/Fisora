@@ -3232,10 +3232,9 @@ class PostgresWorkflowStore:
                 corrected_result["normalized_revision"] = normalized_review[
                     "revision_no"
                 ]
-                corrected_result["normalized_revision_status"] = (
-                    "approved"
-                    if normalized_review["approved"]
-                    else "review_required"
+                corrected_result["normalized_revision_status"] = str(
+                    normalized_review.get("status")
+                    or ("approved" if normalized_review["approved"] else "review_required")
                 )
                 with connection.cursor() as cursor:
                     return self._persist_review_records(
@@ -3255,8 +3254,9 @@ class PostgresWorkflowStore:
                 corrected_result=corrected_result,
             )
             corrected_result["normalized_revision"] = normalized_review["revision_no"]
-            corrected_result["normalized_revision_status"] = (
-                "approved" if normalized_review["approved"] else "review_required"
+            corrected_result["normalized_revision_status"] = str(
+                normalized_review.get("status")
+                or ("approved" if normalized_review["approved"] else "review_required")
             )
         return self._persist_review_records(
             cursor=None,

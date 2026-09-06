@@ -507,3 +507,25 @@ Her konu tek tek şu sırayla kapatılacak:
 
 İlk konu `REV-A01/A02/A03/A04`: canonical active-document context ve işlenemeyen belge UX'inin internal integrity failure'dan ayrılması.
 
+
+---
+
+## Decision note — 2026-09-06 — Review action semantics
+
+Bu not B bölümündeki önceki `KONTROL EDİLECEK / ÜRÜN KARARI` statülerini ürün yönü açısından günceller; implementasyon yapılmış sayılmaz.
+
+**B01 / Undo — KABUL EDİLEN YÖN:** Ctrl+Z zaman penceresine bağlı olmayacak. `Son geri alınabilir review işlemi` işlem bazında tutulacak. İlk öneri: keyboard undo yalnız en son reversible workflow mutation'ını geri alır; bir süre sınırı yoktur. Daha eski bir kaydı değiştirmek için ilgili belge üzerinden açık `Kontrole geri al / Yeniden aç` işlemi kullanılır. Audit geçmişi silinmez; original action + undo/reopen ayrı event olarak saklanır.
+
+**B01 kapsam sınırı:** Ctrl+Z bir input/hesap alanında focus varken metin düzenleme undo'sunu bozmamalı. Global review undo yalnız editable focus dışında devreye girmeli. Upload, export, hard-delete benzeri farklı risk sınıfları review undo stack'ine otomatik sokulmayacak.
+
+**B02 / Onay — KABUL EDİLDİ:** Onaylanmış belge sonradan yeniden kontrol durumuna alınabilir. Onay terminal/geri dönüşsüz state değildir.
+
+**B03 / Kontrolde tut — KABUL EDİLDİ:** `Şimdi karar vermiyorum; sonradan işlenecek` anlamına gelen normal business state'tir. Hata veya dead-end değildir.
+
+**B04 / Hariç tut — KABUL EDİLDİ:** `Bu belgeyi muhasebeleştirmeyeceğiz` anlamına gelir; hard delete değildir. Belge ve geçmiş korunur, gerektiğinde geri getirilebilir. Hariç tutma nedeni isteyip istememe gibi mikro UX kararı ayrıca verilecek.
+
+**B05 / Audit trail — KABUL EDİLDİ:** Onay, undo, yeniden açma, kontrolde tutma, hariç tutma ve geri getirme kim/zaman/belge/eski-yeni state ile audit trail'e yazılacak.
+
+**B06 / Onay feedback — ÖNERİ, HENÜZ KARAR DEĞİL:** Yeni toast/card eklemek yerine mevcut alt kısayol/aksiyon barında tek satırlık `✓ Turkcell · 1.034,33 TL onaylandı · Geri al  Ctrl+Z` son-işlem göstergesi kullanılması öneriliyor. Süreyle kaybolmaz; bir sonraki reversible review işlemiyle yerini yeni son işleme bırakır. Queue görünürse önceki satırın state rozeti de eşzamanlı güncellenir. Ses/modal/pop-up önerilmiyor.
+
+**Undo sonrası önerilen davranış:** Ctrl+Z son onayı geri aldığında o belge yeniden aktif belgeye döner; kullanıcı düzeltme yapabilsin. Bu davranış henüz nihai UI kararı değildir.

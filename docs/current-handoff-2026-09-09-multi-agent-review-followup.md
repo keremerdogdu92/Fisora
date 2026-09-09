@@ -195,7 +195,9 @@ Completed in the 2026-09-09 implementation passes:
 
 Completed 2026-09-10: **`REV-I01` + `REV-I02`** - Learned Rules now maps backend/JSON failures to short accountant-safe messages; raw `error.message` is no longer rendered. Acceptance: targeted regression PASS, full frontend 222/222, Next build + TypeScript PASS.
 
-Next audit verification: **`REV-I03`** - QNB endpoint/500 leakage. Test first; do not broaden into a common error framework unless the current behavior requires it.
+Completed 2026-09-10: **`REV-I03`** - QNB connection, sync, and policy failures now use short accountant-safe messages; raw backend/endpoint `error.message` is not rendered. Acceptance: targeted regression PASS, full frontend 223/223, Next build + TypeScript PASS.
+
+Next audit verification: **`REV-I04`** - QNB production configuration detail leakage. Test first; do not change the settings model until the current visible fields are verified.
 
 ## Required acceptance matrix for this pass
 

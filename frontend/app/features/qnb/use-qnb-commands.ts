@@ -16,6 +16,12 @@ function pageUrl() {
   return typeof window === "undefined" ? "" : window.location.href;
 }
 
+const QNB_STATUS_ERROR = "QNB bağlantı durumu alınamadı. Tekrar deneyin.";
+const QNB_DISABLE_ERROR = "QNB bağlantısı kapatılamadı. Tekrar deneyin.";
+const QNB_SAVE_ERROR = "QNB bağlantısı kaydedilemedi. Tekrar deneyin.";
+const QNB_SYNC_ERROR = "QNB senkronizasyonu başlatılamadı. Tekrar deneyin.";
+const QNB_POLICY_ERROR = "Otomatik senkronizasyon ayarı kaydedilemedi. Tekrar deneyin.";
+
 export function useQnbCommands({
   loginUserId,
   refreshBackendPilotData,
@@ -72,9 +78,9 @@ export function useQnbCommands({
       setQnbPolicy({ enabled: Boolean(policy?.enabled), frequencyMinutes: Number(policy?.frequency_minutes || 60), maxDocumentsPerRun: Number(policy?.max_documents_per_run || 100), statusReconciliationEnabled: Boolean(policy?.status_reconciliation_enabled ?? true), message: "" });
       const latest = health?.latest_run || {};
       setQnbHealth({ safeMessage: String(health?.safe_message || ""), lastSuccessAt: String(health?.policy?.last_success_at || ""), lastAttemptAt: String(health?.policy?.last_attempt_at || ""), nextRunAt: String(health?.policy?.next_run_at || ""), cursor: String(health?.cursor || ""), listedCount: Number(latest?.listed_count || 0), downloadedCount: Number(latest?.downloaded_count || 0), duplicateCount: Number(latest?.skipped_duplicate_count || 0), failedCount: Number(latest?.failed_count || 0) });
-    } catch (error) {
+    } catch {
       setQnbStatus({
-        message: `QNB bağlantı durumu okunamadı. ${error instanceof Error ? error.message : String(error)}`,
+        message: QNB_STATUS_ERROR,
         maskedUsername: "",
         status: "error", environment: "", lastTestedAt: "", lastError: "",
       });
@@ -90,8 +96,8 @@ export function useQnbCommands({
       });
       setQnbStatus({ message: "QNB bağlantısı devre dışı bırakıldı.", maskedUsername: String(payload?.username || ""), status: String(payload?.status || "disabled"), environment: String(payload?.environment || ""), lastTestedAt: String(payload?.last_tested_at || ""), lastError: "" });
       setQnbConnection((current) => ({ ...current, password: "" }));
-    } catch (error) {
-      setQnbStatus({ message: `QNB bağlantısı kapatılamadı. ${error instanceof Error ? error.message : String(error)}`, maskedUsername: "", status: "error", environment: "", lastTestedAt: "", lastError: "" });
+    } catch {
+      setQnbStatus({ message: QNB_DISABLE_ERROR, maskedUsername: "", status: "error", environment: "", lastTestedAt: "", lastError: "" });
     }
   }
 
@@ -116,9 +122,9 @@ export function useQnbCommands({
         environment: String(payload?.environment || ""), lastTestedAt: String(payload?.last_tested_at || ""), lastError: String(payload?.last_error || ""),
       });
       setQnbConnection((current) => ({ ...current, password: "" }));
-    } catch (error) {
+    } catch {
       setQnbStatus({
-        message: `QNB bağlantısı kaydedilemedi. ${error instanceof Error ? error.message : String(error)}`,
+        message: QNB_SAVE_ERROR,
         maskedUsername: "",
         status: "error", environment: "", lastTestedAt: "", lastError: "",
       });
@@ -144,8 +150,8 @@ export function useQnbCommands({
         `${Number(payload?.listed_count || 0)} listelendi, ${Number(payload?.downloaded_count || 0)} indirildi, ${Number(payload?.queued_processing_count || 0)} kuyruğa alındı.`,
       );
       await refreshBackendPilotData();
-    } catch (error) {
-      setQnbSyncMessage(`QNB sync çalışmadı. ${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setQnbSyncMessage(QNB_SYNC_ERROR);
     }
   }
 
@@ -154,8 +160,8 @@ export function useQnbCommands({
     try {
       const payload = await saveQnbSyncPolicy({ apiBaseUrl: resolveApiBaseUrl(pageUrl()), clientId: selectedClient.clientId, userId: loginUserId, sessionToken: session?.sessionToken || "", policy: qnbPolicy });
       setQnbPolicy((current) => ({ ...current, enabled: Boolean(payload?.enabled), message: payload?.enabled ? "Otomatik senkronizasyon aktif." : "Otomatik senkronizasyon kapalı." }));
-    } catch (error) {
-      setQnbPolicy((current) => ({ ...current, message: `Otomatik senkronizasyon kaydedilemedi. ${error instanceof Error ? error.message : String(error)}` }));
+    } catch {
+      setQnbPolicy((current) => ({ ...current, message: QNB_POLICY_ERROR }));
     }
   }
 

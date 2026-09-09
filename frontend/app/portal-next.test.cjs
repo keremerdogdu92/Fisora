@@ -159,6 +159,15 @@ test("learned rules hide raw backend errors from accountants", () => {
   assert.doesNotMatch(ruleCommands, /setStatus\(error instanceof Error \? error\.message : String\(error\)\)/);
 });
 
+test("QNB settings hide raw backend errors from accountants", () => {
+  const qnbCommands = source("features", "qnb", "use-qnb-commands.ts");
+
+  assert.match(qnbCommands, /QNB bağlantı durumu alınamadı\. Tekrar deneyin\./);
+  assert.match(qnbCommands, /QNB senkronizasyonu başlatılamadı\. Tekrar deneyin\./);
+  assert.match(qnbCommands, /Otomatik senkronizasyon ayarı kaydedilemedi\. Tekrar deneyin\./);
+  assert.doesNotMatch(qnbCommands, /error instanceof Error \? error\.message : String\(error\)/);
+});
+
 test("next workbench prefers the latest invoice-bearing period on initial entry", () => {
   const workspaceModel = source("portal-next", "portal-next-workspace-model.ts");
 

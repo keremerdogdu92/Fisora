@@ -284,8 +284,11 @@
 **Resolution:** Same root cause as REV-I01. The UI no longer renders raw `error.message`, therefore JSON/details returned by the API helper are not shown on the Learned Rules screen.
 
 ## REV-I03 — QNB endpoint/500 kullanıcıya çıkıyor
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** [CG-12](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-12--qnb-settings-leak-implementationconfiguration-details)
+**Root cause:** QNB command catches appended raw `error.message` text to visible connection, sync, and policy status messages.
+**Implementation:** QNB connection-status, disable, save, incoming-sync, and policy-save failures now use short accountant-facing messages. Backend/endpoint error detail is no longer interpolated into the QNB UI.
+**Acceptance:** QNB error-presentation regression PASS; full frontend suite 223/223; Next production build + TypeScript PASS.
 
 ## REV-I04 — QNB production config key kullanıcıya çıkıyor
 **Status:** KONTROL EDİLECEK.

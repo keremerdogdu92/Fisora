@@ -646,6 +646,9 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
             "payable_total": "120.00",
             "simulated_status": "review_required",
             "export_status": "review_required",
+            "draft_status": "draft_ready",
+            "draft_decision_source": "static_rules_ai_assisted_draft",
+            "accountant_summary": "Sistem taslağı hazır.",
             "draft_entry_type": "purchase_invoice",
             "total_debit": "120.00",
             "total_credit": "120.00",
@@ -731,6 +734,10 @@ class NormalizedInvoiceJournalSliceTests(unittest.TestCase):
         self.assertEqual(repository.histories["source-1"][1], approved_snapshot)
         self.assertEqual(repository.histories["source-1"][1]["status"], "approved")
         self.assertEqual(repository.histories["source-1"][2]["status"], "working_draft")
+        reopened_result = repository.histories["source-1"][2]["result"]
+        self.assertEqual(reopened_result["draft_status"], "draft_ready")
+        self.assertEqual(reopened_result["draft_decision_source"], "static_rules_ai_assisted_draft")
+        self.assertEqual(reopened_result["accountant_summary"], "Sistem taslağı hazır.")
 
     def test_stale_review_cannot_overwrite_current_revision(self) -> None:
         repository = FakeNormalizedRepository()

@@ -495,6 +495,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     session,
     setData,
     setDecisionStatus,
+    setCorrectionDraft,
     setSelectedDocumentId,
     setSelectedStatementLineNo,
     setStatementAiStatus,

@@ -95,6 +95,7 @@ export function useReviewCommands({
   session,
   setData,
   setDecisionStatus,
+  setCorrectionDraft,
   setSelectedDocumentId,
   setSelectedStatementLineNo,
   setStatementAiStatus,
@@ -110,6 +111,7 @@ export function useReviewCommands({
   session: LocalSession | null;
   setData: Dispatch<SetStateAction<PilotData>>;
   setDecisionStatus: (status: string) => void;
+  setCorrectionDraft: Dispatch<SetStateAction<CorrectionDraft>>;
   setSelectedDocumentId: (documentId: string) => void;
   setSelectedStatementLineNo: (lineNo: number) => void;
   setStatementAiStatus: (status: string) => void;
@@ -201,6 +203,45 @@ export function useReviewCommands({
       const document = selectedDocument;
       if (!document) return undefined;
       const previousStatus = document.status;
+
+      if (action === "review_required" && previousStatus === "export_ready") {
+        const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim();
+        try {
+          const payload = await reopenJournal({
+            apiBaseUrl: resolveApiBaseUrl(pageUrl()),
+            clientId: document.clientId,
+            documentRef: document.id,
+            expectedRevision: document.normalizedRevision || 0,
+            reason: "Müşavir onayı geri alındı; fiş taslağı ve kaynağı korunarak yeniden kontrole açıldı.",
+            userId: reviewer,
+            sessionToken: session?.sessionToken || "",
+          });
+          await refreshBackendPilotData();
+          setCorrectionDraft(emptyCorrectionDraft());
+          const revisionNo = Number((payload as Record<string, unknown>)?.revision_no || 0);
+          const summary = reviewActionSummary(document, "Kontrole geri alındı");
+          setDecisionStatus(`${document.fileName}: kontrole geri alındı; fiş kaynağı korunuyor.`);
+          setLastReviewActionLabel(summary);
+          setUndoableReviewAction(revisionNo > 0 ? {
+            amount: document.amount,
+            category: document.productCategory,
+            clientId: document.clientId,
+            documentId: document.id,
+            documentRef: document.id,
+            fileName: document.fileName,
+            provider: document.provider,
+            restoreAction: "approve",
+            revisionNo,
+            summary,
+          } : null);
+          return { ok: true, payload: { normalized_review: { status: "review_required", revision_no: revisionNo } } };
+        } catch (error) {
+          await refreshBackendPilotData();
+          setDecisionStatus(error instanceof Error ? error.message : String(error));
+          return { ok: false, payload: null };
+        }
+      }
+
       const result = await persistDecision(action, options);
       if (!result?.ok) return result;
 
@@ -230,7 +271,7 @@ export function useReviewCommands({
       }
       return result;
     },
-    [persistDecision, selectedDocument],
+    [loginUserId, persistDecision, refreshBackendPilotData, selectedDocument, session, setCorrectionDraft, setDecisionStatus],
   );
 
   const reprocessSelectedDocument = useCallback(() => {

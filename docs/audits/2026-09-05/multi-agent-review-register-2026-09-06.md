@@ -90,8 +90,12 @@
 **Kerem kararı (2026-09-06):** Hariç tutma geri alınabilir olacak. Uygulamada belge `Hariç tutuldu` state'inde korunuyor ve `Kontrole geri al` aksiyonu sunuluyor; ayrıca özel bir filtre gerekip gerekmediğine sonra karar verilecek.
 
 ## REV-B04 — Kontrolde tut state'i geri döndürürken provenance eski kalabiliyor
-**Status:** KONTROL EDİLECEK.
+**Status:** KABUL EDİLDİ / UYGULANDI — 2026-09-09.
 **Audit refs:** [CG-06](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-06--returning-to-control-did-not-restore-provenance) · [CX validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation)
+**Kerem kararı:** `Kontrole geri al` yalnız onay/workflow kararını geri alır. Fiş taslağının nasıl oluştuğu, mevcut satırları ve provenance bilgisi bu işlem nedeniyle değişmez. Normal `Kontrolde tut` ise mevcut çalışma taslağını korumaya devam eder.
+**Root cause:** Onaylanmış belgeyi yeniden kontrole alma ile normal `Kontrolde tut` aynı generic `review_required` karar yolunu kullanıyordu. Bu yol ekrandaki draft editlerini de payload'a ekleyebildiği için onaylı sistem taslağı `manual_draft_completed / accountant_manual_draft` olarak yeniden damgalanabiliyordu.
+**Implementation:** `export_ready -> review_required` artık `reopenJournal` üzerinden gider. Normalized reopen, onaylı revision snapshot'ını kopyalar ve yalnız `export_status`, revision/status alanlarını yeniden kontrole açar. Draft provenance alanlarına dokunmaz. Normal `review_required -> review_required` Kontrolde tut akışı generic review-decision yolunda kalır.
+**Acceptance:** Reopen regression testi `draft_status`, `draft_decision_source` ve `accountant_summary` alanlarının aynen korunduğunu doğruluyor. Frontend source-contract testi reopen branch'inde `draftLines/manualDraftLines/accountant_manual_draft` gönderilmediğini doğruluyor.
 
 ## REV-B05 — Onay başarı feedback'i yeterli mi?
 **Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
@@ -523,7 +527,7 @@ Her konu tek tek şu sırayla kapatılacak:
 
 ## Next discussion
 
-Sıradaki paket: `REV-B04` + `REV-D01/D02/D03/D04` — review-state provenance, geri dönüşlerde provenance tutarlılığı ve canonical kullanıcı-facing state dili.
+Sıradaki tek konu: `REV-D01` — çelişkili kullanıcı-facing state etiketleri. `REV-D02/D03/D04` bununla birlikte paketlenmeyecek; Kerem kararıyla tek tek ele alınacak.
 
 
 ---

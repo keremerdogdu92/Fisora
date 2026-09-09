@@ -59,3 +59,17 @@ test("review undo is operation-based and does not expire on a timer", () => {
   assert.match(reviewCommands, /setSelectedDocumentId\(reviewAction\.documentId\)/);
   assert.match(controls, /!editable && event\.ctrlKey && event\.key\.toLowerCase\(\) === "z"/);
 });
+
+test("reopening an approved journal preserves its draft provenance instead of resaving it as manual", () => {
+  const reviewCommands = readFileSync(join(__dirname, "features", "review", "use-review-commands.ts"), "utf8");
+
+  assert.match(reviewCommands, /action === "review_required" && previousStatus === "export_ready"/);
+  assert.match(reviewCommands, /await reopenJournal\(\{/);
+  assert.match(reviewCommands, /setCorrectionDraft\(emptyCorrectionDraft\(\)\)/);
+  assert.match(reviewCommands, /fiş taslağı ve kaynağı korunarak yeniden kontrole açıldı/);
+  const reopenBranch = reviewCommands.slice(
+    reviewCommands.indexOf('if (action === "review_required" && previousStatus === "export_ready")'),
+    reviewCommands.indexOf("const result = await persistDecision", reviewCommands.indexOf('if (action === "review_required" && previousStatus === "export_ready")')),
+  );
+  assert.doesNotMatch(reopenBranch, /draftLines|manualDraftLines|accountant_manual_draft/);
+});

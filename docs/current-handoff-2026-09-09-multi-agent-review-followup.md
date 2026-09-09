@@ -52,9 +52,13 @@ Acceptance evidence: document workflow/context regression tests pass, full front
 
 ### Review-state provenance
 
-Open: `REV-B04`, `REV-D01`, `REV-D02`, `REV-D03`, `REV-D04`.
+**Completed 2026-09-09:** `REV-B04` — reopening an approved document now preserves the approved journal snapshot and its draft provenance. `Kontrole geri al` uses normalized journal reopen; normal `Kontrolde tut` keeps the generic review path.
 
-Returning a document to control must keep workflow state, source/provenance, and user-facing language consistent.
+Acceptance evidence: targeted provenance/reopen tests pass; full frontend suite is `219/219`; Next production build + TypeScript pass.
+
+Open, to be discussed **one item at a time**: `REV-D01`, then `REV-D02`, `REV-D03`, `REV-D04`.
+
+Next discussion is only `REV-D01` — contradictory user-facing state labels. Do not batch it with the remaining D items.
 
 ### Source linking
 

@@ -291,8 +291,11 @@
 **Acceptance:** QNB error-presentation regression PASS; full frontend suite 223/223; Next production build + TypeScript PASS.
 
 ## REV-I04 — QNB production config key kullanıcıya çıkıyor
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** CG-12.
+**Root cause:** QNB status/save success payloads copied backend `last_error` directly into the visible `Bağlantı sonucu` field, so production configuration names could be exposed even without a failed HTTP request.
+**Implementation:** Backend `last_error` remains available to the backend, but the accountant-facing UI maps any stored connection error to `QNB bağlantısı doğrulanamadı.`
+**Acceptance:** Stored-error regression PASS; full frontend suite 224/224; Next production build + TypeScript PASS.
 
 ## REV-I05 — QNB `active connection is required` kullanıcıya çıkıyor
 **Status:** KONTROL EDİLECEK.

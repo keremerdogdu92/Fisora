@@ -72,7 +72,7 @@ export function useQnbCommands({
         message: payload?.status === "missing" ? "Bu mükellef için QNB bağlantısı yok." : "QNB bağlantı durumu okundu.",
         maskedUsername: String(payload?.username || ""),
         status: String(payload?.status || ""),
-        environment: String(payload?.environment || ""), lastTestedAt: String(payload?.last_tested_at || ""), lastError: String(payload?.last_error || ""),
+        environment: String(payload?.environment || ""), lastTestedAt: String(payload?.last_tested_at || ""), lastError: payload?.last_error ? "QNB bağlantısı doğrulanamadı." : "",
       });
       setQnbConnection((current) => ({ ...current, password: "" }));
       setQnbPolicy({ enabled: Boolean(policy?.enabled), frequencyMinutes: Number(policy?.frequency_minutes || 60), maxDocumentsPerRun: Number(policy?.max_documents_per_run || 100), statusReconciliationEnabled: Boolean(policy?.status_reconciliation_enabled ?? true), message: "" });
@@ -119,7 +119,7 @@ export function useQnbCommands({
         message: payload?.status === "active" ? "QNB bağlantısı aktif." : `QNB bağlantısı kaydedildi: ${String(payload?.status || "")}`,
         maskedUsername: String(payload?.username || ""),
         status: String(payload?.status || ""),
-        environment: String(payload?.environment || ""), lastTestedAt: String(payload?.last_tested_at || ""), lastError: String(payload?.last_error || ""),
+        environment: String(payload?.environment || ""), lastTestedAt: String(payload?.last_tested_at || ""), lastError: payload?.last_error ? "QNB bağlantısı doğrulanamadı." : "",
       });
       setQnbConnection((current) => ({ ...current, password: "" }));
     } catch {

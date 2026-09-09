@@ -385,3 +385,10 @@ test("next quick upload keeps invoice staging separate from the accounting workb
   assert.match(uploadView, /onUpload\(pendingFiles\)/);
   assert.match(uploadView, /Son yüklemeler/);
 });
+
+test("QNB settings hide stored backend error details from accountants", () => {
+  const qnbCommands = source("features", "qnb", "use-qnb-commands.ts");
+
+  assert.match(qnbCommands, /lastError: payload\?\.last_error \? "QNB bağlantısı doğrulanamadı\." : ""/);
+  assert.doesNotMatch(qnbCommands, /lastError: String\(payload\?\.last_error/);
+});

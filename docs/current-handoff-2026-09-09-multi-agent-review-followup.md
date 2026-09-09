@@ -197,8 +197,9 @@ Completed 2026-09-10: **`REV-I01` + `REV-I02`** - Learned Rules now maps backend
 
 Completed 2026-09-10: **`REV-I03`** - QNB connection, sync, and policy failures now use short accountant-safe messages; raw backend/endpoint `error.message` is not rendered. Acceptance: targeted regression PASS, full frontend 223/223, Next build + TypeScript PASS.
 
-Next audit verification: **`REV-I04`** - QNB production configuration detail leakage. Test first; do not change the settings model until the current visible fields are verified.
+Completed 2026-09-10: **`REV-I04`** - QNB stored `last_error` is no longer rendered verbatim in `Bağlantı sonucu`; any backend connection detail is mapped to `QNB bağlantısı doğrulanamadı.` Acceptance: targeted regression PASS, full frontend 224/224, Next build + TypeScript PASS.
 
+Next audit verification: **`REV-I05`** - QNB `active connection is required` leakage. Test first; do not change QNB connection semantics yet.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

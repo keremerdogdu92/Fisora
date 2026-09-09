@@ -328,6 +328,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   }, [clientSearch, clients]);
   const openCancellationRequests = data.cancellationRequests.filter((request) => request.status === "open");
   const officeDocuments = useMemo(() => data.documents.filter((document) => !resolvedOfficePeriod || document.period === resolvedOfficePeriod), [data.documents, resolvedOfficePeriod]);
+  const selectedClientOfficeDocuments = useMemo(() => clientDocuments.filter((document) => !resolvedOfficePeriod || document.period === resolvedOfficePeriod), [clientDocuments, resolvedOfficePeriod]);
   const officeCancellationRequests = useMemo(() => {
     const officeDocumentIds = new Set(officeDocuments.map((document) => document.id));
     return data.cancellationRequests.filter((request) => officeDocumentIds.has(request.documentId));
@@ -681,7 +682,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           clientRows={visibleDashboardClientRows}
           clients={filteredClients}
           clientSearch={clientSearch}
-          documents={clientDocuments}
+          documents={selectedClientOfficeDocuments}
           isLoading={source.status === "loading"}
           inviteStatus={inviteStatus}
           newClientDraft={newClientDraft}

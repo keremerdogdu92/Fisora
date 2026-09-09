@@ -127,8 +127,10 @@
 **Audit refs:** [CG-08](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-08--not-all-journal-rows-visible-before-approval)
 
 ## REV-C04 — 0 TL belge normal posting UX'i izliyor
-**Status:** KONTROL EDİLECEK; son deploy sonrası yeniden üretilecek.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CG-10](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-10--zero-value-document-still-follows-normal-posting-ux)
+**Current behavior:** Zero-value invoices resolve to `no_posting_required`; journal approval actions are not exposed.
+**Acceptance:** Backend zero-value pipeline test PASS; portal-next no-posting regression PASS.
 
 # D — Workflow state dili ve provenance
 
@@ -141,12 +143,16 @@
 **Acceptance:** Queue regression testi onaylı belgenin `oneClickApproval` içine girmediğini doğruluyor. Workbench source-contract testi onaylı label'ı ve eski contradictory draft label override'ını doğruluyor. Full frontend suite `220/220` ve Next production build + TypeScript PASS.
 
 ## REV-D02 — Sistem taslağını yalnız onaylamak `Manuel fiş girildi` sonucuna dönüşüyor
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CG-05](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-05--approval-changes-provenance-to-manuel-fiş-girildi)
+**Current behavior:** Workbench sends `approve_with_changes` only for a dirty journal draft; clean approval sends `approve`. Backend clean approval preserves `draft_status`, `draft_decision_source`, and the system summary.
+**Acceptance:** Review-command regression suite 6/6 PASS; direct backend clean-approval check preserved `draft_ready / static_rules_ai_assisted_draft`.
 
 ## REV-D03 — Workflow state ve provenance birlikte geri dönmüyor
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CG-06](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-06--returning-to-control-did-not-restore-provenance)
+**Current behavior:** `Kontrole geri al` uses normalized reopen and preserves the approved journal/provenance snapshot.
+**Acceptance:** Approved-export-and-reopen backend regression PASS; frontend reopen regression PASS.
 
 ## REV-D04 — Canonical kullanıcı state modeli
 **Status:** ÜRÜN KARARI.
@@ -156,25 +162,34 @@
 # E — Dönem, mükellef ve ofis scope
 
 ## REV-E01 — Ana dönem ile resume dönemi farklı
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / CURRENT BEHAVIOR KEPT - 2026-09-10.
 **Audit refs:** [CG-07](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-07--period-context-is-ambiguous)
+**Finding:** Office period is the daily dashboard scope. Resume is a separate saved work context and already shows its own client and period before the user resumes it. No extra synchronization state will be added.
 
 ## REV-E02 — Ağustos context'inde Mayıs tarihli belge/fişler
-**Status:** KONTROL EDİLECEK / ÜRÜN KARARI.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CG-07](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-07--period-context-is-ambiguous)
+**Current behavior:** Portal-next Workbench resolves one effective period and filters visible documents to `document.period === effectivePeriod`; documents from another period are not included in that Workbench context.
 
 ## REV-E03 — Yeni Yükleme dönemi üst context ile farklı
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / CURRENT BEHAVIOR KEPT - 2026-09-10.
 **Audit refs:** [CX UXR-007](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-007--p1--yeni-yükleme-dönemi-üst-bağlamla-uyuşmuyor) · CG live audit observation.
+**Finding:** New Uploads exposes its own fixed upload period and explicitly states that uploads on that screen are saved to that period. It will not be forced to follow the daily review period.
 
 ## REV-E04 — Kontrol/sayaç değerleri ekranlar arasında açıklamasız farklı
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** [CX UXR-006](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-006--p1--kontrol-sayıları-bağlamlar-arasında-açıklamasız-çelişiyor) · [AG FINDING-07](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-07-üst-bar-ile-gösterge-paneli-arasındaki-metrik-çelişkisi)
 **Note:** Farklı scope'lar meşru olabilir; önce hangi sayının hangi scope'u anlattığı doğrulanacak.
+**Root cause:** Client list rows used the selected office period while client-detail invoice/bank/other counters used all periods.
+**Implementation:** No new scope/state layer. Client-detail summary counters now use the selected office period; historical document data remains unchanged.
+**Acceptance:** Client-management period-scope regression PASS; full frontend 221/221 and Next production build + TypeScript PASS.
 
 ## REV-E05 — Mükellef listesi/detail belge sayısı farklı
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** [CX UXR-008](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-008--p1--mükellef-liste-ve-detay-sayıları-açıklamasız-farklı)
+**Root cause:** List counts came from `officeDocuments`; detail counters came from all `clientDocuments`.
+**Implementation:** `selectedClientOfficeDocuments` is derived from `resolvedOfficePeriod` and is used only for ClientManagement summary counters. Delete/reprocess/selection and historical records remain all-period.
+**Acceptance:** Two-period synthetic check now yields the same selected-period count in list and detail; regression/build PASS.
 
 ## REV-E06 — Scope etiketleme modeli
 **Status:** ÜRÜN KARARI.
@@ -188,8 +203,10 @@
 # F — Preview, source anchor ve provenance kanıtı
 
 ## REV-F01 — Onay sonrası preview bozulabiliyor
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CG-03](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-03--preview-can-break-after-approval)
+**Current behavior:** Original preview identity depends on `clientId + originalDocumentRef + session`; review/export status does not change preview URL or MIME selection.
+**Acceptance:** Preview/context regression suite 16/16 PASS.
 
 ## REV-F02 — Kaynak metin görünürken anchor bulunamadı sonucu
 **Status:** KONTROL EDİLECEK.

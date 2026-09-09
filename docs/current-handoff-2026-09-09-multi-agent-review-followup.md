@@ -60,13 +60,11 @@ Acceptance evidence: targeted provenance/reopen tests pass; full frontend suite 
 
 Acceptance evidence: full frontend suite `220/220`; Next production build + TypeScript pass.
 
-Open, to be discussed **one item at a time**: `REV-D02`, then `REV-D03`, `REV-D04`.
-
-Next discussion is only `REV-D02` — approval incorrectly changing provenance to `Manuel fiş girildi`.
+**Retested 2026-09-10:** `REV-D02` and `REV-D03` are not reproducible in the current build. Clean approval and normalized reopen preserve provenance. `REV-D04` remains only a product-model candidate; no extra state architecture is planned without a concrete need.
 
 ### Source linking
 
-Open: `REV-F01` through `REV-F05`.
+`REV-F01` was retested on 2026-09-10 and is not reproducible. `REV-F02` through `REV-F05` remain open.
 
 The HTML/PDF source anchor model and workbench provenance interaction remain a separate high-priority reliability track.
 
@@ -193,8 +191,9 @@ Completed in the 2026-09-09 implementation passes:
 3. **Interaction-state visual hierarchy** — `NEW-02` on account options and invoice queue.
 4. **Accounting typography/readability** — `NEW-04` default Workbench typography pass.
 5. **Canonical active-document integrity** — `REV-A01/A02/A03/A04`; `REV-A05` rejected.
+6. **Client period-scope counters** - `REV-E04/E05`; list and detail summaries now share the selected office period.
 
-Next discussion/implementation block after Kerem review: **`REV-B04` + `REV-D01/D02/D03/D04` review-state provenance and canonical user-facing state language.** Production acceptance remains required for all implemented behavior.
+Next audit verification: **`REV-I01`** - Learned Rules raw backend error leakage. If it still reproduces, stop for product/error-copy review before implementation.
 
 ## Required acceptance matrix for this pass
 

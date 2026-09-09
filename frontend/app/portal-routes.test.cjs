@@ -208,6 +208,13 @@ test("client management defaults to the existing-client list and separates loadi
   assert.match(clientsView, /NACE araştırmasını çalıştır/);
 });
 
+test("client management summary counts use the selected office period", () => {
+  const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+
+  assert.match(portalApp, /const selectedClientOfficeDocuments = useMemo\(\(\) => clientDocuments\.filter\(\(document\) => !resolvedOfficePeriod \|\| document\.period === resolvedOfficePeriod\)/);
+  assert.match(portalApp, /<ClientManagementView[\s\S]*documents=\{selectedClientOfficeDocuments\}/);
+});
+
 test("initial workspace loading is not blocked by the separate readiness request", () => {
   const actions = require("node:fs").readFileSync(join(__dirname, "portal-workspace-actions.ts"), "utf8");
   const initialLoader = actions.slice(

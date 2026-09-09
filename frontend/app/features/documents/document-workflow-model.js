@@ -24,6 +24,15 @@ function reviewFilteredDocuments({ documents, reviewFilter }) {
   return documents.filter((document) => document.status === reviewFilter);
 }
 
+function reconcileSelectedDocumentId(visibleDocuments, selectedDocumentId) {
+  const documents = Array.isArray(visibleDocuments) ? visibleDocuments : [];
+  if (!documents.length) return "";
+  if (selectedDocumentId && documents.some((document) => document.id === selectedDocumentId)) {
+    return selectedDocumentId;
+  }
+  return documents[0]?.id || "";
+}
+
 function hasDraftLines(document) {
   return Array.isArray(document.draftLines) && document.draftLines.length > 0;
 }
@@ -121,6 +130,7 @@ module.exports = {
   documentMatchesSegment,
   firstInvoiceSelection,
   nextDocumentSelection,
+  reconcileSelectedDocumentId,
   reviewCockpitQueues,
   reviewFilteredDocuments,
   segmentForDocument,

@@ -8,6 +8,7 @@ const {
   firstInvoiceSelection,
   reviewCockpitQueues,
   nextDocumentSelection,
+  reconcileSelectedDocumentId,
   reviewFilteredDocuments,
   segmentForDocument,
   selectedDocumentFromState,
@@ -36,21 +37,16 @@ test("row open selects the document and moves to its segment without losing sele
   );
 });
 
-test("selected document is found from the segment source even when the visible review filter changes", () => {
+test("visible queue reconciliation replaces stale selection with the first visible document", () => {
   const visible = reviewFilteredDocuments({
     documents: docs.filter((document) => documentMatchesSegment(document, "purchase_invoices")),
     reviewFilter: "export_ready",
   });
 
   assert.deepEqual(visible.map((document) => document.id), ["ready-1"]);
-  assert.equal(
-    selectedDocumentFromState({
-      clientDocuments: docs,
-      selectedDocumentId: "purchase-1",
-      selectedDocumentSegment: "purchase_invoices",
-    })?.id,
-    "purchase-1",
-  );
+  assert.equal(reconcileSelectedDocumentId(visible, "purchase-1"), "ready-1");
+  assert.equal(reconcileSelectedDocumentId(visible, "ready-1"), "ready-1");
+  assert.equal(reconcileSelectedDocumentId([], "purchase-1"), "");
 });
 
 test("invoice page opens the first visible document in the active invoice segment", () => {
@@ -131,4 +127,18 @@ test("review cockpit queues separate one-click, minor-edit, and manual-risk docu
   assert.deepEqual(queues.oneClickApproval.map((document) => document.id), ["one-click", "ready"]);
   assert.deepEqual(queues.minorEdit.map((document) => document.id), ["minor-edit"]);
   assert.deepEqual(queues.manualRisk.map((document) => document.id), ["manual"]);
+});
+
+test("genuine processing failures stay visible in the manual recovery queue", () => {
+  const queues = reviewCockpitQueues([
+    {
+      id: "failed-1",
+      status: "review_required",
+      draftStatus: "provider_failed",
+      isBalanced: false,
+      reviewReasons: ["provider_failed"],
+      draftLines: [],
+    },
+  ]);
+  assert.deepEqual(queues.manualRisk.map((document) => document.id), ["failed-1"]);
 });

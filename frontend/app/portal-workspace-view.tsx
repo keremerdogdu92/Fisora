@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   documentMatchesSegment,
   nextDocumentSelection,
+  reconcileSelectedDocumentId,
   reviewCockpitQueues,
 } from "./features/documents/document-workflow-model";
 import { reviewReasonLabel } from "./portal-normalization";
@@ -313,8 +314,12 @@ export function AccountantWorkspace({
     if (workQueueFilter === "review") return reviewQueueDocuments;
     return filteredSegmentDocuments;
   }, [cockpitQueues, filteredSegmentDocuments, reviewQueueDocuments, workQueueFilter]);
+  const reconciledDocumentId = reconcileSelectedDocumentId(queueDocuments, selectedDocument?.id || "");
+  const queueIsEmpty = queueDocuments.length === 0;
+  const canonicalDocumentReady = Boolean(selectedDocument && selectedDocument.id === reconciledDocumentId);
+  const contextReconciling = !queueIsEmpty && !canonicalDocumentReady;
   const navigationDocuments = queueDocuments;
-  const selectedDocumentPosition = selectedDocument
+  const selectedDocumentPosition = canonicalDocumentReady && selectedDocument
     ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
     : 0;
   const safeDocumentPosition = Math.max(selectedDocumentPosition, 1);
@@ -354,11 +359,16 @@ export function AccountantWorkspace({
   }
 
   function navigateDocument(direction: 1 | -1) {
-    if (!selectedDocument || !navigationDocuments.length) return;
+    if (!canonicalDocumentReady || !selectedDocument || !navigationDocuments.length) return;
     const currentIndex = navigationDocuments.findIndex((document) => document.id === selectedDocument.id);
     const target = navigationDocuments[currentIndex + direction];
     if (target) setSelectedDocumentId(target.id);
   }
+
+  useEffect(() => {
+    const currentDocumentId = selectedDocument?.id || "";
+    if (reconciledDocumentId !== currentDocumentId) setSelectedDocumentId(reconciledDocumentId);
+  }, [reconciledDocumentId, selectedDocument?.id, setSelectedDocumentId]);
 
   useEffect(() => {
     if (hoverSourceTimerRef.current !== null) window.clearTimeout(hoverSourceTimerRef.current);
@@ -492,11 +502,11 @@ export function AccountantWorkspace({
 
       {!nextPresentation ? (
         <section className="document-agent-row" aria-label="Belge durumu ve gezinme">
-          <DocumentAgentStrip document={selectedDocument} />
+          <DocumentAgentStrip document={canonicalDocumentReady ? selectedDocument : undefined} />
           <div className="queue-stepper">
-            <span>{selectedDocument && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
-            <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(-1)} type="button">Önceki</button>
-            <button disabled={!selectedDocument || !navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">Sonraki</button>
+            <span>{canonicalDocumentReady && selectedDocumentPosition > 0 ? `${safeDocumentPosition} / ${Math.max(navigationDocuments.length, 1)}` : `0 / ${navigationDocuments.length}`}</span>
+            <button disabled={!canonicalDocumentReady || !navigationDocuments.length} onClick={() => navigateDocument(-1)} type="button">Önceki</button>
+            <button disabled={!canonicalDocumentReady || !navigationDocuments.length} onClick={() => navigateDocument(1)} type="button">Sonraki</button>
           </div>
         </section>
       ) : null}
@@ -517,9 +527,9 @@ export function AccountantWorkspace({
           <header className="portal-next-focus-toolbar">
             <strong>Belge İnceleme</strong>
             <div className="portal-next-focus-document">
-              <span>{selectedDocument?.fileName || "Belge seçilmedi"}</span>
+              <span>{canonicalDocumentReady ? selectedDocument?.fileName : queueIsEmpty ? "Bu filtrede belge yok" : "Belge görünümü güncelleniyor"}</span>
               {queueHidden ? (
-                <strong>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
+                <strong>Evrak {canonicalDocumentReady && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
               ) : null}
             </div>
             <WorkbenchQueueFilters
@@ -567,6 +577,19 @@ export function AccountantWorkspace({
           </aside>
         ) : null}
         <section className="document-review-main">
+          {queueIsEmpty ? (
+            <section className="workbench-context-state" aria-label="Bu filtrede belge yok">
+              <strong>Bu filtrede belge yok</strong>
+              <span>Aramayı veya kuyruk filtresini temizleyerek çalışma kuyruğuna dönebilirsiniz.</span>
+              {(documentQuery || workQueueFilter !== "all") ? <button onClick={() => { setDocumentQuery(""); setWorkQueueFilter("all"); }} type="button">Filtreleri temizle</button> : null}
+            </section>
+          ) : contextReconciling ? (
+            <section className="workbench-context-state reconciling" aria-live="polite">
+              <strong>Belge görünümü güncelleniyor</strong>
+              <span>Kuyruk, kaynak belge ve fiş aynı belge bağlamında yeniden eşleştiriliyor.</span>
+            </section>
+          ) : (
+            <>
           {controlledPdfPreview || controlledHtmlPreview ? (
             <DocumentPreview controlledHtmlPreview={controlledHtmlPreview} controlledPdfPreview={controlledPdfPreview} document={selectedDocument} onClearSourceTarget={clearDocumentSource} session={session} sourceTarget={sourceTarget} />
           ) : (
@@ -594,6 +617,8 @@ export function AccountantWorkspace({
             setSelectedStatementLineNo={setSelectedStatementLineNo}
             statementAiStatus={statementAiStatus}
           />
+            </>
+          )}
         </section>
       </section>
 
@@ -602,8 +627,8 @@ export function AccountantWorkspace({
           <span>Teknik geçmiş</span>
           <strong>Debug için aç</strong>
         </summary>
-        <DocumentPipelineTimeline events={selectedDocument?.pipelineEvents ?? []} />
-        <AiTracePanel document={selectedDocument} />
+        <DocumentPipelineTimeline events={canonicalDocumentReady ? selectedDocument?.pipelineEvents ?? [] : []} />
+        <AiTracePanel document={canonicalDocumentReady ? selectedDocument : undefined} />
       </details>
 
       <PortalNextWorkspaceControls
@@ -620,9 +645,9 @@ export function AccountantWorkspace({
         <div className="bottom-queue-heading">
           <div>
             <h2>Belge listesi</h2>
-            <span>{queueDocuments.length} belge gösteriliyor. Aktif belge üstte açık kalır.</span>
+            <span>{queueDocuments.length} belge gösteriliyor. Kuyruk ve açık belge birlikte güncellenir.</span>
           </div>
-          {selectedRequest ? (
+          {canonicalDocumentReady && selectedRequest ? (
             <div className="request-strip">
               <span>İptal/düzeltme talebi: {selectedRequest.reason}</span>
               <button onClick={() => onResolveCancellation(selectedRequest.id, "approved")} type="button">Kabul</button>
@@ -639,7 +664,7 @@ export function AccountantWorkspace({
             <div>Aksiyon</div>
           </div>
           {queueDocuments.map((document) => {
-            const isActive = selectedDocument?.id === document.id;
+            const isActive = canonicalDocumentReady && selectedDocument?.id === document.id;
             return (
               <div className={isActive ? "bottom-queue-row active" : "bottom-queue-row"} key={document.id}>
                 <button className="bottom-queue-document" onClick={() => selectDocument(document)} type="button">

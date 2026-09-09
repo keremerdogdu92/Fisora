@@ -7,6 +7,7 @@ import { documentsForProcessing } from "../../portal-dashboard";
 import type { DocumentSegment, PilotDocument, ReviewFilter } from "../../portal-types";
 import {
   firstInvoiceSelection,
+  reconcileSelectedDocumentId,
   reviewFilteredDocuments,
   selectedDocumentFromState,
 } from "./document-workflow-model";
@@ -49,11 +50,14 @@ export function useDocumentWorkflow({
   }, [reviewFilter, segmentedClientDocuments]);
 
   const activeReviewDocuments = mode === "documents" ? visibleProcessingDocuments : visibleReviewDocuments;
-  const selectedDocument = selectedDocumentFromState({
+  const selectedDocumentFromSegment = selectedDocumentFromState({
     clientDocuments,
     selectedDocumentId,
     selectedDocumentSegment,
   }) as PilotDocument | undefined;
+  const selectedDocument = mode === "documents"
+    ? activeReviewDocuments.find((document) => document.id === selectedDocumentFromSegment?.id)
+    : selectedDocumentFromSegment;
   const selectedStatementLineKey = selectedDocument?.statementLines.map((line) => line.line_no).join("|") ?? "";
 
   useEffect(() => {
@@ -78,6 +82,12 @@ export function useDocumentWorkflow({
     }
     setSelectedDocumentId(nextSelection.selectedDocumentId);
   }, [clientDocuments, mode, reviewFilter, selectedClientId, selectedDocumentId, selectedDocumentSegment]);
+
+  useEffect(() => {
+    if (mode !== "documents") return;
+    const nextSelectedDocumentId = reconcileSelectedDocumentId(activeReviewDocuments, selectedDocumentId);
+    if (nextSelectedDocumentId !== selectedDocumentId) setSelectedDocumentId(nextSelectedDocumentId);
+  }, [activeReviewDocuments, mode, selectedDocumentId]);
 
   useEffect(() => {
     const firstLineNo = selectedDocument?.statementLines[0]?.line_no ?? 0;

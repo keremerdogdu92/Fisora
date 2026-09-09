@@ -34,37 +34,41 @@
 # A — Belge kimliği, selection ve context bütünlüğü
 
 ## REV-A01 — Boş filtrede eski belge/fiş görünmesi
-**Status:** KONTROL EDİLECEK — root cause araştırılacak.
+**Status:** KABUL EDİLDİ / UYGULANDI — 2026-09-09.
 **Audit refs:** [CG-01](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-01--empty-filter-leaves-stale-document-context) · [CX UXR-001](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-001--p0--boş-filtrede-eski-belge-ve-karar-eylemleri-kalıyor)
-**Observed:** `Onaya hazır 0`, `Evrak 0/0` iken eski belge/fiş/action context'i yaşayabiliyor.
-**Root-cause inspection:** `portal-workspace-view.tsx::applyWorkQueueFilter()` yalnız yeni filtrede en az bir belge varsa ve mevcut seçim listede değilse `selectedDocumentId` değiştiriyor. `nextDocuments.length === 0` olduğunda eski selection yaşamaya devam ediyor.
-**Discussion:** Neden canonical selection filtre sonucu ile transactionally uzlaşmıyor? Blank screen normal çözüm olarak kabul edilmeyecek.
+**Observed:** `Onaya hazır 0`, `Evrak 0/0` iken eski belge/fiş/action context'i yaşayabiliyordu.
+**Root cause:** Selection görünür kuyruktan bağımsız çözüldüğü ve `0 sonuç` halinde `selectedDocumentId` temizlenmediği için eski context yaşayabiliyordu.
+**Decision / implementation:** Görünür kuyruk selection için canonical kaynak oldu. Sonuç `0` ise selection boşaltılıyor ve `Bu filtrede belge yok` recovery state'i gösteriliyor; eski preview, journal ve mutation kontrolü render edilmiyor.
+**Acceptance:** `reconcileSelectedDocumentId([], staleId) === ""`; full frontend suite/build PASS.
 
 ## REV-A02 — Kuyruk araması ile sağ panel farklı belge gösterebiliyor
-**Status:** KONTROL EDİLECEK — root cause araştırılacak.
+**Status:** KABUL EDİLDİ / UYGULANDI — 2026-09-09.
 **Audit refs:** [CX UXR-002](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-002--p1--kuyruk-araması-seçimi-senkronize-etmiyor)
-**Observed:** `1500` aramasında liste 1.500 TL kayda düşerken sağ panel eski 238,69 TL kaydı göstermeye devam etti.
-**Root-cause inspection:** `documentQuery` yalnız `filteredSegmentDocuments` listesini değiştiriyor; query sonucu mevcut selection'ı dışarı attığında `selectedDocumentId` için reconcile eden bir effect/transition yok.
+**Observed:** `1500` aramasında liste 1.500 TL kayda düşerken sağ panel eski 238,69 TL kaydı göstermeye devam edebiliyordu.
+**Root cause:** `documentQuery` görünür kuyruğu değiştirirken selection ayrı state olarak kaldığı için sağ panel eski belgeyi koruyabiliyordu.
+**Decision / implementation:** Workbench her query/queue değişiminde selection'ı görünür `queueDocuments` ile reconcile ediyor. Eski selection görünmüyorsa ilk görünür belge seçiliyor; reconcile tamamlanana kadar mutation kontrolleri render edilmiyor.
+**Acceptance:** Query/filter source-contract tests + full frontend suite/build PASS.
 
 ## REV-A03 — Canonical active-document invariant
-**Status:** KABUL EDİLEN PRENSİP; implementation henüz kararlaştırılmadı.
+**Status:** KABUL EDİLDİ / UYGULANDI — 2026-09-09.
 **Derived from:** CG-01 + CX UXR-001/002 + 2026-09-06 product discussion.
-**Rule:** `activeDocumentId == previewDocumentId == journalDocumentId == mutationTargetDocumentId` olmalı. Mismatch debug edilmesi gereken integrity fault'tur; normal kullanıcı state'i değildir.
-**Current architecture note:** `useDocumentWorkflow()` içindeki `selectedDocumentFromState()` seçili belgeyi görünür review/query listesinden değil, `clientDocuments + selectedDocumentSegment` kaynağından çözüyor. Bu yüzden queue visibility ile active document identity iki ayrı eksende yaşayabiliyor.
-**Harness note:** `document-workflow-model.test.cjs` içindeki `selected document is found from the segment source even when the visible review filter changes` testi bu davranışı açıkça koruyor. Sorun yalnız rastgele race değildir; mevcut test contract'ının da yeniden değerlendirilmesi gerekir. Safety harness yanlış state'i kalıcı UX olarak meşrulaştırmamalı.
+**Rule:** `activeDocumentId == previewDocumentId == journalDocumentId == mutationTargetDocumentId`.
+**Implementation:** `useDocumentWorkflow()` artık `selectedDocument`ı yalnız görünür `activeReviewDocuments` içinden çözüyor ve selection'ı bu liste ile reconcile ediyor. Workbench'in ek query/queue katmanı da aynı invariantı `queueDocuments` üzerinde uygular. Reconcile sırasında preview/journal/mutation kontrolleri render edilmez; böylece eski belgeye mutation gönderilemez.
+**Harness update:** Eski `selected document is found from the segment source even when the visible review filter changes` kontratı kaldırıldı. Yerine stale selection'ın ilk görünür belgeye veya boş sonuca reconcile edildiğini doğrulayan test geldi.
 
 ## REV-A04 — İşlenemeyen belge UX'i ile integrity fault ayrımı
-**Status:** ÜRÜN KARARI.
+**Status:** KABUL EDİLDİ / UYGULANDI — 2026-09-09.
 **Audit refs:** [CX UXR-003](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-003--p1--eksik-hesap-seçimi-varken-onay-aktif) · [CG-10](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-10--zero-value-document-still-follows-normal-posting-ux)
-**Decision direction:** Gerçekten işlenemeyen/eksik belge görünür kalmalı ve recovery yolu sunmalı. Internal selection mismatch ile aynı empty/disabled UX'e indirgenmemeli.
+**Decision:** Gerçekten işlenemeyen/eksik belge görünür kalır ve normal recovery yolu sunar. Internal selection mismatch business state gibi gösterilmez.
+**Implementation:** `provider_failed`/manuel-risk gibi gerçek belge durumları queue modelinde görünür kalır. Internal context mismatch'te Workbench kısa `Belge görünümü güncelleniyor` self-heal state'ine geçer ve mutation kontrollerini geçici olarak render etmez; reconcile tamamlanınca normal belge görünümü döner.
+**Acceptance:** Gerçek processing failure'ın `manualRisk` kuyruğunda kaldığını ve integrity mismatch sırasında mutation UI'ın gizlendiğini test eden regression coverage eklendi.
 
 ## REV-A05 — Active document ile queue görünümünü ayırma
-**Status:** ÜRÜN KARARI — önerilen model, henüz kabul edilmedi.
-**Motivation:** Mevcut kod ve test contract'ı aktif belgeyi filtre değişiminde kaybetmemeyi hedefliyor; sorun bu devamlılığın UI'da first-class bir kavram olmaması.
-**Candidate behavior:** Filtre/arama `queue`yu değiştirir; mevcut `active document` kendiliğinden kaybolmaz. Aktif belge yeni queue dışında kalıyorsa UI bunu açıkça `Aktif belge — filtre dışında` gibi işaretler veya queue üstünde pinned olarak gösterir. Kullanıcı başka belge seçtiğinde tüm canonical context atomik değişir.
-**When processing fails:** Aktif belge görünür kalır; kaynak, başarısız aşama, neden ve recovery seçenekleri gösterilir. Kullanıcı boş duvara bırakılmaz.
-**When integrity fails:** Önce automatic reconcile/refetch; düzelmezse mutation geçici durur, telemetry/debug kaydı oluşur ve recovery UI gösterilir. Bu exceptional safety path normal belge state'i değildir.
-**Current code refs:** `frontend/app/portal-workspace-view.tsx:266,285,304,334`; `frontend/app/features/documents/use-document-workflow.ts:52`; `frontend/app/features/documents/document-workflow-model.js:74`; `frontend/app/features/documents/document-workflow-model.test.cjs:39`.
+**Status:** REDDEDİLDİ — 2026-09-09.
+**Rejected model:** `Aktif belge — filtre dışında` şeklinde ayrı pinned belge kavramı oluşturulmayacak.
+**Kerem kararı:** Kuyrukta hangi belge seçiliyse Workbench'in tamamı odur. Filtre/arama mevcut belgeyi dışarı atarsa selection görünür kuyruğa reconcile edilir; `0 sonuç` ise kontrollü empty state gösterilir.
+**Reason:** Ayrı pinned/filter-dışı belge modeli gereksiz yeni bir UI kavramı, ek state karmaşası ve tekrar context uyuşmazlığı riski yaratıyor.
+**Implementation note:** Eski `Aktif belge üstte açık kalır` copy'si kaldırıldı; `Kuyruk ve açık belge birlikte güncellenir` kontratı kullanılıyor.
 # B — Onay, undo, kontrolde tut, hariç tut
 
 ## REV-B01 — Ctrl+Z geri alma görünür sonuç üretmedi
@@ -519,7 +523,7 @@ Her konu tek tek şu sırayla kapatılacak:
 
 ## Next discussion
 
-İlk konu `REV-A01/A02/A03/A04`: canonical active-document context ve işlenemeyen belge UX'inin internal integrity failure'dan ayrılması.
+Sıradaki paket: `REV-B04` + `REV-D01/D02/D03/D04` — review-state provenance, geri dönüşlerde provenance tutarlılığı ve canonical kullanıcı-facing state dili.
 
 
 ---

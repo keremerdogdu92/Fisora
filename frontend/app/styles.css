@@ -1493,6 +1493,24 @@ button:disabled {
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
 }
 
+.workbench-context-state {
+  align-content: center;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-column: 1 / -1;
+  justify-items: start;
+  min-height: 320px;
+  padding: 28px;
+}
+
+.workbench-context-state strong { font-size: 1rem; }
+.workbench-context-state span { color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+.workbench-context-state button { margin-top: 4px; }
+.workbench-context-state.reconciling { background: var(--surface-muted); }
+
 .bottom-document-queue {
   background: #fff;
   border: 1px solid var(--border);

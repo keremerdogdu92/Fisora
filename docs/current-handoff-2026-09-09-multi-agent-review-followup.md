@@ -38,14 +38,17 @@ The source register marks the implemented B-section behavior as awaiting product
 
 ### P0/P1 — document identity and selection integrity
 
-Open: `REV-A01`, `REV-A02`, `REV-A03`, `REV-A04`.
+**Completed 2026-09-09:** `REV-A01`, `REV-A02`, `REV-A03`, `REV-A04` are accepted and implemented. `REV-A05` is rejected.
 
-Required invariant:
+Canonical invariant:
 
 `activeDocumentId == previewDocumentId == journalDocumentId == mutationTargetDocumentId`
 
-Filter/search/queue state must never make the visible source document, journal draft, and mutation target disagree.
-Internal integrity faults should attempt reconcile/refetch/self-heal first. A document that is simply incomplete must remain visible with a normal recovery path instead of being treated like an integrity fault.
+Implementation now reconciles selection against the visible review/queue documents. A filtered-out stale selection moves to the first visible document; zero results clear selection and show a controlled empty state. During the brief internal reconcile state, preview/journal/mutation controls are not rendered. Genuine processing/accounting failures remain visible in the normal recovery queue instead of being treated as integrity faults.
+
+Rejected UX: no persistent `Aktif belge — filtre dışında` pinned-document concept. Queue selection and the open Workbench document move together.
+
+Acceptance evidence: document workflow/context regression tests pass, full frontend suite is `217/217`, and Next production build + TypeScript pass.
 
 ### Review-state provenance
 
@@ -175,12 +178,15 @@ Add interaction-state clarity as a Workbench micro-UX requirement: hover, active
 
 ## Recommended implementation order
 
+Completed in the 2026-09-09 implementation passes:
+
 1. **Approval safety gate** — `REV-C01` + `NEW-03`.
-2. **Account combobox focus/navigation** — `NEW-01` + `REV-G01/G02/G03/R07`.
-3. **Interaction-state visual hierarchy** — `NEW-02`, starting with account options and the invoice queue.
-4. **Accounting typography/readability** — `NEW-04` + `REV-K03/K04/K05`.
-5. **Canonical active-document integrity** — finish `REV-A01/A02/A03/A04` if not already resolved in the live build; do not mark closed from static source inspection alone.
-6. **Production acceptance pass** — verify the already-implemented reversible review decisions and the four new changes together in the real Workbench.
+2. **Account combobox focus/navigation** — `NEW-01` + `REV-G01/G02/G03/R07` core behavior.
+3. **Interaction-state visual hierarchy** — `NEW-02` on account options and invoice queue.
+4. **Accounting typography/readability** — `NEW-04` default Workbench typography pass.
+5. **Canonical active-document integrity** — `REV-A01/A02/A03/A04`; `REV-A05` rejected.
+
+Next discussion/implementation block after Kerem review: **`REV-B04` + `REV-D01/D02/D03/D04` review-state provenance and canonical user-facing state language.** Production acceptance remains required for all implemented behavior.
 
 ## Required acceptance matrix for this pass
 

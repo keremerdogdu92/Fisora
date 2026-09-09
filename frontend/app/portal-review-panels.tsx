@@ -18,7 +18,7 @@ const statusLabels: Record<PilotStatus, string> = {
   review_required: "Kontrol gerekli",
   no_posting_required: "Fiş gerekmiyor",
   excluded: "Hariç tutuldu",
-  export_ready: "Aktarıma hazır",
+  export_ready: "Onaylandı",
   cancel_requested: "İptal talebi",
   cancel_approved: "İptal kabul",
   cancel_rejected: "İptal red",
@@ -958,7 +958,7 @@ export function JournalPanel({
         <section className={`journal-status-strip ${noPosting ? "no-posting" : totals.balanced ? "" : "unbalanced"}`} aria-label="Fiş durumu">
           <div className="journal-status-primary">
             <span>Fiş durumu</span>
-            <strong>{noPosting ? "Fiş gerekmiyor" : sourceReviewMode ? "Kaynak satırlar hazır" : formatDraftStatus(document.draftStatus)}</strong>
+            <strong>{document.status === "export_ready" ? "Onaylandı" : noPosting ? "Fiş gerekmiyor" : sourceReviewMode ? "Kaynak satırlar hazır" : formatDraftStatus(document.draftStatus)}</strong>
             <small>{directionSummary}</small>
           </div>
           <div className="journal-status-metrics" aria-label="Fiş toplamları">

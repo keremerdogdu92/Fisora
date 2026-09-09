@@ -124,7 +124,8 @@ test("review cockpit queues separate one-click, minor-edit, and manual-risk docu
     },
   ]);
 
-  assert.deepEqual(queues.oneClickApproval.map((document) => document.id), ["one-click", "ready"]);
+  assert.deepEqual(queues.oneClickApproval.map((document) => document.id), ["one-click"]);
+  assert.equal(queues.oneClickApproval.some((document) => document.status === "export_ready"), false);
   assert.deepEqual(queues.minorEdit.map((document) => document.id), ["minor-edit"]);
   assert.deepEqual(queues.manualRisk.map((document) => document.id), ["manual"]);
 });

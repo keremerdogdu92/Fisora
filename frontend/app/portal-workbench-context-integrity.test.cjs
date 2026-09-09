@@ -38,3 +38,16 @@ test("transient reconciliation also hides stale status and navigation affordance
   assert.match(source, /disabled=\{!canonicalDocumentReady \|\| !navigationDocuments\.length\}/);
   assert.match(source, /canonicalDocumentReady \? selectedDocument\?\.fileName : queueIsEmpty/);
 });
+
+
+test("approved documents leave the approval queue and show one canonical approved label", () => {
+  const workspaceSource = workspace();
+  const panelSource = readFileSync(join(appDir, "portal-review-panels.tsx"), "utf8");
+  const workflowSource = readFileSync(join(appDir, "features", "documents", "document-workflow-model.js"), "utf8");
+
+  assert.match(workflowSource, /document\.status === "export_ready"\) continue/);
+  assert.doesNotMatch(workflowSource, /document\.status === "export_ready" \|\| \(hasDraftLines/);
+  assert.match(workspaceSource, /export_ready: "Onayland\u0131"/);
+  assert.match(panelSource, /export_ready: "Onayland\u0131"/);
+  assert.match(panelSource, /document\.status === "export_ready" \? "Onayland\u0131"/);
+});

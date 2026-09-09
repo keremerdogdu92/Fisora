@@ -133,8 +133,12 @@
 # D — Workflow state dili ve provenance
 
 ## REV-D01 — Çelişkili state etiketleri
-**Status:** KONTROL EDİLECEK.
+**Status:** KABUL EDİLDİ / UYGULANDI — 2026-09-09.
 **Audit refs:** [CG-04](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-04--contradictory-workflow-labels) · [CX validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation)
+**Kerem kararı:** `Onaya hazır` yalnız henüz onaylanmamış ve tek tıkla onaylanabilecek belgeleri ifade eder. Onaylanmış belge bu kuyruğa geri giremez. Workbench'te onaylı belgenin ana kullanıcı etiketi `Onaylandı`dır.
+**Root cause:** `reviewCockpitQueues()` `export_ready` belgeleri doğrudan `oneClickApproval` kuyruğuna ekliyordu. Aynı belgede preview `Aktarıma hazır`, fiş şeridi ise eski `draft_status` üzerinden `Müşavir onayı bekliyor` gösterebiliyordu.
+**Implementation:** `export_ready` belgeler cockpit review kuyruklarından çıkarıldı. Workbench status label'ı `Onaylandı` olarak sadeleştirildi; onaylı belgede journal status strip eski draft-review label'ını göstermiyor. Yeni state/tablo eklenmedi.
+**Acceptance:** Queue regression testi onaylı belgenin `oneClickApproval` içine girmediğini doğruluyor. Workbench source-contract testi onaylı label'ı ve eski contradictory draft label override'ını doğruluyor. Full frontend suite `220/220` ve Next production build + TypeScript PASS.
 
 ## REV-D02 — Sistem taslağını yalnız onaylamak `Manuel fiş girildi` sonucuna dönüşüyor
 **Status:** KONTROL EDİLECEK.

@@ -56,9 +56,13 @@ Acceptance evidence: document workflow/context regression tests pass, full front
 
 Acceptance evidence: targeted provenance/reopen tests pass; full frontend suite is `219/219`; Next production build + TypeScript pass.
 
-Open, to be discussed **one item at a time**: `REV-D01`, then `REV-D02`, `REV-D03`, `REV-D04`.
+**Completed 2026-09-09:** `REV-D01` — approved documents no longer remain in the `Onaya hazır` queue; Workbench uses `Onaylandı` as the approved user-facing label and suppresses the stale draft-review label for approved documents.
 
-Next discussion is only `REV-D01` — contradictory user-facing state labels. Do not batch it with the remaining D items.
+Acceptance evidence: full frontend suite `220/220`; Next production build + TypeScript pass.
+
+Open, to be discussed **one item at a time**: `REV-D02`, then `REV-D03`, `REV-D04`.
+
+Next discussion is only `REV-D02` — approval incorrectly changing provenance to `Manuel fiş girildi`.
 
 ### Source linking
 

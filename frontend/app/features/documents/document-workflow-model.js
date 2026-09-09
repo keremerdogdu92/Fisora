@@ -61,7 +61,7 @@ function reviewCockpitQueues(documents) {
     manualRisk: [],
   };
   for (const document of documents) {
-    if (document.status === "no_posting_required" || document.status === "excluded") continue;
+    if (document.status === "no_posting_required" || document.status === "excluded" || document.status === "export_ready") continue;
     const reasons = documentReviewReasons(document);
     const hasOnlyApprovalGate =
       reasons.length === 0 ||
@@ -69,7 +69,7 @@ function reviewCockpitQueues(documents) {
         reason === "ai_assisted_draft_requires_accountant_approval" ||
         reason === "conservative_mode_requires_review",
       );
-    if (document.status === "export_ready" || (hasDraftLines(document) && isBalancedDraft(document) && hasOnlyApprovalGate)) {
+    if (hasDraftLines(document) && isBalancedDraft(document) && hasOnlyApprovalGate) {
       queues.oneClickApproval.push(document);
     } else if (hasDraftLines(document) && isBalancedDraft(document) && (hasCounterpartyCreationSuggestion(document) || reasons.length <= 2)) {
       queues.minorEdit.push(document);

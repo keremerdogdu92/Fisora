@@ -130,7 +130,10 @@ test("document processing workbench keeps the journal review explicit", () => {
   assert.match(reviewSource, /safeHeaderValue/);
   assert.doesNotMatch(journalPanelSource, /activeReviewTab|reviewWorkspaceTabs/);
   assert.doesNotMatch(journalPanelSource, /journal-account-summary|<h3>Hesap ve cari<\/h3>/);
-  assert.doesNotMatch(journalPanelSource, /correctionAccountLabel|correctionAccountPlaceholder|Yeni gider\/stok hesabı|Yeni gelir hesabı|Yeni cari/);
+  assert.doesNotMatch(journalPanelSource, /correctionAccountLabel|correctionAccountPlaceholder|Yeni gider\/stok hesabı|Yeni gelir hesabı/);
+  assert.match(journalPanelSource, /Cariyi seç \/ oluştur/);
+  assert.match(journalPanelSource, /Mevcut cariyi seç/);
+  assert.match(journalPanelSource, /Yeni cari oluştur/);
   assert.notEqual(draftEditorIndex, -1);
   assert.notEqual(scrollAreaIndex, -1);
   assert.notEqual(primaryApproveIndex, -1);

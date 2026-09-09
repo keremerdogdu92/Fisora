@@ -176,6 +176,7 @@ export function AccountantWorkspace({
   onCreateNewClient,
   onReprocessDocument,
   onRequestStatementAi,
+  onRefreshWorkspace,
   onResolveCancellation,
   onSaveDecision,
   onSaveStatementDecision,
@@ -229,6 +230,7 @@ export function AccountantWorkspace({
   onCreateNewClient: () => void | Promise<void>;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
+  onRefreshWorkspace: () => void | Promise<unknown>;
   onResolveCancellation: (requestId: string, status: "approved" | "rejected") => void;
   onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
@@ -582,6 +584,7 @@ export function AccountantWorkspace({
             onHoverSource={hoverDocumentSource}
             onReprocessDocument={onReprocessDocument}
             onRequestStatementAi={onRequestStatementAi}
+            onRefreshWorkspace={onRefreshWorkspace}
             onSaveDecision={onSaveDecision}
             onSaveStatementDecision={onSaveStatementDecision}
             selectedStatementLineNo={selectedStatementLineNo}

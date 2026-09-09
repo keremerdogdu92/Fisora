@@ -647,6 +647,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           lastReviewActionLabel={lastReviewActionLabel}
           onReprocessDocument={reprocessSelectedDocument}
           onRequestStatementAi={requestStatementAiForSelectedDocument}
+          onRefreshWorkspace={() => refreshBackendPilotData()}
           onResolveCancellation={resolveCancellation}
           onSaveDecision={saveDecision}
           onSaveStatementDecision={saveStatementLineDecision}

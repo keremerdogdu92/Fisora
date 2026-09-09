@@ -4,12 +4,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
-import { applyAccountSelectionToLine, classifyDraftAccountCode, filterAccountOptions, resolveAccountSelection } from "./portal-account-combobox";
+import { applyAccountSelectionToLine, classifyDraftAccountCode, draftAccountResolutionIssues, filterAccountOptions, nextSelectableAccountIndex, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
 import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DocumentSourceTarget, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
-import { backendAuthHeaders, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
+import { backendAuthHeaders, createCounterpartyAccountToBackend, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -715,6 +715,7 @@ export function JournalPanel({
   onHoverSource,
   onReprocessDocument,
   onRequestStatementAi,
+  onRefreshWorkspace,
   onSaveDecision,
   onSaveStatementDecision,
   selectedStatementLineNo,
@@ -735,6 +736,7 @@ export function JournalPanel({
   onHoverSource?: (target: DocumentSourceTarget | null) => void;
   onReprocessDocument: () => void | Promise<void>;
   onRequestStatementAi: () => void | Promise<void>;
+  onRefreshWorkspace?: () => void | Promise<unknown>;
   onSaveDecision: (action: string, options?: ReviewLearningDecisionOptions) => void | Promise<unknown>;
   onSaveStatementDecision: (action: string) => void | Promise<void>;
   selectedStatementLineNo: number;
@@ -747,6 +749,19 @@ export function JournalPanel({
   const [learningModalOpen, setLearningModalOpen] = useState(false);
   const [rulePreview, setRulePreview] = useState<RuleInterpretationView | null>(null);
   const [rulePreviewStatus, setRulePreviewStatus] = useState("");
+  const [counterpartyDrawerLineIndex, setCounterpartyDrawerLineIndex] = useState<number | null>(null);
+  const [counterpartySearch, setCounterpartySearch] = useState("");
+  const [counterpartyName, setCounterpartyName] = useState("");
+  const [counterpartyStatus, setCounterpartyStatus] = useState("");
+  const [counterpartyCreating, setCounterpartyCreating] = useState(false);
+
+  useEffect(() => {
+    setCounterpartyDrawerLineIndex(null);
+    setCounterpartySearch("");
+    setCounterpartyName("");
+    setCounterpartyStatus("");
+    setCounterpartyCreating(false);
+  }, [document?.id]);
 
   if (!document) {
     return (
@@ -767,9 +782,13 @@ export function JournalPanel({
   const activeDraftLines = noPosting ? [] : (correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines);
   const totals = draftTotals(activeDraftLines);
   const needsManualDraft = !noPosting && !sourceReviewMode && (!generatedDraftLines.length || document.draftStatus === "manual_draft_required");
+  const allowedNewCounterpartyCodes = [...newCounterpartyCodesForDocument(document)];
+  const accountResolutionIssues = draftAccountResolutionIssues(activeDraftLines, document.chartAccounts, allowedNewCounterpartyCodes);
   const invalidAccountCodes = invalidDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const newCounterpartyAccountCodes = newCounterpartyDraftAccountCodes(activeDraftLines, document.chartAccounts, document);
   const hasInvalidDraftAccounts = invalidAccountCodes.length > 0;
+  const hasUnresolvedDraftAccounts = accountResolutionIssues.length > 0;
+  const firstNewCounterpartyIssue = accountResolutionIssues.find((issue) => issue.kind === "new_counterparty");
   const sourceReviewNeedsAccounting = !noPosting && sourceReviewMode && (
     !activeDraftLines.length ||
     activeDraftLines.some((line) => !normalizeAccountCodeInput(line.account_code)) ||
@@ -782,10 +801,32 @@ export function JournalPanel({
   const processingIncomplete = ["queued", "processing"].includes(document.status)
     || document.draftStatus === "processing"
     || Boolean(document.processingStages && !htmlSourceReady && document.processingStages.final.status !== "completed");
-  const blocksApproval = noPosting || excluded || processingIncomplete || hasInvalidDraftAccounts || sourceReviewNeedsAccounting;
+  const blocksApproval = noPosting || excluded || processingIncomplete || hasUnresolvedDraftAccounts || sourceReviewNeedsAccounting;
   const accountingDirection = accountingDirectionForDocument(document);
   const uploadDirection = uploadDirectionForDocument(document);
   const pendingDirectionConflict = hasPendingDirectionConflict(document);
+  const drawerLine = counterpartyDrawerLineIndex === null ? null : activeDraftLines[counterpartyDrawerLineIndex];
+  const drawerRequestedCode = normalizeAccountCodeInput(drawerLine?.account_code || "");
+  const rawCounterpartySuggestion = asRecord(document.counterpartyCreationSuggestion);
+  const suggestedCounterpartyCode = normalizeAccountCodeInput(
+    document.suggestedCounterpartyAccount || String(rawCounterpartySuggestion.suggested_code || ""),
+  );
+  const drawerFamily = drawerRequestedCode.startsWith("120") || suggestedCounterpartyCode.startsWith("120")
+    ? "120"
+    : "320";
+  const drawerCreateCode = drawerRequestedCode.startsWith(`${drawerFamily}.`)
+    ? drawerRequestedCode
+    : suggestedCounterpartyCode.startsWith(`${drawerFamily}.`)
+      ? suggestedCounterpartyCode
+      : document.counterpartyTaxId
+        ? `${drawerFamily}.${String(document.counterpartyTaxId).replace(/\D/g, "")}`
+        : "";
+  const normalizedCounterpartySearch = counterpartySearch.trim().toLocaleLowerCase("tr-TR");
+  const drawerCandidates = document.chartAccounts.filter((account) => {
+    if (!account.isDetail || !normalizeAccountCodeInput(account.code).startsWith(`${drawerFamily}.`)) return false;
+    if (!normalizedCounterpartySearch) return true;
+    return `${account.code} ${account.name} ${account.taxId}`.toLocaleLowerCase("tr-TR").includes(normalizedCounterpartySearch);
+  });
   const directionSummary = [
     `Yükleme: ${directionLabel(uploadDirection)}`,
     `Mükellef açısından: ${directionLabel(accountingDirection)}`,
@@ -855,6 +896,41 @@ export function JournalPanel({
     });
   }
 
+  function openCounterpartyDrawer(index: number) {
+    setCounterpartyDrawerLineIndex(index);
+    setCounterpartySearch("");
+    setCounterpartyName(activeDocument.counterpartyTitle || "");
+    setCounterpartyStatus("");
+  }
+
+  function selectExistingCounterparty(account: ChartAccountOption) {
+    if (counterpartyDrawerLineIndex === null) return;
+    const line = activeDraftLines[counterpartyDrawerLineIndex] || blankDraftLine();
+    setManualDraftLine(counterpartyDrawerLineIndex, applyAccountSelectionToLine(line, account, activeDocument.chartAccounts));
+    setCounterpartyDrawerLineIndex(null);
+  }
+
+  async function createCounterpartyAccount() {
+    if (counterpartyDrawerLineIndex === null || !drawerCreateCode || !counterpartyName.trim()) return;
+    setCounterpartyCreating(true);
+    setCounterpartyStatus("Cari hesap oluşturuluyor...");
+    try {
+      await createCounterpartyAccountToBackend({
+        apiBaseUrl: resolvePreviewApiBaseUrl(), clientId: activeDocument.clientId,
+        userId: session?.userId || activeDocument.uploadedBy || "mali-musavir", sessionToken: session?.sessionToken || "",
+        accountCode: drawerCreateCode, accountName: counterpartyName.trim(), taxId: activeDocument.counterpartyTaxId || "",
+      });
+      setManualDraftLine(counterpartyDrawerLineIndex, { account_code: drawerCreateCode });
+      await onRefreshWorkspace?.();
+      setCounterpartyStatus("Cari hesap oluşturuldu ve fiş satırına bağlandı.");
+      setCounterpartyDrawerLineIndex(null);
+    } catch (error) {
+      setCounterpartyStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCounterpartyCreating(false);
+    }
+  }
+
   function handleJournalShortcut(event: KeyboardEvent<HTMLElement>) {
     if (nextKeyboardShortcuts) return;
     if (pendingDirectionConflict) return;
@@ -897,6 +973,14 @@ export function JournalPanel({
             )}
           </div>
         </section>
+        {accountResolutionIssues.length ? (
+          <section className="journal-readiness-warning" role="alert" aria-label="Fiş tamamlanmalı">
+            <div><strong>Fiş tamamlanmalı</strong><span>Boş, seçilemeyen veya henüz oluşturulmamış hesap varken onay verilemez.</span></div>
+            {firstNewCounterpartyIssue ? (
+              <button onClick={() => openCounterpartyDrawer(firstNewCounterpartyIssue.index)} type="button">Cariyi seç / oluştur</button>
+            ) : null}
+          </section>
+        ) : null}
         {hasUnsavedReviewChanges ? (
           <section className="dirty-state-strip" aria-label="Kaydedilmemiş fiş değişikliği">
             <div>
@@ -934,6 +1018,7 @@ export function JournalPanel({
             onAddLine={addManualDraftLine}
             onFocusSource={onFocusSource}
             onHoverSource={onHoverSource}
+            onResolveCounterparty={openCounterpartyDrawer}
             onRemoveLine={removeManualDraftLine}
             onUpdateLine={setManualDraftLine}
             sourceTarget={sourceTarget}
@@ -1059,6 +1144,30 @@ export function JournalPanel({
           pendingDirectionConflict={pendingDirectionConflict}
         />
       )}
+      {counterpartyDrawerLineIndex !== null ? (
+        <div className="counterparty-resolution-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCounterpartyDrawerLineIndex(null); }}>
+          <aside className="counterparty-resolution-drawer" role="dialog" aria-modal="true" aria-label="Cari hesabı çöz">
+            <header><div><span>Fiş satırı {counterpartyDrawerLineIndex + 1}</span><h3>Cari hesabı çöz</h3></div><button aria-label="Kapat" onClick={() => setCounterpartyDrawerLineIndex(null)} type="button">×</button></header>
+            <section className="counterparty-existing-section">
+              <div><strong>Mevcut cariyi seç</strong><span>{drawerFamily} hesapları içinde ara.</span></div>
+              <input aria-label="Cari ara" onChange={(event) => setCounterpartySearch(event.target.value)} placeholder="Kod, unvan veya vergi no ara..." value={counterpartySearch} />
+              <div className="counterparty-candidate-list">
+                {drawerCandidates.length ? drawerCandidates.map((account) => (
+                  <button key={account.code} onClick={() => selectExistingCounterparty(account)} type="button"><span>{account.code}</span><strong>{account.name}</strong>{account.taxId ? <small>{account.taxId}</small> : null}</button>
+                )) : <p className="empty">Uygun mevcut cari bulunamadı.</p>}
+              </div>
+            </section>
+            <section className="counterparty-create-section">
+              <div><strong>Yeni cari oluştur</strong><span>Hesap planına tek bir detay hesap eklenir; mevcut hesaplar korunur.</span></div>
+              <label><span>Hesap kodu</span><input readOnly value={drawerCreateCode} /></label>
+              <label><span>Cari unvanı</span><input onChange={(event) => setCounterpartyName(event.target.value)} value={counterpartyName} /></label>
+              {document.counterpartyTaxId ? <label><span>Vergi / T.C. no</span><input readOnly value={document.counterpartyTaxId} /></label> : null}
+              <button className="primary" disabled={counterpartyCreating || !drawerCreateCode || !counterpartyName.trim()} onClick={() => void createCounterpartyAccount()} type="button">{counterpartyCreating ? "Oluşturuluyor..." : "Yeni cari oluştur"}</button>
+              {counterpartyStatus ? <p className="counterparty-resolution-status" role="status">{counterpartyStatus}</p> : null}
+            </section>
+          </aside>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1234,6 +1343,7 @@ function ManualDraftEditor({
   onAddLine,
   onFocusSource,
   onHoverSource,
+  onResolveCounterparty,
   onRemoveLine,
   onUpdateLine,
   sourceTarget,
@@ -1249,6 +1359,7 @@ function ManualDraftEditor({
   onAddLine: () => void;
   onFocusSource?: (target: DocumentSourceTarget) => void;
   onHoverSource?: (target: DocumentSourceTarget | null) => void;
+  onResolveCounterparty?: (index: number) => void;
   onRemoveLine: (index: number) => void;
   onUpdateLine: (index: number, patch: Partial<DraftLine>) => void;
   sourceTarget?: DocumentSourceTarget | null;
@@ -1354,9 +1465,10 @@ function ManualDraftEditor({
                     <small className="field-warning">Hesap planında olmayan veya seçilemeyen kod.</small>
                   ) : null}
                   {newCounterpartyAccountCodes.includes(normalizeAccountCodeInput(line.account_code)) ? (
-                    <small className="field-notice">
-                      Yeni cari hesabı önerisi. Hesap planında henüz yok; mevcut cariyi seçin veya müşavir onayıyla yeni cari açın.
-                    </small>
+                    <div className="field-notice field-notice-with-action">
+                      <span>Yeni cari hesabı önerisi. Hesap planında henüz yok.</span>
+                      <button onClick={() => onResolveCounterparty?.(index)} type="button">Cariyi çöz</button>
+                    </div>
                   ) : null}
                   <input
                     aria-label="Fatura satırı açıklaması"
@@ -1453,6 +1565,7 @@ function AccountCodeCombobox({
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [popupPosition, setPopupPosition] = useState({ left: 16, top: 16 });
   const matches = useMemo(() => filterAccountOptions(accounts, value, 20), [accounts, value]);
 
@@ -1480,6 +1593,11 @@ function AccountCodeCombobox({
     };
   }, [open, value]);
 
+  useEffect(() => {
+    if (!open) return;
+    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeIndex, open]);
+
   function selectActiveAccount() {
     const selected = resolveAccountSelection(accounts, value, activeIndex);
     if (!selected) return false;
@@ -1502,13 +1620,16 @@ function AccountCodeCombobox({
         autoComplete="off"
         onBlur={() => window.setTimeout(() => setOpen(false), 120)}
         onChange={(event) => {
-          onChange(event.target.value);
-          setActiveIndex(0);
+          const nextValue = event.target.value;
+          const nextMatches = filterAccountOptions(accounts, nextValue, 20);
+          onChange(nextValue);
+          setActiveIndex(nextSelectableAccountIndex(nextMatches, -1, 1));
           updatePopupPosition();
           setOpen(true);
         }}
         onFocus={() => {
           updatePopupPosition();
+          if (value) setActiveIndex(nextSelectableAccountIndex(matches, -1, 1));
           setOpen(Boolean(value));
         }}
         onKeyDown={(event) => {
@@ -1516,10 +1637,10 @@ function AccountCodeCombobox({
             event.preventDefault();
             updatePopupPosition();
             setOpen(true);
-            setActiveIndex((current) => Math.min(current + 1, Math.max(matches.length - 1, 0)));
+            setActiveIndex((current) => nextSelectableAccountIndex(matches, current, 1));
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
-            setActiveIndex((current) => Math.max(current - 1, 0));
+            setActiveIndex((current) => nextSelectableAccountIndex(matches, current, -1));
           } else if (event.key === "Enter" || event.key === "Tab") {
             if (selectActiveAccount()) event.preventDefault();
           } else if (event.key === "Escape") {
@@ -1534,9 +1655,12 @@ function AccountCodeCombobox({
           {matches.map((account, index) => (
             <button
               aria-disabled={!account.isDetail}
+              aria-selected={index === activeIndex}
               className={index === activeIndex ? "active" : ""}
               disabled={!account.isDetail}
               key={account.code}
+              onMouseEnter={() => setActiveIndex(index)}
+              ref={(element) => { optionRefs.current[index] = element; }}
               onMouseDown={(event) => {
                 event.preventDefault();
                 if (!account.isDetail) return;

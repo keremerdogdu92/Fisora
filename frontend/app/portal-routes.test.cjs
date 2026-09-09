@@ -248,8 +248,9 @@ test("journal distinguishes a missing new cari suggestion from an invalid ledger
   const reviewPanels = require("node:fs").readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
 
   assert.match(reviewPanels, /Yeni cari hesabı önerisi/);
-  assert.match(reviewPanels, /mevcut cariyi seçin veya müşavir onayıyla yeni cari açın/);
-  assert.match(reviewPanels, /className="field-notice"/);
+  assert.match(reviewPanels, /Mevcut cariyi seç/);
+  assert.match(reviewPanels, /Yeni cari oluştur/);
+  assert.match(reviewPanels, /className="field-notice field-notice-with-action"/);
   assert.match(reviewPanels, /className="field-warning"/);
 });
 

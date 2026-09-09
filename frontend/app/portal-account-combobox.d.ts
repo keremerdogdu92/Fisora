@@ -1,3 +1,6 @@
+// File: frontend/app/portal-account-combobox.d.ts
+// Summary: Declares chart-account normalization, validation, and keyboard-selection helpers.
+
 import type { DraftLine } from "./portal-types";
 
 export type ChartAccountOption = {
@@ -17,5 +20,11 @@ export function classifyDraftAccountCode(
   suggestedNewCounterpartyCodes?: string[],
 ): "valid" | "new_counterparty" | "invalid";
 export function filterAccountOptions(options: ChartAccountOption[], query: string, limit?: number): ChartAccountOption[];
+export function nextSelectableAccountIndex(options: ChartAccountOption[], currentIndex: number, direction: number): number;
+export function draftAccountResolutionIssues(
+  lines: DraftLine[],
+  options: ChartAccountOption[],
+  suggestedNewCounterpartyCodes?: string[],
+): Array<{ kind: "blank" | "invalid" | "new_counterparty"; index: number; accountCode: string }>;
 export function normalizeChartAccountOptions(accounts: unknown[]): ChartAccountOption[];
 export function resolveAccountSelection(options: ChartAccountOption[], input: string, activeIndex?: number): ChartAccountOption | null;

@@ -413,7 +413,53 @@ class Phase0ServiceTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("770", str(raised.exception.detail))
 
-    def test_review_service_allows_system_suggested_new_counterparty_account(self) -> None:
+    def test_review_service_blocks_approval_until_suggested_counterparty_is_created(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = JsonWorkflowStore(Path(temp_dir) / "store.json")
+            store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
+            store.replace_chart_accounts(
+                client_id="client-1",
+                accounts=[
+                    {"raw_account_code": "770.01", "normalized_account_code": "770.01", "account_name": "Genel gider", "is_detail_account": True},
+                ],
+            )
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="fatura.pdf",
+                result={
+                    "file_name": "fatura.pdf",
+                    "export_status": "review_required",
+                    "draft_lines": [],
+                    "suggested_counterparty_account": "320.A01",
+                    "selected_supplier_account": "320.A01",
+                },
+            )
+            service = ReviewService(
+                store=store,
+                record_operation_event=record_operation_event,
+                require_client_access=allow_access,
+            )
+            decision = ReviewDecisionPayload(
+                document_ref="fatura.pdf",
+                action="approve_with_changes",
+                reviewer="mali-musavir",
+                draft_lines=[
+                    {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},
+                    {"account_code": "320.A01", "description": "Yeni cari", "debit": "0.00", "credit": "100.00"},
+                ],
+            )
+
+            with self.assertRaises(HTTPException) as raised:
+                service.store_review_decision(
+                    payload=StoredReviewDecisionPayload(client_id="client-1", decision=decision),
+                    user_id="mali-musavir",
+                )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "counterparty_account_required")
+        self.assertEqual(raised.exception.detail["account_codes"], ["320.A01"])
+
+    def test_review_service_allows_uncreated_suggested_counterparty_when_kept_in_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")
             store.upsert_client(client_id="client-1", profile={"client_id": "client-1"}, onboarding={"is_ready": True})
@@ -445,7 +491,7 @@ class Phase0ServiceTests(unittest.TestCase):
                     client_id="client-1",
                     decision=ReviewDecisionPayload(
                         document_ref="fatura.pdf",
-                        action="approve_with_changes",
+                        action="review_required",
                         reviewer="mali-musavir",
                         draft_lines=[
                             {"account_code": "770.01", "description": "Gider", "debit": "100.00", "credit": "0.00"},

@@ -10,9 +10,9 @@ from typing import Any
 from fastapi import HTTPException
 
 from app.api.phase0_mappers import chart_account_from_payload, chart_account_payloads, client_profile_from_payload
-from app.api.phase0_schemas import ChartAccountsStorePayload, ClientDocumentsDeletePayload, ClientOnboardingPackagePayload, ClientProfilePayload
+from app.api.phase0_schemas import ChartAccountsStorePayload, ClientDocumentsDeletePayload, ClientOnboardingPackagePayload, ClientProfilePayload, CounterpartyAccountCreatePayload
 from app.domain.business_relevance import check_client_onboarding
-from app.domain.chart_accounts import parse_chart_accounts
+from app.domain.chart_accounts import normalize_account_code, parse_chart_accounts
 from app.domain.document_uploads import store_document_content
 from app.domain.nace_research import NaceResearcher, resolve_nace_research_profile
 
@@ -105,6 +105,35 @@ class WorkspaceService:
             client_id=payload.client_id,
             accounts=chart_account_payloads(payload.accounts),
         )
+
+    def store_counterparty_account(
+        self,
+        payload: CounterpartyAccountCreatePayload,
+        *,
+        x_fisora_user_id: str | None,
+        x_fisora_session: str | None,
+        fisora_session: str | None,
+    ) -> dict[str, object]:
+        client_id = payload.client_id.strip()
+        if not client_id:
+            raise HTTPException(status_code=400, detail="client_id is required")
+        actor = self.request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+        self.require_client_access(client_id=client_id, user_id=actor, allowed_roles=("accountant", "admin"))
+        account = asdict(chart_account_from_payload(payload.account))
+        code = normalize_account_code(str(account.get("raw_account_code") or ""))
+        account_name = str(account.get("account_name") or "").strip()
+        if not code.startswith(("120.", "320.")):
+            raise HTTPException(status_code=400, detail="counterparty account must use a 120 or 320 detail code")
+        if not account_name:
+            raise HTTPException(status_code=400, detail="counterparty account name is required")
+        if not bool(account.get("is_detail_account")):
+            raise HTTPException(status_code=400, detail="counterparty account must be a detail account")
+        account["normalized_account_code"] = code
+        account["account_name"] = account_name
+        stored = self.store.upsert_chart_account(client_id=client_id, account=account)
+        if stored.get("created"):
+            self.record_operation_event(store=self.store, client_id=client_id, event_type="counterparty_account_created", status="ok", message="Cari hesap oluşturuldu.", metadata={"account_code": code, "actor": actor})
+        return stored
 
     def store_chart_accounts_upload(
         self,

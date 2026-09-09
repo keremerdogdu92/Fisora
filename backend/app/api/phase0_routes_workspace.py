@@ -15,6 +15,7 @@ from app.api.phase0_context import (
 )
 from app.api.phase0_schemas import (
     ChartAccountsStorePayload,
+    CounterpartyAccountCreatePayload,
     ClientDocumentsDeletePayload,
     ClientOnboardingPackagePayload,
     ClientProfilePayload,
@@ -72,6 +73,21 @@ def store_chart_accounts(
 ) -> dict[str, object]:
     require_accountant_or_admin(x_fisora_user_id, x_fisora_session, fisora_session)
     return get_workspace_service().store_chart_accounts(payload)
+
+
+@router.post("/store/counterparty-account")
+def store_counterparty_account(
+    payload: CounterpartyAccountCreatePayload,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_workspace_service().store_counterparty_account(
+        payload,
+        x_fisora_user_id=x_fisora_user_id,
+        x_fisora_session=x_fisora_session,
+        fisora_session=fisora_session,
+    )
 
 
 @router.post("/store/chart-accounts/upload")

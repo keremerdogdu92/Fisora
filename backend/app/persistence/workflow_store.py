@@ -240,6 +240,26 @@ class JsonWorkflowStore:
         self._write(data)
         return deepcopy(record)
 
+    def upsert_chart_account(self, *, client_id: str, account: dict[str, Any]) -> dict[str, Any]:
+        code = str(account.get("normalized_account_code") or account.get("raw_account_code") or account.get("code") or "").strip()
+        if not code:
+            raise ValueError("account code is required")
+        with self._lock:
+            data = self._read()
+            existing_record = data["chart_accounts"].get(client_id) or {}
+            accounts = list(existing_record.get("accounts") or [])
+            for existing in accounts:
+                existing_code = str(existing.get("normalized_account_code") or existing.get("raw_account_code") or existing.get("code") or "").strip()
+                if existing_code == code:
+                    return {"created": False, "account": deepcopy(existing), "chart_accounts": deepcopy(existing_record)}
+            accounts.append(deepcopy(account))
+            timestamp = utc_now()
+            record = {**existing_record, "client_id": client_id, "account_count": len(accounts), "accounts": accounts, "updated_at": timestamp}
+            record.setdefault("created_at", timestamp)
+            data["chart_accounts"][client_id] = record
+            self._write(data)
+            return {"created": True, "account": deepcopy(account), "chart_accounts": deepcopy(record)}
+
     def upsert_portal_user(
         self,
         *,

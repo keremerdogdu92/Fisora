@@ -1,3 +1,6 @@
+// File: frontend/app/portal-account-combobox.js
+// Summary: Normalizes chart-account options and resolves safe keyboard/account selections for the workbench.
+
 function safeText(value, fallback = "") {
   return value == null || value === "" ? fallback : String(value);
 }
@@ -61,15 +64,37 @@ function filterAccountOptions(options, query, limit = 20) {
 function resolveAccountSelection(options, input, activeIndex = 0) {
   const normalizedInput = normalizeSearchText(input);
   if (!normalizedInput) return null;
-  if (/^\d{3}$/.test(normalizedInput)) return null;
   const normalizedOptions = safeList(options);
   const selectableOptions = normalizedOptions.filter((option) => Boolean(option?.isDetail));
   const exact = selectableOptions.find((option) => normalizeSearchText(option?.code) === normalizedInput);
   if (exact) return exact;
+  const visible = filterAccountOptions(normalizedOptions, input);
+  const active = visible[Math.max(0, Math.min(activeIndex, visible.length - 1))] || null;
+  if (/^\d{3}$/.test(normalizedInput)) return active?.isDetail ? active : null;
   const codeMatches = selectableOptions.filter((option) => normalizeSearchText(option?.code).startsWith(normalizedInput));
   if (codeMatches.length === 1) return codeMatches[0];
-  const visible = filterAccountOptions(normalizedOptions, input).filter((option) => Boolean(option?.isDetail));
-  return visible[Math.max(0, Math.min(activeIndex, visible.length - 1))] || null;
+  return active?.isDetail ? active : null;
+}
+
+function nextSelectableAccountIndex(options, currentIndex, direction) {
+  const normalizedOptions = safeList(options);
+  const step = direction < 0 ? -1 : 1;
+  let index = Number.isInteger(currentIndex) ? currentIndex + step : step > 0 ? 0 : normalizedOptions.length - 1;
+  while (index >= 0 && index < normalizedOptions.length) {
+    if (normalizedOptions[index]?.isDetail) return index;
+    index += step;
+  }
+  if (normalizedOptions[currentIndex]?.isDetail) return currentIndex;
+  return normalizedOptions.findIndex((option) => Boolean(option?.isDetail));
+}
+
+function draftAccountResolutionIssues(lines, options, suggestedNewCounterpartyCodes = []) {
+  return safeList(lines).flatMap((line, index) => {
+    const accountCode = normalizeDraftAccountCode(line?.account_code);
+    if (!accountCode) return [{ kind: "blank", index, accountCode: "" }];
+    const classification = classifyDraftAccountCode(options, accountCode, suggestedNewCounterpartyCodes);
+    return classification === "valid" ? [] : [{ kind: classification, index, accountCode }];
+  });
 }
 
 function accountNameForCode(options, accountCode) {
@@ -113,7 +138,9 @@ function applyAccountSelectionToLine(line, account, options = []) {
 module.exports = {
   applyAccountSelectionToLine,
   classifyDraftAccountCode,
+  draftAccountResolutionIssues,
   filterAccountOptions,
+  nextSelectableAccountIndex,
   normalizeChartAccountOptions,
   resolveAccountSelection,
 };

@@ -689,6 +689,39 @@ async function saveQnbSyncPolicy({ apiBaseUrl, clientId, userId = DEFAULT_UPLOAD
   });
 }
 
+async function createCounterpartyAccountToBackend({
+  apiBaseUrl,
+  clientId,
+  userId = "",
+  sessionToken = "",
+  accountCode,
+  accountName,
+  taxId = "",
+  taxOffice = "",
+  iban = "",
+  fetchImpl = fetch,
+}) {
+  const code = String(accountCode || "").trim();
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/counterparty-account",
+    payload: {
+      client_id: String(clientId || "").trim(),
+      account: {
+        raw_account_code: code,
+        normalized_account_code: code,
+        account_name: String(accountName || code).trim(),
+        is_detail_account: true,
+        tax_id: String(taxId || "").trim() || null,
+        tax_office: String(taxOffice || "").trim() || null,
+        iban: String(iban || "").trim() || null,
+      },
+    },
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
 async function uploadChartAccountsToBackend({
   apiBaseUrl,
   clientId,
@@ -1242,6 +1275,7 @@ module.exports = {
   buildPortalUserBootstrapPayload,
   createDelegatedClientSession,
   createClientOnboardingPackage,
+  createCounterpartyAccountToBackend,
   createPortalInvite,
   createWorkspaceExportPackage,
   deleteClientDocuments,

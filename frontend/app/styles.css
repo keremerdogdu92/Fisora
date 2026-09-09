@@ -2901,6 +2901,7 @@ button:disabled {
   left: var(--account-options-left, 16px);
   max-height: min(320px, calc(100vh - var(--account-options-top, 16px) - 16px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   position: fixed;
   top: var(--account-options-top, 16px);
   width: min(520px, calc(100vw - 32px));
@@ -2923,7 +2924,9 @@ button:disabled {
 
 .account-code-options button.active,
 .account-code-options button:hover {
-  background: var(--surface-muted);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 4px 0 0 var(--accent), inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .account-code-options button:disabled {
@@ -2964,6 +2967,19 @@ button:disabled {
   font-weight: 700;
   line-height: 1.35;
   margin-top: 4px;
+}
+
+.field-notice-with-action {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  justify-content: space-between;
+}
+
+.field-notice-with-action button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 3px 7px;
 }
 
 .accountant-guidance {

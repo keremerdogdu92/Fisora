@@ -1,3 +1,6 @@
+# File: backend/app/api/phase0_schemas.py
+# Summary: Defines validated HTTP payload contracts for workspace, review, auth, accounting, and integration routes.
+
 from __future__ import annotations
 
 from typing import Literal
@@ -51,6 +54,11 @@ class ChartAccountPayload(BaseModel):
     tax_id: str | None = None
     tax_office: str | None = None
     iban: str | None = None
+
+
+class CounterpartyAccountCreatePayload(BaseModel):
+    client_id: str
+    account: ChartAccountPayload
 
 
 class AccountSelectionPayload(BaseModel):

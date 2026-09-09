@@ -503,14 +503,21 @@ class ReviewService:
     ) -> ReviewDecisionPayload:
         if not decision.draft_lines:
             return decision
+        approval_action = decision.action in {"approve", "approve_with_changes"}
         chart_accounts = workspace.get("chart_accounts") or {}
         accounts = chart_accounts.get("accounts") if isinstance(chart_accounts, dict) else None
         if not isinstance(accounts, list) or not accounts:
+            if approval_action:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"code": "chart_accounts_required_for_approval"},
+                )
             return decision
         account_names, detail_codes = _chart_account_indexes(accounts)
         allowed_new_counterparties = _allowed_new_counterparty_codes(document)
         normalized_lines: list[JournalLinePayload] = []
         invalid_codes: list[str] = []
+        uncreated_counterparty_codes: list[str] = []
         for line in decision.draft_lines:
             code = normalize_account_code(line.account_code)
             if code in detail_codes:
@@ -525,6 +532,9 @@ class ReviewService:
                 )
                 continue
             if code in allowed_new_counterparties:
+                if approval_action:
+                    uncreated_counterparty_codes.append(code)
+                    continue
                 normalized_lines.append(
                     JournalLinePayload(
                         account_code=code,
@@ -540,6 +550,14 @@ class ReviewService:
             raise HTTPException(
                 status_code=400,
                 detail=f"Hesap plani disinda veya secilemez hesap kodu: {', '.join(invalid_codes)}",
+            )
+        if uncreated_counterparty_codes:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "counterparty_account_required",
+                    "account_codes": sorted(set(uncreated_counterparty_codes)),
+                },
             )
         return decision.model_copy(update={"draft_lines": normalized_lines})
 

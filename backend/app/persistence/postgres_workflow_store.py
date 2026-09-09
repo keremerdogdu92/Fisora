@@ -410,6 +410,48 @@ class PostgresWorkflowStore:
             record["created_at"] = timestamp
         return self._upsert_record(client_id, "chart_accounts", client_id, record)
 
+    def upsert_chart_account(self, *, client_id: str, account: dict[str, Any]) -> dict[str, Any]:
+        code = str(account.get("normalized_account_code") or account.get("raw_account_code") or account.get("code") or "").strip()
+        if not code:
+            raise ValueError("account code is required")
+        self._ensure_tenant()
+        timestamp = utc_now()
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "select pg_advisory_xact_lock(%s)",
+                    (workflow_document_lock_key(self.tenant_id, client_id, "chart_accounts"),),
+                )
+                cursor.execute("""
+                    select payload from workflow_records
+                    where tenant_id = %s and client_id = %s and record_type = 'chart_accounts' and record_key = %s
+                    for update
+                """, (self.tenant_id, client_id, client_id))
+                row = cursor.fetchone()
+                existing_record = dict(row[0] or {}) if row else {}
+                accounts = list(existing_record.get("accounts") or [])
+                for existing in accounts:
+                    existing_code = str(existing.get("normalized_account_code") or existing.get("raw_account_code") or existing.get("code") or "").strip()
+                    if existing_code == code:
+                        return {"created": False, "account": deepcopy(existing), "chart_accounts": deepcopy(existing_record)}
+                if self.normalized_accounting_enabled:
+                    taxpayer_id = taxpayer_uuid(self.tenant_id, client_id)
+                    raw_code = str(account.get("raw_account_code") or code).strip()
+                    account_id = uuid5(NAMESPACE_URL, f"fisora:chart-account:{self.tenant_id}:{client_id}:{code}")
+                    cursor.execute("""
+                        insert into chart_accounts (id, tenant_id, taxpayer_id, raw_account_code, normalized_account_code, account_name, is_detail_account, tax_id, tax_office, iban, is_active)
+                        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true)
+                        on conflict (tenant_id, taxpayer_id, normalized_account_code) do update set
+                            raw_account_code = excluded.raw_account_code, account_name = excluded.account_name,
+                            is_detail_account = excluded.is_detail_account, tax_id = excluded.tax_id,
+                            tax_office = excluded.tax_office, iban = excluded.iban, is_active = true, updated_at = now()
+                    """, (account_id, self.tenant_id, taxpayer_id, raw_code, code, str(account.get("account_name") or account.get("name") or code), bool(account.get("is_detail_account")), str(account.get("tax_id") or "") or None, str(account.get("tax_office") or "") or None, str(account.get("iban") or "") or None))
+                accounts.append(deepcopy(account))
+                record = {**existing_record, "client_id": client_id, "account_count": len(accounts), "accounts": accounts, "updated_at": timestamp}
+                record.setdefault("created_at", timestamp)
+                self._upsert_record_with_cursor(cursor, client_id, "chart_accounts", client_id, record)
+                return {"created": True, "account": deepcopy(account), "chart_accounts": deepcopy(record)}
+
     def upsert_portal_user(
         self,
         *,

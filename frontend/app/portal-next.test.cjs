@@ -150,6 +150,15 @@ test("next learned rules only presents confirmed active rules and lifecycle acti
   assert.match(agents, /changeStatus\(rule, "archive"\)/);
   assert.match(agents, /Yeni adaylar önce AI Ajanları altında doğrulama sinyali olarak görünür/);
 });
+
+test("learned rules hide raw backend errors from accountants", () => {
+  const ruleCommands = source("features", "agents", "use-agent-rule-commands.ts");
+
+  assert.match(ruleCommands, /Öğrenilen kurallar şu anda yüklenemedi\. Tekrar deneyin\./);
+  assert.match(ruleCommands, /Kural durumu güncellenemedi\. Tekrar deneyin\./);
+  assert.doesNotMatch(ruleCommands, /setStatus\(error instanceof Error \? error\.message : String\(error\)\)/);
+});
+
 test("next workbench prefers the latest invoice-bearing period on initial entry", () => {
   const workspaceModel = source("portal-next", "portal-next-workspace-model.ts");
 

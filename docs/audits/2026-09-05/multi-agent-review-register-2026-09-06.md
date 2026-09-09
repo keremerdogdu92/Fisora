@@ -272,13 +272,16 @@
 # I — Hata yönetimi ve teknik metin sızıntısı
 
 ## REV-I01 — Öğrenilen Kurallar raw 500
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** [CG-11](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-11--learned-rules-leaks-raw-backend-error) · [CX UXR-005](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-005--p1--öğrenilen-kurallar-ekranı-500-hatasını-kullanıcıya-sızdırıyor)
+**Root cause:** Learned Rules presentation copied `error.message` directly into the visible status line, so backend 500/detail text could be rendered to accountants.
+**Implementation:** The Learned Rules hook now maps load failures to `Öğrenilen kurallar şu anda yüklenemedi. Tekrar deneyin.` and lifecycle failures to `Kural durumu güncellenemedi. Tekrar deneyin.` Raw backend detail remains outside the accountant-facing presentation.
+**Acceptance:** Learned-rules regression PASS; full frontend suite 222/222; Next production build + TypeScript PASS.
 
 ## REV-I02 — Öğrenilen Kurallar raw JSON
-**Status:** TEKRAR TEST.
+**Status:** ACCEPTED / IMPLEMENTED WITH REV-I01 - 2026-09-10.
 **Audit refs:** [AG FINDING-01](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-01-öğrenilen-kurallar-ekranında-ham-json-hatası-render-edilmesi)
-**Note:** Exact hata CG/CX build'inde 500 idi; aynı error-mapping ailesi olabilir.
+**Resolution:** Same root cause as REV-I01. The UI no longer renders raw `error.message`, therefore JSON/details returned by the API helper are not shown on the Learned Rules screen.
 
 ## REV-I03 — QNB endpoint/500 kullanıcıya çıkıyor
 **Status:** KONTROL EDİLECEK.

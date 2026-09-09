@@ -6,6 +6,9 @@ import type { LocalSession } from "../../portal-types";
 
 export type AgentRuleView = Record<string, unknown> & { rule_key?: string; status?: string; version?: number };
 
+const RULE_LOAD_ERROR = "Öğrenilen kurallar şu anda yüklenemedi. Tekrar deneyin.";
+const RULE_UPDATE_ERROR = "Kural durumu güncellenemedi. Tekrar deneyin.";
+
 export function useAgentRuleCommands({ loginUserId, session }: { loginUserId: string; session: LocalSession | null }) {
   const [rules, setRules] = useState<AgentRuleView[]>([]);
   const [status, setStatus] = useState("");
@@ -16,8 +19,8 @@ export function useAgentRuleCommands({ loginUserId, session }: { loginUserId: st
     try {
       const payload = await fetchLearningRules({ apiBaseUrl, userId, sessionToken: session?.sessionToken || "" });
       setRules(Array.isArray(payload?.items) ? payload.items : Array.isArray(payload) ? payload : []);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+    } catch {
+      setStatus(RULE_LOAD_ERROR);
     }
   }, [apiBaseUrl, session?.sessionToken, userId]);
 
@@ -28,8 +31,8 @@ export function useAgentRuleCommands({ loginUserId, session }: { loginUserId: st
       await changeLearningRuleLifecycle({ apiBaseUrl, ruleKey: String(rule.rule_key || ""), action, expectedVersion: Number(rule.version || 0), userId, sessionToken: session?.sessionToken || "" });
       setStatus("Kural durumu güncellendi.");
       await refresh();
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+    } catch {
+      setStatus(RULE_UPDATE_ERROR);
     }
   }, [apiBaseUrl, refresh, session?.sessionToken, userId]);
 

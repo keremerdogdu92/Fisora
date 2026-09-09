@@ -193,7 +193,9 @@ Completed in the 2026-09-09 implementation passes:
 5. **Canonical active-document integrity** — `REV-A01/A02/A03/A04`; `REV-A05` rejected.
 6. **Client period-scope counters** - `REV-E04/E05`; list and detail summaries now share the selected office period.
 
-Next audit verification: **`REV-I01`** - Learned Rules raw backend error leakage. If it still reproduces, stop for product/error-copy review before implementation.
+Completed 2026-09-10: **`REV-I01` + `REV-I02`** - Learned Rules now maps backend/JSON failures to short accountant-safe messages; raw `error.message` is no longer rendered. Acceptance: targeted regression PASS, full frontend 222/222, Next build + TypeScript PASS.
+
+Next audit verification: **`REV-I03`** - QNB endpoint/500 leakage. Test first; do not broaden into a common error framework unless the current behavior requires it.
 
 ## Required acceptance matrix for this pass
 

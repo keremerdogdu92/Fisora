@@ -217,12 +217,13 @@
 **Acceptance:** `e2e/document-inspector.spec.ts` 4/4 Chromium PASS. The HTML case deliberately duplicates the same source text outside `#lineTable` and still targets the correct invoice row; PDF hover/pin produces the visible source highlight. No code change was required.
 
 ## REV-F03 — Kaynak detayında eksik/şüpheli metadata
-**Status:** PARTIAL / FIRST DEFECT IMPLEMENTED - 2026-09-10.
+**Status:** CLOSED / ONE DEFECT FIXED + REMAINDER NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CX UXR-004](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-004--p1--kaynak-bağlantısı-görünen-belgeyi-bulamıyor)
 **Confirmed defect:** Workbench source-evidence formatting treated `source_line_numbers` as sufficient VAT evidence and defaulted a missing VAT rate to `0`, so a non-VAT source-linked journal row could be shown as `Kaynak: KDV %0`.
 **Implementation:** VAT evidence formatting is now a directly tested presentation-only helper. `KDV %X` is rendered only when `vat_group_id` or `tax_rate` actually supplies a rate; source linkage without tax metadata renders only the invoice source-line reference. No Reader, planner, final-accountant, AI prompt, journal, approval, or tax-calculation behavior changed.
 **Acceptance:** Behavioral regression covers missing VAT metadata, explicit `%20`, explicit `%0`, and `vat_group_id`; frontend full suite 233/233 PASS; TypeScript PASS; Next production build PASS.
-**Remaining scope:** REV-F03 stays open for the other source-detail metadata/provenance questions. They will be reviewed one at a time instead of being bundled into this fix.
+**Retest:** A valid chart-account code resolves its name from the review workspace chart account list. Playwright verified initial 770.01 / 191.01 / 320.01 names and an interactive 770.01 -> 191.01 selection; the journal row and source detail both updated to the correct account name. Backend review payload also preserved normalized code + account_name. The old missing-description observation was not reproduced.
+**Resolution:** No additional source-metadata plumbing is added for REV-F03. Raw invoice-line text remains a parked UX idea in docs/open-questions.md; current journal description + account code/name + amount + source focus behavior is kept.
 
 ## REV-F04 — Canonical source-anchor modeli
 **Status:** ÜRÜN KARARI.

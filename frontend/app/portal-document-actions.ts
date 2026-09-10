@@ -14,6 +14,7 @@ import {
   reprocessDocument,
   resolveApiBaseUrl,
   storeReviewDecision,
+  summarizeDocumentUploadResults,
   uploadDocumentsToBackend,
   userSafeErrorMessage,
 } from "./upload-api";
@@ -151,14 +152,10 @@ export async function addLocalUploadsAction({
       sessionToken: session?.sessionToken,
       files: selectedFiles,
     });
-    const failedUploads = uploadResults.filter((result) => !result.ok);
-    setUploadStatus(
-      failedUploads.length
-        ? `${uploadResults.length - failedUploads.length}/${selectedFiles.length} belge yuklendi. Basarisiz: ${failedUploads.map((result) => result.fileName).join(", ")}`
-        : `${selectedFiles.length} belge isleme alindi.`,
-    );
+    const uploadSummary = summarizeDocumentUploadResults(uploadResults, selectedFiles.length);
+    setUploadStatus(uploadSummary.message);
     await refreshBackendPilotData();
-    return failedUploads.length === 0;
+    return uploadSummary.failedCount === 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setUploadStatus(

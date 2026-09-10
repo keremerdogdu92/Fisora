@@ -265,8 +265,11 @@
 # H — Yeni Yükleme, duplicate ve upload sonucu
 
 ## REV-H01 — Duplicate upload kullanıcıya açık sonuç vermiyor
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** [CG-13](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-13--duplicate-upload-result-is-not-explained-to-the-user)
+**Root cause:** The normalized backend already returns `deduplicated=true` for a source that resolves to an existing document and does not create a second document identity. Frontend upload orchestration treated every HTTP-success result as a newly accepted upload and therefore showed a false newly-accepted success message.
+**Implementation:** Upload result summarization now classifies successful results into newly accepted vs deduplicated. A duplicate is reported as previously uploaded and explicitly says that no new record was created. Mixed results keep accepted, duplicate, and failed outcomes distinct. Upload does not silently reprocess an existing document.
+**Acceptance:** `upload-api.test.cjs` 59/59 PASS including duplicate-only and mixed accepted+duplicate summaries; frontend full suite 229/229 PASS; normalized backend source-dedupe regression PASS; TypeScript PASS; Next production build PASS.
 
 ## REV-H02 — `backend kuyruğu` müşavir dili değil
 **Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.

@@ -78,6 +78,10 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Accepted 2026-09-10: REV-G02 / REV-G03** - keyboard ownership is context-sensitive by product decision. When a control or list is opened/focused, ArrowUp/ArrowDown operate inside that surface (for example period selection or the accountant-requested account-plan candidate navigation). Global Workbench ArrowUp/ArrowDown changes documents only when no arrow-owning surface is active. Current behavior is kept; no code change.
 
+### Upload duplicate result
+
+**Completed 2026-09-10: REV-H01** - backend deduplication was already correct, but frontend counted every successful upload response as newly accepted. Upload status now distinguishes new documents from `deduplicated=true` results and tells the user that an existing document was not recreated. Duplicate upload does not trigger implicit reprocess. Acceptance: upload API 59/59, frontend 229/229, backend dedupe regression PASS, TypeScript/build PASS. Next upload topic is REV-H03 (final/batch upload summary product behavior).
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

@@ -22,6 +22,7 @@ const {
   requestPasswordReset,
   confirmPasswordReset,
   sessionAuthErrorMessage,
+  summarizeDocumentUploadResults,
   userSafeErrorMessage,
   pickUploadUser,
   parseChartAccountsFromBackend,
@@ -542,6 +543,26 @@ test("uploadTaxCertificateToBackend sends reviewed tax-certificate data without 
   });
   const fields = Object.fromEntries(request.init.body.fields);
   assert.equal(fields.tax_certificate_json, JSON.stringify({ title: "Reviewed Client", vkn: "9270740926", nace_code: "477401" }));
+});
+
+test("summarizeDocumentUploadResults distinguishes accepted and duplicate uploads", () => {
+  const summary = summarizeDocumentUploadResults([
+    { fileName: "new.pdf", ok: true, payload: { deduplicated: false } },
+    { fileName: "same.pdf", ok: true, payload: { deduplicated: true } },
+  ], 2);
+  assert.equal(summary.acceptedCount, 1);
+  assert.equal(summary.duplicateCount, 1);
+  assert.equal(summary.failedCount, 0);
+  assert.equal(summary.message, "1 belge i\u015fleme al\u0131nd\u0131. 1 belge daha \u00f6nce y\u00fcklenmi\u015f. Yeni kay\u0131t olu\u015fturulmad\u0131.");
+});
+
+test("summarizeDocumentUploadResults does not call a duplicate newly accepted", () => {
+  const summary = summarizeDocumentUploadResults([
+    { fileName: "same.pdf", ok: true, payload: { deduplicated: true } },
+  ], 1);
+  assert.equal(summary.acceptedCount, 0);
+  assert.equal(summary.duplicateCount, 1);
+  assert.equal(summary.message, "1 belge daha \u00f6nce y\u00fcklenmi\u015f. Yeni kay\u0131t olu\u015fturulmad\u0131.");
 });
 
 test("uploadDocumentsToBackend uploads multiple files sequentially with the same intake metadata", async () => {

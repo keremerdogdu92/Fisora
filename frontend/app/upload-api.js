@@ -837,6 +837,28 @@ function uploadTaxCertificateToBackend({
   });
 }
 
+function summarizeDocumentUploadResults(results, selectedCount) {
+  const items = Array.from(results || []);
+  const failed = items.filter((result) => !result?.ok);
+  const duplicates = items.filter((result) => result?.ok && Boolean(result?.payload?.deduplicated));
+  const accepted = items.filter((result) => result?.ok && !result?.payload?.deduplicated);
+  const parts = [];
+  if (accepted.length) parts.push(`${accepted.length} belge i\u015fleme al\u0131nd\u0131.`);
+  if (duplicates.length) {
+    parts.push(`${duplicates.length} belge daha \u00f6nce y\u00fcklenmi\u015f. Yeni kay\u0131t olu\u015fturulmad\u0131.`);
+  }
+  if (failed.length) {
+    parts.push(`Y\u00fcklenemeyen: ${failed.map((result) => result.fileName).filter(Boolean).join(", ") || failed.length}.`);
+  }
+  if (!parts.length && selectedCount) parts.push(`${selectedCount} belge i\u015fleme al\u0131nd\u0131.`);
+  return {
+    acceptedCount: accepted.length,
+    duplicateCount: duplicates.length,
+    failedCount: failed.length,
+    message: parts.join(" "),
+  };
+}
+
 async function uploadDocumentsToBackend({
   apiBaseUrl,
   clientId,
@@ -1330,6 +1352,7 @@ module.exports = {
   saveQnbConnectionToBackend,
   saveQnbSyncPolicy,
   sessionAuthErrorMessage,
+  summarizeDocumentUploadResults,
   userSafeErrorMessage,
   setPortalPassword,
   storeReviewDecision,

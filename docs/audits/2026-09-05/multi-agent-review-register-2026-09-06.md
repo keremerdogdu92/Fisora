@@ -252,13 +252,15 @@
 **Resolution:** The AG non-working observation is not reproducible in the current build. No code change. Editable/select focus ownership remains the separate REV-G02 topic.
 
 ## REV-G02 — Shortcut focus güvenliği
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / CURRENT BEHAVIOR KEPT - 2026-09-10.
 **Audit refs:** [CG-22](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-22--shortcut-behavior-is-focus-sensitive)
-**Observed:** Dönem select focus'tayken `↓` evrak yerine dönemi değiştirdi.
+**Decision:** The focused/open control owns ArrowUp/ArrowDown. A period select uses the arrows to change period; an open account-plan combobox uses them to move the active account candidate. Global Workbench ArrowUp/ArrowDown document navigation applies only when no arrow-owning editable/select/list surface is active.
+**Rationale:** This matches the accountant-requested serial workflow already implemented for account-plan selection and prevents global document navigation from stealing keys while the user is operating an opened control. No code change required.
 
 ## REV-G03 — Keyboard focus policy
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED - 2026-09-10.
 **Derived from:** CG-22 + AG FINDING-02.
+**Policy:** Keyboard ownership follows the active surface. Open/focused controls and lists keep their native/domain navigation keys; otherwise the Workbench may use ArrowUp/ArrowDown for previous/next document. This policy governs future keyboard interactions unless a specific surface documents a different shortcut contract.
 
 # H — Yeni Yükleme, duplicate ve upload sonucu
 

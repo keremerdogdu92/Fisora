@@ -76,6 +76,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Retested 2026-09-10: REV-G01** - the old claim that F10 and global ArrowUp/ArrowDown do not work is not reproducible. A two-document Chromium user fixture verified F10 collapse/expand from the persisted starting state, ArrowDown to the next Workbench document, and ArrowUp back to the previous document. No code change. REV-G02 remains separate because editable/select controls intentionally own their arrow keys.
 
+**Accepted 2026-09-10: REV-G02 / REV-G03** - keyboard ownership is context-sensitive by product decision. When a control or list is opened/focused, ArrowUp/ArrowDown operate inside that surface (for example period selection or the accountant-requested account-plan candidate navigation). Global Workbench ArrowUp/ArrowDown changes documents only when no arrow-owning surface is active. Current behavior is kept; no code change.
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

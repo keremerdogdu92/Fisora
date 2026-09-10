@@ -82,6 +82,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-10: REV-H01** - backend deduplication was already correct, but frontend counted every successful upload response as newly accepted. Upload status now distinguishes new documents from `deduplicated=true` results and tells the user that an existing document was not recreated. Duplicate upload does not trigger implicit reprocess. Acceptance: upload API 59/59, frontend 229/229, backend dedupe regression PASS, TypeScript/build PASS. Next upload topic is REV-H03 (final/batch upload summary product behavior).
 
+**Completed 2026-09-11: REV-H03** - upload completion stays on the existing status line but now uses a compact batch summary (`total · accepted · previously uploaded · failed`). Failure names appear only when failures exist; duplicate-only upload explicitly says no new record was created. Acceptance: upload API 60/60, frontend 230/230, TypeScript/build PASS. Next upload audit topic is REV-H04 (raw upload timestamp presentation).
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

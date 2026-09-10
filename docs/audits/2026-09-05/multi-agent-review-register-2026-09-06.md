@@ -278,9 +278,10 @@
 **Acceptance:** Product-language regression PASS; visible technical-wording sweep has no user-facing backend/server/local-copy hits.
 
 ## REV-H03 — Upload sonuç özeti
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
 **Source:** CG feature candidate derived from CG-13.
-**Candidate only:** `5 dosya: 3 eklendi · 1 duplicate · 1 hata`.
+**Decision / implementation:** Keep the existing upload status surface and present one compact batch summary: total selected files, newly accepted, previously uploaded, and failed counts. Failed file names are shown only when failures exist; duplicate file names are not expanded into a noisy list. A single duplicate explicitly says no new record was created.
+**Acceptance:** Upload-summary unit tests cover mixed, duplicate-only, and all-accepted cases; `upload-api.test.cjs` 60/60 PASS; frontend full suite 230/230 PASS; TypeScript PASS; Next production build PASS.
 
 ## REV-H04 — Upload geçmişi raw ISO timestamp
 **Status:** KONTROL EDİLECEK.

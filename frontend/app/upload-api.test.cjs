@@ -545,24 +545,35 @@ test("uploadTaxCertificateToBackend sends reviewed tax-certificate data without 
   assert.equal(fields.tax_certificate_json, JSON.stringify({ title: "Reviewed Client", vkn: "9270740926", nace_code: "477401" }));
 });
 
-test("summarizeDocumentUploadResults distinguishes accepted and duplicate uploads", () => {
+test("summarizeDocumentUploadResults gives a compact batch summary", () => {
   const summary = summarizeDocumentUploadResults([
-    { fileName: "new.pdf", ok: true, payload: { deduplicated: false } },
+    { fileName: "new-1.pdf", ok: true, payload: { deduplicated: false } },
+    { fileName: "new-2.pdf", ok: true, payload: { deduplicated: false } },
+    { fileName: "new-3.pdf", ok: true, payload: { deduplicated: false } },
     { fileName: "same.pdf", ok: true, payload: { deduplicated: true } },
-  ], 2);
-  assert.equal(summary.acceptedCount, 1);
+    { fileName: "broken.pdf", ok: false, error: "upload failed" },
+  ], 5);
+  assert.equal(summary.acceptedCount, 3);
   assert.equal(summary.duplicateCount, 1);
-  assert.equal(summary.failedCount, 0);
-  assert.equal(summary.message, "1 belge i\u015fleme al\u0131nd\u0131. 1 belge daha \u00f6nce y\u00fcklenmi\u015f. Yeni kay\u0131t olu\u015fturulmad\u0131.");
+  assert.equal(summary.failedCount, 1);
+  assert.equal(summary.message, "5 dosya \u00b7 3 i\u015fleme al\u0131nd\u0131 \u00b7 1 daha \u00f6nce y\u00fcklenmi\u015f \u00b7 1 y\u00fcklenemedi. Y\u00fcklenemeyen: broken.pdf.");
 });
 
-test("summarizeDocumentUploadResults does not call a duplicate newly accepted", () => {
+test("summarizeDocumentUploadResults explains a duplicate-only upload", () => {
   const summary = summarizeDocumentUploadResults([
     { fileName: "same.pdf", ok: true, payload: { deduplicated: true } },
   ], 1);
   assert.equal(summary.acceptedCount, 0);
   assert.equal(summary.duplicateCount, 1);
-  assert.equal(summary.message, "1 belge daha \u00f6nce y\u00fcklenmi\u015f. Yeni kay\u0131t olu\u015fturulmad\u0131.");
+  assert.equal(summary.message, "1 dosya \u00b7 daha \u00f6nce y\u00fcklenmi\u015f \u00b7 yeni kay\u0131t olu\u015fturulmad\u0131.");
+});
+
+test("summarizeDocumentUploadResults stays compact when every upload is accepted", () => {
+  const summary = summarizeDocumentUploadResults([
+    { fileName: "a.pdf", ok: true, payload: { deduplicated: false } },
+    { fileName: "b.pdf", ok: true, payload: { deduplicated: false } },
+  ], 2);
+  assert.equal(summary.message, "2 dosya \u00b7 2 i\u015fleme al\u0131nd\u0131.");
 });
 
 test("uploadDocumentsToBackend uploads multiple files sequentially with the same intake metadata", async () => {

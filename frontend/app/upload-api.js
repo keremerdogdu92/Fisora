@@ -842,20 +842,28 @@ function summarizeDocumentUploadResults(results, selectedCount) {
   const failed = items.filter((result) => !result?.ok);
   const duplicates = items.filter((result) => result?.ok && Boolean(result?.payload?.deduplicated));
   const accepted = items.filter((result) => result?.ok && !result?.payload?.deduplicated);
-  const parts = [];
-  if (accepted.length) parts.push(`${accepted.length} belge i\u015fleme al\u0131nd\u0131.`);
-  if (duplicates.length) {
-    parts.push(`${duplicates.length} belge daha \u00f6nce y\u00fcklenmi\u015f. Yeni kay\u0131t olu\u015fturulmad\u0131.`);
+  const totalCount = Number(selectedCount) || items.length;
+  const summaryParts = [`${totalCount} dosya`];
+  if (accepted.length) summaryParts.push(`${accepted.length} i\u015fleme al\u0131nd\u0131`);
+  if (duplicates.length) summaryParts.push(
+    duplicates.length === 1 && totalCount === 1
+      ? `daha \u00f6nce y\u00fcklenmi\u015f`
+      : `${duplicates.length} daha \u00f6nce y\u00fcklenmi\u015f`,
+  );
+  if (failed.length) summaryParts.push(`${failed.length} y\u00fcklenemedi`);
+  let message = `${summaryParts.join(" \u00b7 ")}.`;
+  if (duplicates.length === 1 && totalCount === 1) {
+    message = `1 dosya \u00b7 daha \u00f6nce y\u00fcklenmi\u015f \u00b7 yeni kay\u0131t olu\u015fturulmad\u0131.`;
   }
   if (failed.length) {
-    parts.push(`Y\u00fcklenemeyen: ${failed.map((result) => result.fileName).filter(Boolean).join(", ") || failed.length}.`);
+    const names = failed.map((result) => result.fileName).filter(Boolean);
+    message += ` Y\u00fcklenemeyen: ${names.join(", ") || failed.length}.`;
   }
-  if (!parts.length && selectedCount) parts.push(`${selectedCount} belge i\u015fleme al\u0131nd\u0131.`);
   return {
     acceptedCount: accepted.length,
     duplicateCount: duplicates.length,
     failedCount: failed.length,
-    message: parts.join(" "),
+    message,
   };
 }
 

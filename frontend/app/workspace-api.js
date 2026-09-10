@@ -861,7 +861,7 @@ function backendExportBasketForWorkspace(workspace, client) {
       clientName: client.clientName,
       documentIds: safeList(payload.document_refs).map(String),
       documentCount: safeNumber(payload.entry_count || payload.candidate_count),
-      period: periodFromDate(safeText(record?.created_at || payload.created_at)),
+      period: safeText(payload.period) || periodFromDate(safeText(record?.created_at || payload.created_at)),
       status: payload.downloaded_at || payload.output_filename ? "packaged" : "ready",
     };
   });

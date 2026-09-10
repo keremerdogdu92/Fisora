@@ -554,6 +554,7 @@ class Phase0ServiceTests(unittest.TestCase):
                 document_ref="ready.pdf",
                 result={
                     "file_name": "ready.pdf",
+                    "period": "2026-07",
                     "export_status": "export_ready",
                     "review_reason_codes": [],
                     "risk_flags": [],
@@ -572,7 +573,7 @@ class Phase0ServiceTests(unittest.TestCase):
             )
 
             saved = service.store_export_package_from_workspace(
-                payload=WorkspaceExportPackagePayload(client_id="client-1", export_type="zirve_mapping_csv"),
+                payload=WorkspaceExportPackagePayload(client_id="client-1", period="2026-07", export_type="zirve_mapping_csv"),
                 user_id="mali-musavir",
             )
 

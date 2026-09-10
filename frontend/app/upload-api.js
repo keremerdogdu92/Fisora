@@ -578,6 +578,7 @@ async function deleteClientDocuments({
 async function createWorkspaceExportPackage({
   apiBaseUrl,
   clientId,
+  period,
   exportType = "zirve_mapping_csv",
   userId = DEFAULT_UPLOAD_USER_ID,
   sessionToken = "",
@@ -588,6 +589,7 @@ async function createWorkspaceExportPackage({
     path: "/phase0/store/export-package/from-workspace",
     payload: {
       client_id: String(clientId || "").trim(),
+      period: String(period || "").trim(),
       export_type: String(exportType || "zirve_mapping_csv").trim() || "zirve_mapping_csv",
     },
     headers: backendAuthHeaders({ sessionToken, userId }),

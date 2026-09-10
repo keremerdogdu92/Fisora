@@ -197,6 +197,18 @@ test("next outputs preserve the approved v13 target composition while marking fu
   assert.match(styles, /\.portal-next-export-grid/);
 });
 
+test("next outputs use approved documents in the selected office period", () => {
+  const exportsView = source("portal-exports-view.tsx");
+  const exportCommands = source("features", "export", "use-export-commands.ts");
+  const portalApp = source("portal-app.tsx");
+
+  assert.match(exportsView, /document\.period === outputPeriod/);
+  assert.match(exportsView, /disabled=\{!totalDocuments\}/);
+  assert.match(exportCommands, /document\.period === outputPeriod/);
+  assert.match(exportCommands, /period: target\.period/);
+  assert.match(portalApp, /outputPeriod=\{resolvedOfficePeriod\}/);
+});
+
 test("next keyboard controls preserve review guards and desktop-only legend", () => {
   const controls = source("portal-next", "portal-next-workspace-controls.tsx");
   const styles = source("portal-next", "portal-next.css");

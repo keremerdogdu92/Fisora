@@ -539,6 +539,7 @@ class StoredExportPackagePayload(BaseModel):
 
 class WorkspaceExportPackagePayload(BaseModel):
     client_id: str
+    period: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     export_type: str = "zirve_universal_csv"
 
 

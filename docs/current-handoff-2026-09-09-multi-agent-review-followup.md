@@ -201,7 +201,9 @@ Completed 2026-09-10: **`REV-I04`** - QNB stored `last_error` is no longer rende
 
 Completed 2026-09-10: **general user-facing error hygiene + `REV-H02/I06/I07`** - raw exception payloads are kept out of normal UI status text, invalid credentials have clear feedback, and visible `backend/server/lokal` implementation wording was removed. QNB-specific `REV-I05` is deferred to the later QNB integration track.
 
-Next non-QNB audit verification: **`REV-J01`** - Outputs readiness/buttons consistency. Test current behavior first; keep approval/output semantics simple.
+Completed 2026-09-10: **`REV-J01/J02/J04`** - Portal-next output readiness no longer depends on the legacy manual export basket. Approved documents in the selected office period are the canonical output scope; empty scope disables CSV/control actions. Backend export now requires `period=YYYY-MM` and filters the authoritative workspace to that period. Two-period regression proves June export excludes July; frontend 227/227 PASS; backend 1153 passed / 37 skipped; Next build + TypeScript PASS.
+
+Next non-QNB audit verification: **`REV-J03`** - retest XLSX disabled behavior against the intentionally deferred XLSX implementation; do not enable an unimplemented export path.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

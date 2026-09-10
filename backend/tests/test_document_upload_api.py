@@ -1445,11 +1445,25 @@ class DocumentUploadApiTests(unittest.TestCase):
             response = client.post(
                 "/phase0/store/export-package/from-workspace",
                 headers={"X-Fisora-User-Id": "mukellef-user"},
-                json={"client_id": "client-1", "export_type": "zirve_universal_csv"},
+                json={"client_id": "client-1", "period": "2026-06", "export_type": "zirve_universal_csv"},
             )
 
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["detail"]["reason"], "role_not_allowed")
+
+    def test_store_export_package_from_workspace_requires_period_scope(self) -> None:
+        if TestClient is None or phase0 is None or app is None:
+            self.skipTest("fastapi is not installed in this Python environment")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            phase0.DEFAULT_STORE_PATH = Path(temp_dir) / "store.json"
+            phase0.DEFAULT_EXPORT_PATH = Path(temp_dir) / "exports"
+            client = TestClient(app)
+            response = client.post(
+                "/phase0/store/export-package/from-workspace",
+                json={"client_id": "client-1", "export_type": "zirve_universal_csv"},
+            )
+
+        self.assertEqual(response.status_code, 422)
 
     def test_store_export_package_from_workspace_writes_downloadable_csv(self) -> None:
         if TestClient is None or phase0 is None or app is None:
@@ -1464,6 +1478,7 @@ class DocumentUploadApiTests(unittest.TestCase):
                 document_ref="ready.pdf",
                 result={
                     "file_name": "ready.pdf",
+                    "period": "2026-06",
                     "export_status": "export_ready",
                     "review_reason_codes": [],
                     "risk_flags": [],
@@ -1474,9 +1489,25 @@ class DocumentUploadApiTests(unittest.TestCase):
                 },
             )
 
+            store.save_simulation_result(
+                client_id="client-1",
+                document_ref="other-period.pdf",
+                result={
+                    "file_name": "other-period.pdf",
+                    "period": "2026-07",
+                    "export_status": "export_ready",
+                    "review_reason_codes": [],
+                    "risk_flags": [],
+                    "draft_lines": [
+                        {"account_code": "770.02", "description": "Other", "debit": "200.00", "credit": "0.00"},
+                        {"account_code": "320.02", "description": "Other", "debit": "0.00", "credit": "200.00"},
+                    ],
+                },
+            )
+
             response = client.post(
                 "/phase0/store/export-package/from-workspace",
-                json={"client_id": "client-1", "export_type": "zirve_universal_csv"},
+                json={"client_id": "client-1", "period": "2026-06", "export_type": "zirve_universal_csv"},
             )
             payload = response.json()
             download = client.get(payload["package"]["download_url"])
@@ -1484,11 +1515,13 @@ class DocumentUploadApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(payload["package"]["entry_count"], 1)
+        self.assertEqual(payload["package"]["period"], "2026-06")
         self.assertTrue(payload["package"]["manifest_filename"].endswith(".manifest.json"))
         self.assertEqual(download.status_code, 200)
         self.assertIn("770.01", download.text)
         self.assertEqual(manifest.status_code, 200)
         self.assertIn("ready.pdf", manifest.text)
+        self.assertNotIn("other-period.pdf", manifest.text)
 
     def test_statement_ai_suggestions_endpoint_returns_review_only_structured_payload(self) -> None:
         if TestClient is None or phase0 is None or app is None:

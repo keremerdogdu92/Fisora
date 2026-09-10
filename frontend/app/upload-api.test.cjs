@@ -972,6 +972,7 @@ test("createWorkspaceExportPackage posts selected Zirve mapping adapter", async 
   const result = await createWorkspaceExportPackage({
     apiBaseUrl: "http://localhost:8000",
     clientId: "client-1",
+    period: "2026-06",
     exportType: "zirve_mapping_csv",
     userId: "mali-musavir",
     sessionToken: "session-token-1",
@@ -987,6 +988,7 @@ test("createWorkspaceExportPackage posts selected Zirve mapping adapter", async 
   });
   assert.deepEqual(JSON.parse(request.init.body), {
     client_id: "client-1",
+    period: "2026-06",
     export_type: "zirve_mapping_csv",
   });
   assert.equal(result.package.download_url, "/download.csv");

@@ -474,7 +474,8 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     requestCancellation,
     resolveCancellation,
   } = useExportCommands({
-    cancelReason, clientDocuments, exportBasket: data.exportBasket, exportMode, exportType, loginUserId, selectedClient, selectedPeriod, session,
+    cancelReason, clientDocuments, directApprovedScope: isNextPresentation, documents: data.documents, exportBasket: data.exportBasket,
+    exportMode, exportType, loginUserId, outputPeriod: resolvedOfficePeriod, selectedClient, selectedPeriod, session,
     setCancelReason,
     setClientCancellationDocumentId,
     setData,
@@ -747,7 +748,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
         <ExportBasketRouteView
           documents={data.documents} exportBasket={data.exportBasket} exportMode={exportMode} exportStatus={exportStatus} exportType={exportType}
           nextPresentation={isNextPresentation}
-          onMarkPackaged={markBasketPackaged} periodLabel={periodLabel} setExportMode={setExportMode} setExportType={setExportType}
+          onMarkPackaged={markBasketPackaged} outputPeriod={resolvedOfficePeriod} periodLabel={periodLabel} setExportMode={setExportMode} setExportType={setExportType}
         />
       ) : null}
       {mode === "operations" ? (

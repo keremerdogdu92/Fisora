@@ -19,6 +19,21 @@ OperationRecorder = Callable[..., dict[str, object]]
 AccessChecker = Callable[..., dict[str, object]]
 
 
+def _document_period(document: object, uploaded_periods: dict[str, str]) -> str:
+    if not isinstance(document, dict):
+        return ""
+    result = document.get("result") if isinstance(document.get("result"), dict) else {}
+    document_ref = str(document.get("document_ref") or document.get("id") or "")
+    value = (
+        document.get("period")
+        or document.get("accounting_period")
+        or result.get("period")
+        or uploaded_periods.get(document_ref)
+        or ""
+    )
+    return str(value)[:7]
+
+
 class ExportService:
     def __init__(
         self,
@@ -89,6 +104,19 @@ class ExportService:
                 workspace,
                 holds=holds_reader(client_id=payload.client_id),
             )
+        scoped_period = payload.period.strip()
+        uploaded_periods = {
+            str(item.get("document_ref") or item.get("document_id") or ""): str(item.get("period") or "")
+            for item in workspace.get("uploaded_documents", [])
+            if isinstance(item, dict)
+        }
+        workspace = {
+            **workspace,
+            "documents": [
+                document for document in workspace.get("documents", [])
+                if _document_period(document, uploaded_periods) == scoped_period
+            ],
+        }
         try:
             adapter = get_export_adapter(payload.export_type)
         except ValueError as exc:
@@ -104,6 +132,7 @@ class ExportService:
         )
         package_payload = {
             "export_type": build.package.export_type,
+            "period": scoped_period,
             "adapter": {
                 "display_name": adapter.display_name,
                 "file_extension": adapter.file_extension,
@@ -137,6 +166,7 @@ class ExportService:
             message="Workspace'ten indirilebilir export paketi uretildi.",
             metadata={
                 "export_type": package_payload["export_type"],
+                "period": scoped_period,
                 "entry_count": package_payload["entry_count"],
                 "candidate_count": package_payload["candidate_count"],
                 "excluded_document_refs": package_payload["excluded_document_refs"],

@@ -320,20 +320,27 @@
 # J — Onay & Çıktılar
 
 ## REV-J01 — `Çıktıya hazır 0` iken bazı export butonları aktif
-**Status:** KONTROL EDİLECEK.
-**Audit refs:** [CX UXR-009](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-009--p1--çıktı-kontrollerinin-hazır-olma-durumu-birbiriyle-çelişiyor) · [CG-25](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-25--output-readinessprerequisite-ux-is-incomplete)
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
+**Audit refs:** CX UXR-009 · CG-25.
+**Root cause:** Yeni çıktı ekranı readiness'i eski `exportBasket` state'inden sayıyor, fakat yeni Çalışma Masası artık manuel sepete ekleme aksiyonunu sunmuyordu. CSV ve kontrol paketi butonları boş kapsamda yine aktif kalıyordu.
+**Implementation:** Portal-next çıktıları artık seçili ofis dönemindeki `export_ready/export_added/exported` belgeleri doğrudan çıktı adayı kabul ediyor. Uygun belge yoksa CSV ve kontrol paketi aksiyonları disabled; sayaç ve dönem toplamı aynı belge kapsamından türetiliyor.
+**Acceptance:** Frontend full suite 227/227 PASS; Next build + TypeScript PASS.
 
 ## REV-J02 — CSV/Kontrol Paketi aktif ama prerequisite mesajında duruyor
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED WITH REV-J01 - 2026-09-10.
 **Audit refs:** CX UXR-009 · CG-25.
+**Resolution:** Portal-next için eski manuel `exportBasket` prerequisite'i kaldırıldı. Paket hedefleri seçili dönemdeki onaylı belgelerin mükelleflerinden doğrudan türetiliyor; boş kapsam buton seviyesinde engelleniyor.
 
 ## REV-J03 — XLSX bazı durumda disabled
 **Status:** KONTROL EDİLECEK.
 **Audit refs:** CX UXR-009 · CG-25.
 
 ## REV-J04 — Export readiness için canonical gate
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Derived from:** CX UXR-009 + CG-25.
+**Decision:** Canonical çıktı kapsamı = onaylanmış belge + seçili ofis dönemi. Ayrı bir kullanıcı-facing `Çıktıya hazır` workflow state veya manuel sepet prerequisite'i eklenmedi.
+**Backend guard:** `/store/export-package/from-workspace` artık `period=YYYY-MM` zorunlu alıyor ve authoritative workspace'i bu döneme filtreliyor. Normalized export projection authoritative `accounting_period` değerini taşıyor. Period gönderilmezse istek reddediliyor.
+**Acceptance:** İki dönemli regression Haziran paketinden Temmuz belgesini dışarıda tuttu; export API/service 61/61 PASS; normalized accounting 18/18 PASS; full backend 1153 passed / 37 skipped.
 
 ## REV-J05 — Pilot export kapsamı
 **Status:** STRATEJİ KARARI.

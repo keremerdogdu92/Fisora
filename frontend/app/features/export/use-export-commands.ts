@@ -13,6 +13,8 @@ import {
 import { createWorkspaceExportPackage, resolveApiBaseUrl, userSafeErrorMessage } from "../../upload-api";
 import type { ExportMode, LocalSession, PilotClient, PilotData, PilotDocument, ExportBasketItem } from "../../portal-types";
 
+const DIRECT_OUTPUT_STATUSES = new Set(["export_ready", "export_added", "exported"]);
+
 function pageUrl() {
   return typeof window === "undefined" ? "" : window.location.href;
 }
@@ -20,10 +22,13 @@ function pageUrl() {
 export function useExportCommands({
   cancelReason,
   clientDocuments,
+  directApprovedScope,
+  documents,
   exportBasket,
   exportMode,
   exportType,
   loginUserId,
+  outputPeriod,
   selectedClient,
   selectedPeriod,
   session,
@@ -35,10 +40,13 @@ export function useExportCommands({
 }: {
   cancelReason: string;
   clientDocuments: PilotDocument[];
+  directApprovedScope: boolean;
+  documents: PilotDocument[];
   exportBasket: ExportBasketItem[];
   exportMode: ExportMode;
   exportType: string;
   loginUserId: string;
+  outputPeriod: string;
   selectedClient?: PilotClient;
   selectedPeriod: string;
   session: LocalSession | null;
@@ -88,32 +96,35 @@ export function useExportCommands({
   }, [clientDocuments, selectedClient, selectedPeriod, setData, setExportStatus]);
 
   const markBasketPackaged = useCallback(async (requestedExportType = exportType) => {
-    if (!exportBasket.length) {
-      setExportStatus("Cikti paketi icin once mukellef ekleyin.");
+    const directDocuments = directApprovedScope
+      ? documents.filter((document) => document.period === outputPeriod && DIRECT_OUTPUT_STATUSES.has(document.status))
+      : [];
+    const targets = directApprovedScope
+      ? Array.from(new Set(directDocuments.map((document) => document.clientId))).map((clientId) => ({ clientId, period: outputPeriod }))
+      : exportBasket.map((item) => ({ clientId: item.clientId, period: item.period || selectedPeriod }));
+    if (!targets.length) {
+      setExportStatus(directApprovedScope ? "Bu dönemde çıktıya uygun onaylı belge yok." : "Çıktı paketi için önce mükellef ekleyin.");
       return;
     }
     const actingUserId = session?.userId || loginUserId.trim() || "mali-musavir";
-    setExportStatus(`${exportBasket.length} mukellef icin ${requestedExportType} paketi uretiliyor.`);
+    setExportStatus(`${targets.length} mükellef için çıktı paketi hazırlanıyor.`);
     try {
       const packages = [];
-      for (const item of exportBasket) {
+      for (const target of targets) {
         packages.push(await createWorkspaceExportPackage({
-          apiBaseUrl: resolveApiBaseUrl(pageUrl()),
-          clientId: item.clientId,
-          exportType: requestedExportType,
-          userId: actingUserId,
-          sessionToken: session?.sessionToken,
+          apiBaseUrl: resolveApiBaseUrl(pageUrl()), clientId: target.clientId, period: target.period,
+          exportType: requestedExportType, userId: actingUserId, sessionToken: session?.sessionToken,
         }));
       }
-      markBasketPackagedAction({ exportMode, exportType: requestedExportType, setData, setExportStatus });
+      if (!directApprovedScope) markBasketPackagedAction({ exportMode, exportType: requestedExportType, setData, setExportStatus });
       const firstPackage = packages[0]?.package || packages[0] || {};
       const download = String(firstPackage.download_url || "");
-      setExportStatus(download ? `${packages.length} paket hazir: ${download}` : `${packages.length} ${requestedExportType} paketi hazir.`);
+      setExportStatus(download ? `${packages.length} paket hazır: ${download}` : `${packages.length} çıktı paketi hazır.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setExportStatus(userSafeErrorMessage(message, "Cikti paketi uretilemedi. Tekrar deneyin."));
+      setExportStatus(userSafeErrorMessage(message, "Çıktı paketi üretilemedi. Tekrar deneyin."));
     }
-  }, [exportBasket, exportMode, exportType, loginUserId, session, setData, setExportStatus]);
+  }, [directApprovedScope, documents, exportBasket, exportMode, exportType, loginUserId, outputPeriod, selectedPeriod, session, setData, setExportStatus]);
 
   return {
     addSelectedClientToBasket,

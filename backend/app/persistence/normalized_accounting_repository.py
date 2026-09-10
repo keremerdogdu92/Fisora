@@ -2099,8 +2099,8 @@ class NormalizedAccountingRepository:
             with conn.cursor() as cursor:
                 cursor.execute(
                     f"""
-                    select documents.source_ref, documents.status, revisions.revision_no,
-                           revisions.result_snapshot, revisions.status
+                    select documents.source_ref, documents.status, documents.accounting_period,
+                           revisions.revision_no, revisions.result_snapshot, revisions.status
                     from documents
                     join journal_entries on journal_entries.id = documents.current_journal_entry_id
                     join journal_revisions revisions
@@ -2117,10 +2117,11 @@ class NormalizedAccountingRepository:
             {
                 "document_ref": str(row[0]),
                 "status": str(row[1]),
-                "export_status": str((row[3] or {}).get("export_status") or "review_required"),
-                "normalized_revision": int(row[2]),
-                "normalized_revision_status": str(row[4]),
-                "result": dict(row[3] or {}),
+                "period": row[2].strftime("%Y-%m") if row[2] else "",
+                "export_status": str((row[4] or {}).get("export_status") or "review_required"),
+                "normalized_revision": int(row[3]),
+                "normalized_revision_status": str(row[5]),
+                "result": dict(row[4] or {}),
             }
             for row in rows
         ]

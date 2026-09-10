@@ -43,6 +43,7 @@ export function ExportBasketView({
   exportType,
   nextPresentation = false,
   onMarkPackaged,
+  outputPeriod,
   periodLabel,
   setExportMode,
   setExportType,
@@ -54,25 +55,28 @@ export function ExportBasketView({
   exportType: string;
   nextPresentation?: boolean;
   onMarkPackaged: (exportTypeOverride?: string) => void | Promise<void>;
+  outputPeriod: string;
   periodLabel: (period: string) => string;
   setExportMode: (value: ExportMode) => void;
   setExportType: (value: string) => void;
 }) {
-  const totalDocuments = exportBasket.reduce((sum, item) => sum + item.documentCount, 0);
-  const pendingReviewDocuments = documents.filter((document) => document.status === "review_required");
+  const approvedOutputDocuments = documents.filter((document) =>
+    document.period === outputPeriod && ["export_ready", "export_added", "exported"].includes(document.status),
+  );
+  const totalDocuments = nextPresentation ? approvedOutputDocuments.length : exportBasket.reduce((sum, item) => sum + item.documentCount, 0);
+  const pendingReviewDocuments = documents.filter((document) => document.status === "review_required" && (!nextPresentation || document.period === outputPeriod));
   const reviewReasonGroups = groupedReviewReasons(pendingReviewDocuments);
   const blockedDocuments = pendingReviewDocuments.filter((document) => (document.reviewBlockers?.length ?? 0) > 0);
   const shortReviewCount = Math.max(0, pendingReviewDocuments.length - blockedDocuments.length);
   const basketDocumentIds = new Set(exportBasket.flatMap((item) => item.documentIds));
-  const outputScopeDocuments = documents.filter((document) =>
-    basketDocumentIds.size
-      ? basketDocumentIds.has(document.id)
-      : ["export_ready", "export_added", "exported"].includes(document.status),
+  const outputScopeDocuments = nextPresentation ? approvedOutputDocuments : documents.filter((document) =>
+    basketDocumentIds.size ? basketDocumentIds.has(document.id) : ["export_ready", "export_added", "exported"].includes(document.status),
   );
   const periodTotal = outputScopeDocuments.reduce((sum, document) => sum + parseOutputAmount(document.amount), 0);
   const periodValues = Array.from(new Set(exportBasket.map((item) => item.period).filter(Boolean)));
-  const periodValue = periodValues.length === 1 ? periodLabel(periodValues[0]) : periodValues.length > 1 ? "Birden fazla dönem" : "Dönem seçilmedi";
-  const clientValue = exportBasket.length === 1 ? exportBasket[0].clientName : exportBasket.length ? `${exportBasket.length} mükellef` : "Mükellef seçilmedi";
+  const periodValue = nextPresentation ? periodLabel(outputPeriod) : periodValues.length === 1 ? periodLabel(periodValues[0]) : periodValues.length > 1 ? "Birden fazla dönem" : "Dönem seçilmedi";
+  const approvedClientCount = new Set(approvedOutputDocuments.map((document) => document.clientId)).size;
+  const clientValue = nextPresentation ? (approvedClientCount ? `${approvedClientCount} mükellef` : "Mükellef seçilmedi") : exportBasket.length === 1 ? exportBasket[0].clientName : exportBasket.length ? `${exportBasket.length} mükellef` : "Mükellef seçilmedi";
 
   if (nextPresentation) {
     return (
@@ -95,7 +99,7 @@ export function ExportBasketView({
           <article className="portal-next-export-card">
             <header>
               <strong>1 · Çıktı paketi oluştur</strong>
-              <span className="portal-next-export-pill ready">Kullanılabilir</span>
+              <span className={`portal-next-export-pill ${totalDocuments ? "ready" : "demo"}`}>{totalDocuments ? "Kullanılabilir" : "Onay bekliyor"}</span>
             </header>
             <div className="portal-next-export-card-body">
               <div className="portal-next-output-option">
@@ -110,17 +114,17 @@ export function ExportBasketView({
                   <strong>CSV çıktı paketi</strong>
                   <span>Muhasebe programına hazırlık / saha testi · .csv</span>
                 </div>
-                <button className="secondary" onClick={() => { setExportType("zirve_mapping_csv"); void onMarkPackaged("zirve_mapping_csv"); }} type="button">CSV oluştur</button>
+                <button className="secondary" disabled={!totalDocuments} onClick={() => { setExportType("zirve_mapping_csv"); void onMarkPackaged("zirve_mapping_csv"); }} type="button">CSV oluştur</button>
               </div>
               <div className="portal-next-output-option">
                 <div>
                   <strong>Kontrol paketi</strong>
                   <span>Müşavir incelemesi için dönem kontrol listesi</span>
                 </div>
-                <button className="secondary" onClick={() => { setExportType("zirve_trial_csv"); void onMarkPackaged("zirve_trial_csv"); }} type="button">Paketi hazırla</button>
+                <button className="secondary" disabled={!totalDocuments} onClick={() => { setExportType("zirve_trial_csv"); void onMarkPackaged("zirve_trial_csv"); }} type="button">Paketi hazırla</button>
               </div>
               {exportStatus ? <p className="portal-next-export-status">{exportStatus}</p> : null}
-              {!exportBasket.length && pendingReviewDocuments.length ? (
+              {!totalDocuments && pendingReviewDocuments.length ? (
                 <div className="portal-next-export-blocked">
                   <strong>Çıktı hazır değil</strong>
                   <span>Önce kontrol bekleyen belgeleri ve onboarding eksiklerini tamamlayın.</span>

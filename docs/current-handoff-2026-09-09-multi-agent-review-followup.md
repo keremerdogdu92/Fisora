@@ -72,6 +72,10 @@ REV-F01 and REV-F02 were retested on 2026-09-10 and are not reproducible in the 
 
 Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; `e2e/document-inspector.spec.ts` 8/8 Chromium PASS; frontend 227/227; backend 1155 passed / 37 skipped; TypeScript and Next production build PASS.
 
+### Keyboard retest
+
+**Retested 2026-09-10: REV-G01** - the old claim that F10 and global ArrowUp/ArrowDown do not work is not reproducible. A two-document Chromium user fixture verified F10 collapse/expand from the persisted starting state, ArrowDown to the next Workbench document, and ArrowUp back to the previous document. No code change. REV-G02 remains separate because editable/select controls intentionally own their arrow keys.
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior
@@ -213,7 +217,7 @@ Completed 2026-09-10: **`REV-C03`** - all journal rows are rendered and the appr
 
 Completed 2026-09-10: **`REV-F02` retest** - current HTML/PDF source focus could not reproduce the old visible-text/anchor failure. Browser acceptance 4/4 PASS, including duplicate HTML text disambiguation and PDF source highlighting. No code change.
 
-Completed 2026-09-10: **REV-F03** - the Workbench no longer invents KDV %0 from source-line linkage alone. Valid chart-account names were verified through backend review mapping and a Playwright user flow, including interactive account selection; the old missing-description observation was not reproduced. REV-F04 was subsequently implemented as the canonical source-anchor plumbing; REV-F05 remains the separate UI/product decision.
+Completed 2026-09-10: **REV-F03** - the Workbench no longer invents KDV %0 from source-line linkage alone. Valid chart-account names were verified through backend review mapping and a Playwright user flow, including interactive account selection; the old missing-description observation was not reproduced. REV-F04 and REV-F05 are both completed: canonical source anchors now support single- and multi-source HTML/PDF highlighting.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

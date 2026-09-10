@@ -245,9 +245,11 @@
 # G — Klavye ve seri kullanım
 
 ## REV-G01 — F10 / ↑↓ konusunda çelişkili audit sonucu
-**Status:** TEKRAR TEST.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [AG FINDING-02](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-02-f10-ve-yön-tuşları-klavye-kısayollarının-işlevsiz-olması) · [CG-22](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-22--shortcut-behavior-is-focus-sensitive) · [CX Strongest parts](./fisora-codex-ux-qa-audit-2026-09-05.md#strongest-parts-of-the-product)
 **Conflict:** CG canlı turunda F10 ve ↑↓ çalıştı; AG çalışmadığını raporladı. Doğrudan bug kabul edilmeyecek.
+**Retest:** A two-document Chromium user fixture exercised the real global keyboard handler. F10 toggled the persisted sidebar collapse state and a second F10 restored it; ArrowDown moved the active Workbench document to the next queue item and ArrowUp returned to the previous item.
+**Resolution:** The AG non-working observation is not reproducible in the current build. No code change. Editable/select focus ownership remains the separate REV-G02 topic.
 
 ## REV-G02 — Shortcut focus güvenliği
 **Status:** KONTROL EDİLECEK.

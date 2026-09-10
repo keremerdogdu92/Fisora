@@ -1389,10 +1389,29 @@ function ManualDraftEditor({
   function sourceTargetForLine(line: DraftLine, index: number): DocumentSourceTarget | null {
     const text = String(line.source_text || line.description || "").trim();
     const sourceLineNumbers = Array.isArray(line.source_line_numbers) ? line.source_line_numbers : [];
-    if (!text && !line.source_position && !sourceLineNumbers.length) return null;
+    const anchors = Array.isArray(line.source_anchors)
+      ? line.source_anchors
+          .map((anchor, anchorIndex) => {
+            const anchorText = String(anchor?.source_text || "").trim();
+            const sourcePosition = String(anchor?.source_position || "").trim();
+            const canonicalLineId = String(anchor?.canonical_line_id || "").trim();
+            if (!anchorText && !sourcePosition) return null;
+            return {
+              key: canonicalLineId || `${sourcePosition || anchorIndex + 1}::${anchorText.replace(/\s+/g, " ").trim()}`,
+              text: anchorText,
+              sourceAmount: String(anchor?.source_amount || "").trim(),
+              sourcePosition,
+            };
+          })
+          .filter((anchor): anchor is NonNullable<typeof anchor> => Boolean(anchor))
+      : [];
+    if (!anchors.length && !text && !line.source_position && !sourceLineNumbers.length) return null;
     return {
-      key: `${line.source_position || sourceLineNumbers.join("-") || index + 1}::${text.replace(/\s+/g, " ").trim()}`,
+      key: anchors.length
+        ? `anchors:${anchors.map((anchor) => anchor.key).join("|")}`
+        : `${line.source_position || sourceLineNumbers.join("-") || index + 1}::${text.replace(/\s+/g, " ").trim()}`,
       text,
+      anchors: anchors.length ? anchors : undefined,
       pinned: false,
       sourceAmount: String(line.source_amount || "").trim(),
       sourcePosition: line.source_position || "",

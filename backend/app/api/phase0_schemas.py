@@ -253,6 +253,7 @@ class JournalLinePayload(BaseModel):
     tax_rate: str = ""
     vat_group_id: str = ""
     contributing_line_ids: list[str] = Field(default_factory=list)
+    source_anchors: list[dict[str, object]] = Field(default_factory=list)
     source_line_numbers: list[int] = Field(default_factory=list)
     allocated_amounts: list[dict[str, object]] = Field(default_factory=list)
     source_position: str = ""

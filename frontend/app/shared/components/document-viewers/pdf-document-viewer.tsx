@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
-import type { DocumentSourceTarget } from "../../../portal-types";
+import type { DocumentSourceAnchor, DocumentSourceTarget } from "../../../portal-types";
 import { findTokenSequence, sourceTokenValues, tokenizeSourceText } from "./document-source-match";
 
 type FitMode = "page" | "width" | "custom";
@@ -72,7 +72,13 @@ function unionRects(rects: { left: number; top: number; width: number; height: n
   return { left, top, width: right - left, height: bottom - top };
 }
 
-function sourceMatchesOnPage(items: PdfTextItem[], target: DocumentSourceTarget, viewport: PdfViewport) {
+type SourceMatchTarget = Pick<DocumentSourceTarget, "text" | "sourceAmount" | "sourcePosition"> | DocumentSourceAnchor;
+
+function sourceMatchTargets(target: DocumentSourceTarget): SourceMatchTarget[] {
+  return target.anchors?.length ? target.anchors : [target];
+}
+
+function sourceMatchesOnPage(items: PdfTextItem[], target: SourceMatchTarget, viewport: PdfViewport) {
   const needle = sourceTokenValues(target.text);
   if (!needle.length) return [];
   const indexedTokens: { itemIndex: number; value: string }[] = [];
@@ -108,9 +114,9 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   const [status, setStatus] = useState("PDF yükleniyor.");
   const [error, setError] = useState("");
-  const [sourceHighlight, setSourceHighlight] = useState<PdfSourceHighlight | null>(null);
+  const [sourceHighlights, setSourceHighlights] = useState<PdfSourceHighlight[]>([]);
   const [sourceMatchStatus, setSourceMatchStatus] = useState("");
-  const [highlightStyle, setHighlightStyle] = useState<CSSProperties | null>(null);
+  const [highlightStyles, setHighlightStyles] = useState<CSSProperties[]>([]);
   const [lens, setLens] = useState<LensState>({ left: 0, top: 0, visible: false });
   const magnifierEnabled = magnifierRequested;
 
@@ -160,36 +166,48 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
 
   useEffect(() => {
     if (!pdfDocument || !sourceTarget) {
-      setSourceHighlight(null);
+      setSourceHighlights([]);
       setSourceMatchStatus("");
       return undefined;
     }
     let active = true;
-    setSourceMatchStatus("Kaynak aranıyor…");
+    setSourceMatchStatus("Kaynak aran?yor?");
     void (async () => {
-      const matches: PdfSourceHighlight[] = [];
-      for (let page = 1; page <= pdfDocument.numPages; page += 1) {
-        const pdfPage = await pdfDocument.getPage(page);
-        const textContent = await pdfPage.getTextContent();
-        if (!active) return;
-        const items = textContent.items.filter(isPdfTextItem);
-        const viewport = pdfPage.getViewport({ scale: 1 });
-        sourceMatchesOnPage(items, sourceTarget, viewport).forEach((match) => matches.push({ page, ...match }));
-        if (matches.length > 1) break;
+      const targets = sourceMatchTargets(sourceTarget);
+      const resolved: PdfSourceHighlight[] = [];
+      let matchedTargetCount = 0;
+      for (const source of targets) {
+        const sourceMatches: PdfSourceHighlight[] = [];
+        for (let page = 1; page <= pdfDocument.numPages; page += 1) {
+          const pdfPage = await pdfDocument.getPage(page);
+          const textContent = await pdfPage.getTextContent();
+          if (!active) return;
+          const items = textContent.items.filter(isPdfTextItem);
+          const viewport = pdfPage.getViewport({ scale: 1 });
+          sourceMatchesOnPage(items, source, viewport).forEach((match) => sourceMatches.push({ page, ...match }));
+          if (sourceMatches.length > 1) break;
+        }
+        if (sourceMatches.length === 1) {
+          resolved.push(sourceMatches[0]);
+          matchedTargetCount += 1;
+        }
       }
       if (!active) return;
-      if (matches.length === 1) {
-        setSourceHighlight(matches[0]);
-        setPageNumber(matches[0].page);
-        setSourceMatchStatus(`Kaynak bulundu · sayfa ${matches[0].page}`);
+      setSourceHighlights(resolved);
+      if (resolved.length) {
+        setPageNumber(resolved[0].page);
+        setSourceMatchStatus(
+          targets.length > 1
+            ? `${matchedTargetCount}/${targets.length} kaynak bulundu`
+            : `Kaynak bulundu ? sayfa ${resolved[0].page}`,
+        );
         return;
       }
-      setSourceHighlight(null);
-      setSourceMatchStatus(matches.length > 1 ? "Kaynak metin birden fazla yerde bulundu." : "Kaynak metin PDF içinde bulunamadı.");
-    })().catch((scanError) => {
+      setSourceMatchStatus(targets.length > 1 ? "Kaynak sat?rlar? PDF i?inde bulunamad?." : "Kaynak metin PDF i?inde bulunamad?.");
+    })().catch(() => {
       if (!active) return;
-      setSourceHighlight(null);
-      setSourceMatchStatus("Kaynak eşleme yapılamadı.");
+      setSourceHighlights([]);
+      setSourceMatchStatus("Kaynak e?leme yap?lamad?.");
     });
     return () => { active = false; };
   }, [pdfDocument, sourceTarget?.key, sourceTarget?.text]);
@@ -245,19 +263,27 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     };
   }, [customZoom, fitMode, pageNumber, pdfDocument, stageSize.height, stageSize.width]);
   useEffect(() => {
-    if (!sourceHighlight || sourceHighlight.page !== pageNumber) {
-      setHighlightStyle(null);
+    const pageHighlights = sourceHighlights.filter((highlight) => highlight.page === pageNumber);
+    if (!pageHighlights.length) {
+      setHighlightStyles([]);
       return undefined;
     }
     const frame = window.requestAnimationFrame(() => {
       const canvas = canvasRef.current;
       const stage = stageRef.current;
       if (!canvas || !stage) return;
-      const left = canvas.offsetLeft + sourceHighlight.left * effectiveScale;
-      const top = canvas.offsetTop + sourceHighlight.top * effectiveScale;
-      const width = Math.max(10, sourceHighlight.width * effectiveScale);
-      const height = Math.max(10, sourceHighlight.height * effectiveScale);
-      setHighlightStyle({ left, top, width, height });
+      const styles = pageHighlights.map((highlight) => ({
+        left: canvas.offsetLeft + highlight.left * effectiveScale,
+        top: canvas.offsetTop + highlight.top * effectiveScale,
+        width: Math.max(10, highlight.width * effectiveScale),
+        height: Math.max(10, highlight.height * effectiveScale),
+      }));
+      setHighlightStyles(styles);
+      const first = styles[0];
+      const left = Number(first.left || 0);
+      const top = Number(first.top || 0);
+      const width = Number(first.width || 0);
+      const height = Number(first.height || 0);
       const outsideViewport = top < stage.scrollTop + 8
         || top + height > stage.scrollTop + stage.clientHeight - 8
         || left < stage.scrollLeft + 8
@@ -270,7 +296,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [effectiveScale, pageNumber, sourceHighlight, sourceTarget?.key, sourceTarget?.pinned, stageSize.height, stageSize.width]);
+  }, [effectiveScale, pageNumber, sourceHighlights, sourceTarget?.key, sourceTarget?.pinned, stageSize.height, stageSize.width]);
 
   function selectFitMode(mode: Exclude<FitMode, "custom">) {
     hideLens();
@@ -370,9 +396,9 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
   useEffect(() => () => clearTouchTimer(), []);
 
   function clearSourceFocus() {
-    setSourceHighlight(null);
+    setSourceHighlights([]);
     setSourceMatchStatus("");
-    setHighlightStyle(null);
+    setHighlightStyles([]);
     onClearSourceTarget?.();
   }
 
@@ -418,7 +444,14 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
           </div>
         ) : null}
         {!error ? <canvas aria-label={`${fileName} sayfa ${pageNumber}`} ref={canvasRef} /> : null}
-        {highlightStyle && !error ? <div className={`pdf-source-highlight${sourceTarget?.pinned ? " pinned" : ""}`} aria-label="Kaynak eşleşmesi" style={highlightStyle} /> : null}
+        {!error ? highlightStyles.map((style, index) => (
+          <div
+            aria-label={index === 0 ? "Kaynak e?le?mesi" : `Kaynak e?le?mesi ${index + 1}`}
+            className={`pdf-source-highlight${sourceTarget?.pinned ? " pinned" : ""}`}
+            key={`${pageNumber}:${index}`}
+            style={style}
+          />
+        )) : null}
         {!error && magnifierEnabled ? (
           <div
             aria-hidden="true"

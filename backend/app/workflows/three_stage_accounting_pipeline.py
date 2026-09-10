@@ -439,6 +439,14 @@ def _draft_lines(lines: Sequence[Mapping[str, object]], canonical: Mapping[str, 
             if canonical_line_id and canonical_line_id not in contributing_line_ids:
                 contributing_line_ids.append(canonical_line_id)
                 contributing_rows.append(row)
+        source_anchors = [
+            {
+                "canonical_line_id": str(row.get("canonical_line_id") or "").strip(),
+                "source_position": str(row.get("source_position") or ""),
+                "source_text": str(row.get("description") or ""),
+            }
+            for row in contributing_rows
+        ]
         source_row = contributing_rows[0] if len(contributing_rows) == 1 else {}
         result.append({
             "fact_ref": f"three-stage:{index}",
@@ -453,6 +461,7 @@ def _draft_lines(lines: Sequence[Mapping[str, object]], canonical: Mapping[str, 
             "source_basis": [str(item) for item in line.get("source_positions") or []],
             "source_line_numbers": _source_line_numbers(line.get("source_positions")),
             "contributing_line_ids": contributing_line_ids,
+            "source_anchors": source_anchors,
             **({
                 "source_position": str(source_row.get("source_position") or ""),
                 "source_text": str(source_row.get("description") or ""),

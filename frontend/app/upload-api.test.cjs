@@ -1234,14 +1234,14 @@ test("storeReviewDecision includes manual journal draft lines when provided", as
     action: "approve_with_changes",
     reviewer: "mali-musavir",
     draftLines: [
-      { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00", contributing_line_ids: ["line-1"], source_line_numbers: [1], source_position: "1", source_text: "Kargo Hizmet Bedeli" },
+      { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00", contributing_line_ids: ["line-1", "line-2"], source_anchors: [{ canonical_line_id: "line-1", source_position: "1", source_text: "Kargo Hizmet Bedeli" }, { canonical_line_id: "line-2", source_position: "2", source_text: "Paketleme Hizmeti" }], source_line_numbers: [1, 2] },
       { account_code: "320.01.001", description: "Cari", debit: "0.00", credit: "100.00" },
     ],
     fetchImpl,
   });
 
   assert.deepEqual(JSON.parse(request.init.body).decision.draft_lines, [
-    { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00", contributing_line_ids: ["line-1"], source_line_numbers: [1], source_position: "1", source_text: "Kargo Hizmet Bedeli" },
+    { account_code: "770.01", description: "Gider", debit: "100.00", credit: "0.00", contributing_line_ids: ["line-1", "line-2"], source_anchors: [{ canonical_line_id: "line-1", source_position: "1", source_text: "Kargo Hizmet Bedeli" }, { canonical_line_id: "line-2", source_position: "2", source_text: "Paketleme Hizmeti" }], source_line_numbers: [1, 2] },
     { account_code: "320.01.001", description: "Cari", debit: "0.00", credit: "100.00" },
   ]);
 });

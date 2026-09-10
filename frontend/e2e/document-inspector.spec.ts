@@ -4,6 +4,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const SOURCE_TEXT = "Kargo Hizmet Bedeli 540,00 TL";
+const SECOND_SOURCE_TEXT = "Paketleme Hizmeti 60,00 TL";
 const CLIENT_ID = "inspector-client";
 
 const readiness = {
@@ -28,25 +29,31 @@ const client = {
 };
 
 function pdfBytes(text: string) {
-  const escaped = text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-  const stream = `BT\n/F1 18 Tf\n72 700 Td\n(${escaped}) Tj\nET\n`;
+  return pdfBytesLines([text]);
+}
+
+function pdfBytesLines(texts: string[]) {
+  const newline = String.fromCharCode(10);
+  const lines = texts.map((text) => text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"));
+  const textCommands = lines.map((text, index) => `${index ? "0 -36 Td" + newline : ""}(${text}) Tj`).join(newline);
+  const stream = ["BT", "/F1 18 Tf", "72 700 Td", textCommands, "ET", ""].join(newline);
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}endstream`,
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>${newline}stream${newline}${stream}endstream`,
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
   ];
-  let body = "%PDF-1.4\n";
+  let body = `%PDF-1.4${newline}`;
   const offsets = [0];
   objects.forEach((object, index) => {
     offsets.push(Buffer.byteLength(body, "ascii"));
-    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    body += `${index + 1} 0 obj${newline}${object}${newline}endobj${newline}`;
   });
   const xrefOffset = Buffer.byteLength(body, "ascii");
-  const xref = offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n `).join("\n");
-  body += `xref\n0 6\n0000000000 65535 f \n${xref}\n`;
-  body += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  const xref = offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n `).join(newline);
+  body += `xref${newline}0 6${newline}0000000000 65535 f ${newline}${xref}${newline}`;
+  body += `trailer${newline}<< /Size 6 /Root 1 0 R >>${newline}startxref${newline}${xrefOffset}${newline}%%EOF${newline}`;
   return Buffer.from(body, "ascii");
 }
 
@@ -402,4 +409,65 @@ test("generated PDF journal keeps source focus when accountant description diffe
   await expect(journalRow.locator("input").nth(1)).toHaveValue("Kargo gideri");
   await journalRow.hover();
   await expect(page.locator(".pdf-source-highlight")).toBeVisible();
+});
+
+test("multi-source HTML journal highlights all contributing invoice rows", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sira No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr><tr><td>2</td><td>${SECOND_SOURCE_TEXT}</td><td>60,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "multi-anchor.html", "text/html", html, (workspace) => {
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result["draft_status"] = "draft_ready";
+    result["source_review_rows"] = [];
+    result["draft_lines"] = [{
+      account_code: "770.01",
+      description: "Toplam hizmet gideri",
+      debit: "600.00",
+      credit: "0.00",
+      contributing_line_ids: ["line-anchor-1", "line-anchor-2"],
+      source_line_numbers: [1, 2],
+      source_anchors: [
+        { canonical_line_id: "line-anchor-1", source_position: "1", source_text: SOURCE_TEXT },
+        { canonical_line_id: "line-anchor-2", source_position: "2", source_text: SECOND_SOURCE_TEXT },
+      ],
+    }];
+  });
+  await openInspectorDocument(page, ".html-document-viewer");
+  const journalRow = page.locator(".journal-source-row").first();
+  const sourceChip = journalRow.locator(".source-review-chip");
+  await expect(sourceChip).toContainText("Kaynak 1, 2");
+  await journalRow.hover();
+  await expect(page.frameLocator(".html-viewer-frame").locator('[data-fisora-source-target="true"]')).toHaveCount(2);
+  await sourceChip.click();
+  await page.mouse.move(0, 0);
+  await expect(page.locator(".html-document-viewer .document-source-focus-controls")).toContainText("2/2 kaynak bulundu");
+  await expect(page.frameLocator(".html-viewer-frame").locator('[data-fisora-source-target="true"]')).toHaveCount(2);
+});
+
+test("multi-source PDF journal highlights all contributing invoice rows", async ({ page }) => {
+  await setupInspector(page, "multi-anchor.pdf", "application/pdf", pdfBytesLines([SOURCE_TEXT, SECOND_SOURCE_TEXT]), (workspace) => {
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result["draft_status"] = "draft_ready";
+    result["source_review_rows"] = [];
+    result["draft_lines"] = [{
+      account_code: "770.01",
+      description: "Toplam hizmet gideri",
+      debit: "600.00",
+      credit: "0.00",
+      contributing_line_ids: ["line-anchor-1", "line-anchor-2"],
+      source_line_numbers: [1, 2],
+      source_anchors: [
+        { canonical_line_id: "line-anchor-1", source_position: "1", source_text: SOURCE_TEXT },
+        { canonical_line_id: "line-anchor-2", source_position: "2", source_text: SECOND_SOURCE_TEXT },
+      ],
+    }];
+  });
+  await openInspectorDocument(page, ".pdf-document-viewer");
+  const journalRow = page.locator(".journal-source-row").first();
+  const sourceChip = journalRow.locator(".source-review-chip");
+  await expect(sourceChip).toContainText("Kaynak 1, 2");
+  await journalRow.hover();
+  await expect(page.locator(".pdf-source-highlight")).toHaveCount(2);
+  await sourceChip.click();
+  await page.mouse.move(0, 0);
+  await expect(page.locator(".pdf-document-viewer .document-source-focus-controls")).toContainText("2/2 kaynak bulundu");
+  await expect(page.locator(".pdf-source-highlight.pinned")).toHaveCount(2);
 });

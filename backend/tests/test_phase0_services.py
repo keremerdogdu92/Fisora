@@ -357,7 +357,7 @@ class Phase0ServiceTests(unittest.TestCase):
                         action="approve_with_changes",
                         reviewer="mali-musavir",
                         draft_lines=[
-                            {"account_code": "770.01", "description": "Elle yazilan gider", "debit": "100.00", "credit": "0.00", "contributing_line_ids": ["line-1"], "source_line_numbers": [1], "source_position": "1", "source_text": "Kargo Hizmet Bedeli"},
+                            {"account_code": "770.01", "description": "Elle yazilan gider", "debit": "100.00", "credit": "0.00", "contributing_line_ids": ["line-1", "line-2"], "source_anchors": [{"canonical_line_id": "line-1", "source_position": "1", "source_text": "Kargo Hizmet Bedeli"}, {"canonical_line_id": "line-2", "source_position": "2", "source_text": "Paketleme Hizmeti"}], "source_line_numbers": [1, 2]},
                             {"account_code": "320.01", "description": "Elle yazilan cari", "debit": "0.00", "credit": "100.00"},
                         ],
                     ),
@@ -368,10 +368,15 @@ class Phase0ServiceTests(unittest.TestCase):
 
         saved_lines = workspace["documents"][0]["result"]["draft_lines"]
         self.assertEqual([line["description"] for line in saved_lines], ["Genel gider", "Satici cari"])
-        self.assertEqual(saved_lines[0]["contributing_line_ids"], ["line-1"])
-        self.assertEqual(saved_lines[0]["source_line_numbers"], [1])
-        self.assertEqual(saved_lines[0]["source_position"], "1")
-        self.assertEqual(saved_lines[0]["source_text"], "Kargo Hizmet Bedeli")
+        self.assertEqual(saved_lines[0]["contributing_line_ids"], ["line-1", "line-2"])
+        self.assertEqual(saved_lines[0]["source_line_numbers"], [1, 2])
+        self.assertEqual(
+            saved_lines[0]["source_anchors"],
+            [
+                {"canonical_line_id": "line-1", "source_position": "1", "source_text": "Kargo Hizmet Bedeli"},
+                {"canonical_line_id": "line-2", "source_position": "2", "source_text": "Paketleme Hizmeti"},
+            ],
+        )
 
     def test_review_service_rejects_header_accounts_even_when_in_chart_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

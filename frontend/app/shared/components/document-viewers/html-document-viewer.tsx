@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { DocumentSourceTarget } from "../../../portal-types";
+import type { DocumentSourceAnchor, DocumentSourceTarget } from "../../../portal-types";
 import { findTokenSequence, sourceTokenValues } from "./document-source-match";
 
 type FitMode = "page" | "width" | "content" | "custom";
@@ -75,7 +75,13 @@ function containsEquivalentAmount(value: string, sourceAmount: string) {
   return candidates.some((candidate) => candidate.replace(/\D/g, "") === amountDigits);
 }
 
-function elementMatchesTarget(element: HTMLElement, target: DocumentSourceTarget) {
+type SourceMatchTarget = Pick<DocumentSourceTarget, "text" | "sourceAmount" | "sourcePosition"> | DocumentSourceAnchor;
+
+function sourceMatchTargets(target: DocumentSourceTarget): SourceMatchTarget[] {
+  return target.anchors?.length ? target.anchors : [target];
+}
+
+function elementMatchesTarget(element: HTMLElement, target: SourceMatchTarget) {
   const textNeedle = sourceTokenValues(target.text);
   const value = elementText(element);
   const textMatches = !textNeedle.length || containsExactTokenSequence(value, textNeedle);
@@ -83,7 +89,7 @@ function elementMatchesTarget(element: HTMLElement, target: DocumentSourceTarget
   return textMatches && amountMatches;
 }
 
-function findBestSourceElement(document: Document, target: DocumentSourceTarget) {
+function findBestSourceElement(document: Document, target: SourceMatchTarget) {
   const sourceIndex = Number.parseInt(String(target.sourcePosition || ""), 10);
   const lineRows = invoiceLineRows(document);
   const indexedRow = Number.isInteger(sourceIndex) && sourceIndex > 0 ? lineRows[sourceIndex - 1] : undefined;
@@ -105,14 +111,26 @@ function findBestSourceElement(document: Document, target: DocumentSourceTarget)
 
 function instrumentHtmlSource(rawHtml: string, target: DocumentSourceTarget) {
   const parsed = new DOMParser().parseFromString(rawHtml, "text/html");
-  const targetElement = findBestSourceElement(parsed, target);
-  if (!targetElement) return null;
-  targetElement.id = SOURCE_TARGET_ID;
+  const targets = sourceMatchTargets(target);
+  const targetElements: HTMLElement[] = [];
+  for (const source of targets) {
+    const element = findBestSourceElement(parsed, source);
+    if (element && !targetElements.includes(element)) targetElements.push(element);
+  }
+  if (!targetElements.length) return null;
+  targetElements.forEach((element, index) => {
+    if (index === 0) element.id = SOURCE_TARGET_ID;
+    element.setAttribute("data-fisora-source-target", "true");
+  });
   const style = parsed.createElement("style");
   style.setAttribute("data-fisora-source-focus", "true");
-  style.textContent = `#${SOURCE_TARGET_ID}{outline:3px solid #f59e0b!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:rgba(254,243,199,.65)!important;scroll-margin:180px!important}`;
+  style.textContent = `[data-fisora-source-target="true"]{outline:3px solid #f59e0b!important;outline-offset:2px!important;box-shadow:0 0 0 5px rgba(245,158,11,.18)!important;background:rgba(254,243,199,.65)!important;scroll-margin:180px!important}`;
   parsed.head.appendChild(style);
-  return `<!doctype html>${parsed.documentElement.outerHTML}`;
+  return {
+    html: `<!doctype html>${parsed.documentElement.outerHTML}`,
+    matchedCount: targetElements.length,
+    requestedCount: targets.length,
+  };
 }
 
 function measureDocumentLayout(document: Document) {
@@ -207,9 +225,13 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
           setSourceMatchStatus("Kaynak metin HTML içinde bulunamadı.");
           return;
         }
-        objectUrl = URL.createObjectURL(new Blob([instrumented], { type: "text/html" }));
+        objectUrl = URL.createObjectURL(new Blob([instrumented.html], { type: "text/html" }));
         setFocusedSrc(objectUrl);
-        setSourceMatchStatus("Kaynak bulundu");
+        setSourceMatchStatus(
+          instrumented.requestedCount > 1
+            ? `${instrumented.matchedCount}/${instrumented.requestedCount} kaynak bulundu`
+            : "Kaynak bulundu",
+        );
       } catch (error) {
         if (!active) return;
         setFocusedSrc("");

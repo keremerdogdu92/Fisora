@@ -66,9 +66,11 @@ Acceptance evidence: full frontend suite `220/220`; Next production build + Type
 
 REV-F01 and REV-F02 were retested on 2026-09-10 and are not reproducible in the current build. REV-F03 is closed: the invented KDV %0 fallback was fixed and the valid-account missing-description observation was not reproduced.
 
-**Completed 2026-09-10: REV-F04** - canonical source identity is now carried into three-stage journal draft provenance. Final Accountant descriptions are no longer used as the only source locator when they differ from invoice wording: unambiguous single-source journal rows carry the canonical contributing line ID, original source position, and Reader-derived source text. Accountant edits/save preserve these provenance fields instead of stripping them. Multi-source visual behavior remains REV-F05 and is intentionally not decided here.
+**Completed 2026-09-10: REV-F04** - canonical source identity is carried into three-stage journal draft provenance and survives accountant edit/save. Final Accountant wording may differ from invoice wording without breaking source focus.
 
-Acceptance: Chromium document-inspector 6/6 PASS including HTML/PDF description-mismatch cases; frontend full suite 227/227; backend full suite 1155 passed / 37 skipped; TypeScript PASS; Next production build PASS.
+**Completed 2026-09-10: REV-F05** - the existing `Kaynak` chip/detail UX is retained and extended for multi-source journal rows. `source_anchors` carries every resolved contributing canonical line. HTML highlights all matching invoice rows; PDF highlights all matching regions on the active source page; click pins the group; unresolved anchors are not guessed and the viewer reports `N/M kaynak bulundu`.
+
+Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; `e2e/document-inspector.spec.ts` 8/8 Chromium PASS; frontend 227/227; backend 1155 passed / 37 skipped; TypeScript and Next production build PASS.
 
 ## New decisions — 2026-09-09
 

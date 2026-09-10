@@ -334,7 +334,7 @@ def _manual_draft_lines(value: object) -> list[dict[str, Any]]:
             "credit": f"{credit:.2f}",
         }
         for key in (
-            "tax_rate", "vat_group_id", "contributing_line_ids", "source_line_numbers",
+            "tax_rate", "vat_group_id", "contributing_line_ids", "source_anchors", "source_line_numbers",
             "allocated_amounts", "source_position", "source_text", "source_amount",
             "source_amount_label", "source_amount_basis", "source_role",
         ):

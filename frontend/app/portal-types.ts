@@ -10,6 +10,7 @@ export type DraftLine = {
   tax_rate?: string;
   vat_group_id?: string;
   contributing_line_ids?: string[];
+  source_anchors?: { canonical_line_id?: string; source_position?: string; source_text?: string; source_amount?: string }[];
   source_line_numbers?: number[];
   allocated_amounts?: { canonical_line_id: string; amount: string }[];
   source_position?: string;
@@ -30,9 +31,17 @@ export type SourceReviewRow = {
   role: "posting_candidate" | "group_or_subtotal" | "informational";
 };
 
+export type DocumentSourceAnchor = {
+  key: string;
+  text: string;
+  sourceAmount?: string;
+  sourcePosition?: string;
+};
+
 export type DocumentSourceTarget = {
   key: string;
   text: string;
+  anchors?: DocumentSourceAnchor[];
   pinned?: boolean;
   sourceAmount?: string;
   sourcePosition?: string;

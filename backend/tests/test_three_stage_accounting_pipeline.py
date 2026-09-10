@@ -203,6 +203,13 @@ class ThreeStageAccountingPipelineTests(unittest.TestCase):
         self.assertEqual(result["draft_lines"][0]["contributing_line_ids"], [decision_ids["1"]])
         self.assertEqual(result["draft_lines"][1]["contributing_line_ids"], [decision_ids["8"]])
         self.assertEqual(result["draft_lines"][-1]["contributing_line_ids"], [decision_ids["1"], decision_ids["8"]])
+        self.assertEqual(
+            result["draft_lines"][-1]["source_anchors"],
+            [
+                {"canonical_line_id": decision_ids["1"], "source_position": "1", "source_text": READER["invoice_table_rows"][0]["source_text"]},
+                {"canonical_line_id": decision_ids["8"], "source_position": "8", "source_text": READER["invoice_table_rows"][1]["source_text"]},
+            ],
+        )
         self.assertNotIn("source_text", result["draft_lines"][-1])
         self.assertEqual(result["source_review_row_count"], 2)
         self.assertEqual(result["source_review_posting_candidate_count"], 1)

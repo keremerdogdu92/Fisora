@@ -967,7 +967,7 @@ async function storeReviewDecision({
               : {}),
           };
           for (const key of [
-            "vat_group_id", "contributing_line_ids", "source_line_numbers", "allocated_amounts",
+            "vat_group_id", "contributing_line_ids", "source_anchors", "source_line_numbers", "allocated_amounts",
             "source_position", "source_text", "source_amount", "source_amount_label",
             "source_amount_basis", "source_role",
           ]) {

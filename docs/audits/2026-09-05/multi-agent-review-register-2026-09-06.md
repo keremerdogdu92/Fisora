@@ -234,9 +234,13 @@
 **Edit persistence:** Review-decision transport/schema and manual-draft normalization preserve source/provenance fields when the accountant edits and saves a journal, so source focus does not disappear after correction/reopen. Chart-account validation and account-name normalization are unchanged.
 **Acceptance:** Source-identity pipeline tests PASS; corrected-draft provenance survives ReviewService persistence; Chromium document-inspector 6/6 PASS including HTML/PDF cases where journal description differs from invoice text; frontend full suite 227/227 PASS; backend full suite 1155 passed / 37 skipped; TypeScript PASS; Next production build PASS.
 
-## REV-F05 — Source/provenance UI yaklaşımı
-**Status:** ÜRÜN KARARI — güçlü bulunan mevcut yaklaşım korunacak mı?
-**Audit refs:** [CG-24](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-24--sourceprovenance-interaction-is-a-strong-product-pattern) · [CX Strongest parts](./fisora-codex-ux-qa-audit-2026-09-05.md#strongest-parts-of-the-product)
+## REV-F05 - Source/provenance UI approach
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
+**Audit refs:** CG-24 + CX strongest-parts source/provenance findings.
+**Decision:** Keep the existing `Kaynak` chip + detail interaction; do not add a new panel or new user-facing concept. When one journal line is derived from multiple invoice lines, the same source action targets every resolved canonical contributing line.
+**Implementation:** REV-F04 canonical identity is extended with `source_anchors`. Three-stage draft projection carries canonical line id + source position + Reader source text for every resolved contributing line, and review edit/save preserves the list. HTML highlights all matching invoice rows. PDF highlights all matching regions on the active source page and focuses the first resolved source; pin preserves the active group.
+**Safety:** Missing or ambiguous anchors are not guessed. Resolved anchors are shown and the viewer reports `N/M kaynak bulundu` for partial matches.
+**Acceptance:** Pipeline + ReviewService provenance tests 43/43 PASS; review API transport 57/57 PASS; Chromium document-inspector 8/8 PASS including two-source HTML and PDF hover/click/pin cases; frontend full suite 227/227 PASS; backend full suite 1155 passed / 37 skipped; TypeScript PASS; Next production build PASS.
 
 # G — Klavye ve seri kullanım
 
@@ -586,7 +590,7 @@ Her konu tek tek şu sırayla kapatılacak:
 
 ## Next discussion
 
-Next single topic: `REV-F05` - source/provenance UI behavior. REV-F04 now supplies the canonical source-anchor plumbing; F05 remains a separate product decision for multi-source highlighting and the visible interaction model.
+Next single topic: `REV-G01` - retest the contradictory F10 / ArrowUp / ArrowDown audit result before accepting any new bug or code change.
 
 
 ---

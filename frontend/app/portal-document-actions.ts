@@ -15,6 +15,7 @@ import {
   resolveApiBaseUrl,
   storeReviewDecision,
   uploadDocumentsToBackend,
+  userSafeErrorMessage,
 } from "./upload-api";
 
 function pageUrl() {
@@ -125,7 +126,7 @@ export async function addLocalUploadsAction({
     setData((current) => ({ ...current, documents: [...nextDocuments, ...current.documents] }));
     setSelectedPeriod(period);
   }
-  setUploadStatus(`${selectedFiles.length} belge backend kuyruguna gonderiliyor.`);
+  setUploadStatus(`${selectedFiles.length} belge yukleniyor.`);
 
   const apiBaseUrl = resolveApiBaseUrl(pageUrl());
   const uploadUserId = pickUploadUser({ session, selectedClient });
@@ -154,16 +155,19 @@ export async function addLocalUploadsAction({
     setUploadStatus(
       failedUploads.length
         ? `${uploadResults.length - failedUploads.length}/${selectedFiles.length} belge yuklendi. Basarisiz: ${failedUploads.map((result) => result.fileName).join(", ")}`
-        : `${selectedFiles.length} belge backend kuyruguna alindi.`,
+        : `${selectedFiles.length} belge isleme alindi.`,
     );
     await refreshBackendPilotData();
     return failedUploads.length === 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setUploadStatus(
-      localFallbackAllowed
-        ? `Backend yukleme tamamlanamadi; belge lokal listede tutuldu. ${message}`
-        : `Backend yukleme tamamlanamadi; serverda belge kaydedilmedi. ${message}`,
+      userSafeErrorMessage(
+        message,
+        localFallbackAllowed
+          ? "Yukleme tamamlanamadi; belge yalniz gecici listede tutuldu. Tekrar deneyin."
+          : "Yukleme tamamlanamadi; belge kaydedilmedi. Tekrar deneyin.",
+      ),
     );
     return false;
   }
@@ -214,7 +218,7 @@ export async function requestStatementAiForSelectedDocumentAction({
     setStatementAiStatus(suggestions.length ? `${suggestions.length} AI ajan onerisi alindi.` : "Oneri motoru sonuc dondurmedi; mevcut oneriler korundu.");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setStatementAiStatus(`AI ajan onerisi alinamadi. ${message}`);
+    setStatementAiStatus(userSafeErrorMessage(message, "Hesap Ajani onerisi alinamadi. Tekrar deneyin."));
   }
 }
 
@@ -283,14 +287,17 @@ export async function saveStatementLineDecisionAction({
       decisionNote,
       sessionToken: session?.sessionToken,
     });
-    setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satir: ${label} backend'e kaydedildi.`);
+    setDecisionStatus(`${selectedDocument.fileName} / ${lineNo}. satir: ${label} kaydedildi.`);
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setDecisionStatus(
-      localFallbackAllowed
-        ? `${selectedDocument.fileName} / ${lineNo}. satir lokal uygulandi; backend kaydi tamamlanamadi. ${message}`
-        : `${selectedDocument.fileName} / ${lineNo}. satir backend'e kaydedilemedi; serverda kalici karar olusmadi. ${message}`,
+      userSafeErrorMessage(
+        message,
+        localFallbackAllowed
+          ? `${selectedDocument.fileName} / ${lineNo}. satir gecici olarak uygulandi ancak kaydedilemedi.`
+          : `${selectedDocument.fileName} / ${lineNo}. satir kaydedilemedi; degisiklik kalici olmadi.`,
+      ),
     );
   }
 }
@@ -377,15 +384,18 @@ export async function saveDecisionAction({
       expectedRevision: selectedDocument.normalizedRevision || 0,
       sessionToken: session?.sessionToken,
     });
-    setDecisionStatus(`${selectedDocument.fileName}: ${label} backend'e kaydedildi.`);
+    setDecisionStatus(`${selectedDocument.fileName}: ${label} kaydedildi.`);
     await refreshBackendPilotData();
     return { ok: true, payload };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setDecisionStatus(
-      localFallbackAllowed
-        ? `${selectedDocument.fileName}: ${label} lokal uygulandi; backend kaydi tamamlanamadi. ${message}`
-        : `${selectedDocument.fileName}: ${label} backend'e kaydedilemedi; serverda kalici karar olusmadi. ${message}`,
+      userSafeErrorMessage(
+        message,
+        localFallbackAllowed
+          ? `${selectedDocument.fileName}: ${label} gecici olarak uygulandi ancak kaydedilemedi.`
+          : `${selectedDocument.fileName}: ${label} kaydedilemedi; karar kalici olmadi.`,
+      ),
     );
     return { ok: false, payload: null };
   }
@@ -420,6 +430,6 @@ export async function reprocessSelectedDocumentAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setDecisionStatus(`${selectedDocument.fileName}: yeniden isleme baslatilamadi. ${message}`);
+    setDecisionStatus(userSafeErrorMessage(message, `${selectedDocument.fileName}: yeniden isleme baslatilamadi. Tekrar deneyin.`));
   }
 }

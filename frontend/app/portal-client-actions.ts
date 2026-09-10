@@ -14,7 +14,7 @@ import {
   parseTaxCertificateFromBackend,
   reprocessClient,
   resolveApiBaseUrl,
-  sessionAuthErrorMessage,
+  userSafeErrorMessage,
   setPortalPassword as setBackendPortalPassword,
   updateClientPortalAccess,
   uploadChartAccountsToBackend,
@@ -148,7 +148,7 @@ export async function refreshNewClientNaceResearchAction({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     setNewClientNaceResearchProfile(null);
-    setNewClientNaceResearchStatus(`NACE araştırması tamamlanamadı. Sonra tekrar deneyin. ${message}`);
+    setNewClientNaceResearchStatus(userSafeErrorMessage(message, "NACE araştırması tamamlanamadı. Sonra tekrar deneyin."));
   } finally {
     setNewClientNaceResearchPending(false);
   }
@@ -239,7 +239,7 @@ export async function createNewClientAction({
         chartArchiveStatus = " Hesap planı ham dosyası arşivlendi.";
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        chartArchiveStatus = ` Hesap planı kaydedildi; ham dosya arşivlenemedi: ${message}`;
+        chartArchiveStatus = ` Hesap planı kaydedildi; ham dosya arşivlenemedi.`;
       }
     }
     let certificateStatus = "";
@@ -258,7 +258,7 @@ export async function createNewClientAction({
         certificateStatus = " Vergi levhası arşivlendi; ikinci Gemini okuması yapılmadı.";
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        certificateStatus = ` Vergi levhası yüklenemedi: ${message}`;
+        certificateStatus = ` Vergi levhası yüklenemedi.`;
       }
     }
     setNewClientDraft(emptyNewClientDraft());
@@ -272,7 +272,7 @@ export async function createNewClientAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Mükellef kaydedilemedi. ${sessionAuthErrorMessage(message) || message}`);
+    setNewClientStatus(userSafeErrorMessage(message, "Mükellef kaydedilemedi. Tekrar deneyin."));
   }
 }
 
@@ -388,7 +388,7 @@ export async function selectNewClientTaxCertificateAction({
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Vergi levhası okunamadı. Elle devam edebilirsiniz. ${message}`);
+    setNewClientStatus(userSafeErrorMessage(message, "Vergi levhası okunamadı. Elle devam edebilirsiniz."));
     setNewClientTaxCertificateStage("Vergi levhası okunamadı");
   } finally {
     setNewClientTaxCertificateParsePending(false);
@@ -432,7 +432,7 @@ export async function parseNewClientChartAccountsAction({
     setNewClientStatus(`${file.name}: ${Number(result?.account_count || accounts.length)} hesap okundu.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setNewClientStatus(`Hesap planı okunamadı. ${message}`);
+    setNewClientStatus(userSafeErrorMessage(message, "Hesap planı okunamadı. Tekrar deneyin."));
   }
 }
 
@@ -462,11 +462,11 @@ export async function uploadChartAccountsAction({
       sessionToken: session?.sessionToken,
       file,
     });
-    setChartUploadStatus(`${selectedClient.clientName}: ${result.account_count ?? 0} hesap backend store'a yazildi.`);
+    setChartUploadStatus(`${selectedClient.clientName}: ${result.account_count ?? 0} hesap kaydedildi.`);
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setChartUploadStatus(`Hesap planı importu tamamlanamadı. ${message}`);
+    setChartUploadStatus(userSafeErrorMessage(message, "Hesap planı aktarımı tamamlanamadı. Tekrar deneyin."));
   }
 }
 
@@ -510,7 +510,7 @@ export async function createInviteForSelectedClientAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setInviteStatus(`Davet linki olusturulamadi. ${message}`);
+    setInviteStatus(userSafeErrorMessage(message, "Davet bağlantısı oluşturulamadı. Tekrar deneyin."));
   }
 }
 
@@ -544,7 +544,7 @@ export async function setPasswordForSelectedClientAction({
     setPortalPasswordDraft("");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setPortalPasswordStatus(`Sifre kurulumu tamamlanamadi. ${message}`);
+    setPortalPasswordStatus(userSafeErrorMessage(message, "Şifre kurulumu tamamlanamadı. Tekrar deneyin."));
   }
 }
 
@@ -577,7 +577,7 @@ export async function reprocessSelectedClientAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setClientReprocessStatus(`${selectedClient.clientName}: yeniden işleme tamamlanamadı. ${message}`);
+    setClientReprocessStatus(userSafeErrorMessage(message, `${selectedClient.clientName}: yeniden işleme tamamlanamadı. Tekrar deneyin.`));
   }
 }
 
@@ -625,7 +625,7 @@ export async function updatePortalAccessForSelectedClientAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setPortalPasswordStatus(`Üyelik güncellenemedi. ${sessionAuthErrorMessage(message) || message}`);
+    setPortalPasswordStatus(userSafeErrorMessage(message, "Üyelik güncellenemedi. Tekrar deneyin."));
   }
 }
 
@@ -673,7 +673,7 @@ export async function openSelectedClientPortalAction({
   } catch (error) {
     if (popup && !popup.closed) popup.close();
     const message = error instanceof Error ? error.message : String(error);
-    setClientPortalOpenStatus(`Mükellef ekranı açılamadı. ${sessionAuthErrorMessage(message) || message}`);
+    setClientPortalOpenStatus(userSafeErrorMessage(message, "Mükellef ekranı açılamadı. Tekrar deneyin."));
   }
 }
 
@@ -721,6 +721,6 @@ export async function deleteSelectedClientDocumentsAction({
     await refreshBackendPilotData();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    setClientDocumentDeleteStatus(`Belgeler silinemedi. ${sessionAuthErrorMessage(message) || message}`);
+    setClientDocumentDeleteStatus(userSafeErrorMessage(message, "Belgeler silinemedi. Tekrar deneyin."));
   }
 }

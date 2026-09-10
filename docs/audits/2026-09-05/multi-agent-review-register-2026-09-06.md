@@ -248,8 +248,10 @@
 **Audit refs:** [CG-13](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-13--duplicate-upload-result-is-not-explained-to-the-user)
 
 ## REV-H02 — `backend kuyruğu` müşavir dili değil
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Source:** CG-13.
+**Implementation:** Upload and save confirmations now use accountant-facing copy such as `işleme alındı` and `kaydedildi`; `backend kuyruğu`, `backend'e kaydedildi`, `backend store` and similar implementation wording were removed from visible status text.
+**Acceptance:** Product-language regression PASS; visible technical-wording sweep has no user-facing backend/server/local-copy hits.
 
 ## REV-H03 — Upload sonuç özeti
 **Status:** ÜRÜN KARARI.
@@ -298,17 +300,22 @@
 **Acceptance:** Stored-error regression PASS; full frontend suite 224/224; Next production build + TypeScript PASS.
 
 ## REV-I05 — QNB `active connection is required` kullanıcıya çıkıyor
-**Status:** KONTROL EDİLECEK.
+**Status:** DEFERRED — QNB INTEGRATION TRACK.
 **Audit refs:** CG-12.
+**Decision:** QNB'nin gerçek bağlantı/çalışma problemi bu genel audit turunun dışında ele alınacak. I03/I04 kullanıcıya teknik detay sızıntısını kapattı; I05 QNB entegrasyon turunu bloklamadan park edildi.
 
 ## REV-I06 — Yanlış şifre feedback'i yok iddiası
-**Status:** TEKRAR TEST.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** [AG FINDING-03](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-03-giriş-ekranında-yanlış-şifre-girildiğinde-geri-bildirim-verilmemesi)
-**Note:** CG temiz incognito login/reset'i test etti; aynı yanlış-şifre senaryosunu bağımsız doğrulamadı.
+**Root cause:** Login catch rendered the backend error payload directly, so `invalid_credentials` could appear as raw JSON instead of useful feedback.
+**Implementation:** `invalid_credentials` now maps to `Kullanıcı adı veya şifre hatalı.`; password-reset token and stale-session reasons also have safe actionable messages.
+**Acceptance:** `userSafeErrorMessage` regression PASS and login presentation routes failures through the safe mapper.
 
 ## REV-I07 — Ortak user-safe error mapping katmanı
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Derived from:** CG-11/12 + CX UXR-005 + AG FINDING-01/03.
+**Implementation:** Added one lightweight `userSafeErrorMessage(message, fallback)` helper instead of a new error framework. User-facing catches use known auth/token/rate-limit mappings or a surface-specific fallback; raw API details remain available inside API/debug layers but are not interpolated into normal status text.
+**Acceptance:** Raw-error sink sweep clean; product-language source contract guards against direct `${message}` / `setStatus(error.message)` regressions.
 
 # J — Onay & Çıktılar
 

@@ -213,7 +213,7 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
       } catch (error) {
         if (!active) return;
         setFocusedSrc("");
-        setSourceMatchStatus(error instanceof Error ? error.message : "Kaynak eşleme yapılamadı.");
+        setSourceMatchStatus("Kaynak eşleme yapılamadı.");
       }
     })();
     return () => {

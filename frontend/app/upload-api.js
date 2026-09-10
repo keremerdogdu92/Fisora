@@ -185,16 +185,19 @@ function backendAuthHeaders({ sessionToken = "", userId = "", userHeader = "" } 
   return headers;
 }
 
-function sessionAuthErrorMessage(message) {
-  let reason = "";
+function backendErrorReason(message) {
   try {
     const parsed = JSON.parse(String(message || ""));
-    reason = String(parsed?.reason || parsed?.detail?.reason || "");
+    return String(parsed?.reason || parsed?.detail?.reason || "");
   } catch {
     const text = String(message || "");
     const match = text.match(/"reason"\s*:\s*"([^"]+)"/);
-    reason = match?.[1] || "";
+    return match?.[1] || "";
   }
+}
+
+function sessionAuthErrorMessage(message) {
+  const reason = backendErrorReason(message);
   if (reason === "session_not_found") {
     return "Oturum bulunamadı. Çıkış yapıp şifreyle tekrar giriş yapın.";
   }
@@ -205,6 +208,18 @@ function sessionAuthErrorMessage(message) {
     return "Bu işlem için şifreli oturum gerekli. Şifreyle tekrar giriş yapın.";
   }
   return "";
+}
+
+function userSafeErrorMessage(message, fallback = "İşlem tamamlanamadı. Tekrar deneyin.") {
+  const sessionMessage = sessionAuthErrorMessage(message);
+  if (sessionMessage) return sessionMessage;
+  const reason = backendErrorReason(message);
+  if (reason === "invalid_credentials") return "Kullanıcı adı veya şifre hatalı.";
+  if (["token_expired", "token_not_found", "token_used", "token_consumed"].includes(reason)) {
+    return "Bu bağlantı geçersiz veya süresi dolmuş. Yeni bir bağlantı isteyin.";
+  }
+  if (reason === "rate_limit_exceeded") return "Çok fazla deneme yapıldı. Kısa bir süre sonra tekrar deneyin.";
+  return String(fallback || "İşlem tamamlanamadı. Tekrar deneyin.");
 }
 
 async function postJson({ apiBaseUrl, path, payload, headers = {}, fetchImpl = fetch }) {
@@ -1303,6 +1318,7 @@ module.exports = {
   saveQnbConnectionToBackend,
   saveQnbSyncPolicy,
   sessionAuthErrorMessage,
+  userSafeErrorMessage,
   setPortalPassword,
   storeReviewDecision,
   acquireReviewEditLease,

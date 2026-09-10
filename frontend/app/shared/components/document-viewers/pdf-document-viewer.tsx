@@ -149,7 +149,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
         setPdfDocument(loadedDocument);
         setStatus("");
       } catch (loadError) {
-        if (active) setError(loadError instanceof Error ? loadError.message : "PDF açılamadı.");
+        if (active) setError("PDF açılamadı.");
       }
     })();
     return () => {
@@ -189,7 +189,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
     })().catch((scanError) => {
       if (!active) return;
       setSourceHighlight(null);
-      setSourceMatchStatus(scanError instanceof Error ? scanError.message : "Kaynak eşleme yapılamadı.");
+      setSourceMatchStatus("Kaynak eşleme yapılamadı.");
     });
     return () => { active = false; };
   }, [pdfDocument, sourceTarget?.key, sourceTarget?.text]);
@@ -236,7 +236,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
         }
       } catch (renderError) {
         if (!active || (renderError instanceof Error && renderError.name === "RenderingCancelledException")) return;
-        setError(renderError instanceof Error ? renderError.message : "PDF sayfası çizilemedi.");
+        setError("PDF sayfası gösterilemedi.");
       }
     })();
     return () => {

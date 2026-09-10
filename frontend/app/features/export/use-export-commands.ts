@@ -10,7 +10,7 @@ import {
   requestCancellationAction,
   resolveCancellationAction,
 } from "../../portal-export-actions";
-import { createWorkspaceExportPackage, resolveApiBaseUrl, sessionAuthErrorMessage } from "../../upload-api";
+import { createWorkspaceExportPackage, resolveApiBaseUrl, userSafeErrorMessage } from "../../upload-api";
 import type { ExportMode, LocalSession, PilotClient, PilotData, PilotDocument, ExportBasketItem } from "../../portal-types";
 
 function pageUrl() {
@@ -111,7 +111,7 @@ export function useExportCommands({
       setExportStatus(download ? `${packages.length} paket hazir: ${download}` : `${packages.length} ${requestedExportType} paketi hazir.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setExportStatus(`Cikti paketi uretilemedi. ${sessionAuthErrorMessage(message) || message}`);
+      setExportStatus(userSafeErrorMessage(message, "Cikti paketi uretilemedi. Tekrar deneyin."));
     }
   }, [exportBasket, exportMode, exportType, loginUserId, session, setData, setExportStatus]);
 

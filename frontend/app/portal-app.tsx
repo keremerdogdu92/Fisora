@@ -16,7 +16,7 @@ import { PortalNextUploadView } from "./portal-next/portal-next-upload-view";
 import { resolvePortalNextWorkspacePeriod } from "./portal-next/portal-next-workspace-model";
 import { PortalPresentationChrome, type PortalPresentation } from "./portal-presentation-chrome";
 import { AccountantWorkspace } from "./portal-workspace-view";
-import { loginWithPassword, persistSession, resolveApiBaseUrl, usePortalSessionGuard, useTestDataReset } from "./features/session";
+import { loginWithPassword, persistSession, resolveApiBaseUrl, userSafeErrorMessage, usePortalSessionGuard, useTestDataReset } from "./features/session";
 import {
   PilotQueryProvider,
   buildPilotReadinessView,
@@ -60,31 +60,31 @@ export function FisoraPortalApp({ routeKey = "home", presentation = "legacy" }: 
   );
 }
 function workspaceSourceState(payload: PilotData, nextSource: string): WorkspaceSourceState {
-  if (nextSource === "Backend okunamadı") {
+  if (nextSource === "Çalışma alanı alınamadı") {
     return {
-      label: "Backend okunamadı",
+      label: "Çalışma alanı alınamadı",
       status: "error",
       detail: "Oturum veya sunucu yanıtı gerekli. Lütfen tekrar giriş yapın.",
     };
   }
-  if (nextSource === "Yerel çalışma verisi") {
+  if (nextSource === "Geçici çalışma verisi") {
     return {
       label: nextSource,
       status: "fallback",
-      detail: "Backend okunamadı; yerel çalışma verisi gösteriliyor.",
+      detail: "Çalışma alanı alınamadı; yerel çalışma verisi gösteriliyor.",
     };
   }
   if (!payload.clients.length) {
     return {
       label: nextSource || "Çalışma alanı boş",
       status: "empty",
-      detail: "Sunucu yanıt verdi, mükellef bulunamadı.",
+      detail: "Çalışma alanında henüz mükellef yok.",
     };
   }
   return {
     label: nextSource || "Çalışma alanı",
     status: "backend",
-    detail: "Sunucu çalışma alanı kullanılıyor.",
+    detail: "Güncel çalışma alanı kullanılıyor.",
   };
 }
 function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { routeKey?: PortalRouteKey | string; presentation?: PortalPresentation }) {
@@ -438,7 +438,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setLoginStatus(`Oturum açılamadı. ${message}`);
+        setLoginStatus(userSafeErrorMessage(message, "Oturum açılamadı. Tekrar deneyin."));
         return;
       }
     }
@@ -449,7 +449,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     const nextSession: LocalSession = { userId, role: effectiveRole };
     persistSession(nextSession);
     setSession(nextSession);
-    setLoginStatus(`${nextSession.userId} için lokal ofis oturumu açıldı.`);
+    setLoginStatus(`${nextSession.userId} için geçici ofis oturumu açıldı.`);
     setMode(nextSession.role === "client_user" ? "client" : (portalConfig.initialMode as PilotMode));
   }
 

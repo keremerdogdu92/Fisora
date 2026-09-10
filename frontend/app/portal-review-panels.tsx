@@ -9,7 +9,7 @@ import { Info, ReasonCard } from "./portal-shared";
 import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DocumentSourceTarget, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
-import { backendAuthHeaders, createCounterpartyAccountToBackend, previewReviewRule, resolveApiBaseUrl } from "./upload-api";
+import { backendAuthHeaders, createCounterpartyAccountToBackend, previewReviewRule, resolveApiBaseUrl, userSafeErrorMessage } from "./upload-api";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -862,7 +862,8 @@ export function JournalPanel({
       setLearningModalOpen(true);
       setRulePreviewStatus(interpretation ? "Yorum hazir." : "Sistem bu nottan net kural olusturamadi.");
     } catch (error) {
-      setRulePreviewStatus(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setRulePreviewStatus(userSafeErrorMessage(message, "Kural yorumu hazırlanamadı. Tekrar deneyin."));
     }
   }
 
@@ -925,7 +926,8 @@ export function JournalPanel({
       setCounterpartyStatus("Cari hesap oluşturuldu ve fiş satırına bağlandı.");
       setCounterpartyDrawerLineIndex(null);
     } catch (error) {
-      setCounterpartyStatus(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setCounterpartyStatus(userSafeErrorMessage(message, "Yeni cari oluşturulamadı. Tekrar deneyin."));
     } finally {
       setCounterpartyCreating(false);
     }

@@ -1,4 +1,4 @@
-const assert = require("node:assert/strict");
+﻿const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const test = require("node:test");
@@ -188,4 +188,24 @@ test("review data mapper preserves existing rule interpretation without new visi
   assert.match(mapperSource, /function normalizeRuleInterpretation/);
   assert.match(reviewRowsMapper, /ruleInterpretation:\s*normalizeRuleInterpretation\(row\.ruleInterpretation \?\? row\.rule_interpretation\)/);
   assert.doesNotMatch(reviewRowsMapper, /ruleInterpretation:\s*null/);
+});
+test("user-facing status messages do not expose raw exception text", () => {
+  const files = [
+    "page.tsx",
+    "portal-app.tsx",
+    "portal-client-actions.ts",
+    "portal-document-actions.ts",
+    "portal-review-panels.tsx",
+    "features/export/use-export-commands.ts",
+    "features/operations/use-document-retention-commands.ts",
+    "features/review/use-review-commands.ts",
+    "features/session/use-test-data-reset.ts",
+    "portal/password-reset/page.tsx",
+  ];
+  const visibleErrorSource = files.map(source).join("\n");
+
+  assert.doesNotMatch(visibleErrorSource, /\$\{message\}/);
+  assert.doesNotMatch(visibleErrorSource, /set[A-Za-z0-9_]*\(\s*error instanceof Error \? error\.message/);
+  assert.match(visibleErrorSource, /userSafeErrorMessage/);
+  assert.doesNotMatch(visibleErrorSource, /Backend okunamadı|backend kuyru|backend''e kaydedildi|backend store|lokal ofis/i);
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { confirmPasswordReset, resolveApiBaseUrl } from "../../upload-api";
+import { confirmPasswordReset, resolveApiBaseUrl, userSafeErrorMessage } from "../../upload-api";
 
 export default function PasswordResetPage() {
   const [password, setPassword] = useState("");
@@ -35,7 +35,7 @@ export default function PasswordResetPage() {
       window.setTimeout(() => window.location.assign("/"), 1000);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatus(`Şifre güncellenemedi. ${message}`);
+      setStatus(userSafeErrorMessage(message, "Şifre güncellenemedi. Tekrar deneyin."));
     } finally {
       setBusy(false);
     }

@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { canUseLocalPilotFallback } from "./pilot-readiness";
 import { LANDING_ROLE_ENTRIES, portalEntryForRole } from "./portal-routes";
 import { persistSession } from "./portal-session";
-import { loginWithPassword, requestPasswordReset, resolveApiBaseUrl } from "./upload-api";
+import { loginWithPassword, requestPasswordReset, resolveApiBaseUrl, userSafeErrorMessage } from "./upload-api";
 
 type LandingRole = "accountant" | "client_user";
 
@@ -66,7 +66,7 @@ export default function RoleGatewayLanding() {
       setStatus("Hesap bulunursa şifre sıfırlama bağlantısı e-posta adresinize gönderildi.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setStatus(`Şifre sıfırlama isteği gönderilemedi. ${message}`);
+      setStatus(userSafeErrorMessage(message, "Şifre sıfırlama isteği gönderilemedi. Tekrar deneyin."));
     } finally {
       setResetBusy(false);
     }
@@ -98,7 +98,7 @@ export default function RoleGatewayLanding() {
         return;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setStatus(`Oturum açılamadı. ${message}`);
+        setStatus(userSafeErrorMessage(message, "Oturum açılamadı. Tekrar deneyin."));
         return;
       }
     }

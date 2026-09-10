@@ -199,7 +199,9 @@ Completed 2026-09-10: **`REV-I03`** - QNB connection, sync, and policy failures 
 
 Completed 2026-09-10: **`REV-I04`** - QNB stored `last_error` is no longer rendered verbatim in `Bağlantı sonucu`; any backend connection detail is mapped to `QNB bağlantısı doğrulanamadı.` Acceptance: targeted regression PASS, full frontend 224/224, Next build + TypeScript PASS.
 
-Next audit verification: **`REV-I05`** - QNB `active connection is required` leakage. Test first; do not change QNB connection semantics yet.
+Completed 2026-09-10: **general user-facing error hygiene + `REV-H02/I06/I07`** - raw exception payloads are kept out of normal UI status text, invalid credentials have clear feedback, and visible `backend/server/lokal` implementation wording was removed. QNB-specific `REV-I05` is deferred to the later QNB integration track.
+
+Next non-QNB audit verification: **`REV-J01`** - Outputs readiness/buttons consistency. Test current behavior first; keep approval/output semantics simple.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

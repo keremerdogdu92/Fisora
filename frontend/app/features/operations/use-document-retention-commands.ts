@@ -3,6 +3,7 @@ import {
   applyDocumentRetentionAction,
   previewDocumentRetention,
   resolveApiBaseUrl,
+  userSafeErrorMessage,
 } from "../../upload-api";
 import type { LocalSession } from "../../portal-types";
 
@@ -38,7 +39,7 @@ export function useDocumentRetentionCommands({
       setRetentionStatus(`${documents.length} belge icin saklama aksiyonu bekliyor.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRetentionStatus(`Belge saklama onizlemesi alinamadi. ${message}`);
+      setRetentionStatus(userSafeErrorMessage(message, "Belge saklama onizlemesi alinamadi. Tekrar deneyin."));
     }
   }
 
@@ -67,7 +68,7 @@ export function useDocumentRetentionCommands({
       await refreshBackendPilotData();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRetentionStatus(`Belge saklama islemi tamamlanamadi. ${message}`);
+      setRetentionStatus(userSafeErrorMessage(message, "Belge saklama islemi tamamlanamadi. Tekrar deneyin."));
     }
   }
 

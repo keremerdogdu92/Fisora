@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { LocalSession } from "../../portal-types";
-import { resetTestData, resolveApiBaseUrl } from "../../upload-api";
+import { resetTestData, resolveApiBaseUrl, userSafeErrorMessage } from "../../upload-api";
 
 export function useTestDataReset({
   loginUserId,
@@ -46,7 +46,7 @@ export function useTestDataReset({
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setResetStatus(`Temizleme başarısız. ${message}`);
+      setResetStatus(userSafeErrorMessage(message, "Temizleme tamamlanamadı. Tekrar deneyin."));
     }
   }
 

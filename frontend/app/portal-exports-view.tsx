@@ -103,7 +103,7 @@ export function ExportBasketView({
                   <strong>Excel çalışma dosyası</strong>
                   <span>Fişler + temel belge referansları · .xlsx</span>
                 </div>
-                <button className="primary future-action" disabled title="XLSX backend bağlantısı sonraki aşamada eklenecek." type="button">XLSX oluştur</button>
+                <button className="primary future-action" disabled title="XLSX aktarımı sonraki aşamada eklenecek." type="button">XLSX oluştur</button>
               </div>
               <div className="portal-next-output-option">
                 <div>

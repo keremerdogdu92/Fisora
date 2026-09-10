@@ -12,7 +12,7 @@ import {
 } from "../../portal-document-actions";
 import { reviewActionLabel } from "../../portal-formatters";
 import type { CorrectionDraft, LocalSession, PilotData, PilotDocument, PilotStatus, ReviewLearningDecisionOptions } from "../../portal-types";
-import { reopenJournal, resolveApiBaseUrl, storeReviewDecision } from "../../upload-api";
+import { reopenJournal, resolveApiBaseUrl, storeReviewDecision, userSafeErrorMessage } from "../../upload-api";
 
 type ReviewRestoreAction = "reopen_approval" | "approve" | "review_required" | "exclude_export";
 
@@ -237,7 +237,8 @@ export function useReviewCommands({
           return { ok: true, payload: { normalized_review: { status: "review_required", revision_no: revisionNo } } };
         } catch (error) {
           await refreshBackendPilotData();
-          setDecisionStatus(error instanceof Error ? error.message : String(error));
+          const message = error instanceof Error ? error.message : String(error);
+          setDecisionStatus(userSafeErrorMessage(message, "İşlem kaydedilemedi. Veriler yenilendi; tekrar deneyin."));
           return { ok: false, payload: null };
         }
       }
@@ -358,7 +359,8 @@ export function useReviewCommands({
       return true;
     } catch (error) {
       await refreshBackendPilotData();
-      setDecisionStatus(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setDecisionStatus(userSafeErrorMessage(message, "Geri alma tamamlanamadı. Veriler yenilendi; tekrar deneyin."));
       setLastReviewActionLabel(`${reviewAction.summary} · Geri alma tamamlanamadı`);
       setUndoableReviewAction(null);
       return false;

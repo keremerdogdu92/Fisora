@@ -81,7 +81,7 @@ export async function loadInitialPilotData({
   if (!shouldCancel()) setLocalFallbackAllowed(allowLocalFallback);
   if (await refreshBackendPilotData({ applyPilotData, defaultUserId, session, shouldCancel })) return;
   if (!allowLocalFallback) {
-    if (!shouldCancel()) applyPilotData(emptyPilotData, "Backend okunamadı");
+    if (!shouldCancel()) applyPilotData(emptyPilotData, "Çalışma alanı alınamadı");
     return;
   }
   const paths = ["/local-pilot-data.json", "/local-workspace-data.json", "/local-review-data.json"];
@@ -89,14 +89,14 @@ export async function loadInitialPilotData({
     try {
       const payload = normalizePilotData(await fetchJson(path));
       if (shouldCancel()) return;
-      applyPilotData(payload, "Yerel çalışma verisi");
+      applyPilotData(payload, "Geçici çalışma verisi");
       return;
     } catch {
       // Try the next private/local source.
     }
   }
   const fallback = normalizePilotData(fallbackReviewData);
-  if (!shouldCancel()) applyPilotData(fallback, "Yerel çalışma verisi");
+  if (!shouldCancel()) applyPilotData(fallback, "Geçici çalışma verisi");
 }
 
 export { buildPilotReadinessView };

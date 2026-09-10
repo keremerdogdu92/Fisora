@@ -22,6 +22,7 @@ const {
   requestPasswordReset,
   confirmPasswordReset,
   sessionAuthErrorMessage,
+  userSafeErrorMessage,
   pickUploadUser,
   parseChartAccountsFromBackend,
   parseTaxCertificateFromBackend,
@@ -805,6 +806,12 @@ test("sessionAuthErrorMessage translates stale backend sessions into a re-login 
     "Oturum süresi doldu. Çıkış yapıp şifreyle tekrar giriş yapın.",
   );
   assert.equal(sessionAuthErrorMessage("plain backend error"), "");
+});
+
+test("userSafeErrorMessage keeps actionable auth feedback and hides raw backend details", () => {
+  assert.equal(userSafeErrorMessage('{"allowed":false,"reason":"invalid_credentials"}', "Giriş yapılamadı."), "Kullanıcı adı veya şifre hatalı.");
+  assert.equal(userSafeErrorMessage('{"detail":{"reason":"token_expired"}}', "Şifre güncellenemedi."), "Bu bağlantı geçersiz veya süresi dolmuş. Yeni bir bağlantı isteyin.");
+  assert.equal(userSafeErrorMessage('{"detail":{"internal":"stack"}}', "İşlem tamamlanamadı. Tekrar deneyin."), "İşlem tamamlanamadı. Tekrar deneyin.");
 });
 
 test("createPortalInvite posts invite payload without sending email", async () => {

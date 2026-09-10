@@ -331,3 +331,13 @@ Amac: Text PDF'de iki kaynak carpismasini engellemek.
 4. Ileride OCR eklenecekse once parser-vs-OCR uzlastirma tasarimi yap.
 5. Uygulama basladi: textless fatura PDF'i `scanned_pdf_unsupported` notuyla
    review hattina ayriliyor; fatura workflow'u OCR basari olayi uretmiyor.
+
+## Park Edilen UX / Urun Fikirleri
+
+### Workbench - ham fatura satiri bilgisini sakin bir yuzeyde gostermek
+
+**Durum:** Sonra degerlendirilecek; mevcut Workbench degistirilmeyecek.
+
+Muhasebe fis satirinda zaten hesap kodu, hesap plani aciklamasi, XKIRO/final accountant tarafindan uretilen fis aciklamasi, borc/alacak tutari ve kaynak baglantisi birlikte gorunuyor. Bu nedenle Reader'in ham `source_text` degerini ayni satira kalici bir alan olarak eklemek mevcut yuzeyi gereksiz kalabaliklastirabilir.
+
+Buna ragmen ham fatura satiri metni yararli bir kanit olabilir. Ileride kaynak ayrintisi, hover/popover, ikincil detay paneli veya benzeri sessiz bir yuzeyde `orijinal fatura satiri` ile `fis aciklamasi` yan yana gosterilebilir. Amac AI muhasebe kararini degistirmek degil; musavirin gerektiginde orijinal belge metnine hizli ulasabilmesini saglamaktir.

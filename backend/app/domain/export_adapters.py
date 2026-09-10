@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from app.domain.exporters import export_universal_journal_csv, export_zirve_mapping_csv, export_zirve_trial_csv
+from app.domain.exporters import export_journal_workbook_xlsx, export_universal_journal_csv, export_zirve_mapping_csv, export_zirve_trial_csv
 from app.domain.journal_entries import JournalEntry
 
 
-ExportAdapterType = Literal["zirve_universal_csv", "zirve_trial_csv", "zirve_mapping_csv", "json_manifest"]
+ExportAdapterType = Literal["journal_workbook_xlsx", "zirve_universal_csv", "zirve_trial_csv", "zirve_mapping_csv", "json_manifest"]
 ValidationStatus = Literal["field_test_pending", "verified", "audit_only"]
 
 
@@ -25,6 +25,15 @@ class ExportAdapter:
 
 
 SUPPORTED_EXPORT_ADAPTERS: dict[str, ExportAdapter] = {
+    "journal_workbook_xlsx": ExportAdapter(
+        export_type="journal_workbook_xlsx",
+        file_extension=".xlsx",
+        mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        display_name="Fisora Excel çalışma dosyası",
+        verified_in_zirve=False,
+        validation_status="verified",
+        field_mapping_notes=("Accountant workbook; not a direct Zirve import format.",),
+    ),
     "zirve_universal_csv": ExportAdapter(
         export_type="zirve_universal_csv",
         file_extension=".csv",
@@ -109,6 +118,8 @@ def write_export_file(
     client_id: str = "",
 ) -> Path:
     path = Path(output_path)
+    if adapter.export_type == "journal_workbook_xlsx":
+        return export_journal_workbook_xlsx(list(entries), path)
     if adapter.export_type == "zirve_universal_csv":
         return export_universal_journal_csv(list(entries), path)
     if adapter.export_type == "zirve_trial_csv":

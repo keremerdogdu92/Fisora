@@ -261,6 +261,6 @@ class ExportService:
             client_id=client_id,
             event_type="export_package_downloaded",
             status="ok",
-            message="Export CSV indirildi.",
+            message="Export paketi indirildi.",
             metadata={"output_filename": output_filename},
         )

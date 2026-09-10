@@ -112,7 +112,11 @@ def download_export_package(
         user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
     )
     safe_name = Path(file_name).name
-    if path.suffix.lower() == ".csv":
+    if path.suffix.lower() in {".csv", ".xlsx"}:
         service.mark_export_package_downloaded(client_id=client_id, output_filename=safe_name)
-    media_type = "application/json; charset=utf-8" if path.suffix.lower() == ".json" else "text/csv; charset=utf-8"
+    media_types = {
+        ".json": "application/json; charset=utf-8",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
+    media_type = media_types.get(path.suffix.lower(), "text/csv; charset=utf-8")
     return FileResponse(path, filename=safe_name, media_type=media_type)

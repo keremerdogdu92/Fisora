@@ -107,7 +107,7 @@ export function ExportBasketView({
                   <strong>Excel çalışma dosyası</strong>
                   <span>Fişler + temel belge referansları · .xlsx</span>
                 </div>
-                <button className="primary future-action" disabled title="XLSX aktarımı sonraki aşamada eklenecek." type="button">XLSX oluştur</button>
+                <button className="primary" disabled={!totalDocuments} onClick={() => { setExportType("journal_workbook_xlsx"); void onMarkPackaged("journal_workbook_xlsx"); }} type="button">XLSX oluştur</button>
               </div>
               <div className="portal-next-output-option">
                 <div>

@@ -204,6 +204,8 @@ test("next outputs use approved documents in the selected office period", () => 
 
   assert.match(exportsView, /document\.period === outputPeriod/);
   assert.match(exportsView, /disabled=\{!totalDocuments\}/);
+  assert.match(exportsView, /setExportType\("journal_workbook_xlsx"\)/);
+  assert.doesNotMatch(exportsView, /XLSX aktarımı sonraki aşamada/);
   assert.match(exportCommands, /document\.period === outputPeriod/);
   assert.match(exportCommands, /period: target\.period/);
   assert.match(portalApp, /outputPeriod=\{resolvedOfficePeriod\}/);

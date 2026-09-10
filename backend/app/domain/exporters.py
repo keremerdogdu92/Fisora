@@ -3,6 +3,9 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from openpyxl import Workbook
+from openpyxl.styles import Font
+
 from app.domain.journal_entries import JournalEntry
 
 
@@ -49,10 +52,54 @@ ZIRVE_MAPPING_COLUMNS = [
     "kaynak_belge",
 ]
 
+JOURNAL_WORKBOOK_COLUMNS = [
+    "Fiş No",
+    "Fiş Tarihi",
+    "Fiş Türü",
+    "Fiş Açıklaması",
+    "Satır No",
+    "Hesap Kodu",
+    "Satır Açıklaması",
+    "Borç",
+    "Alacak",
+    "VKN/TCKN",
+    "Kaynak Belge",
+]
+
+
 ZIRVE_TRIAL_VOUCHER_TYPES = {
     "bank_collection": "BANKA",
     "bank_payment": "BANKA",
 }
+
+
+def export_journal_workbook_xlsx(entries: list[JournalEntry], path: Path | str) -> Path:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Fişler"
+    sheet.append(JOURNAL_WORKBOOK_COLUMNS)
+    for entry_no, entry in enumerate(entries, start=1):
+        voucher_type = ZIRVE_TRIAL_VOUCHER_TYPES.get(entry.entry_type, "MAHSUP")
+        for line_no, line in enumerate(entry.lines, start=1):
+            sheet.append([
+                entry_no, entry.entry_date, voucher_type, entry.description, line_no,
+                line.account_code, line.description, float(line.debit), float(line.credit),
+                line.counterparty_tax_id or "", line.document_ref or "",
+            ])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for cell in sheet[1]:
+        cell.font = Font(bold=True)
+    for column in ("H", "I"):
+        for cell in sheet[column][1:]:
+            cell.number_format = "#,##0.00"
+    widths = {"A": 10, "B": 14, "C": 13, "D": 34, "E": 10, "F": 18, "G": 34, "H": 15, "I": 15, "J": 18, "K": 34}
+    for column, width in widths.items():
+        sheet.column_dimensions[column].width = width
+    workbook.save(output_path)
+    return output_path
 
 
 def export_universal_journal_csv(entries: list[JournalEntry], path: Path | str) -> Path:

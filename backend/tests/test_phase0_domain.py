@@ -13281,6 +13281,28 @@ TOPLAM: 1200.00"""
         with self.assertRaises(ValueError):
             get_export_adapter("zirve_verified_format")
 
+    def test_journal_workbook_xlsx_adapter_writes_accountant_workbook(self) -> None:
+        from openpyxl import load_workbook
+
+        entry = build_purchase_entry(
+            entry_date="2026-05-01", total=money("1200.00"), vat_rate=Decimal("0.20"),
+            expense_account="770.01", document_ref="ready.pdf",
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = get_export_adapter("journal_workbook_xlsx")
+            output = write_export_file(
+                adapter=adapter, entries=(entry,),
+                output_path=Path(temp_dir) / "fisora-workbook.xlsx", client_id="client-1",
+            )
+            workbook = load_workbook(output, data_only=True)
+            sheet = workbook["Fişler"]
+
+        self.assertEqual(adapter.file_extension, ".xlsx")
+        self.assertEqual(sheet["F2"].value, "770.01")
+        self.assertEqual(sheet["H2"].value, 1000)
+        self.assertEqual(sheet["K2"].value, "ready.pdf")
+        self.assertEqual(sheet.freeze_panes, "A2")
+
     def test_zirve_trial_csv_adapter_writes_field_mapping_candidate(self) -> None:
         entry = build_bank_payment_entry(
             entry_date="2026-05-03",

@@ -203,7 +203,9 @@ Completed 2026-09-10: **general user-facing error hygiene + `REV-H02/I06/I07`** 
 
 Completed 2026-09-10: **`REV-J01/J02/J04`** - Portal-next output readiness no longer depends on the legacy manual export basket. Approved documents in the selected office period are the canonical output scope; empty scope disables CSV/control actions. Backend export now requires `period=YYYY-MM` and filters the authoritative workspace to that period. Two-period regression proves June export excludes July; frontend 227/227 PASS; backend 1153 passed / 37 skipped; Next build + TypeScript PASS.
 
-Next non-QNB audit verification: **`REV-J03`** - retest XLSX disabled behavior against the intentionally deferred XLSX implementation; do not enable an unimplemented export path.
+Completed 2026-09-10: **`REV-J03`** - XLSX is now implemented as a real Fisora accountant workbook over the canonical approved + selected-period scope. It is not presented as a Zirve import format. Real workbook/MIME regressions PASS; full backend 1155 passed / 37 skipped; frontend 227/227; build + TypeScript PASS.
+
+Next non-QNB audit verification: **`REV-C03`** - verify whether all journal rows required for approval are visible before approval; test current behavior before changing code.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

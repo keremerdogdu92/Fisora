@@ -332,8 +332,10 @@
 **Resolution:** Portal-next için eski manuel `exportBasket` prerequisite'i kaldırıldı. Paket hedefleri seçili dönemdeki onaylı belgelerin mükelleflerinden doğrudan türetiliyor; boş kapsam buton seviyesinde engelleniyor.
 
 ## REV-J03 — XLSX bazı durumda disabled
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Audit refs:** CX UXR-009 · CG-25.
+**Resolution:** The XLSX action now produces a real Fisora accountant workbook from the same approved, period-scoped journal entries as other outputs. It is intentionally an internal working file, not a claimed Zirve import format.
+**Acceptance:** Real `.xlsx` reopened with openpyxl; API download MIME/content verified; frontend 227/227 PASS; full backend 1155 passed / 37 skipped; Next build + TypeScript PASS.
 
 ## REV-J04 — Export readiness için canonical gate
 **Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.

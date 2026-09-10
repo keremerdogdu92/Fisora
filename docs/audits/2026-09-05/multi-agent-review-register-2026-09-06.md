@@ -217,8 +217,12 @@
 **Acceptance:** `e2e/document-inspector.spec.ts` 4/4 Chromium PASS. The HTML case deliberately duplicates the same source text outside `#lineTable` and still targets the correct invoice row; PDF hover/pin produces the visible source highlight. No code change was required.
 
 ## REV-F03 — Kaynak detayında eksik/şüpheli metadata
-**Status:** KONTROL EDİLECEK.
+**Status:** PARTIAL / FIRST DEFECT IMPLEMENTED - 2026-09-10.
 **Audit refs:** [CX UXR-004](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-004--p1--kaynak-bağlantısı-görünen-belgeyi-bulamıyor)
+**Confirmed defect:** Workbench source-evidence formatting treated `source_line_numbers` as sufficient VAT evidence and defaulted a missing VAT rate to `0`, so a non-VAT source-linked journal row could be shown as `Kaynak: KDV %0`.
+**Implementation:** VAT evidence formatting is now a directly tested presentation-only helper. `KDV %X` is rendered only when `vat_group_id` or `tax_rate` actually supplies a rate; source linkage without tax metadata renders only the invoice source-line reference. No Reader, planner, final-accountant, AI prompt, journal, approval, or tax-calculation behavior changed.
+**Acceptance:** Behavioral regression covers missing VAT metadata, explicit `%20`, explicit `%0`, and `vat_group_id`; frontend full suite 233/233 PASS; TypeScript PASS; Next production build PASS.
+**Remaining scope:** REV-F03 stays open for the other source-detail metadata/provenance questions. They will be reviewed one at a time instead of being bundled into this fix.
 
 ## REV-F04 — Canonical source-anchor modeli
 **Status:** ÜRÜN KARARI.

@@ -64,7 +64,7 @@ Acceptance evidence: full frontend suite `220/220`; Next production build + Type
 
 ### Source linking
 
-`REV-F01` and `REV-F02` were retested on 2026-09-10 and are not reproducible in the current build. `REV-F03` remains the next source/provenance verification; `REV-F04/F05` remain product-level follow-ups.
+`REV-F01` and `REV-F02` were retested on 2026-09-10 and are not reproducible in the current build. `REV-F03` is being handled one defect at a time; the first confirmed defect (invented `KDV %0` when tax metadata is absent) is fixed and regression-tested. Other F03 metadata questions remain open. `REV-F04/F05` remain product-level follow-ups.
 
 `REV-F02` acceptance: `e2e/document-inspector.spec.ts` 4/4 Chromium PASS. The HTML fixture contains duplicate visible source text outside the invoice table yet the matcher anchors the correct `#lineTable` row; PDF hover/pin also renders the source highlight. No code change was required.
 
@@ -209,7 +209,7 @@ Completed 2026-09-10: **`REV-C03`** - all journal rows are rendered and the appr
 
 Completed 2026-09-10: **`REV-F02` retest** - current HTML/PDF source focus could not reproduce the old visible-text/anchor failure. Browser acceptance 4/4 PASS, including duplicate HTML text disambiguation and PDF source highlighting. No code change.
 
-Next non-QNB audit verification: **`REV-F03`** - retest source-detail metadata (`KDV`, source line references, account-plan description) against current production-oriented data mapping before changing code. Stop and discuss if a real inconsistency remains.
+Current non-QNB audit item remains **`REV-F03`**. First sub-issue completed: the Workbench no longer invents `KDV %0` from source-line linkage alone; explicit `%0`/`%20` tax metadata still renders unchanged. Do not advance to another F03 metadata concern or another audit item until the next one is discussed separately.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

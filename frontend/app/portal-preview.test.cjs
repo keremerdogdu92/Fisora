@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const test = require("node:test");
+const { vatGroupEvidenceText } = require("./portal-source-evidence");
 
 test("document previews do not render mock paper markup when an original document exists", () => {
   const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
@@ -50,13 +51,14 @@ test("journal totals keep dot-decimal amounts as decimals", () => {
   assert.doesNotMatch(reviewPanels, /replace\(\/\\\\\\.\/g, ""\)/);
 });
 
-test("journal rows expose compact vat-group and source-line evidence", () => {
-  const reviewPanels = readFileSync(join(__dirname, "portal-review-panels.tsx"), "utf8");
-
-  assert.match(reviewPanels, /vatGroupEvidenceText/);
-  assert.match(reviewPanels, /Kaynak: KDV/);
-  assert.match(reviewPanels, /Fatura satırları/);
-  assert.match(reviewPanels, /contributing_line_ids/);
+test("journal source evidence never invents KDV %0 when tax metadata is absent", () => {
+  assert.equal(vatGroupEvidenceText({ source_line_numbers: [1] }), "Kaynak: Fatura sat\u0131rlar\u0131 1");
+  assert.equal(vatGroupEvidenceText({ source_line_numbers: [1], tax_rate: "20" }), "Kaynak: KDV %20 \u00b7 Fatura sat\u0131rlar\u0131 1");
+  assert.equal(vatGroupEvidenceText({ source_line_numbers: [1], tax_rate: "0" }), "Kaynak: KDV %0 \u00b7 Fatura sat\u0131rlar\u0131 1");
+  assert.equal(
+    vatGroupEvidenceText({ vat_group_id: "KDV|S|20|", contributing_line_ids: ["line-1"] }),
+    "Kaynak: KDV %20 \u00b7 Fatura sat\u0131rlar\u0131 1",
+  );
 });
 
 test("review history includes a collapsed ai trace panel with wrapped json", () => {

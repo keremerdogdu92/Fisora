@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, classifyDraftAccountCode, draftAccountResolutionIssues, filterAccountOptions, nextSelectableAccountIndex, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
+import { vatGroupEvidenceText } from "./portal-source-evidence";
 import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DocumentSourceTarget, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
@@ -134,18 +135,6 @@ function sourceReviewDraftLinesForDocument(document: PilotDocument): DraftLine[]
       source_role: row.role,
       source_line_numbers: /^\d+$/.test(row.sourcePosition.trim()) ? [Number(row.sourcePosition)] : [],
     }));
-}
-
-function vatGroupEvidenceText(line: DraftLine) {
-  const sourceLineNumbers = Array.isArray(line.source_line_numbers)
-    ? line.source_line_numbers.filter((value) => Number.isInteger(value) && value > 0)
-    : [];
-  if (!line.vat_group_id && !sourceLineNumbers.length) return "";
-  const rate = String(line.vat_group_id || "").split("|")[2] || line.tax_rate || "0";
-  const sourceText = sourceLineNumbers.length
-    ? sourceLineNumbers.join(", ")
-    : (line.contributing_line_ids || []).map((_, index) => index + 1).join(", ");
-  return `Kaynak: KDV %${rate} · Fatura satırları ${sourceText}`;
 }
 
 function normalizeAccountCodeInput(value: string) {

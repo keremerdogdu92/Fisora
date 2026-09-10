@@ -64,9 +64,9 @@ Acceptance evidence: full frontend suite `220/220`; Next production build + Type
 
 ### Source linking
 
-`REV-F01` was retested on 2026-09-10 and is not reproducible. `REV-F02` through `REV-F05` remain open.
+`REV-F01` and `REV-F02` were retested on 2026-09-10 and are not reproducible in the current build. `REV-F03` remains the next source/provenance verification; `REV-F04/F05` remain product-level follow-ups.
 
-The HTML/PDF source anchor model and workbench provenance interaction remain a separate high-priority reliability track.
+`REV-F02` acceptance: `e2e/document-inspector.spec.ts` 4/4 Chromium PASS. The HTML fixture contains duplicate visible source text outside the invoice table yet the matcher anchors the correct `#lineTable` row; PDF hover/pin also renders the source highlight. No code change was required.
 
 ## New decisions — 2026-09-09
 
@@ -205,7 +205,11 @@ Completed 2026-09-10: **`REV-J01/J02/J04`** - Portal-next output readiness no lo
 
 Completed 2026-09-10: **`REV-J03`** - XLSX is now implemented as a real Fisora accountant workbook over the canonical approved + selected-period scope. It is not presented as a Zirve import format. Real workbook/MIME regressions PASS; full backend 1155 passed / 37 skipped; frontend 227/227; build + TypeScript PASS.
 
-Next non-QNB audit verification: **`REV-C03`** - verify whether all journal rows required for approval are visible before approval; test current behavior before changing code.
+Completed 2026-09-10: **`REV-C03`** - all journal rows are rendered and the approval guard evaluates every active draft line, including rows below the visible viewport. A mandatory scroll-to-end gate will not be added; the fixed approval action is retained as a low-friction UX choice.
+
+Completed 2026-09-10: **`REV-F02` retest** - current HTML/PDF source focus could not reproduce the old visible-text/anchor failure. Browser acceptance 4/4 PASS, including duplicate HTML text disambiguation and PDF source highlighting. No code change.
+
+Next non-QNB audit verification: **`REV-F03`** - retest source-detail metadata (`KDV`, source line references, account-plan description) against current production-oriented data mapping before changing code. Stop and discuss if a real inconsistency remains.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

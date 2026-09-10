@@ -123,8 +123,10 @@
 **Question:** `Borç/alacak dengeli` ile `Muhasebe kararı tamamlandı` ayrı göstergeler mi olmalı?
 
 ## REV-C03 — Tüm fiş satırları görünmeden onay erişilebilir
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / CURRENT BEHAVIOR KEPT - 2026-09-10.
 **Audit refs:** [CG-08](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-08--not-all-journal-rows-visible-before-approval)
+**Finding:** Workbench fiş satırlarını kesmeden `rows.map(...)` ile render ediyor; approval guard tüm `activeDraftLines` üzerinden hesaplandığı için viewport dışındaki boş/geçersiz/çözümlenmemiş hesap da onayı blokluyor.
+**Decision:** Uzun fişte `Onayla ve sonraki` sabit erişilebilir kalabilir; zorunlu sona-kadar-scroll kilidi eklenmeyecek. Bu kalan nokta integrity bug değil, bilinçli düşük-sürtünmeli UX tercihidir.
 
 ## REV-C04 — 0 TL belge normal posting UX'i izliyor
 **Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
@@ -209,8 +211,10 @@
 **Acceptance:** Preview/context regression suite 16/16 PASS.
 
 ## REV-F02 — Kaynak metin görünürken anchor bulunamadı sonucu
-**Status:** KONTROL EDİLECEK.
+**Status:** RETESTED / NOT REPRODUCED - 2026-09-10.
 **Audit refs:** [CX UXR-004](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-004--p1--kaynak-bağlantısı-görünen-belgeyi-bulamıyor)
+**Current behavior:** Source rows carry position/text/amount into the Workbench. HTML matching prefers the indexed invoice row and then exact normalized token + amount matching; PDF matching scans normalized token sequences across PDF.js text items.
+**Acceptance:** `e2e/document-inspector.spec.ts` 4/4 Chromium PASS. The HTML case deliberately duplicates the same source text outside `#lineTable` and still targets the correct invoice row; PDF hover/pin produces the visible source highlight. No code change was required.
 
 ## REV-F03 — Kaynak detayında eksik/şüpheli metadata
 **Status:** KONTROL EDİLECEK.
@@ -573,7 +577,7 @@ Her konu tek tek şu sırayla kapatılacak:
 
 ## Next discussion
 
-Sıradaki tek konu: `REV-D01` — çelişkili kullanıcı-facing state etiketleri. `REV-D02/D03/D04` bununla birlikte paketlenmeyecek; Kerem kararıyla tek tek ele alınacak.
+Sıradaki tek konu: `REV-F03` — kaynak detayındaki eksik/şüpheli metadata. Yeni mesajda önce mevcut davranış retest edilecek; kod değişikliği ancak gerçek sorun kalırsa ayrıca konuşulacak.
 
 
 ---

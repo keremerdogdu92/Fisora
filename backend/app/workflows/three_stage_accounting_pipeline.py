@@ -411,11 +411,35 @@ def _compose_journal(final_output: Mapping[str, object], plan: Mapping[str, obje
     return lines, warnings
 
 
-def _draft_lines(lines: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+def _canonical_rows_by_source_position(canonical: Mapping[str, object]) -> dict[str, list[Mapping[str, object]]]:
+    result: dict[str, list[Mapping[str, object]]] = {}
+    for row in canonical.get("line_items") or []:
+        if not isinstance(row, Mapping):
+            continue
+        position = _normalized_source_position(row.get("source_position"))
+        if position:
+            result.setdefault(position, []).append(row)
+    return result
+
+
+def _draft_lines(lines: Sequence[Mapping[str, object]], canonical: Mapping[str, object]) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
+    rows_by_position = _canonical_rows_by_source_position(canonical)
     for index, line in enumerate(lines, start=1):
         debit = _money(line.get("debit"))
         credit = _money(line.get("credit"))
+        contributing_rows: list[Mapping[str, object]] = []
+        contributing_line_ids: list[str] = []
+        for source_position in line.get("source_positions") or []:
+            matches = rows_by_position.get(_normalized_source_position(source_position), [])
+            if len(matches) != 1:
+                continue
+            row = matches[0]
+            canonical_line_id = str(row.get("canonical_line_id") or "").strip()
+            if canonical_line_id and canonical_line_id not in contributing_line_ids:
+                contributing_line_ids.append(canonical_line_id)
+                contributing_rows.append(row)
+        source_row = contributing_rows[0] if len(contributing_rows) == 1 else {}
         result.append({
             "fact_ref": f"three-stage:{index}",
             "proposal_role": "three_stage_ai",
@@ -428,10 +452,14 @@ def _draft_lines(lines: Sequence[Mapping[str, object]]) -> list[dict[str, object
             "side": "debit" if debit > 0 else "credit" if credit > 0 else "",
             "source_basis": [str(item) for item in line.get("source_positions") or []],
             "source_line_numbers": _source_line_numbers(line.get("source_positions")),
+            "contributing_line_ids": contributing_line_ids,
+            **({
+                "source_position": str(source_row.get("source_position") or ""),
+                "source_text": str(source_row.get("description") or ""),
+            } if source_row else {}),
             "warnings": [],
         })
     return result
-
 
 def _source_review_rows(package: Mapping[str, object]) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
@@ -556,7 +584,7 @@ def _compatibility_result(*, package: Mapping[str, object], plan: Mapping[str, o
     else:
         canonical["supplier_party"], canonical["customer_party"] = counterparty, own
     line_decisions, line_decision_coverage = _canonical_line_decisions(canonical, final_output, account_names)
-    draft_lines = _draft_lines(journal_lines)
+    draft_lines = _draft_lines(journal_lines, canonical)
     debit, credit = _totals(journal_lines)
     reason_codes = list(dict.fromkeys(str(item) for item in warnings if str(item).strip()))
     final_failed = str(final_output.get("_stage_status") or "") == "failed" or "final_accountant_unavailable" in reason_codes

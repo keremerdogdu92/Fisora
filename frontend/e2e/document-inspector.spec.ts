@@ -105,8 +105,15 @@ function workspaceFor(fileName: string, contentType: string) {
   };
 }
 
-async function setupInspector(page: Page, fileName: string, contentType: string, fileBody: string | Buffer) {
+async function setupInspector(
+  page: Page,
+  fileName: string,
+  contentType: string,
+  fileBody: string | Buffer,
+  mutateWorkspace?: (workspace: ReturnType<typeof workspaceFor>) => void,
+) {
   const workspace = workspaceFor(fileName, contentType);
+  mutateWorkspace?.(workspace);
   await page.addInitScript(() => {
     window.localStorage.setItem("fisora.office.session.v1", JSON.stringify({
       userId: "mali-musavir",
@@ -347,4 +354,52 @@ test("PDF invoice magnifier and journal source focus use PDF.js text evidence", 
   await journalRow.click({ position: { x: 2, y: 2 } });
   await expect(journalRow).toHaveClass(/source-pinned-row/);
   await expect(page.locator(".pdf-source-highlight.pinned")).toBeVisible();
+});
+
+
+test("generated HTML journal keeps source focus when accountant description differs from invoice text", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sira No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "generated-anchor.html", "text/html", html, (workspace) => {
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result["draft_status"] = "draft_ready";
+    result["source_review_rows"] = [];
+    result["draft_lines"] = [{
+      account_code: "770.01",
+      description: "Kargo gideri",
+      debit: "540.00",
+      credit: "0.00",
+      contributing_line_ids: ["line-anchor-1"],
+      source_line_numbers: [1],
+      source_position: "1",
+      source_text: SOURCE_TEXT,
+    }];
+  });
+  await openInspectorDocument(page, ".html-document-viewer");
+  const journalRow = page.locator(".journal-source-row").first();
+  await expect(journalRow.locator("input").nth(1)).toHaveValue("Kargo gideri");
+  await journalRow.hover();
+  await expect(page.frameLocator(".html-viewer-frame").locator("#lineTable #fisora-source-target")).toBeVisible();
+});
+
+test("generated PDF journal keeps source focus when accountant description differs from invoice text", async ({ page }) => {
+  await setupInspector(page, "generated-anchor.pdf", "application/pdf", pdfBytes(SOURCE_TEXT), (workspace) => {
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result["draft_status"] = "draft_ready";
+    result["source_review_rows"] = [];
+    result["draft_lines"] = [{
+      account_code: "770.01",
+      description: "Kargo gideri",
+      debit: "540.00",
+      credit: "0.00",
+      contributing_line_ids: ["line-anchor-1"],
+      source_line_numbers: [1],
+      source_position: "1",
+      source_text: SOURCE_TEXT,
+    }];
+  });
+  await openInspectorDocument(page, ".pdf-document-viewer");
+  const journalRow = page.locator(".journal-source-row").first();
+  await expect(journalRow.locator("input").nth(1)).toHaveValue("Kargo gideri");
+  await journalRow.hover();
+  await expect(page.locator(".pdf-source-highlight")).toBeVisible();
 });

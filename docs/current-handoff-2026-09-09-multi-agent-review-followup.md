@@ -64,9 +64,11 @@ Acceptance evidence: full frontend suite `220/220`; Next production build + Type
 
 ### Source linking
 
-REV-F01 and REV-F02 were retested on 2026-09-10 and are not reproducible in the current build. REV-F03 is now closed: the invented KDV %0 fallback was fixed, while the valid-account missing-description observation was not reproduced in backend mapping or Playwright user flow. REV-F04/F05 remain product-level follow-ups and must be discussed separately.
+REV-F01 and REV-F02 were retested on 2026-09-10 and are not reproducible in the current build. REV-F03 is closed: the invented KDV %0 fallback was fixed and the valid-account missing-description observation was not reproduced.
 
-`REV-F02` acceptance: `e2e/document-inspector.spec.ts` 4/4 Chromium PASS. The HTML fixture contains duplicate visible source text outside the invoice table yet the matcher anchors the correct `#lineTable` row; PDF hover/pin also renders the source highlight. No code change was required.
+**Completed 2026-09-10: REV-F04** - canonical source identity is now carried into three-stage journal draft provenance. Final Accountant descriptions are no longer used as the only source locator when they differ from invoice wording: unambiguous single-source journal rows carry the canonical contributing line ID, original source position, and Reader-derived source text. Accountant edits/save preserve these provenance fields instead of stripping them. Multi-source visual behavior remains REV-F05 and is intentionally not decided here.
+
+Acceptance: Chromium document-inspector 6/6 PASS including HTML/PDF description-mismatch cases; frontend full suite 227/227; backend full suite 1155 passed / 37 skipped; TypeScript PASS; Next production build PASS.
 
 ## New decisions — 2026-09-09
 
@@ -209,7 +211,7 @@ Completed 2026-09-10: **`REV-C03`** - all journal rows are rendered and the appr
 
 Completed 2026-09-10: **`REV-F02` retest** - current HTML/PDF source focus could not reproduce the old visible-text/anchor failure. Browser acceptance 4/4 PASS, including duplicate HTML text disambiguation and PDF source highlighting. No code change.
 
-Completed 2026-09-10: **REV-F03** - the Workbench no longer invents KDV %0 from source-line linkage alone. Valid chart-account names were verified through backend review mapping and a Playwright user flow, including interactive account selection; the old missing-description observation was not reproduced. No additional provenance plumbing was added. REV-F04/F05 remain separate product decisions.
+Completed 2026-09-10: **REV-F03** - the Workbench no longer invents KDV %0 from source-line linkage alone. Valid chart-account names were verified through backend review mapping and a Playwright user flow, including interactive account selection; the old missing-description observation was not reproduced. REV-F04 was subsequently implemented as the canonical source-anchor plumbing; REV-F05 remains the separate UI/product decision.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

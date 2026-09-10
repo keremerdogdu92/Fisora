@@ -251,6 +251,16 @@ class JournalLinePayload(BaseModel):
     debit: str = "0.00"
     credit: str = "0.00"
     tax_rate: str = ""
+    vat_group_id: str = ""
+    contributing_line_ids: list[str] = Field(default_factory=list)
+    source_line_numbers: list[int] = Field(default_factory=list)
+    allocated_amounts: list[dict[str, object]] = Field(default_factory=list)
+    source_position: str = ""
+    source_text: str = ""
+    source_amount: str = ""
+    source_amount_label: str = ""
+    source_amount_basis: str = ""
+    source_role: str = ""
     document_ref: str | None = None
 
 

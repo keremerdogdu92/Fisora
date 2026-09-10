@@ -522,13 +522,7 @@ class ReviewService:
             code = normalize_account_code(line.account_code)
             if code in detail_codes:
                 normalized_lines.append(
-                    JournalLinePayload(
-                        account_code=code,
-                        description=account_names[code],
-                        debit=line.debit,
-                        credit=line.credit,
-                        document_ref=line.document_ref,
-                    )
+                    line.model_copy(update={"account_code": code, "description": account_names[code]})
                 )
                 continue
             if code in allowed_new_counterparties:
@@ -536,13 +530,7 @@ class ReviewService:
                     uncreated_counterparty_codes.append(code)
                     continue
                 normalized_lines.append(
-                    JournalLinePayload(
-                        account_code=code,
-                        description=line.description,
-                        debit=line.debit,
-                        credit=line.credit,
-                        document_ref=line.document_ref,
-                    )
+                    line.model_copy(update={"account_code": code})
                 )
                 continue
             invalid_codes.append(code or line.account_code)

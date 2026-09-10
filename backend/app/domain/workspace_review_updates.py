@@ -327,14 +327,20 @@ def _manual_draft_lines(value: object) -> list[dict[str, Any]]:
             continue
         debit = _money(item.get("debit"))
         credit = _money(item.get("credit"))
-        lines.append(
-            {
-                "account_code": account_code,
-                "description": str(item.get("description") or "").strip(),
-                "debit": f"{debit:.2f}",
-                "credit": f"{credit:.2f}",
-            }
-        )
+        normalized = {
+            "account_code": account_code,
+            "description": str(item.get("description") or "").strip(),
+            "debit": f"{debit:.2f}",
+            "credit": f"{credit:.2f}",
+        }
+        for key in (
+            "tax_rate", "vat_group_id", "contributing_line_ids", "source_line_numbers",
+            "allocated_amounts", "source_position", "source_text", "source_amount",
+            "source_amount_label", "source_amount_basis", "source_role",
+        ):
+            if key in item:
+                normalized[key] = deepcopy(item[key])
+        lines.append(normalized)
     return lines
 
 

@@ -956,15 +956,25 @@ async function storeReviewDecision({
   const normalizedUserId = String(userId || reviewer || DEFAULT_UPLOAD_USER_ID).trim() || DEFAULT_UPLOAD_USER_ID;
   const normalizedDraftLines = Array.isArray(draftLines)
     ? draftLines
-        .map((line) => ({
-          account_code: String(line?.account_code || line?.accountCode || ""),
-          description: String(line?.description || ""),
-          debit: String(line?.debit || "0.00"),
-          credit: String(line?.credit || "0.00"),
-          ...(line?.tax_rate || line?.taxRate
-            ? { tax_rate: String(line?.tax_rate || line?.taxRate || "") }
-            : {}),
-        }))
+        .map((line) => {
+          const normalized = {
+            account_code: String(line?.account_code || line?.accountCode || ""),
+            description: String(line?.description || ""),
+            debit: String(line?.debit || "0.00"),
+            credit: String(line?.credit || "0.00"),
+            ...(line?.tax_rate || line?.taxRate
+              ? { tax_rate: String(line?.tax_rate || line?.taxRate || "") }
+              : {}),
+          };
+          for (const key of [
+            "vat_group_id", "contributing_line_ids", "source_line_numbers", "allocated_amounts",
+            "source_position", "source_text", "source_amount", "source_amount_label",
+            "source_amount_basis", "source_role",
+          ]) {
+            if (line?.[key] !== undefined) normalized[key] = line[key];
+          }
+          return normalized;
+        })
         .filter((line) => line.account_code || line.description || line.debit !== "0.00" || line.credit !== "0.00")
     : [];
   const normalizedDecisionNote = String(decisionNote || "").trim();

@@ -226,9 +226,13 @@
 **Resolution:** No additional source-metadata plumbing is added for REV-F03. Raw invoice-line text remains a parked UX idea in docs/open-questions.md; current journal description + account code/name + amount + source focus behavior is kept.
 
 ## REV-F04 — Canonical source-anchor modeli
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-10.
 **Derived from:** CX UXR-004 + CG-24.
-**Question:** Kaynak satırı HTML/PDF reader ve workbench arasında hangi kalıcı kimlikle taşınmalı?
+**Reproduction:** Final Accountant journal descriptions may legitimately differ from invoice text. A browser fixture with `source_line_numbers=[1]`, invoice text `Kargo Hizmet Bedeli 540,00 TL`, and journal description `Kargo gideri` failed source focus even though the source position was correct; HTML rejected the indexed row on text mismatch and PDF searched only the journal description.
+**Root cause:** Reader/canonical processing already owns `canonical_line_id`, but three-stage compatibility `draft_lines` kept only source positions/line numbers. Workbench therefore fell back to the editable journal description as source-search text.
+**Decision / implementation:** Reuse the existing canonical identity; add no AI or accounting inference. Three-stage draft projection resolves Final Accountant `source_positions` back to canonical invoice lines, carries `contributing_line_ids`, and for an unambiguous single-source journal line carries the original `source_position` and Reader-derived source text. Multi-source journal lines keep all canonical IDs but do not invent one source text; their UI behavior remains REV-F05 scope.
+**Edit persistence:** Review-decision transport/schema and manual-draft normalization preserve source/provenance fields when the accountant edits and saves a journal, so source focus does not disappear after correction/reopen. Chart-account validation and account-name normalization are unchanged.
+**Acceptance:** Source-identity pipeline tests PASS; corrected-draft provenance survives ReviewService persistence; Chromium document-inspector 6/6 PASS including HTML/PDF cases where journal description differs from invoice text; frontend full suite 227/227 PASS; backend full suite 1155 passed / 37 skipped; TypeScript PASS; Next production build PASS.
 
 ## REV-F05 — Source/provenance UI yaklaşımı
 **Status:** ÜRÜN KARARI — güçlü bulunan mevcut yaklaşım korunacak mı?
@@ -582,7 +586,7 @@ Her konu tek tek şu sırayla kapatılacak:
 
 ## Next discussion
 
-Sıradaki tek konu: `REV-F03` — kaynak detayındaki eksik/şüpheli metadata. Yeni mesajda önce mevcut davranış retest edilecek; kod değişikliği ancak gerçek sorun kalırsa ayrıca konuşulacak.
+Next single topic: `REV-F05` - source/provenance UI behavior. REV-F04 now supplies the canonical source-anchor plumbing; F05 remains a separate product decision for multi-source highlighting and the visible interaction model.
 
 
 ---

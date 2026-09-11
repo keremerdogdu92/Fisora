@@ -101,6 +101,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-12: REV-L02** - Workbench queue position and PDF page position are now explicitly distinct: the review queue uses `Kuyruk n / total`, while the PDF viewer uses `Sayfa n / total`. HTML intentionally keeps no synthetic page counter. Navigation behavior and ordering are unchanged. Acceptance: portal-next 22/22, document-inspector 9/9, frontend 235/235, TypeScript/build PASS. Next: REV-L03.
 
+**Completed 2026-09-12: REV-L03** - Reopening the Workbench queue now reveals the active document instead of returning visually to the top of a long list. A 25-document Chromium reproduction confirmed the bug with document 12 selected while the queue was hidden; the active row existed but was outside the viewport. The active queue button now scrolls into the nearest visible position when selection changes or the queue reopens. Queue ordering and selection behavior are unchanged. Acceptance: portal-next 22/22, document-inspector 10/10, frontend 235/235, TypeScript/build PASS. Next: REV-L04 product decision.
+
 ## New decisions — 2026-09-09
 
 

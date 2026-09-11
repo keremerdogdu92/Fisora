@@ -449,9 +449,14 @@
 **Implementation:** Workbench position is now labelled `Kuyruk 12 / 25`; PDF navigation is labelled `Sayfa 1 / 3`. HTML keeps no synthetic page counter. No queue ordering, PDF paging, or document-selection behavior changed.
 **Acceptance:** portal-next contract 22/22 PASS; document-inspector Playwright 9/9 PASS; full frontend 235/235 PASS; TypeScript and Next production build PASS.
 
-## REV-L03 — Kuyruk tekrar açılınca selected item'a scroll etmiyor
-**Status:** KONTROL EDİLECEK.
+## REV-L03 ? Kuyruk yeniden a??ld???nda aktif belgeyi g?r?n?r alana getir
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-12.
 **Audit refs:** [CG-17](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-17--reopening-queue-does-not-reveal-current-item)
+
+**Reproduction:** A 25-document Chromium fixture hid the queue, advanced the active selection to document 12 with global ArrowDown navigation, then reopened the queue. The correct active button existed (`queue-12.html`) but its viewport ratio was `0`; the list remained at the top.
+**Root cause:** The queue rendered the active state but had no ref/visibility reconciliation for selection changes while the list was hidden.
+**Implementation:** The active queue button owns one ref. When portal-next queue becomes visible or the selected document changes while the queue is visible, a requestAnimationFrame callback calls `scrollIntoView({ block: "nearest", inline: "nearest" })`. No queue ordering, selection state, or keyboard-navigation model changed.
+**Acceptance:** Dedicated 25-document Playwright reproduction now PASS; portal-next contract 22/22 PASS; document-inspector 10/10 PASS; full frontend 235/235 PASS; TypeScript / Next production build PASS.
 
 ## REV-L04 — Teknik ID/UUID ağırlığı
 **Status:** ÜRÜN KARARI.

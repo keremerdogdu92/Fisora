@@ -276,6 +276,38 @@ test("queue visibility and focus mode preserve the active workbench", async ({ p
   expect(mainBox!.width).toBeGreaterThan(700);
 });
 
+test("reopening queue reveals the current selected document", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "queue-scroll.html", "text/html", html, (workspace) => {
+    const baseUpload = workspace.uploaded_documents[0];
+    const baseDocument = workspace.documents[0];
+    workspace.uploaded_documents = Array.from({ length: 25 }, (_, index) => ({
+      ...baseUpload,
+      document_ref: `queue-doc-${index + 1}`,
+      original_file_name: `queue-${String(index + 1).padStart(2, "0")}.html`,
+    }));
+    workspace.documents = Array.from({ length: 25 }, (_, index) => ({
+      ...baseDocument,
+      document_ref: `queue-doc-${index + 1}`,
+      result: { ...baseDocument.result, file_name: `queue-${String(index + 1).padStart(2, "0")}.html` },
+    }));
+  });
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const queue = page.locator(".portal-next-document-queue");
+  const list = page.locator(".portal-next-queue-list");
+  await page.locator(".portal-next-workbench-actions .queue-action").click();
+  await expect(queue).toBeHidden();
+  for (let index = 0; index < 11; index += 1) await page.keyboard.press("ArrowDown");
+  await expect(page.locator(".portal-next-workbench-actions")).toContainText("Kuyruk 12 / 25");
+  await page.locator(".portal-next-workbench-actions .queue-action").click();
+  await expect(queue).toBeVisible();
+
+  const active = list.locator("button.active");
+  await expect(active).toContainText("queue-12.html");
+  await expect(active).toBeInViewport();
+});
+
 test("ledger hierarchy keeps approval dominant and shortcut help clear of decisions", async ({ page }) => {
   const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sira No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
   await setupInspector(page, "approval-hierarchy.html", "text/html", html);

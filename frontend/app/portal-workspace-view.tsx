@@ -279,6 +279,7 @@ export function AccountantWorkspace({
   const [mobilePane, setMobilePane] = useState<"queue" | "preview" | "journal">("preview");
   const [hoverSourceTarget, setHoverSourceTarget] = useState<DocumentSourceTarget | null>(null);
   const [pinnedSourceTarget, setPinnedSourceTarget] = useState<DocumentSourceTarget | null>(null);
+  const activeQueueItemRef = useRef<HTMLButtonElement | null>(null);
   const hoverSourceTimerRef = useRef<number | null>(null);
   const sourceTarget = hoverSourceTarget ?? pinnedSourceTarget;
   const focusStageRef = useRef<HTMLElement | null>(null);
@@ -370,6 +371,14 @@ export function AccountantWorkspace({
     const currentDocumentId = selectedDocument?.id || "";
     if (reconciledDocumentId !== currentDocumentId) setSelectedDocumentId(reconciledDocumentId);
   }, [reconciledDocumentId, selectedDocument?.id, setSelectedDocumentId]);
+
+  useEffect(() => {
+    if (!nextPresentation || queueHidden || !selectedDocument?.id) return;
+    const frame = window.requestAnimationFrame(() => {
+      activeQueueItemRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [nextPresentation, queueHidden, selectedDocument?.id]);
 
   useEffect(() => {
     if (hoverSourceTimerRef.current !== null) window.clearTimeout(hoverSourceTimerRef.current);
@@ -563,7 +572,7 @@ export function AccountantWorkspace({
                 const active = selectedDocument?.id === queueDocument.id;
                 return (
                   <li key={queueDocument.id}>
-                    <button className={active ? "active" : ""} onClick={() => selectDocument(queueDocument)} type="button">
+                    <button className={active ? "active" : ""} onClick={() => selectDocument(queueDocument)} ref={active ? activeQueueItemRef : undefined} type="button">
                       <span>
                         <strong>{queueDocument.fileName}</strong>
                         <b>{formatReadOnlyAmount(queueDocument.amount)}</b>

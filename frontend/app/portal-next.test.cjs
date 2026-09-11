@@ -250,6 +250,8 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(workspace, /journalHidden/);
   assert.match(workspace, /mobilePane/);
   assert.match(workspace, /portal-next-focus-document/);
+  assert.match(workspace, /activeQueueItemRef/);
+  assert.match(workspace, /scrollIntoView\(\{ block: "nearest", inline: "nearest" \}\)/);
   assert.match(workspace, /Kuyruk \{selectedDocument/);
   assert.match(styles, /grid-template-columns:\s*210px minmax\(0, 1fr\)/);
   assert.match(styles, /height:\s*calc\(100vh - 196px\)/);

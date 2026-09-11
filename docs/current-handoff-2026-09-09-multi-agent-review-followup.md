@@ -97,6 +97,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-11: REV-K06** - Narrow-desktop retest proved the existing one-row journal still overflowed at 1000px even though 1093px was safe. From 861px to 1092px only, the journal now uses a two-tier row: account code + chart name + journal description/source stay on the first tier; labelled `Borç` / `Alacak` inputs move to a second right-aligned tier. Wider desktop layout is unchanged. 1000x700, 900x700, and 900px sidebar open/closed all pass. Acceptance: frontend 235/235, document-inspector 9/9, TypeScript/build PASS. Next audit group: REV-L01.
 
+**Completed 2026-09-12: REV-L01** - Preview controls keep all useful capability but are grouped by purpose: fit modes are segmented, zoom is `− / current % / +`, and the current percentage doubles as the 100% reset. Magnifier is a separate tool group and PDF keeps its real page navigator. HTML intentionally receives no synthetic page navigation. Source-match feedback moved out of the toolbar into a floating document-stage control; its status collapses after a short confirmation period while `Vurguyu kaldır` remains, so source feedback never pushes the invoice down. Acceptance: portal-next 22/22, frontend 235/235, document-inspector 9/9, TypeScript/build PASS. Next: REV-L02 counter semantics.
+
 ## New decisions — 2026-09-09
 
 

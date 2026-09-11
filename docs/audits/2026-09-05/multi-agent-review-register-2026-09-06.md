@@ -434,8 +434,12 @@
 # L — Workbench mikro UX
 
 ## REV-L01 — Preview toolbar yoğunluğu
-**Status:** ÜRÜN KARARI.
-**Audit refs:** [CG-23](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-23--preview-controls-work-but-toolbar-is-dense)
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-12.
+**Audit refs:** CG-23.
+
+**Decision:** Keep the preview capabilities, but reduce first-glance density by grouping them by purpose instead of removing useful controls. HTML receives no artificial page navigation; PDF keeps its real page navigator.
+**Implementation:** Fit modes are now one segmented group (`Sığdır / Genişlik / İçerik` where applicable), zoom is a separate `− / current % / +` group, and magnifier is a separate tool group. The standalone `%100` control was removed; clicking the current percentage now resets to 100%. PDF page navigation remains its own group. Source/provenance status no longer consumes toolbar layout space: it floats over the document stage, shows the match status temporarily, then collapses to the persistent `Vurguyu kaldır` action without pushing the invoice down.
+**Acceptance:** portal-next contracts 22/22 PASS; frontend full suite 235/235 PASS; document-inspector Playwright 9/9 PASS; TypeScript / Next production build PASS. Regression coverage verifies the floating source control is absolute, its status collapses while the clear action remains usable, and HTML did not gain PDF-style page navigation.
 
 ## REV-L02 — `Evrak 12/25` ile `1/3` sayaçlarının anlamı
 **Status:** KONTROL EDİLECEK.

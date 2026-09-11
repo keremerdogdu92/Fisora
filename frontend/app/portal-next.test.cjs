@@ -350,6 +350,17 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(htmlViewer, /sandbox="allow-same-origin"/);
   assert.doesNotMatch(htmlViewer, /allow-scripts/);
   assert.match(styles, /document-source-focus-controls/);
+  assert.match(styles, /document-source-focus-controls[^}]*position:\s*absolute/s);
+  assert.match(styles, /document-source-status-collapse/);
+  assert.match(pdfViewer, /document-fit-controls pdf-viewer-fit-controls/);
+  assert.match(htmlViewer, /document-fit-controls html-viewer-fit-controls/);
+  assert.doesNotMatch(htmlViewer, /pdf-viewer-page-controls/);
+  assert.match(pdfViewer, /document-zoom-controls/);
+  assert.match(htmlViewer, /document-zoom-controls/);
+  assert.match(pdfViewer, /zoom-reset/);
+  assert.match(htmlViewer, /zoom-reset/);
+  assert.doesNotMatch(pdfViewer, /pdf-viewer-zoom-controls/);
+  assert.doesNotMatch(htmlViewer, /html-viewer-zoom-controls/);
   assert.match(styles, /document-magnifier/);
   assert.match(styles, /journal-remove-line/);
   assert.match(styles, /journal-account-line/);

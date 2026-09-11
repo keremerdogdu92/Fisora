@@ -233,7 +233,7 @@ test("HTML invoice magnifier and journal source focus stay calibrated across zoo
   await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
   await magnifierToggle.click();
   await expectHtmlLensCalibratedAtSource(page);
-  await page.locator(".html-document-viewer").getByRole("button", { name: "%100" }).click();
+  await page.locator(".html-document-viewer").getByRole("button", { name: "Yüzde 100'e dön" }).click();
   await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
   await magnifierToggle.click();
   await expectHtmlLensCalibratedAtSource(page);
@@ -345,7 +345,7 @@ test("PDF invoice magnifier and journal source focus use PDF.js text evidence", 
   expect(widthCanvasBox).not.toBeNull();
   await page.mouse.move(widthCanvasBox!.x + 120, widthCanvasBox!.y + 90);
   await expect(pdfLens).toBeVisible();
-  await page.locator(".pdf-document-viewer").getByRole("button", { name: "%100" }).click();
+  await page.locator(".pdf-document-viewer").getByRole("button", { name: "Yüzde 100'e dön" }).click();
   await expect(magnifierToggle).toHaveAttribute("aria-pressed", "false");
   await magnifierToggle.click();
   const fullScaleCanvasBox = await canvas.boundingBox();
@@ -438,7 +438,13 @@ test("multi-source HTML journal highlights all contributing invoice rows", async
   await expect(page.frameLocator(".html-viewer-frame").locator('[data-fisora-source-target="true"]')).toHaveCount(2);
   await sourceChip.click();
   await page.mouse.move(0, 0);
-  await expect(page.locator(".html-document-viewer .document-source-focus-controls")).toContainText("2/2 kaynak bulundu");
+  const htmlSourceOverlay = page.locator(".html-document-viewer .document-source-focus-controls");
+  await expect(htmlSourceOverlay).toContainText("2/2 kaynak bulundu");
+  await expect(htmlSourceOverlay).toHaveCSS("position", "absolute");
+  const htmlSourceStatus = htmlSourceOverlay.locator(".document-source-focus-status");
+  await htmlSourceStatus.evaluate((element) => element.getAnimations().forEach((animation) => animation.finish()));
+  await expect(htmlSourceStatus).toHaveCSS("opacity", "0");
+  await expect(htmlSourceOverlay.getByRole("button", { name: "Vurguyu kaldır" })).toBeVisible();
   await expect(page.frameLocator(".html-viewer-frame").locator('[data-fisora-source-target="true"]')).toHaveCount(2);
 });
 
@@ -468,7 +474,10 @@ test("multi-source PDF journal highlights all contributing invoice rows", async 
   await expect(page.locator(".pdf-source-highlight")).toHaveCount(2);
   await sourceChip.click();
   await page.mouse.move(0, 0);
-  await expect(page.locator(".pdf-document-viewer .document-source-focus-controls")).toContainText("2/2 kaynak bulundu");
+  const pdfSourceOverlay = page.locator(".pdf-document-viewer .document-source-focus-controls");
+  await expect(pdfSourceOverlay).toContainText("2/2 kaynak bulundu");
+  await expect(pdfSourceOverlay).toHaveCSS("position", "absolute");
+  await expect(pdfSourceOverlay.getByRole("button", { name: "Vurguyu kaldır" })).toBeVisible();
   await expect(page.locator(".pdf-source-highlight.pinned")).toHaveCount(2);
 });
 

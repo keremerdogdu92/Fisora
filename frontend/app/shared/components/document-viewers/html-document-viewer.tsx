@@ -409,24 +409,27 @@ export function HtmlDocumentViewer({ fileName, src, sourceTarget, onClearSourceT
   return (
     <section className="html-document-viewer" aria-label={`${fileName} HTML görüntüleyici`}>
       <div className="html-viewer-toolbar document-viewer-toolbar">
-        <div className="html-viewer-zoom-controls">
+        <div className="document-fit-controls html-viewer-fit-controls">
           <button className={fitMode === "page" ? "active" : ""} onClick={() => selectFitMode("page")} type="button">Sığdır</button>
           <button className={fitMode === "width" ? "active" : ""} onClick={() => selectFitMode("width")} type="button">Genişlik</button>
           <button className={fitMode === "content" ? "active" : ""} onClick={() => selectFitMode("content")} type="button">İçerik</button>
-          <button className={fitMode === "custom" && Math.abs(effectiveScale - 1) < 0.01 ? "active" : ""} onClick={() => applyCustomZoom(1)} type="button">%100</button>
+        </div>
+        <div className="document-zoom-controls">
           <button onClick={() => applyCustomZoom(effectiveScale - 0.1)} type="button" aria-label="Uzaklaştır">−</button>
-          <span>{Math.round(effectiveScale * 100)}%</span>
+          <button aria-label="Yüzde 100'e dön" className={`zoom-reset${Math.abs(effectiveScale - 1) < 0.01 ? " active" : ""}`} onClick={() => applyCustomZoom(1)} title="%100'e dön" type="button">{Math.round(effectiveScale * 100)}%</button>
           <button onClick={() => applyCustomZoom(effectiveScale + 0.1)} type="button" aria-label="Yakınlaştır">+</button>
+        </div>
+        <div className="document-tool-controls">
           <button aria-pressed={magnifierRequested} className={`magnifier-toggle${magnifierRequested ? " active" : ""}`} onClick={toggleMagnifier} title="İmlecin çevresini büyüt" type="button">Büyüteç</button>
         </div>
+      </div>
+      <div className="html-viewer-stage" onScroll={hideLens} ref={stageRef}>
         {sourceTarget?.pinned ? (
-          <div className="document-source-focus-controls">
-            <span>{sourceMatchStatus || "Kaynak aranıyor…"}</span>
+          <div className="document-source-focus-controls" key={`${sourceTarget.key}:${sourceMatchStatus}`}>
+            <span className="document-source-focus-status">{sourceMatchStatus || "Kaynak aranıyor…"}</span>
             <button onClick={clearSourceFocus} type="button">Vurguyu kaldır</button>
           </div>
         ) : null}
-      </div>
-      <div className="html-viewer-stage" onScroll={hideLens} ref={stageRef}>
         <div className="html-viewer-canvas" ref={canvasRef} style={{ height: `${viewportBounds.height * effectiveScale}px`, width: `${viewportBounds.width * effectiveScale}px` }}>
           <iframe
             className="html-viewer-frame"

@@ -2469,8 +2469,25 @@
   padding: 2px 5px;
 }
 .portal-next-theme .pdf-viewer-page-controls,
-.portal-next-theme .pdf-viewer-zoom-controls,
-.portal-next-theme .html-viewer-zoom-controls { align-items: center; display: flex; gap: 4px; }
+.portal-next-theme .document-fit-controls,
+.portal-next-theme .document-zoom-controls,
+.portal-next-theme .document-tool-controls {
+  align-items: center;
+  display: flex;
+}
+.portal-next-theme .pdf-viewer-page-controls { gap: 4px; }
+.portal-next-theme .document-fit-controls,
+.portal-next-theme .document-zoom-controls { gap: 0; }
+.portal-next-theme .document-tool-controls { margin-left: auto; }
+.portal-next-theme .document-fit-controls button,
+.portal-next-theme .document-zoom-controls button { border-radius: 0; }
+.portal-next-theme .document-fit-controls button:first-child,
+.portal-next-theme .document-zoom-controls button:first-child { border-radius: 4px 0 0 4px; }
+.portal-next-theme .document-fit-controls button:last-child,
+.portal-next-theme .document-zoom-controls button:last-child { border-radius: 0 4px 4px 0; }
+.portal-next-theme .document-fit-controls button + button,
+.portal-next-theme .document-zoom-controls button + button { margin-left: -1px; }
+.portal-next-theme .document-zoom-controls .zoom-reset { min-width: 48px; }
 .portal-next-theme .document-viewer-toolbar button {
   background: #fff;
   border: 1px solid var(--border);
@@ -2553,19 +2570,44 @@
 /* Source-to-journal navigation keeps provenance visible without weakening the HTML sandbox. */
 .portal-next-theme .document-source-focus-controls {
   align-items: center;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.18);
   display: flex;
   gap: 5px;
-  margin-left: auto;
-  min-width: 0;
+  max-width: calc(100% - 16px);
+  padding: 5px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 35;
 }
-.portal-next-theme .document-source-focus-controls span {
-  color: #64748b;
-  max-width: 180px;
+.portal-next-theme .document-source-focus-status {
+  animation: document-source-status-collapse 3s ease forwards;
+  color: #475569;
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 800;
+  max-width: 190px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .portal-next-theme .document-source-focus-controls button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 3px 6px;
   white-space: nowrap;
+}
+@keyframes document-source-status-collapse {
+  0%, 72% { max-width: 190px; opacity: 1; }
+  100% { max-width: 0; opacity: 0; }
 }
 .portal-next-theme .pdf-source-highlight {
   background: rgba(254, 243, 199, 0.48);

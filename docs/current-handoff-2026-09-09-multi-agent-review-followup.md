@@ -88,6 +88,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Closed 2026-09-11: REV-H05 / REV-H06** - H05 is a duplicate of the already accepted REV-E03 period model: review period and upload accounting period are separate; New Uploads keeps the explicitly shown previous-completed-month target and no new selector/state is added. H06 is an audit-tool file chooser limitation, not a Fisora product bug; real Windows upload was already exercised successfully. H section is closed.
 
+**Completed 2026-09-11: REV-K01** - Turkish accounting number formatting is now presentation-only for read-only amounts. Canonical/backend values and editable debit/credit inputs are unchanged. The formatter is string-based (no floating-point reparse), does not invent currency, and is applied to Workbench/document/statement/source-evidence/Reading Quality amount displays. Acceptance: formatter 3/3, frontend 233/233, TypeScript/build PASS. Editable localized amount entry remains parked in `docs/open-questions.md`. Next: REV-K02 (`12K TL` retest).
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

@@ -385,9 +385,11 @@
 # K — Muhasebe okunabilirliği ve responsive
 
 ## REV-K01 — Türk muhasebe sayı formatı
-**Status:** KONTROL EDİLECEK / ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
 **Audit refs:** [AG FINDING-05](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-05-türk-muhasebe-standardına-uymayan-rakam-formatı) · CG canlı ekranlarında `238.69`, `1034.33`, `1500.00` doğrulandı.
-**Question:** `12.000,00`, `12.000,00 TL` veya `₺12.000,00` standardı hangisi?
+**Decision:** K01 is presentation-only. Canonical/backend amounts and editable journal debit/credit values remain unchanged; localized editable input is parked separately in `docs/open-questions.md`.
+**Implementation:** Added a string-based read-only amount formatter that groups thousands with dots and uses comma decimals without converting through JavaScript `Number`. Workbench document totals, queue totals, statement amounts, source-evidence amounts, and Reading Quality row amounts use the formatter. Currency symbols are not invented when currency is not explicit.
+**Acceptance:** Money formatter 3/3 PASS; frontend full suite 233/233 PASS; TypeScript PASS; Next production build PASS. Regression contract confirms `value={line.debit}` / `value={line.credit}` remain canonical editable values.
 
 ## REV-K02 — `12K TL` kısaltması iddiası
 **Status:** TEKRAR TEST.

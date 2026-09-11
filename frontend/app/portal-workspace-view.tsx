@@ -10,6 +10,7 @@ import {
   reviewCockpitQueues,
 } from "./features/documents/document-workflow-model";
 import { reviewReasonLabel } from "./portal-normalization";
+import { formatReadOnlyAmount } from "./portal-money-format";
 import { AiTracePanel, DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import { PortalNextWorkspaceControls } from "./portal-next/portal-next-workspace-controls";
 import type {
@@ -565,7 +566,7 @@ export function AccountantWorkspace({
                     <button className={active ? "active" : ""} onClick={() => selectDocument(queueDocument)} type="button">
                       <span>
                         <strong>{queueDocument.fileName}</strong>
-                        <b>{queueDocument.amount || "-"}</b>
+                        <b>{formatReadOnlyAmount(queueDocument.amount)}</b>
                       </span>
                       <small>{queueDocument.issueDate || queueDocument.uploadedAt || "-"} · {labelForIntakeCategory(queueDocument.intakeCategory)}</small>
                       {queueDocument.status === "review_required" ? null : <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>}
@@ -672,7 +673,7 @@ export function AccountantWorkspace({
                   <span>{document.uploadedAt}</span>
                 </button>
                 <div>{labelForIntakeCategory(document.intakeCategory)}</div>
-                <div>{document.amount || "-"}</div>
+                <div>{formatReadOnlyAmount(document.amount)}</div>
                 <div>
                   <em>{document.status === "review_required" ? "Müşavir onayı" : formatStatus(document.status)}</em>
                   {document.reviewReasons.length ? (

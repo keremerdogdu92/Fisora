@@ -9,6 +9,7 @@ import { useOriginalDocumentPreview } from "../portal-review-panels";
 import { ResearchKnowledgeView } from "../portal-research-view";
 import { HtmlDocumentViewer } from "../shared/components/document-viewers/html-document-viewer";
 import type { DocumentSourceTarget, LocalSession, PilotDocument, SourceReviewRow } from "../portal-types";
+import { formatReadOnlyAmount } from "../portal-money-format";
 
 type AgentSummary = {
   key: string; name: string; statusLabel: string; touchedCount: number;
@@ -140,7 +141,7 @@ function ReaderQualityPanel({ documents, session }: { documents: PilotDocument[]
               return <button className={compared.matched ? "portal-next-reader-row matched" : "portal-next-reader-row attention"} key={`${row.sourcePosition}:${index}`} onClick={() => focusRow(row, index)} type="button">
                 <div className="portal-next-reader-row-head"><strong>{row.sourcePosition || String(index + 1)} · {row.description || row.sourceText || "Satır"}</strong><span>{compared.matched ? "Eşleşti" : "Kontrol"}</span></div>
                 <div><small>Reader</small><p>{compared.readerText || "Kaynak satırı bulunamadı."}</p></div>
-                <div><small>Fisora'da</small><p>{row.description || row.sourceText || "-"}{row.amount ? ` · ${row.amount}` : ""}</p></div>
+                <div><small>Fisora'da</small><p>{row.description || row.sourceText || "-"}{row.amount ? ` · ${formatReadOnlyAmount(row.amount)}` : ""}</p></div>
               </button>;
             })}
             {!rows.length ? <p className="empty">Bu belge için Fisora UI satırı oluşmamış.</p> : null}

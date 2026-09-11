@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, classifyDraftAccountCode, draftAccountResolutionIssues, filterAccountOptions, nextSelectableAccountIndex, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
+import { formatReadOnlyAmount } from "./portal-money-format";
 import { vatGroupEvidenceText } from "./portal-source-evidence";
 import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
@@ -637,7 +638,7 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
         <aside className="document-info-panel" aria-label="Belge bilgileri">
           <Info label="Belge türü" value={document.documentType || document.intakeCategory} />
           <Info label="Tarih" value={document.issueDate || "-"} />
-          <Info label="Tutar" value={document.amount || "-"} />
+          <Info label="Tutar" value={formatReadOnlyAmount(document.amount)} />
           <Info label="KDV" value={document.vatRates.length ? document.vatRates.join(", ") : "-"} />
           <Info label="Satir" value={typeof document.canonicalLineCount === "number" ? String(document.canonicalLineCount) : "-"} />
           <Info
@@ -1502,7 +1503,7 @@ function ManualDraftEditor({
                         type="button"
                       >
                         ↗ Kaynak {line.source_position || line.source_line_numbers?.join(", ") || index + 1}
-                        {line.source_amount ? ` · ${line.source_amount}` : ""}
+                        {line.source_amount ? ` · ${formatReadOnlyAmount(line.source_amount)}` : ""}
                       </button>
                       {(line.source_amount_label || line.source_amount_basis || vatGroupEvidenceText(line)) ? (
                         <details className="source-review-details">
@@ -1783,7 +1784,7 @@ function StatementReviewPanel({
                   <td>{line.transaction_date || "-"}</td>
                   <td>{line.description || "-"}</td>
                   <td>{statementDirectionLabel(line.direction)}</td>
-                  <td>{line.amount}</td>
+                  <td>{formatReadOnlyAmount(line.amount)}</td>
                   <td>{statementStatusLabel(line.accountant_review_status)}</td>
                 </tr>
               ))}

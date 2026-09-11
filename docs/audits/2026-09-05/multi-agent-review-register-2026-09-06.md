@@ -284,8 +284,11 @@
 **Acceptance:** Upload-summary unit tests cover mixed, duplicate-only, and all-accepted cases; `upload-api.test.cjs` 60/60 PASS; frontend full suite 230/230 PASS; TypeScript PASS; Next production build PASS.
 
 ## REV-H04 — Upload geçmişi raw ISO timestamp
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
 **Audit refs:** [CG-20](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-20--upload-history-uses-raw-iso-timestamp) · [AG FINDING-07](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-07-üst-bar-ile-gösterge-paneli-arasındaki-metrik-çelişkisi) (AG Top-10 ISSUE-07 / timestamp observation)
+**Root cause:** Backend/workspace timestamps were correctly kept as ISO values in `uploadedAt`, but the New Uploads history table rendered that raw field directly.
+**Implementation:** Added `formatPortalDateTime()` in the shared portal formatter layer. Upload history now formats valid timestamps in `Europe/Istanbul` as `DD.MM.YYYY · HH:mm`; invalid/non-date legacy display strings are preserved and the underlying `uploadedAt` value remains unchanged for sorting and calculations.
+**Acceptance:** portal-next contract 22/22 PASS; frontend full suite 230/230 PASS; TypeScript PASS; Next production build PASS.
 
 ## REV-H05 — Upload dönemi görünürlüğü/değiştirilebilirliği
 **Status:** ÜRÜN KARARI.

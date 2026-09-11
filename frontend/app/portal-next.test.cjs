@@ -397,6 +397,7 @@ test("next quick upload keeps invoice staging separate from the accounting workb
   assert.match(uploadView, /"sales_invoice"/);
   assert.match(uploadView, /accept="\.pdf,\.html,\.htm,\.xml,\.zip"/);
   assert.match(uploadView, /onUpload\(pendingFiles\)/);
+  assert.match(uploadView, /formatPortalDateTime\(document\.uploadedAt\)/);
   assert.match(uploadView, /Son yüklemeler/);
 });
 

@@ -38,6 +38,24 @@ export function longPeriodLabel(period: string) {
   return label.charAt(0).toLocaleUpperCase("tr-TR") + label.slice(1);
 }
 
+export function formatPortalDateTime(value: string) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "-";
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return normalized;
+  const parts = new Intl.DateTimeFormat("tr-TR", {
+    timeZone: "Europe/Istanbul",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(parsed);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.day}.${byType.month}.${byType.year} \u00b7 ${byType.hour}:${byType.minute}`;
+}
+
 export function isInProgress(status: PilotStatus) {
   return status === "uploaded" || status === "queued" || status === "processing";
 }

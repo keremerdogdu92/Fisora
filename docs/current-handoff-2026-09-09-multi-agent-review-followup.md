@@ -84,6 +84,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-11: REV-H03** - upload completion stays on the existing status line but now uses a compact batch summary (`total · accepted · previously uploaded · failed`). Failure names appear only when failures exist; duplicate-only upload explicitly says no new record was created. Acceptance: upload API 60/60, frontend 230/230, TypeScript/build PASS. Next upload audit topic is REV-H04 (raw upload timestamp presentation).
 
+**Completed 2026-09-11: REV-H04** - New Uploads history no longer exposes raw ISO timestamps. `uploadedAt` stays canonical/raw in data, while the table formats valid timestamps in the `Europe/Istanbul` timezone as `DD.MM.YYYY · HH:mm`. Acceptance: portal-next 22/22, frontend 230/230, TypeScript/build PASS. Next upload topic is REV-H05 (upload period visibility/changeability product decision).
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

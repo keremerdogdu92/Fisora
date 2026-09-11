@@ -5,6 +5,7 @@
 import { FileText, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { IntakeCategory, PilotClient, PilotDocument, PilotStatus } from "../portal-types";
+import { formatPortalDateTime } from "../portal-formatters";
 
 const invoiceCategories = new Set<IntakeCategory>(["purchase_invoice", "sales_invoice"]);
 const acceptedExtensions = new Set(["pdf", "html", "htm", "xml", "zip"]);
@@ -257,7 +258,7 @@ export function PortalNextUploadView({
                   <td data-label="Belge">{document.fileName}</td>
                   <td data-label="Tür">{categoryLabel(document.intakeCategory)}</td>
                   <td data-label="Durum"><span className={`portal-next-upload-status ${statusTone(document.status)}`}>{statusLabels[document.status]}</span></td>
-                  <td data-label="Zaman">{document.uploadedAt || "-"}</td>
+                  <td data-label="Zaman">{formatPortalDateTime(document.uploadedAt)}</td>
                 </tr>
               ))}
               {!recentDocuments.length ? (

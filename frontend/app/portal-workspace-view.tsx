@@ -468,7 +468,7 @@ export function AccountantWorkspace({
             <button className="fullscreen-action" onClick={() => void toggleWorkspaceFullscreen(true)} title="Çalışma masasını tarayıcı tam ekranında aç" type="button">
               <span aria-hidden="true">⛶</span> Tam ekran
             </button>
-            <span>Evrak {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</span>
+            <span>Kuyruk {selectedDocument && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</span>
           </div>
         </section>
       ) : (
@@ -530,7 +530,7 @@ export function AccountantWorkspace({
             <div className="portal-next-focus-document">
               <span>{canonicalDocumentReady ? selectedDocument?.fileName : queueIsEmpty ? "Bu filtrede belge yok" : "Belge görünümü güncelleniyor"}</span>
               {queueHidden ? (
-                <strong>Evrak {canonicalDocumentReady && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
+                <strong>Kuyruk {canonicalDocumentReady && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
               ) : null}
             </div>
             <WorkbenchQueueFilters

@@ -97,6 +97,7 @@ test("controlled PDF viewer is enabled only for the next presentation", () => {
   assert.match(pdfViewer, /Genişlik/);
   assert.match(pdfViewer, /%100/);
   assert.match(pdfViewer, /pageNumber/);
+  assert.match(pdfViewer, /Sayfa \${pageNumber} \/ \${pageCount}/);
   assert.match(pdfViewer, /effectiveScale/);
 });
 
@@ -249,7 +250,7 @@ test("next workbench prioritizes queue, source document, journal, and focus mode
   assert.match(workspace, /journalHidden/);
   assert.match(workspace, /mobilePane/);
   assert.match(workspace, /portal-next-focus-document/);
-  assert.match(workspace, /Evrak \{selectedDocument/);
+  assert.match(workspace, /Kuyruk \{selectedDocument/);
   assert.match(styles, /grid-template-columns:\s*210px minmax\(0, 1fr\)/);
   assert.match(styles, /height:\s*calc\(100vh - 196px\)/);
   assert.match(styles, /min-height:\s*min\(590px, calc\(100vh - 196px\)\)/);

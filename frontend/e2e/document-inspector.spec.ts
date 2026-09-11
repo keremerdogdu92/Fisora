@@ -258,14 +258,14 @@ test("queue visibility and focus mode preserve the active workbench", async ({ p
   const focusToolbar = page.locator(".portal-next-focus-toolbar");
   await focusToolbar.getByRole("button", { name: "Kuyruğu gizle" }).click();
   await expect(queue).toBeHidden();
-  await expect(focusToolbar.getByText("Evrak 1 / 1", { exact: true })).toBeVisible();
+  await expect(focusToolbar.getByText("Kuyruk 1 / 1", { exact: true })).toBeVisible();
   const focusedMainBox = await main.boundingBox();
   expect(focusedMainBox).not.toBeNull();
   expect(focusedMainBox!.width).toBeGreaterThan(700);
 
   await focusToolbar.getByRole("button", { name: "Kuyruğu göster" }).click();
   await expect(queue).toBeVisible();
-  await expect(focusToolbar.getByText("Evrak 1 / 1", { exact: true })).toHaveCount(0);
+  await expect(focusToolbar.getByText("Kuyruk 1 / 1", { exact: true })).toHaveCount(0);
   await focusToolbar.getByRole("button", { name: "× Kapat" }).click();
   await expect(stage).not.toHaveClass(/focus-mode/);
 
@@ -320,6 +320,7 @@ test("PDF invoice magnifier and journal source focus use PDF.js text evidence", 
 
   const canvas = page.locator(".pdf-viewer-stage > canvas");
   await expect(canvas).toBeVisible();
+  await expect(page.locator(".pdf-viewer-page-controls")).toContainText("Sayfa 1 / 1");
   await expect(page.locator(".pdf-viewer-status")).toHaveCount(0);
   const rasterScale = await canvas.evaluate((element) => (element as HTMLCanvasElement).width / Math.max(element.getBoundingClientRect().width, 1));
   expect(rasterScale).toBeGreaterThan(1.5);

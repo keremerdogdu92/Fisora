@@ -99,6 +99,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-12: REV-L01** - Preview controls keep all useful capability but are grouped by purpose: fit modes are segmented, zoom is `− / current % / +`, and the current percentage doubles as the 100% reset. Magnifier is a separate tool group and PDF keeps its real page navigator. HTML intentionally receives no synthetic page navigation. Source-match feedback moved out of the toolbar into a floating document-stage control; its status collapses after a short confirmation period while `Vurguyu kaldır` remains, so source feedback never pushes the invoice down. Acceptance: portal-next 22/22, frontend 235/235, document-inspector 9/9, TypeScript/build PASS. Next: REV-L02 counter semantics.
 
+**Completed 2026-09-12: REV-L02** - Workbench queue position and PDF page position are now explicitly distinct: the review queue uses `Kuyruk n / total`, while the PDF viewer uses `Sayfa n / total`. HTML intentionally keeps no synthetic page counter. Navigation behavior and ordering are unchanged. Acceptance: portal-next 22/22, document-inspector 9/9, frontend 235/235, TypeScript/build PASS. Next: REV-L03.
+
 ## New decisions — 2026-09-09
 
 

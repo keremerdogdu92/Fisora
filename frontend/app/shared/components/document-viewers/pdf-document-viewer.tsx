@@ -408,7 +408,7 @@ export function PdfDocumentViewer({ fileName, src, sourceTarget, onClearSourceTa
       <div className="pdf-viewer-toolbar document-viewer-toolbar">
         <div className="pdf-viewer-page-controls">
           <button disabled={pageNumber <= 1} onClick={() => setPageNumber((value) => Math.max(1, value - 1))} type="button">‹</button>
-          <span>{pageCount ? `${pageNumber} / ${pageCount}` : "- / -"}</span>
+          <span>{pageCount ? `Sayfa ${pageNumber} / ${pageCount}` : "Sayfa - / -"}</span>
           <button disabled={!pageCount || pageNumber >= pageCount} onClick={() => setPageNumber((value) => Math.min(pageCount, value + 1))} type="button">›</button>
         </div>
         <div className="document-fit-controls pdf-viewer-fit-controls">

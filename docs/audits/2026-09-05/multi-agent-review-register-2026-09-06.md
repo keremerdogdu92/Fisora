@@ -441,9 +441,13 @@
 **Implementation:** Fit modes are now one segmented group (`Sığdır / Genişlik / İçerik` where applicable), zoom is a separate `− / current % / +` group, and magnifier is a separate tool group. The standalone `%100` control was removed; clicking the current percentage now resets to 100%. PDF page navigation remains its own group. Source/provenance status no longer consumes toolbar layout space: it floats over the document stage, shows the match status temporarily, then collapses to the persistent `Vurguyu kaldır` action without pushing the invoice down.
 **Acceptance:** portal-next contracts 22/22 PASS; frontend full suite 235/235 PASS; document-inspector Playwright 9/9 PASS; TypeScript / Next production build PASS. Regression coverage verifies the floating source control is absolute, its status collapses while the clear action remains usable, and HTML did not gain PDF-style page navigation.
 
-## REV-L02 — `Evrak 12/25` ile `1/3` sayaçlarının anlamı
-**Status:** KONTROL EDİLECEK.
+## REV-L02 — Kuyruk konumu ile PDF sayfa sayacının ayrımı
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-12.
 **Audit refs:** [CG-18](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-18--queuepage-counters-are-easy-to-confuse)
+
+**Finding:** Retest confirmed two unrelated navigation levels used the same bare `x / y` visual language: `Evrak 12 / 25` represented the selected document inside the active review queue, while `1 / 3` represented the current PDF page.
+**Implementation:** Workbench position is now labelled `Kuyruk 12 / 25`; PDF navigation is labelled `Sayfa 1 / 3`. HTML keeps no synthetic page counter. No queue ordering, PDF paging, or document-selection behavior changed.
+**Acceptance:** portal-next contract 22/22 PASS; document-inspector Playwright 9/9 PASS; full frontend 235/235 PASS; TypeScript and Next production build PASS.
 
 ## REV-L03 — Kuyruk tekrar açılınca selected item'a scroll etmiyor
 **Status:** KONTROL EDİLECEK.

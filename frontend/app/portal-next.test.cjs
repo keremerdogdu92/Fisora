@@ -312,7 +312,8 @@ test("journal source links locate and highlight the matching PDF or sandboxed HT
   assert.match(review, /className="secondary"/);
   assert.match(review, /className="secondary danger"/);
   assert.match(review, /chartAccountNameForCode/);
-  assert.match(review, /aria-label="Fatura satırı açıklaması"/);
+  assert.match(review, /aria-label="Fiş satırı açıklaması"/);
+  assert.doesNotMatch(review, /aria-label="Fatura satırı açıklaması"/);
   assert.match(review, /journal-remove-line/);
   assert.match(review, /aria-label="Satırı sil"/);
   assert.match(review, /onFocusSource/);

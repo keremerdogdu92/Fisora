@@ -22,6 +22,19 @@
   grid-template-columns: 64px minmax(0, 1fr);
 }
 
+@media (min-width: 861px) and (max-width: 1199px) {
+  .portal-next-theme { grid-template-columns: 64px minmax(0, 1fr); }
+  .portal-next-theme .portal-main-shell { grid-column: 2; }
+  .portal-next-theme:not(.sidebar-collapsed) .portal-next-sidebar {
+    box-shadow: 20px 0 44px rgba(15, 23, 42, 0.24);
+    left: 0;
+    position: fixed;
+    top: 0;
+    width: 232px;
+    z-index: 120;
+  }
+}
+
 .portal-next-sidebar {
   background: #14201f;
   color: #e8f1ee;
@@ -2099,6 +2112,11 @@
   min-height: 0;
   overflow: hidden;
 }
+@media (min-width: 861px) and (max-width: 1199px) {
+  .portal-next-workbench-stage.next .document-review-main {
+    grid-template-columns: minmax(350px, 0.43fr) minmax(460px, 0.57fr);
+  }
+}
 .portal-next-workbench-stage.next .document-review-main > .review-panel {
   border: 0;
   border-radius: 0;
@@ -2304,13 +2322,15 @@
 }
 .portal-next-theme .journal-account-name {
   color: #35485a;
+  display: -webkit-box;
   font-size: 0.78rem;
   font-weight: 760;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   line-height: 1.25;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 .portal-next-theme .journal-ledger th:nth-child(1),
 .portal-next-theme .journal-ledger td:nth-child(1) { width: auto; }

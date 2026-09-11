@@ -43,3 +43,13 @@ test("journal typography is stronger without abandoning compact rows", () => {
   assert.match(css, /\.portal-next-theme \.journal-account-name \{[^}]*font-size:\s*0\.78rem;[^}]*font-weight:\s*7\d\d;/s);
   assert.match(css, /\.portal-next-theme \.journal-ledger td:nth-child\(2\) input,[\s\S]*font-variant-numeric:\s*tabular-nums;/);
 });
+
+test("journal separates final-accountant description from source evidence and keeps account names readable", () => {
+  const source = panels();
+  const css = nextStyles();
+  assert.match(source, /aria-label="Fi\u015f sat\u0131r\u0131 a\u00e7\u0131klamas\u0131"/);
+  assert.match(source, /title="Fi\u015f sat\u0131r\u0131 a\u00e7\u0131klamas\u0131"/);
+  assert.doesNotMatch(source, /aria-label="Fatura sat\u0131r\u0131 a\u00e7\u0131klamas\u0131"/);
+  assert.match(css, /\.portal-next-theme \.journal-account-name \{[^}]*display:\s*-webkit-box;[^}]*-webkit-line-clamp:\s*2;[^}]*white-space:\s*normal;/s);
+  assert.doesNotMatch(css, /\.portal-next-theme \.journal-account-name \{[^}]*text-overflow:\s*ellipsis;/s);
+});

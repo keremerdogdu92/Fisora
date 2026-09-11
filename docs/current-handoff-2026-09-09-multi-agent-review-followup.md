@@ -93,7 +93,10 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 **Completed 2026-09-11: REV-K02** - Outputs no longer abbreviates accounting totals as `12K TL` / `1,5M TL`. The existing period-total calculation is unchanged; only the final display formatter now renders the full `tr-TR` value with two decimals (for example `12.000,00 TL`). Acceptance: portal-next 22/22, frontend 233/233, TypeScript/build PASS. Next: REV-K03 critical account-name truncation.
 
 
+**Completed 2026-09-11: REV-K03 / REV-K04 / REV-K05** - Workbench journal hierarchy is now explicit and responsive: account code stays beside the real chart-of-accounts name; the chart name may wrap to at most two lines; `line.description` is labelled `Fiş satırı açıklaması` because it is Final Accountant output, while original invoice `source_text` remains separate provenance behind the Source link. 1366x768 keeps the horizontal account hierarchy. At the 125% equivalent 1093x614 range, the journal receives a 460px minimum and an expanded sidebar overlays instead of squeezing the workspace. Debit/credit inputs and canonical accounting values are unchanged. Acceptance: source contracts 5/5, frontend 234/234, document-inspector Playwright 9/9, TypeScript/build PASS. Next: REV-K06 remains a separate product decision.
+
 ## New decisions — 2026-09-09
+
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior
 

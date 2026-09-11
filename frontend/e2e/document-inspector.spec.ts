@@ -471,3 +471,75 @@ test("multi-source PDF journal highlights all contributing invoice rows", async 
   await expect(page.locator(".pdf-document-viewer .document-source-focus-controls")).toContainText("2/2 kaynak bulundu");
   await expect(page.locator(".pdf-source-highlight.pinned")).toHaveCount(2);
 });
+
+
+test("long chart account names stay readable at laptop width and 125 percent equivalent", async ({ page }) => {
+  const longAccountName = "Yurtiçi Kargo Gönderim Bedelleri";
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await setupInspector(page, "account-readability.html", "text/html", html, (workspace) => {
+    (workspace.chart_accounts.accounts as Array<Record<string, unknown>>).push({
+      raw_account_code: "770.01.003",
+      normalized_account_code: "770.01.003",
+      account_name: longAccountName,
+      is_detail_account: true,
+    });
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result["draft_status"] = "draft_ready";
+    result["source_review_rows"] = [];
+    result["draft_lines"] = [{
+      account_code: "770.01.003",
+      description: "Kargo gideri",
+      debit: "540.00",
+      credit: "0.00",
+      source_line_numbers: [1],
+      source_position: "1",
+      source_text: SOURCE_TEXT,
+    }];
+  });
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const accountName = page.locator(".journal-account-name").first();
+  await expect(accountName).toHaveText(longAccountName);
+  await expect(page.getByLabel("Fiş satırı açıklaması")).toHaveValue("Kargo gideri");
+  await expect(page.getByLabel("Fatura satırı açıklaması")).toHaveCount(0);
+
+  async function expectReadableJournal(viewportWidth: number) {
+    const metrics = await accountName.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      return {
+        clamp: style.webkitLineClamp,
+        whiteSpace: style.whiteSpace,
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        lineHeight,
+      };
+    });
+    expect(metrics.clamp).toBe("2");
+    expect(metrics.whiteSpace).toBe("normal");
+    expect(metrics.clientHeight).toBeLessThanOrEqual(metrics.lineHeight * 2 + 2);
+    expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight + 1);
+
+    const row = page.locator(".journal-source-row").first();
+    const rowBox = await row.boundingBox();
+    const debitBox = await row.locator('input[inputmode="decimal"]').nth(0).boundingBox();
+    const creditBox = await row.locator('input[inputmode="decimal"]').nth(1).boundingBox();
+    expect(rowBox).not.toBeNull();
+    expect(debitBox).not.toBeNull();
+    expect(creditBox).not.toBeNull();
+    expect(rowBox!.x + rowBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
+    expect(debitBox!.x + debitBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
+    expect(creditBox!.x + creditBox!.width).toBeLessThanOrEqual(viewportWidth + 1);
+  }
+
+  await expectReadableJournal(1366);
+  await page.setViewportSize({ width: 1093, height: 614 });
+  await expectReadableJournal(1093);
+  await page.getByRole("button", { name: "Menüyü genişlet" }).click();
+  await expect(page.locator(".portal-next-sidebar")).not.toHaveClass(/collapsed/);
+  await expectReadableJournal(1093);
+  await page.getByRole("button", { name: "Menüyü daralt" }).click();
+  await expect(page.locator(".portal-next-sidebar")).toHaveClass(/collapsed/);
+  await expectReadableJournal(1093);
+});

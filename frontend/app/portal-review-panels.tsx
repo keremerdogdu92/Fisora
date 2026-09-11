@@ -1482,7 +1482,7 @@ function ManualDraftEditor({
                     </div>
                   ) : null}
                   <input
-                    aria-label="Fatura satırı açıklaması"
+                    aria-label="Fiş satırı açıklaması"
                     onChange={(event) => onUpdateLine(index, { description: event.target.value })}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -1491,7 +1491,7 @@ function ManualDraftEditor({
                       }
                     }}
                     ref={(element) => { descriptionRefs.current[index] = element; }}
-                    title="Fatura satırından gelen hareket açıklaması"
+                    title="Fiş satırı açıklaması"
                     value={line.description}
                   />
                   {lineSourceTarget ? (

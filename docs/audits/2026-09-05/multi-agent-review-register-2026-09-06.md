@@ -400,17 +400,28 @@
 **Acceptance:** portal-next 22/22 PASS; frontend full suite 233/233 PASS; TypeScript PASS; Next production build PASS. Regression guard rejects reintroduction of `formatCompactTl` / `K` / `M` formatter branches.
 
 ## REV-K03 — Kritik hesap adlarının truncation'ı
-**Status:** KONTROL EDİLECEK.
-**Audit refs:** [CG-19](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-19--critical-account-text-truncates) · [AG FINDING-06](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-06-1366768-laptop-çözünürlüğünde-hesap-adlarının-kesilmesi)
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
+**Audit refs:** CG-19 / AG FINDING-06.
 
-## REV-K04 — 1366×768 account readability
-**Status:** KONTROL EDİLECEK.
-**Audit refs:** AG FINDING-06 · CG-14.
-**Conflict:** CG genel layout'u 100% zoom'da kullanılabilir buldu; AG hesap adı kırpılması gördü.
+**Finding:** Retest confirmed the chart-account name was forced to one-line ellipsis next to the account code, hiding critical account identity on narrower workbench widths.
+**Implementation:** The account code remains beside the chart-of-accounts name. The name may wrap to at most two lines instead of one-line ellipsis. `line.description` is now correctly labelled `Fiş satırı açıklaması`; it is Final Accountant output, while original invoice text remains separate source evidence/provenance behind the Source link and is not overwritten.
+**Acceptance:** Workbench source-contract tests 5/5 PASS; frontend full suite 234/234 PASS; document-inspector Playwright 9/9 PASS; TypeScript PASS; Next production build PASS.
+
+## REV-K04 — 1366x768 account readability
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
+**Audit refs:** AG FINDING-06 / CG-14.
+
+**Finding:** 1366x768 retest showed the horizontal account-code + account-name hierarchy can remain intact when the account name is allowed a bounded two-line wrap.
+**Implementation:** Kept account code and chart name side-by-side; no debit/credit input widths or canonical accounting values were changed.
+**Acceptance:** Dedicated Playwright coverage verifies the long account name `Yurtiçi Kargo Gönderim Bedelleri` at 1366x768 without journal overflow or hidden account-name content.
 
 ## REV-K05 — %125 zoom + açık sidebar sıkışması
-**Status:** KONTROL EDİLECEK.
-**Audit refs:** [CG-14](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-14--125-browser-zoom-with-expanded-sidebar-compresses-accounting-pane)
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
+**Audit refs:** CG-14.
+
+**Finding:** At the 125% equivalent viewport (1093x614 CSS px), expanding the 232px sidebar squeezed the accounting pane and could push the journal outside the viewport.
+**Implementation:** Between 861px and 1199px the workbench keeps a 64px rail allocation and an expanded sidebar overlays the workspace instead of reflowing/squeezing it. In the same range the source/journal split gives the journal a 460px minimum while preserving the source preview. At normal 1366px desktop width the existing desktop layout remains unchanged.
+**Acceptance:** Dedicated Playwright coverage passes at 1093x614 with sidebar collapsed and expanded; journal, debit, and credit controls remain inside the viewport and the critical account name remains readable. Full frontend 234/234 PASS; document-inspector 9/9 PASS; TypeScript/build PASS.
 
 ## REV-K06 — Muhasebe satırı iki satırlı responsive layout
 **Status:** ÜRÜN KARARI.

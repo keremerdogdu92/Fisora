@@ -473,7 +473,7 @@ test("multi-source PDF journal highlights all contributing invoice rows", async 
 });
 
 
-test("long chart account names stay readable at laptop width and 125 percent equivalent", async ({ page }) => {
+test("journal stays readable through narrow desktop two-tier layout", async ({ page }) => {
   const longAccountName = "Yurtiçi Kargo Gönderim Bedelleri";
   const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
   await page.setViewportSize({ width: 1366, height: 768 });
@@ -536,10 +536,30 @@ test("long chart account names stay readable at laptop width and 125 percent equ
   await expectReadableJournal(1366);
   await page.setViewportSize({ width: 1093, height: 614 });
   await expectReadableJournal(1093);
-  await page.getByRole("button", { name: "Menüyü genişlet" }).click();
+  async function expectTwoTierJournal() {
+    const row = page.locator(".journal-source-row").first();
+    expect(await row.evaluate((element) => getComputedStyle(element).display)).toBe("grid");
+    await expect(row.locator(".journal-responsive-amount-label")).toHaveCount(2);
+    expect(await row.locator(".journal-responsive-amount-label").first().evaluate((element) => getComputedStyle(element).display)).toBe("block");
+  }
+
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await expectReadableJournal(1000);
+  await expectTwoTierJournal();
+  await page.setViewportSize({ width: 900, height: 700 });
+  await expectReadableJournal(900);
+  await expectTwoTierJournal();
+  await page.locator(".portal-next-collapse").click();
+  await expect(page.locator(".portal-next-sidebar")).not.toHaveClass(/collapsed/);
+  await expectReadableJournal(900);
+  await expectTwoTierJournal();
+  await page.locator(".portal-next-collapse").click();
+  await expect(page.locator(".portal-next-sidebar")).toHaveClass(/collapsed/);
+  await page.setViewportSize({ width: 1093, height: 614 });
+  await page.locator(".portal-next-collapse").click();
   await expect(page.locator(".portal-next-sidebar")).not.toHaveClass(/collapsed/);
   await expectReadableJournal(1093);
-  await page.getByRole("button", { name: "Menüyü daralt" }).click();
+  await page.locator(".portal-next-collapse").click();
   await expect(page.locator(".portal-next-sidebar")).toHaveClass(/collapsed/);
   await expectReadableJournal(1093);
 });

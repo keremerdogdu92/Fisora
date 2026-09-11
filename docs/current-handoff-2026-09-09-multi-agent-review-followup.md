@@ -95,6 +95,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-11: REV-K03 / REV-K04 / REV-K05** - Workbench journal hierarchy is now explicit and responsive: account code stays beside the real chart-of-accounts name; the chart name may wrap to at most two lines; `line.description` is labelled `Fiş satırı açıklaması` because it is Final Accountant output, while original invoice `source_text` remains separate provenance behind the Source link. 1366x768 keeps the horizontal account hierarchy. At the 125% equivalent 1093x614 range, the journal receives a 460px minimum and an expanded sidebar overlays instead of squeezing the workspace. Debit/credit inputs and canonical accounting values are unchanged. Acceptance: source contracts 5/5, frontend 234/234, document-inspector Playwright 9/9, TypeScript/build PASS. Next: REV-K06 remains a separate product decision.
 
+**Completed 2026-09-11: REV-K06** - Narrow-desktop retest proved the existing one-row journal still overflowed at 1000px even though 1093px was safe. From 861px to 1092px only, the journal now uses a two-tier row: account code + chart name + journal description/source stay on the first tier; labelled `Borç` / `Alacak` inputs move to a second right-aligned tier. Wider desktop layout is unchanged. 1000x700, 900x700, and 900px sidebar open/closed all pass. Acceptance: frontend 235/235, document-inspector 9/9, TypeScript/build PASS. Next audit group: REV-L01.
+
 ## New decisions — 2026-09-09
 
 

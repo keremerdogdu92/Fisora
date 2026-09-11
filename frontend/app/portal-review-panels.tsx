@@ -1520,7 +1520,9 @@ function ManualDraftEditor({
                   ) : null}
                 </td>
                 <td>
+                  <span className="journal-responsive-amount-label">Borç</span>
                   <input
+                    aria-label="Borç"
                     inputMode="decimal"
                     onChange={(event) => updateDebit(index, event.target.value)}
                     onKeyDown={(event) => {
@@ -1534,7 +1536,9 @@ function ManualDraftEditor({
                   />
                 </td>
                 <td>
+                  <span className="journal-responsive-amount-label">Alacak</span>
                   <input
+                    aria-label="Alacak"
                     inputMode="decimal"
                     onChange={(event) => updateCredit(index, event.target.value)}
                     ref={(element) => { creditRefs.current[index] = element; }}

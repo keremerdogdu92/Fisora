@@ -424,8 +424,12 @@
 **Acceptance:** Dedicated Playwright coverage passes at 1093x614 with sidebar collapsed and expanded; journal, debit, and credit controls remain inside the viewport and the critical account name remains readable. Full frontend 234/234 PASS; document-inspector 9/9 PASS; TypeScript/build PASS.
 
 ## REV-K06 — Muhasebe satırı iki satırlı responsive layout
-**Status:** ÜRÜN KARARI.
-**Source:** AG FINDING-06 recommendation; henüz kabul edilmiş tasarım değildir.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
+**Source:** AG FINDING-06 recommendation, validated against the current Workbench after REV-K03/K04/K05.
+
+**Finding:** The horizontal journal remains readable at 1093 CSS px, but retest at 1000px reproduced a real right-edge overflow (~91px). Therefore a narrow-desktop adaptation is still required below the previously validated 125% equivalent width.
+**Implementation:** Between 861px and 1092px, each journal row uses a two-tier visual layout. The first tier keeps account code + real chart-of-accounts name together with the journal description/source evidence; the second tier keeps labelled `Borç` and `Alacak` inputs aligned on the right. The delete action remains on the first tier. Wider desktop layouts retain the normal table row. The source/journal split is relaxed only in this narrow range so the row fits without changing canonical debit/credit values.
+**Acceptance:** Dedicated Playwright coverage passes at 1000x700 and 900x700, including 900px with sidebar expanded and collapsed. Full frontend 235/235 PASS; document-inspector Playwright 9/9 PASS; TypeScript/build PASS.
 
 # L — Workbench mikro UX
 

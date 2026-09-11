@@ -53,3 +53,15 @@ test("journal separates final-accountant description from source evidence and ke
   assert.match(css, /\.portal-next-theme \.journal-account-name \{[^}]*display:\s*-webkit-box;[^}]*-webkit-line-clamp:\s*2;[^}]*white-space:\s*normal;/s);
   assert.doesNotMatch(css, /\.portal-next-theme \.journal-account-name \{[^}]*text-overflow:\s*ellipsis;/s);
 });
+
+test("narrow desktop journal moves debit and credit to a second visual tier", () => {
+  const source = panels();
+  const css = nextStyles();
+  assert.match(source, /journal-responsive-amount-label/);
+  assert.match(source, /aria-label="Bor/);
+  assert.match(source, /aria-label="Alacak"/);
+  assert.match(css, /@media \(min-width: 861px\) and \(max-width: 1092px\)/);
+  assert.match(css, /journal-ledger tbody tr \{[^}]*display:\s*grid;[^}]*grid-template-columns:/s);
+  assert.match(css, /journal-ledger tbody td:nth-child\(2\) \{ grid-column: 2; grid-row: 2; \}/);
+  assert.match(css, /journal-ledger tbody td:nth-child\(3\) \{ grid-column: 3; grid-row: 2; \}/);
+});

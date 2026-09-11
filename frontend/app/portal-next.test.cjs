@@ -187,6 +187,8 @@ test("next outputs preserve the approved v13 target composition while marking fu
   assert.match(exportsView, /Çıktıya hazır/);
   assert.match(exportsView, /Kısa kontrol/);
   assert.match(exportsView, /Blokeli/);
+  assert.match(exportsView, /formatOutputTotalTl\(periodTotal\)/);
+  assert.doesNotMatch(exportsView, /formatCompactTl|\}K`|\}M`/);
   assert.match(exportsView, /Dönem toplamı/);
   assert.match(exportsView, /Excel çalışma dosyası/);
   assert.match(exportsView, /CSV çıktı paketi/);

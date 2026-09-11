@@ -29,10 +29,8 @@ function parseOutputAmount(value: string) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatCompactTl(value: number) {
-  if (value >= 1_000_000) return `${new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 1 }).format(value / 1_000_000)}M`;
-  if (value >= 1_000) return `${new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(value / 1_000)}K`;
-  return new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 0 }).format(value);
+function formatOutputTotalTl(value: number) {
+  return new Intl.NumberFormat("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
 export function ExportBasketView({
@@ -92,7 +90,7 @@ export function ExportBasketView({
           <article><span>Çıktıya hazır</span><strong>{totalDocuments}</strong><small>Onaylanmış fiş</small></article>
           <article><span>Kısa kontrol</span><strong>{shortReviewCount}</strong><small>Onay bekliyor</small></article>
           <article className={blockedDocuments.length ? "attention" : ""}><span>Blokeli</span><strong>{blockedDocuments.length}</strong><small>Eksik / çelişkili</small></article>
-          <article><span>Dönem toplamı</span><strong>{formatCompactTl(periodTotal)}</strong><small>TL</small></article>
+          <article><span>Dönem toplamı</span><strong>{formatOutputTotalTl(periodTotal)}</strong><small>TL</small></article>
         </section>
 
         <section className="portal-next-export-grid">

@@ -90,6 +90,9 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-11: REV-K01** - Turkish accounting number formatting is now presentation-only for read-only amounts. Canonical/backend values and editable debit/credit inputs are unchanged. The formatter is string-based (no floating-point reparse), does not invent currency, and is applied to Workbench/document/statement/source-evidence/Reading Quality amount displays. Acceptance: formatter 3/3, frontend 233/233, TypeScript/build PASS. Editable localized amount entry remains parked in `docs/open-questions.md`. Next: REV-K02 (`12K TL` retest).
 
+**Completed 2026-09-11: REV-K02** - Outputs no longer abbreviates accounting totals as `12K TL` / `1,5M TL`. The existing period-total calculation is unchanged; only the final display formatter now renders the full `tr-TR` value with two decimals (for example `12.000,00 TL`). Acceptance: portal-next 22/22, frontend 233/233, TypeScript/build PASS. Next: REV-K03 critical account-name truncation.
+
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

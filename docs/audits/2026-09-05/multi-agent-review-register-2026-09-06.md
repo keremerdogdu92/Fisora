@@ -392,8 +392,12 @@
 **Acceptance:** Money formatter 3/3 PASS; frontend full suite 233/233 PASS; TypeScript PASS; Next production build PASS. Regression contract confirms `value={line.debit}` / `value={line.credit}` remain canonical editable values.
 
 ## REV-K02 — `12K TL` kısaltması iddiası
-**Status:** TEKRAR TEST.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-11.
 **Audit ref:** AG Top 10 ISSUE-10 / P2 fixes section.
+
+**Finding:** Retest confirmed the production Outputs view still abbreviated period totals with `K` / `M` through `formatCompactTl()`.
+**Implementation:** Removed compact `K` / `M` output formatting. `D?nem toplam?` now renders the existing calculated total in full `tr-TR` notation with two decimal places; the total calculation itself and backend/export data are unchanged.
+**Acceptance:** portal-next 22/22 PASS; frontend full suite 233/233 PASS; TypeScript PASS; Next production build PASS. Regression guard rejects reintroduction of `formatCompactTl` / `K` / `M` formatter branches.
 
 ## REV-K03 — Kritik hesap adlarının truncation'ı
 **Status:** KONTROL EDİLECEK.

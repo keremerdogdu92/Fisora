@@ -341,3 +341,11 @@ Amac: Text PDF'de iki kaynak carpismasini engellemek.
 Muhasebe fis satirinda zaten hesap kodu, hesap plani aciklamasi, XKIRO/final accountant tarafindan uretilen fis aciklamasi, borc/alacak tutari ve kaynak baglantisi birlikte gorunuyor. Bu nedenle Reader'in ham `source_text` degerini ayni satira kalici bir alan olarak eklemek mevcut yuzeyi gereksiz kalabaliklastirabilir.
 
 Buna ragmen ham fatura satiri metni yararli bir kanit olabilir. Ileride kaynak ayrintisi, hover/popover, ikincil detay paneli veya benzeri sessiz bir yuzeyde `orijinal fatura satiri` ile `fis aciklamasi` yan yana gosterilebilir. Amac AI muhasebe kararini degistirmek degil; musavirin gerektiginde orijinal belge metnine hizli ulasabilmesini saglamaktir.
+
+### Workbench - editable borc/alacak alanlarinda Turkce sayi girisi
+
+**Durum:** Sonra degerlendirilecek; mevcut editable tutar girisi ve canonical muhasebe degeri simdilik degistirilmeyecek.
+
+K01 kapsaminda yalniz salt-okunur tutarlar Turk muhasebe gosterimine cevrilecek. Borc/Alacak inputlarinda locale-aware giris ayri bir is olarak ele alinacak; cunku formatlama/parsing hatasi muhasebe tutarini degistirmemeli.
+
+Ileride musavir ihtiyaci tekrar dogrulanirsa `12000.50`, `12000,50` ve gerekirse `12.000,50` girislerinin ayni canonical `12000.50` degerine guvenli normalize edilmesi incelenecek. Uygulama ancak save -> reload round-trip testleriyle tutarin birebir korundugu kanitlanirsa kabul edilecek. Ornek kritik kabul testi: `12.345.678,90` -> canonical `12345678.90` -> save/reload -> `12345678.90`; display tekrar `12.345.678,90`.

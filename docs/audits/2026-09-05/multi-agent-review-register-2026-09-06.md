@@ -291,13 +291,14 @@
 **Acceptance:** portal-next contract 22/22 PASS; frontend full suite 230/230 PASS; TypeScript PASS; Next production build PASS.
 
 ## REV-H05 — Upload dönemi görünürlüğü/değiştirilebilirliği
-**Status:** ÜRÜN KARARI.
+**Status:** CLOSED / DUPLICATE OF REV-E03 - 2026-09-11.
 **Audit refs:** [CX UXR-007](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-007--p1--yeni-yükleme-dönemi-üst-bağlamla-uyuşmuyor) · AG Upload workflow scorecard note.
+**Decision:** REV-E03 already established the product rule: the office/review period and the upload accounting period are separate contexts. New Uploads keeps a fixed `previousCompletedPeriod()` target and visibly labels that target; it will not silently follow the current review period and no extra period selector is added in this audit pass.
 
 ## REV-H06 — Codex file chooser `Not allowed`
-**Status:** TEST SINIRLAMASI.
+**Status:** CLOSED / TEST LIMITATION - 2026-09-11.
 **Audit refs:** [CX Evidence and limitations](./fisora-codex-ux-qa-audit-2026-09-05.md#evidence-and-limitations)
-**Decision:** Ürün bug'ı olarak kaydedilmeyecek; CG Windows file picker ile gerçek dosya yükledi.
+**Decision:** Not a product defect. The restriction belonged to the audit agent/file chooser path; CG successfully exercised real Windows file upload. No code change.
 
 # I — Hata yönetimi ve teknik metin sızıntısı
 

@@ -86,6 +86,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-11: REV-H04** - New Uploads history no longer exposes raw ISO timestamps. `uploadedAt` stays canonical/raw in data, while the table formats valid timestamps in the `Europe/Istanbul` timezone as `DD.MM.YYYY · HH:mm`. Acceptance: portal-next 22/22, frontend 230/230, TypeScript/build PASS. Next upload topic is REV-H05 (upload period visibility/changeability product decision).
 
+**Closed 2026-09-11: REV-H05 / REV-H06** - H05 is a duplicate of the already accepted REV-E03 period model: review period and upload accounting period are separate; New Uploads keeps the explicitly shown previous-completed-month target and no new selector/state is added. H06 is an audit-tool file chooser limitation, not a Fisora product bug; real Windows upload was already exercised successfully. H section is closed.
+
 ## New decisions — 2026-09-09
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior

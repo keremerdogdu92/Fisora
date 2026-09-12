@@ -7,6 +7,7 @@ const {
   agentSourceLabel,
   groupedReviewReasons,
   normalizeRulePrompt,
+  normalizeSearchText,
   normalizeStatementAiSuggestions,
   normalizeStatementEntries,
   normalizeStatementLines,
@@ -15,6 +16,12 @@ const {
   reviewReasonLabel,
   safeText,
 } = require("./portal-normalization");
+
+test("client search normalization is Turkish-character tolerant", () => {
+  assert.equal(normalizeSearchText("ARİF ŞİMŞEK"), "arif simsek");
+  assert.equal(normalizeSearchText("ARIF SIMSEK"), "arif simsek");
+  assert.equal(normalizeSearchText("Çağrı Öztürk Üçyol"), "cagri ozturk ucyol");
+});
 
 test("portal normalization helpers map review records without React state", () => {
   assert.equal(safeText("", "fallback"), "fallback");

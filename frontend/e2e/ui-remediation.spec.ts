@@ -22,7 +22,7 @@ const pilotClient = {
   client_id: "pilot-client",
   profile: {
     client_id: "pilot-client",
-    title: "Pilot Test AS",
+    title: "ARİF Pilot Test AŞ",
     tax_id: "1111111111",
   },
 };
@@ -141,7 +141,7 @@ test("workspace backend failure does not stay as loading copy", async ({ page })
 
   await page.goto("/portal/musavir");
 
-  await expect(page.getByText(/Backend okunamadı|Yerel çalışma verisi|Çalışma alanı boş/).first()).toBeVisible();
+  await expect(page.getByRole("status", { name: /Çalışma alanı alınamadı|Geçici çalışma verisi|Çalışma alanı boş/i }).first()).toBeVisible();
   await expect(page.getByText("Çalışma alanı yükleniyor")).toHaveCount(0);
 });
 
@@ -178,7 +178,10 @@ test("client management uses list/detail navigation and clear onboarding section
   await page.goto("/portal/mukellefler");
 
   await expect(page.getByLabel(/M.kellef listesi/)).toBeVisible();
-  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
+  const clientSearch = page.getByPlaceholder(/M.kellef ara/);
+  await clientSearch.fill("ARIF");
+  await expect(page.getByText("ARİF Pilot Test AŞ").first()).toBeVisible();
+  await clientSearch.fill("");
 
   await page.getByRole("button", { name: /Yeni m.kellef/ }).first().click();
   await expect(page.locator(".tax-certificate-preview")).toBeVisible();
@@ -193,7 +196,7 @@ test("client management uses list/detail navigation and clear onboarding section
   await expect(page.getByLabel(/M.kellef listesi/)).toBeVisible();
   await page.getByRole("button", { name: /G.r.nt.le/ }).click();
   await expect(page.locator(".client-v13-detail")).toBeVisible();
-  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
+  await expect(page.getByText("ARİF Pilot Test AŞ").first()).toBeVisible();
   await expect(page.locator(".client-v13-chart-replace")).toBeVisible();
   await expect(page.getByRole("button", { name: /Se.ili belgeleri sil/i })).toHaveCount(0);
 });
@@ -257,7 +260,7 @@ test("accountant opens selected client portal in a delegated tab without return 
   await popup.waitForLoadState("domcontentloaded");
 
   await expect(popup).toHaveURL(/\/portal\/mukellef/);
-  await expect(popup.getByText("Pilot Test AS").first()).toBeVisible();
+  await expect(popup.getByText("ARİF Pilot Test AŞ").first()).toBeVisible();
   await expect(popup.getByText(/Müşavir vekaletinde|MÃ¼ÅŸavir vekaletinde|MÃƒÂ¼ÅŸavir vekaletinde|Musavir vekaletinde/i)).toBeVisible();
   await expect(popup.getByRole("button", { name: /Müşavir ekranına dön|MÃ¼ÅŸavir ekranÄ±na dÃ¶n|sekme kapat|kapat/i })).toHaveCount(0);
 });

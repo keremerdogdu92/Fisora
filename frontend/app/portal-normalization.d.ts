@@ -83,6 +83,7 @@ export type ReviewReasonGroup = {
 export function agentSourceLabel(value: string): string;
 export function groupedReviewReasons(documents: Array<{ reviewReasons?: string[] }>): ReviewReasonGroup[];
 export function normalizeRulePrompt(value: unknown): NormalizedRulePrompt;
+export function normalizeSearchText(value: unknown): string;
 export function normalizeStatementAiSuggestions(value: unknown): NormalizedStatementAiSuggestion[];
 export function normalizeStatementEntries(value: unknown): NormalizedStatementEntry[];
 export function normalizeStatementLines(value: unknown): NormalizedStatementLine[];

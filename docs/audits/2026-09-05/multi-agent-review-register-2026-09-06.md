@@ -483,8 +483,12 @@
 # M — Mükellefler
 
 ## REV-M01 — Türkçe karakter toleranslı arama
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-12.
 **Audit refs:** [CG-15](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-15--turkish-insensitive-client-search-missing)
+
+**Reproduction:** Current client search still reproduced the audit defect: `ARIF` normalized to `arıf` while `ARİF` normalized to `arif`, so a client named with dotted Turkish `İ` could disappear from an ASCII keyboard search.
+**Implementation:** Client-name, client-id, tax-id, and query text now share one search-only normalization path. It trims, applies Turkish lowercase rules, removes combining diacritics, and folds dotless `ı` to `i`. Canonical client data is unchanged; only comparison text is normalized.
+**Acceptance:** Normalization behavior covers `ARIF`/`ARİF`, `Ş/S`, `Ç/C`, `Ğ/G`, `Ö/O`, and `Ü/U`; targeted Node tests 22/22 PASS; real Chromium Mükellefler flow confirms `ARIF` finds `ARİF Pilot Test AŞ`; full frontend Node suite 241/241 PASS; `ui-remediation` Chromium 8/8 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 ## REV-M02 — 0 arama sonucunda `Henüz mükellef yok`
 **Status:** KONTROL EDİLECEK.

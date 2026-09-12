@@ -4,6 +4,15 @@ function safeText(value, fallback = "") {
   return value == null || value === "" ? fallback : String(value);
 }
 
+function normalizeSearchText(value) {
+  return safeText(value)
+    .trim()
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ı/g, "i");
+}
+
 function safeRecord(value) {
   return value && typeof value === "object" ? value : {};
 }
@@ -164,6 +173,7 @@ module.exports = {
   agentSourceLabel,
   groupedReviewReasons,
   normalizeRulePrompt,
+  normalizeSearchText,
   normalizeStatementAiSuggestions,
   normalizeStatementEntries,
   normalizeStatementLines,

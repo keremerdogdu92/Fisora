@@ -208,6 +208,13 @@ test("client management defaults to the existing-client list and separates loadi
   assert.match(clientsView, /NACE araştırmasını çalıştır/);
 });
 
+test("client management search is Turkish-character tolerant", () => {
+  const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
+
+  assert.match(portalApp, /normalizeSearchText\(clientSearch\)/);
+  assert.match(portalApp, /normalizeSearchText\(`\$\{client\.clientName\} \$\{client\.clientId\} \$\{client\.taxId\}`\)\.includes\(query\)/);
+});
+
 test("client management summary counts use the selected office period", () => {
   const portalApp = require("node:fs").readFileSync(join(__dirname, "portal-app.tsx"), "utf8");
 

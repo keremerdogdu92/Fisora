@@ -46,6 +46,7 @@ import type {
 } from "./portal-types";
 import { emptyPilotData } from "./portal-data-mappers";
 import { scopePilotDataForSession } from "./portal-data-scope";
+import { normalizeSearchText } from "./portal-normalization";
 import { periodLabel } from "./portal-formatters";
 import { previousCompletedPeriod } from "./portal-periods";
 import { emptyCorrectionDraft, useReviewCommands } from "./features/review";
@@ -322,9 +323,9 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   });
   const clientSelectedDocument = periodDocuments.find((document) => document.id === selectedDocumentId);
   const filteredClients = useMemo(() => {
-    const query = clientSearch.trim().toLocaleLowerCase("tr-TR");
+    const query = normalizeSearchText(clientSearch);
     if (!query) return clients;
-    return clients.filter((client) => `${client.clientName} ${client.clientId} ${client.taxId}`.toLocaleLowerCase("tr-TR").includes(query));
+    return clients.filter((client) => normalizeSearchText(`${client.clientName} ${client.clientId} ${client.taxId}`).includes(query));
   }, [clientSearch, clients]);
   const openCancellationRequests = data.cancellationRequests.filter((request) => request.status === "open");
   const officeDocuments = useMemo(() => data.documents.filter((document) => !resolvedOfficePeriod || document.period === resolvedOfficePeriod), [data.documents, resolvedOfficePeriod]);

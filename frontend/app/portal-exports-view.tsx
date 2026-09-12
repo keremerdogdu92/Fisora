@@ -1,5 +1,6 @@
 // File: frontend/app/portal-exports-view.tsx
 // Summary: Renders export package, future output targets, and operational status surfaces for accountant workflows.
+import { formatPortalDateTime } from "./portal-formatters";
 import { groupedReviewReasons } from "./portal-normalization";
 import { Info, Metric } from "./portal-shared";
 import type { AiCapacityAgentView, AiCapacityView, ExportBasketItem, ExportMode, PilotData, PilotDocument, PilotReadinessView } from "./portal-types";
@@ -288,7 +289,5 @@ function agentCapacityText(agent: AiCapacityAgentView) {
 }
 
 function formatCapacityDate(value: string) {
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("tr-TR");
+  return formatPortalDateTime(value);
 }

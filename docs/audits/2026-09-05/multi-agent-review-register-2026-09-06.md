@@ -471,8 +471,14 @@
 **Acceptance:** Targeted workspace-api 17/17 PASS; targeted queue identity Playwright 2/2 PASS; full frontend 235/235 PASS; full document-inspector Playwright 12/12 PASS; `tsc --noEmit` PASS; Next production build PASS; mojibake guard PASS; `git diff --check` PASS. REV-L05 date-format consistency remains separate.
 
 ## REV-L05 — Tarih formatlarının tutarsızlığı
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-12.
 **Audit refs:** CX Working but poor UX · AG Top 10 ISSUE-07 · CG-20.
+
+**Decision:** Canonical backend values remain unchanged. Business/date-only values display as `DD.MM.YYYY`; operational timestamps display as `DD.MM.YYYY · HH:mm` in `Europe/Istanbul`. Accounting periods keep their intentional `MM.YYYY` / long-month presentation, native date inputs keep ISO-compatible values, and ordinary UI timestamps omit seconds.
+
+**Implementation:** The shared formatter layer now has separate safe date-only and date-time paths. It accepts explicit ISO instants, canonical `YYYY-MM-DD`, and known Turkish day-first legacy values, validates calendar/time parts, and preserves unknown or ambiguous strings instead of guessing. Workbench queue/detail/journal/bottom-list dates, the client document list, QNB document/settings timestamps, Research benchmark history, Learned Rules last-use timestamps, Operations capacity formatting, session expiry text, and statement-review summary timestamps use the shared presentation. The dashboard activity feed intentionally remains time-only because that surface communicates recency rather than a full date.
+
+**Acceptance:** formatter behavior 3/3 PASS; portal-next targeted contracts 23/23 PASS; targeted queue Chromium 1/1 PASS; full frontend Node suite 239/239 PASS; full document-inspector Chromium 12/12 PASS; `tsc --noEmit` PASS; Next production build PASS; visible-source mojibake guard PASS through the full Node suite; `git diff --check` PASS.
 
 # M — Mükellefler
 

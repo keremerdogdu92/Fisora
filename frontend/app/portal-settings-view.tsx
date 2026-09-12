@@ -1,5 +1,8 @@
+// File: frontend/app/portal-settings-view.tsx
+// Summary: Renders office/session settings and QNB integration controls with shared operational timestamp formatting.
 "use client";
 
+import { formatPortalDateTime } from "./portal-formatters";
 import { Info } from "./portal-shared";
 import type { LocalSession, PilotClient, PilotReadinessView } from "./portal-types";
 
@@ -7,13 +10,6 @@ const roleLabels: Record<LocalSession["role"], string> = {
   accountant: "Müşavir",
   client_user: "Mükellef",
 };
-
-function formatDateText(value: string) {
-  if (!value) return "";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString("tr-TR");
-}
 
 function SessionPanel({
   loginPassword,
@@ -51,7 +47,7 @@ function SessionPanel({
           {loginStatus ||
             (session
               ? session.sessionToken
-                ? `Oturum aktif${session.expiresAt ? ` / ${formatDateText(session.expiresAt)}` : ""}.`
+                ? `Oturum aktif${session.expiresAt ? ` / ${formatPortalDateTime(session.expiresAt)}` : ""}.`
                 : "Ofis oturumu aktif."
               : localFallbackAllowed
                 ? "Şifresiz yerel oturum kullanılabilir."
@@ -259,7 +255,7 @@ export function SettingsView({
           <div className="settings-grid">
             <Info label="Kullanıcı" value={qnbStatus.maskedUsername || "-"} />
             <Info label="Ortam" value={qnbStatus.environment === "production" ? "Canlı" : qnbStatus.environment === "test" ? "Test" : "-"} />
-            <Info label="Son bağlantı testi" value={qnbStatus.lastTestedAt || "-"} />
+            <Info label="Son bağlantı testi" value={formatPortalDateTime(qnbStatus.lastTestedAt)} />
             <Info label="Bağlantı sonucu" value={qnbStatus.lastError || (qnbStatus.status === "active" ? "Bağlantı başarılı" : "-")} />
             <Info label="Sync" value={qnbSyncWindow.message || "Henüz çalışmadı"} />
           </div>
@@ -273,9 +269,9 @@ export function SettingsView({
           {qnbPolicy.message ? <p>{qnbPolicy.message}</p> : null}
           <div className="settings-grid" aria-label="QNB senkronizasyon sağlığı">
             <Info label="Akış" value={qnbHealth.safeMessage || "Henüz otomatik çalışma yok"} />
-            <Info label="Son başarılı" value={qnbHealth.lastSuccessAt || "-"} />
-            <Info label="Son deneme" value={qnbHealth.lastAttemptAt || "-"} />
-            <Info label="Sonraki çalışma" value={qnbHealth.nextRunAt || "-"} />
+            <Info label="Son başarılı" value={formatPortalDateTime(qnbHealth.lastSuccessAt)} />
+            <Info label="Son deneme" value={formatPortalDateTime(qnbHealth.lastAttemptAt)} />
+            <Info label="Sonraki çalışma" value={formatPortalDateTime(qnbHealth.nextRunAt)} />
             <Info label="Son sonuç" value={`${qnbHealth.listedCount} listelendi / ${qnbHealth.downloadedCount} alındı / ${qnbHealth.duplicateCount} tekrar / ${qnbHealth.failedCount} hata`} />
           </div>
         </section>

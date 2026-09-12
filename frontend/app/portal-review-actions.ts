@@ -1,5 +1,7 @@
+// File: frontend/app/portal-review-actions.ts
+// Summary: Applies accountant statement-line decisions and records review summaries using shared portal timestamp formatting.
 import type { DraftLine, PilotDocument } from "./portal-types";
-import { statementReviewStatus, statementStatusLabel } from "./portal-formatters";
+import { formatPortalDateTime, statementReviewStatus, statementStatusLabel } from "./portal-formatters";
 
 export function reviewedStatementRiskFlags(flags: string[], status: string) {
   if (status === "approved") {
@@ -38,7 +40,7 @@ export function applyStatementLineDecision(
 ): PilotDocument {
   const reviewStatus = statementReviewStatus(action);
   const newAccount = correctedCounterpartyCode.trim() || correctedAccountCode.trim();
-  const reviewedAt = new Date().toLocaleString("tr-TR");
+  const reviewedAt = formatPortalDateTime(new Date().toISOString());
   const statementLines = document.statementLines.map((line) => {
     if (line.line_no !== lineNo) return line;
     return {

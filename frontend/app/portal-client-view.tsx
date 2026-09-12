@@ -3,6 +3,7 @@
 "use client";
 
 import { buildClientCancellationViewModel } from "./portal-dashboard";
+import { formatPortalDateTime } from "./portal-formatters";
 import { DocumentPreview } from "./portal-review-panels";
 import { Metric } from "./portal-shared";
 import { INTAKE_TABS, buildUploadIntakeMetadata, labelForIntakeCategory } from "./upload-intake";
@@ -179,7 +180,7 @@ export function ClientPortal({
             <div className={selectedDocument?.id === document.id ? "client-document-row active" : "client-document-row"} key={document.id}>
               <button className="document-row-main" onClick={() => onSelectDocument(document)} type="button">
                 <strong>{document.fileName}</strong>
-                <span>{labelForIntakeCategory(document.intakeCategory)} / {documentTypeLabels[document.documentType] ?? document.documentType} / {document.uploadedAt}</span>
+                <span>{labelForIntakeCategory(document.intakeCategory)} / {documentTypeLabels[document.documentType] ?? document.documentType} / {formatPortalDateTime(document.uploadedAt)}</span>
               </button>
               <span className={`status ${document.status}`}>{formatStatus(document.status)}</span>
               <button onClick={() => onOpenCancellationRequest(document)} type="button">İptal/Düzeltme</button>

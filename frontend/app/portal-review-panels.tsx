@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MutableRefObject } from "react";
 import { applyAccountSelectionToLine, classifyDraftAccountCode, draftAccountResolutionIssues, filterAccountOptions, nextSelectableAccountIndex, resolveAccountSelection } from "./portal-account-combobox";
 import { Info, ReasonCard } from "./portal-shared";
+import { formatPortalDate, formatPortalDateTime } from "./portal-formatters";
 import { formatReadOnlyAmount } from "./portal-money-format";
 import { vatGroupEvidenceText } from "./portal-source-evidence";
 import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-document-viewer";
@@ -637,7 +638,7 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
         </div>
         <aside className="document-info-panel" aria-label="Belge bilgileri">
           <Info label="Belge türü" value={document.documentType || document.intakeCategory} />
-          <Info label="Tarih" value={document.issueDate || "-"} />
+          <Info label="Tarih" value={formatPortalDate(document.issueDate)} />
           <Info label="Tutar" value={formatReadOnlyAmount(document.amount)} />
           <Info label="KDV" value={document.vatRates.length ? document.vatRates.join(", ") : "-"} />
           <Info label="Satir" value={typeof document.canonicalLineCount === "number" ? String(document.canonicalLineCount) : "-"} />
@@ -652,8 +653,8 @@ export function DocumentPreview({ controlledHtmlPreview = false, controlledPdfPr
           <Info label="AI okuma" value={document.canonicalExtractionAiUsed ? "Kullanildi" : "Yok"} />
           <Info label="Sağlayıcı" value={document.provider || document.aiProvider || "-"} />
           {document.qnbStatus ? <Info label="QNB durumu" value={qnbStatusLabel(document.qnbStatus)} /> : null}
-          {document.qnbStatusCheckedAt ? <Info label="QNB kontrol" value={document.qnbStatusCheckedAt} /> : null}
-          {document.qnbPulledAt ? <Info label="QNB'den alınma" value={document.qnbPulledAt} /> : null}
+          {document.qnbStatusCheckedAt ? <Info label="QNB kontrol" value={formatPortalDateTime(document.qnbStatusCheckedAt)} /> : null}
+          {document.qnbPulledAt ? <Info label="QNB'den alınma" value={formatPortalDateTime(document.qnbPulledAt)} /> : null}
           {document.qnbReviewRequired ? (
             <div className="preview-error-panel" role="status">
               <strong>{document.qnbStatus === "unknown" ? "QNB durumu doğrulanamadı" : `QNB belgesi ${qnbStatusLabel(document.qnbStatus).toLocaleLowerCase("tr-TR")}`}</strong>
@@ -939,7 +940,7 @@ export function JournalPanel({
         <div className="panel-heading journal-next-heading">
           <div>
             <h2>{nextKeyboardShortcuts ? "Mahsup Fişi Taslağı" : "Muhasebe fişi"}</h2>
-            <span>{nextKeyboardShortcuts ? (document.issueDate || document.period || "") : `${document.clientName} için belge, fiş ve kontrol kararları`}</span>
+            <span>{nextKeyboardShortcuts ? (document.issueDate ? formatPortalDate(document.issueDate) : document.period || "") : `${document.clientName} için belge, fiş ve kontrol kararları`}</span>
           </div>
           {nextKeyboardShortcuts ? (
             <span className={`next-balance-pill ${noPosting ? "no-posting" : totals.balanced && activeDraftLines.length ? "balanced" : "warning"}`}>

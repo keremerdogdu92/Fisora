@@ -38,22 +38,87 @@ export function longPeriodLabel(period: string) {
   return label.charAt(0).toLocaleUpperCase("tr-TR") + label.slice(1);
 }
 
-export function formatPortalDateTime(value: string) {
-  const normalized = String(value || "").trim();
-  if (!normalized) return "-";
-  const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) return normalized;
+type PortalDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour?: number;
+  minute?: number;
+};
+
+function validPortalDateParts(parts: PortalDateParts) {
+  const probe = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+  const validDate = probe.getUTCFullYear() === parts.year
+    && probe.getUTCMonth() === parts.month - 1
+    && probe.getUTCDate() === parts.day;
+  const validTime = (parts.hour === undefined || (parts.hour >= 0 && parts.hour <= 23))
+    && (parts.minute === undefined || (parts.minute >= 0 && parts.minute <= 59));
+  return validDate && validTime;
+}
+
+function knownPortalDateParts(value: string): PortalDateParts | null {
+  const isoDate = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDate) {
+    const parts = { year: Number(isoDate[1]), month: Number(isoDate[2]), day: Number(isoDate[3]) };
+    return validPortalDateParts(parts) ? parts : null;
+  }
+  const dayFirst = value.match(/^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::\d{2})?)?$/);
+  if (!dayFirst) return null;
+  const parts: PortalDateParts = {
+    year: Number(dayFirst[3]),
+    month: Number(dayFirst[2]),
+    day: Number(dayFirst[1]),
+    ...(dayFirst[4] === undefined ? {} : { hour: Number(dayFirst[4]), minute: Number(dayFirst[5]) }),
+  };
+  return validPortalDateParts(parts) ? parts : null;
+}
+
+function explicitPortalInstant(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function portalDateLabel(parts: PortalDateParts) {
+  return `${String(parts.day).padStart(2, "0")}.${String(parts.month).padStart(2, "0")}.${parts.year}`;
+}
+
+function istanbulPortalParts(value: Date, includeTime: boolean) {
   const parts = new Intl.DateTimeFormat("tr-TR", {
     timeZone: "Europe/Istanbul",
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(parsed);
-  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${byType.day}.${byType.month}.${byType.year} \u00b7 ${byType.hour}:${byType.minute}`;
+    ...(includeTime ? { hour: "2-digit", minute: "2-digit", hour12: false } : {}),
+  }).formatToParts(value);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
+}
+
+export function formatPortalDate(value: string) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "-";
+  const known = knownPortalDateParts(normalized);
+  if (known) return portalDateLabel(known);
+  const instant = explicitPortalInstant(normalized);
+  if (!instant) return normalized;
+  const parts = istanbulPortalParts(instant, false);
+  return `${parts.day}.${parts.month}.${parts.year}`;
+}
+
+export function formatPortalDateTime(value: string) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "-";
+  const known = knownPortalDateParts(normalized);
+  if (known) {
+    const date = portalDateLabel(known);
+    return known.hour === undefined || known.minute === undefined
+      ? date
+      : `${date} \u00b7 ${String(known.hour).padStart(2, "0")}:${String(known.minute).padStart(2, "0")}`;
+  }
+  const instant = explicitPortalInstant(normalized);
+  if (!instant) return normalized;
+  const parts = istanbulPortalParts(instant, true);
+  return `${parts.day}.${parts.month}.${parts.year} \u00b7 ${parts.hour}:${parts.minute}`;
 }
 
 export function isInProgress(status: PilotStatus) {

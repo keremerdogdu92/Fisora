@@ -323,7 +323,7 @@ test("queue business identity stays readable without growing compact cards", asy
   await expect(card.locator(".portal-next-queue-identity-title strong")).toHaveText("Yurtiçi Kargo Gönderim Hizmetleri ve Ticaret A.Ş.");
   await expect(card.locator(".portal-next-queue-identity-meta small")).toHaveText("BEF2026002324731");
   await expect(card.locator(".portal-next-queue-identity-meta b")).toHaveText("12.345,67");
-  await expect(card.locator(".portal-next-queue-identity-footer small")).toHaveText("2026-09-04");
+  await expect(card.locator(".portal-next-queue-identity-footer small")).toHaveText("04.09.2026");
   await expect(card).toHaveAttribute("title", "Orijinal dosya: 1790617537_BEF2026002324731.html");
 
   for (const viewport of [{ width: 1366, height: 768 }, { width: 1093, height: 614 }, { width: 1000, height: 700 }]) {

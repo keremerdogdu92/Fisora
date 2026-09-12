@@ -10,6 +10,7 @@ import {
   reviewCockpitQueues,
 } from "./features/documents/document-workflow-model";
 import { reviewReasonLabel } from "./portal-normalization";
+import { formatPortalDate, formatPortalDateTime } from "./portal-formatters";
 import { formatReadOnlyAmount } from "./portal-money-format";
 import { AiTracePanel, DocumentPipelineTimeline, DocumentPreview, JournalPanel } from "./portal-review-panels";
 import { PortalNextWorkspaceControls } from "./portal-next/portal-next-workspace-controls";
@@ -613,7 +614,7 @@ export function AccountantWorkspace({
                         <b>{formatReadOnlyAmount(queueDocument.amount)}</b>
                       </span>
                       <span className="portal-next-queue-identity-footer">
-                        <small>{queueDocument.issueDate || queueDocument.uploadedAt || "-"}</small>
+                        <small>{queueDocument.issueDate ? formatPortalDate(queueDocument.issueDate) : formatPortalDateTime(queueDocument.uploadedAt)}</small>
                         {queueDocument.status === "review_required" ? null : <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>}
                       </span>
                     </button>
@@ -716,7 +717,7 @@ export function AccountantWorkspace({
               <div className={isActive ? "bottom-queue-row active" : "bottom-queue-row"} key={document.id}>
                 <button className="bottom-queue-document" onClick={() => selectDocument(document)} type="button">
                   <strong>{document.fileName}</strong>
-                  <span>{document.uploadedAt}</span>
+                  <span>{formatPortalDateTime(document.uploadedAt)}</span>
                 </button>
                 <div>{labelForIntakeCategory(document.intakeCategory)}</div>
                 <div>{formatReadOnlyAmount(document.amount)}</div>

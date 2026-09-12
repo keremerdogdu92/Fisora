@@ -418,6 +418,26 @@ test("next quick upload keeps invoice staging separate from the accounting workb
   assert.match(uploadView, /Son yüklemeler/);
 });
 
+test("portal date presentation uses shared accountant-facing formats", () => {
+  const formatters = source("portal-formatters.ts");
+  const workspace = source("portal-workspace-view.tsx");
+  const reviewPanels = source("portal-review-panels.tsx");
+  const clientView = source("portal-client-view.tsx");
+  const settings = source("portal-settings-view.tsx");
+  const research = source("portal-research-view.tsx");
+  const agents = source("portal-next", "portal-next-agents-view.tsx");
+
+  assert.match(formatters, /export function formatPortalDate\(/);
+  assert.match(formatters, /Europe\/Istanbul/);
+  assert.match(workspace, /formatPortalDate\(queueDocument\.issueDate\)/);
+  assert.match(workspace, /formatPortalDateTime\(document\.uploadedAt\)/);
+  assert.match(reviewPanels, /formatPortalDate\(document\.issueDate\)/);
+  assert.match(clientView, /formatPortalDateTime\(document\.uploadedAt\)/);
+  assert.match(settings, /formatPortalDateTime\(qnbHealth\.lastSuccessAt\)/);
+  assert.match(research, /formatPortalDateTime\(value\)/);
+  assert.match(agents, /formatPortalDateTime\(value\)/);
+});
+
 test("QNB settings hide stored backend error details from accountants", () => {
   const qnbCommands = source("features", "qnb", "use-qnb-commands.ts");
 

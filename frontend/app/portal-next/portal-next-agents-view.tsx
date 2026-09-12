@@ -9,6 +9,7 @@ import { useOriginalDocumentPreview } from "../portal-review-panels";
 import { ResearchKnowledgeView } from "../portal-research-view";
 import { HtmlDocumentViewer } from "../shared/components/document-viewers/html-document-viewer";
 import type { DocumentSourceTarget, LocalSession, PilotDocument, SourceReviewRow } from "../portal-types";
+import { formatPortalDateTime } from "../portal-formatters";
 import { formatReadOnlyAmount } from "../portal-money-format";
 
 type AgentSummary = {
@@ -232,10 +233,7 @@ function categoryLabel(category: string) {
   return "Tedarikçi";
 }
 function formatRuleDate(value: string) {
-  if (!value) return "Henüz yok";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "short", year: "numeric" }).format(date);
+  return value ? formatPortalDateTime(value) : "Henüz yok";
 }
 
 export function PortalNextLearnedRulesView({ loginUserId, session }: { loginUserId: string; session: LocalSession | null }) {

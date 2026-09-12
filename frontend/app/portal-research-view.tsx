@@ -1,7 +1,10 @@
+// File: frontend/app/portal-research-view.tsx
+// Summary: Renders accountant-facing research knowledge, benchmark results, and office overrides with shared portal date formatting.
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { resolveApiBaseUrl } from "./features/session";
+import { formatPortalDateTime } from "./portal-formatters";
 import { Info, Metric } from "./portal-shared";
 import type { LocalSession, ResearchBenchmarkRunView, ResearchProfileView } from "./portal-types";
 import {
@@ -92,10 +95,7 @@ function reviewReason(profile?: ResearchProfileView) {
 
 function benchmarkRunTime(run: ResearchBenchmarkRunView) {
   const value = run.created_at || "";
-  if (!value) return "Benchmark koşumu";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Benchmark koşumu";
-  return parsed.toLocaleString("tr-TR");
+  return value ? formatPortalDateTime(value) : "Benchmark koşumu";
 }
 
 function sortBenchmarkRuns(runs: ResearchBenchmarkRunView[]) {

@@ -2166,6 +2166,11 @@
   color: #102f4c;
 }
 .portal-next-queue-list button > span { align-items: center; display: flex; gap: 7px; justify-content: space-between; min-width: 0; }
+.portal-next-queue-list .portal-next-queue-identity-title { display: block; }
+.portal-next-queue-list .portal-next-queue-identity-title strong { display: block; width: 100%; }
+.portal-next-queue-list .portal-next-queue-identity-meta small,
+.portal-next-queue-list .portal-next-queue-identity-footer small { min-width: 0; }
+.portal-next-queue-list .portal-next-queue-identity-footer { min-height: 14px; }
 .portal-next-queue-list button strong { font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .portal-next-queue-list button b { flex: 0 0 auto; font-size: 0.72rem; }
 .portal-next-queue-list button small { color: var(--muted); font-size: 0.64rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

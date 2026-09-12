@@ -223,6 +223,7 @@ export type PilotDocument = {
   clientId: string;
   clientName: string;
   fileName: string;
+  invoiceNumber?: string;
   documentType: string;
   intakeCategory: IntakeCategory;
   period: string;
@@ -525,6 +526,7 @@ export type ReviewData = {
   invoiceRows?: {
     documentRef?: string;
     fileName?: string;
+    invoiceNumber?: string;
     providerHint?: string;
     invoiceType?: string;
     intakeCategory?: string;

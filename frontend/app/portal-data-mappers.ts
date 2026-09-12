@@ -94,6 +94,7 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       clientId,
       clientName,
       fileName,
+      invoiceNumber: safeText(row.invoiceNumber ?? rowRecord.invoice_number ?? rowRecord.original_invoice_number ?? rowRecord.source_invoice_no),
       documentType: safeText(row.invoiceType, "invoice"),
       intakeCategory: toIntakeCategory(row.intakeCategory || inferIntakeCategory("invoice", row.invoiceType)),
       period: periodFromDate(safeText(row.issueDate), "2026-04"),

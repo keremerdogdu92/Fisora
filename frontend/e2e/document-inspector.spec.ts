@@ -304,8 +304,73 @@ test("reopening queue reveals the current selected document", async ({ page }) =
   await expect(queue).toBeVisible();
 
   const active = list.locator("button.active");
-  await expect(active).toContainText("queue-12.html");
+  await expect(active).toHaveAttribute("title", "Orijinal dosya: queue-12.html");
   await expect(active).toBeInViewport();
+});
+
+test("queue business identity stays readable without growing compact cards", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>1</td><td>${SOURCE_TEXT}</td><td>12.345,67 TL</td></tr></tbody></table></body></html>`;
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await setupInspector(page, "1790617537_BEF2026002324731.html", "text/html", html, (workspace) => {
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result.counterparty_title = "Yurtiçi Kargo Gönderim Hizmetleri ve Ticaret A.Ş.";
+    result.invoice_number = "BEF2026002324731";
+    result.payable_total = "12345.67";
+  });
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const card = page.locator(".portal-next-queue-list button.active");
+  await expect(card.locator(".portal-next-queue-identity-title strong")).toHaveText("Yurtiçi Kargo Gönderim Hizmetleri ve Ticaret A.Ş.");
+  await expect(card.locator(".portal-next-queue-identity-meta small")).toHaveText("BEF2026002324731");
+  await expect(card.locator(".portal-next-queue-identity-meta b")).toHaveText("12.345,67");
+  await expect(card.locator(".portal-next-queue-identity-footer small")).toHaveText("2026-09-04");
+  await expect(card).toHaveAttribute("title", "Orijinal dosya: 1790617537_BEF2026002324731.html");
+
+  for (const viewport of [{ width: 1366, height: 768 }, { width: 1093, height: 614 }, { width: 1000, height: 700 }]) {
+    await page.setViewportSize(viewport);
+    const metrics = await card.evaluate((element) => {
+      const title = element.querySelector<HTMLElement>(".portal-next-queue-identity-title strong");
+      const invoice = element.querySelector<HTMLElement>(".portal-next-queue-identity-meta small");
+      const date = element.querySelector<HTMLElement>(".portal-next-queue-identity-footer small");
+      const rect = element.getBoundingClientRect();
+      return {
+        height: rect.height,
+        titleClient: title?.clientWidth || 0,
+        titleScroll: title?.scrollWidth || 0,
+        invoiceClient: invoice?.clientWidth || 0,
+        invoiceScroll: invoice?.scrollWidth || 0,
+        dateClient: date?.clientWidth || 0,
+        dateScroll: date?.scrollWidth || 0,
+      };
+    });
+    expect(metrics.height).toBe(72);
+    expect(metrics.titleClient).toBeGreaterThan(150);
+    expect(metrics.titleScroll).toBeGreaterThan(metrics.titleClient);
+    expect(metrics.invoiceScroll).toBeLessThanOrEqual(metrics.invoiceClient);
+    expect(metrics.dateScroll).toBeLessThanOrEqual(metrics.dateClient);
+  }
+});
+
+test("queue identity fallback prefers meaningful provider and skips generic provider labels", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "meaningful-provider.html", "text/html", html, (workspace) => {
+    const baseUpload = workspace.uploaded_documents[0];
+    const baseDocument = workspace.documents[0];
+    workspace.uploaded_documents = [
+      { ...baseUpload, document_ref: "meaningful-provider-ref", original_file_name: "meaningful-provider.html" },
+      { ...baseUpload, document_ref: "generic-provider-ref", original_file_name: "generic-provider.html" },
+    ];
+    workspace.documents = [
+      { ...baseDocument, document_ref: "meaningful-provider-ref", result: { ...baseDocument.result, file_name: "meaningful-provider.html", provider_hint: "Yurtiçi Kargo" } },
+      { ...baseDocument, document_ref: "generic-provider-ref", result: { ...baseDocument.result, file_name: "generic-provider.html", provider_hint: "Çalışma alanı" } },
+    ];
+  });
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const meaningfulCard = page.locator('.portal-next-queue-list button[title="Orijinal dosya: meaningful-provider.html"]');
+  const genericCard = page.locator('.portal-next-queue-list button[title="Orijinal dosya: generic-provider.html"]');
+  await expect(meaningfulCard.locator(".portal-next-queue-identity-title strong")).toHaveText("Yurtiçi Kargo");
+  await expect(genericCard.locator(".portal-next-queue-identity-title strong")).toHaveText("generic-provider.html");
 });
 
 test("ledger hierarchy keeps approval dominant and shortcut help clear of decisions", async ({ page }) => {

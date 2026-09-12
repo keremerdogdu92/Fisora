@@ -628,6 +628,7 @@ function processedBackendDocument(document, workspace, client) {
     clientId: client.clientId,
     clientName: client.clientName,
     fileName: safeText(result.file_name || document?.document_ref, documentRef),
+    invoiceNumber: safeText(result.invoice_number || result.original_invoice_number || uploadedDocument?.source_invoice_no),
     documentType: safeText(result.invoice_type || document?.document_type, "invoice"),
     intakeCategory: intakeCategoryForBackendDocument(intakeSource),
     period: safeText(uploadedDocument?.period || result.period || document?.period) || periodFromDate(safeText(result.issue_date || document?.created_at || document?.updated_at)),

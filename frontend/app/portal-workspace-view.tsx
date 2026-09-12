@@ -97,6 +97,32 @@ function formatStatus(status: PilotStatus) {
   return statusLabels[status] ?? status;
 }
 
+const genericQueueProviderTokens = new Set([
+  "calisma alani",
+  "tedarikci bilinmiyor",
+  "belge yukleme",
+  "isleme alinacak belge",
+  "html source reader",
+  "ai invoice pipeline",
+]);
+
+function normalizedQueueProviderToken(value: string) {
+  return value
+    .trim()
+    .toLocaleLowerCase("tr-TR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0131/g, "i");
+}
+
+function queueIdentityTitle(document: PilotDocument) {
+  const counterparty = String(document.counterpartyTitle || "").trim();
+  if (counterparty) return counterparty;
+  const provider = String(document.provider || "").trim();
+  if (provider && !genericQueueProviderTokens.has(normalizedQueueProviderToken(provider))) return provider;
+  return document.fileName;
+}
+
 function processingStageLabel(status?: string) {
   if (status === "processing") return "Çalışıyor";
   if (status === "completed") return "Tamamlandı";
@@ -296,7 +322,7 @@ export function AccountantWorkspace({
       .filter((document) => documentMatchesSegment(document, selectedDocumentSegment))
       .filter((document) => {
         if (!query) return true;
-        return `${document.fileName} ${document.provider} ${document.amount} ${formatStatus(document.status)}`.toLocaleLowerCase("tr-TR").includes(query);
+        return `${document.fileName} ${document.invoiceNumber || ""} ${document.counterpartyTitle || ""} ${document.provider} ${document.amount} ${formatStatus(document.status)}`.toLocaleLowerCase("tr-TR").includes(query);
       });
   }, [documentQuery, documents, selectedDocumentSegment]);
   const cockpitQueues = useMemo(() => reviewCockpitQueues(filteredSegmentDocuments), [filteredSegmentDocuments]);
@@ -572,13 +598,24 @@ export function AccountantWorkspace({
                 const active = selectedDocument?.id === queueDocument.id;
                 return (
                   <li key={queueDocument.id}>
-                    <button className={active ? "active" : ""} onClick={() => selectDocument(queueDocument)} ref={active ? activeQueueItemRef : undefined} type="button">
-                      <span>
-                        <strong>{queueDocument.fileName}</strong>
+                    <button
+                      className={active ? "active" : ""}
+                      onClick={() => selectDocument(queueDocument)}
+                      ref={active ? activeQueueItemRef : undefined}
+                      title={`Orijinal dosya: ${queueDocument.fileName}`}
+                      type="button"
+                    >
+                      <span className="portal-next-queue-identity-title">
+                        <strong>{queueIdentityTitle(queueDocument)}</strong>
+                      </span>
+                      <span className="portal-next-queue-identity-meta">
+                        <small>{queueDocument.invoiceNumber || labelForIntakeCategory(queueDocument.intakeCategory)}</small>
                         <b>{formatReadOnlyAmount(queueDocument.amount)}</b>
                       </span>
-                      <small>{queueDocument.issueDate || queueDocument.uploadedAt || "-"} · {labelForIntakeCategory(queueDocument.intakeCategory)}</small>
-                      {queueDocument.status === "review_required" ? null : <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>}
+                      <span className="portal-next-queue-identity-footer">
+                        <small>{queueDocument.issueDate || queueDocument.uploadedAt || "-"}</small>
+                        {queueDocument.status === "review_required" ? null : <em>{queueDocument.status === "export_ready" ? "Onaya hazır" : formatStatus(queueDocument.status)}</em>}
+                      </span>
                     </button>
                   </li>
                 );

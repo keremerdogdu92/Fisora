@@ -103,6 +103,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-12: REV-L03** - Reopening the Workbench queue now reveals the active document instead of returning visually to the top of a long list. A 25-document Chromium reproduction confirmed the bug with document 12 selected while the queue was hidden; the active row existed but was outside the viewport. The active queue button now scrolls into the nearest visible position when selection changes or the queue reopens. Queue ordering and selection behavior are unchanged. Acceptance: portal-next 22/22, document-inspector 10/10, frontend 235/235, TypeScript/build PASS. Next: REV-L04 product decision.
 
+**Completed 2026-09-12: REV-L04** - Workbench queue cards now use business identity (counterparty title -> meaningful provider -> filename fallback), real backend invoice number + amount, and date while staying 72 px high in the existing 210 px queue. Generic provider placeholders do not displace a useful filename, and original filename remains available in the card tooltip. Invoice number is projected only from backend canonical fields (`invoice_number`, `original_invoice_number`, QNB `source_invoice_no`), never parsed from filename. Variant C remains validated at 1366x768, 1093x614, and 1000x700. Acceptance: targeted workspace-api 17/17, targeted queue Playwright 2/2, frontend 235/235, document-inspector 12/12, TypeScript/build PASS, mojibake guard PASS, `git diff --check` PASS. Next: discuss REV-L05 date-format consistency separately.
+
 ## New decisions — 2026-09-09
 
 

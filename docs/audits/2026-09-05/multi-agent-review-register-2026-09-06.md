@@ -458,9 +458,17 @@
 **Implementation:** The active queue button owns one ref. When portal-next queue becomes visible or the selected document changes while the queue is visible, a requestAnimationFrame callback calls `scrollIntoView({ block: "nearest", inline: "nearest" })`. No queue ordering, selection state, or keyboard-navigation model changed.
 **Acceptance:** Dedicated 25-document Playwright reproduction now PASS; portal-next contract 22/22 PASS; document-inspector 10/10 PASS; full frontend 235/235 PASS; TypeScript / Next production build PASS.
 
-## REV-L04 — Teknik ID/UUID ağırlığı
-**Status:** ÜRÜN KARARI.
-**Audit refs:** [CX Working but poor UX](./fisora-codex-ux-qa-audit-2026-09-05.md#working-but-poor-ux) · AG accounting-office observations.
+## REV-L04 - Technical ID/UUID-heavy queue identity
+**Status:** IMPLEMENTED - 2026-09-12.
+**Audit refs:** [CX Working but poor UX](./fisora-codex-ux-qa-audit-2026-09-05.md#working-but-poor-ux) - AG accounting-office observations.
+
+**Decision:** Workbench queue identity prioritizes business meaning instead of technical-looking filenames. Selected compact hierarchy: counterparty title; then real invoice number + amount; then date. Original filename remains available as troubleshooting metadata/tooltip. Invoice number comes only from backend canonical fields, never filename parsing.
+
+**UX validation:** The queue remains 210 px wide and the card remains 198 x 72 px. The selected three-micro-row layout was validated in Chromium at 1366x768, 1093x614 (125% equivalent), and 1000x700 without taking width from document/journal panels.
+
+**Implementation:** Backend data projects `invoice_number`, `original_invoice_number`, or QNB `source_invoice_no` into the queue model. Queue identity resolves counterparty title -> meaningful provider -> original filename, explicitly skipping generic provider placeholders. Search includes filename, real invoice number, counterparty title, provider, amount, and status. Original filename remains in the card tooltip for troubleshooting. PowerShell-induced mojibake was repaired with Unicode-safe source text.
+
+**Acceptance:** Targeted workspace-api 17/17 PASS; targeted queue identity Playwright 2/2 PASS; full frontend 235/235 PASS; full document-inspector Playwright 12/12 PASS; `tsc --noEmit` PASS; Next production build PASS; mojibake guard PASS; `git diff --check` PASS. REV-L05 date-format consistency remains separate.
 
 ## REV-L05 — Tarih formatlarının tutarsızlığı
 **Status:** KONTROL EDİLECEK.

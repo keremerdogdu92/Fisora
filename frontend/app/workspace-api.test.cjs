@@ -97,6 +97,7 @@ const workspaceRecord = {
       export_status: "export_ready",
       result: {
         file_name: "satis-faturasi.pdf",
+        invoice_number: "SAT2026000000123",
         invoice_type: "SATIS",
         issue_date: "2026-06-01",
         payable_total: "120.00",
@@ -392,6 +393,7 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.deepEqual(data.documents[0].clientActivityTags, ["hearing_aid", "medical_retail", "retail_trade"]);
   assert.equal(data.documents[0].counterpartyTaxId, "2222222222");
   assert.equal(data.documents[0].counterpartyTitle, "Alici Hasta");
+  assert.equal(data.documents[0].invoiceNumber, "SAT2026000000123");
   assert.deepEqual(data.documents[0].decisionNarrative, {
     invoiceProductLine: "Cihaz satisi",
     fisoraInterpretation: "Isitme cihazi",

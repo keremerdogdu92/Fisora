@@ -62,6 +62,23 @@ const pilotWorkspace = {
   ],
 };
 
+const twoPeriodWorkspace = {
+  ...pilotWorkspace,
+  documents: [
+    ...pilotWorkspace.documents,
+    {
+      ...pilotWorkspace.documents[0],
+      document_ref: "invoice-previous-period",
+      created_at: "2026-05-12T10:00:00Z",
+      result: {
+        ...pilotWorkspace.documents[0].result,
+        file_name: "invoice-previous-period.pdf",
+        issue_date: "2026-05-12",
+      },
+    },
+  ],
+};
+
 async function setupAccountantSession(page: Page) {
   await page.addInitScript(() => {
     window.localStorage.setItem("fisora.office.session.v1", JSON.stringify({
@@ -83,7 +100,7 @@ async function setupAccountantSession(page: Page) {
   });
 }
 
-async function setupPilotRoutes(page: Page) {
+async function setupPilotRoutes(page: Page, workspace = pilotWorkspace) {
   await setupAccountantSession(page);
   await page.route("**/phase0/store/system/readiness", async (route) => {
     await route.fulfill({ json: readyForRealDataPayload });
@@ -92,7 +109,7 @@ async function setupPilotRoutes(page: Page) {
     await route.fulfill({ json: { clients: [pilotClient] } });
   });
   await page.route("**/phase0/store/workspace/**", async (route) => {
-    await route.fulfill({ json: pilotWorkspace });
+    await route.fulfill({ json: workspace });
   });
   await page.route("**/phase0/store/research/profiles**", async (route) => {
     await route.fulfill({
@@ -205,6 +222,20 @@ test("client management uses list/detail navigation and clear onboarding section
   await expect(page.getByText("ARİF Pilot Test AŞ").first()).toBeVisible();
   await expect(page.locator(".client-v13-chart-replace")).toBeVisible();
   await expect(page.getByRole("button", { name: /Se.ili belgeleri sil/i })).toHaveCount(0);
+});
+
+test("client list and detail keep the same selected-period document scope", async ({ page }) => {
+  await setupPilotRoutes(page, twoPeriodWorkspace);
+  await page.goto("/portal/mukellefler");
+
+  const clientRow = page.getByRole("row").filter({ hasText: "1111111111" });
+  await expect(clientRow.locator('[data-label="Belge"]')).toHaveText("1");
+  await expect(clientRow.locator('[data-label="Bekleyen"]')).toHaveText("1 kontrol");
+  await clientRow.getByRole("button", { name: /G.r.nt.le/ }).click();
+
+  const invoiceMetric = page.getByLabel(/M.kellef belge .zeti/).locator("article").filter({ hasText: "Faturalar" });
+  await expect(invoiceMetric.locator("strong")).toHaveText("1");
+  await expect(invoiceMetric.locator("small")).toHaveText("1 kontrol");
 });
 
 test("Bilgi Havuzu uses Turkish fallback copy for English-only profiles", async ({ page }) => {

@@ -111,6 +111,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-12: REV-M02** - Client management now distinguishes a real empty office from a zero-result search. The original `Henüz mükellef yok` onboarding state remains only when no search is active. A non-empty query with no matches shows `Aramayla eşleşen mükellef bulunamadı`, keeps the typed query visible, and offers `Aramayı temizle` instead of steering the accountant toward duplicate client creation. Acceptance: source-contract 18/18, targeted Chromium PASS, frontend 241/241, `ui-remediation` 8/8, TypeScript/build PASS, `git diff --check` PASS. Next audit item: REV-M03.
 
+**Closed 2026-09-13: REV-M03** - The list/detail scope finding is the same UXR-008 defect already fixed by REV-E05. A new two-period Chromium regression proves that list and detail both use the selected office period: one current-period invoice is shown in both counts while a previous-period invoice is excluded from both. No product code change was required. Acceptance: dedicated Chromium PASS, frontend 241/241, `ui-remediation` 9/9, TypeScript/build PASS, `git diff --check` PASS. Next M item is REV-M04, which remains a strategy decision rather than an audit bug.
+
 ## New decisions — 2026-09-09
 
 

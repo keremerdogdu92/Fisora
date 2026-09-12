@@ -499,8 +499,12 @@
 **Acceptance:** Source-contract 18/18 PASS; Chromium client-management flow verifies the filtered-zero-result copy, absence of the false empty-office message, and recovery through `Aramayı temizle`; full frontend Node suite 241/241 PASS; `ui-remediation` Chromium 8/8 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 ## REV-M03 — Liste/detail scope farkı
-**Status:** KONTROL EDİLECEK.
+**Status:** CLOSED / DUPLICATE OF REV-E05 - 2026-09-13.
 **Audit refs:** CX UXR-008.
+
+**Retest:** The original UXR-008 mismatch is not reproducible after REV-E05. A two-period Chromium fixture gives the same selected-period scope to the client list row and client detail summary: the current-period invoice is counted in both surfaces while the previous-period invoice is excluded from both.
+**Resolution:** No new product/state change. REV-M03 tracks the same defect already fixed by REV-E05 (`selectedClientOfficeDocuments` + period-scoped dashboard rows), so this duplicate is closed and the browser reproduction remains as regression coverage.
+**Acceptance:** Dedicated two-period Chromium reproduction PASS; full frontend Node suite 241/241 PASS; `ui-remediation` Chromium 9/9 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 ## REV-M04 — Hızlı mükellef geçişi / Ctrl+K
 **Status:** STRATEJİ KARARI.

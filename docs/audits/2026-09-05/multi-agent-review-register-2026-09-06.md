@@ -491,8 +491,12 @@
 **Acceptance:** Normalization behavior covers `ARIF`/`ARİF`, `Ş/S`, `Ç/C`, `Ğ/G`, `Ö/O`, and `Ü/U`; targeted Node tests 22/22 PASS; real Chromium Mükellefler flow confirms `ARIF` finds `ARİF Pilot Test AŞ`; full frontend Node suite 241/241 PASS; `ui-remediation` Chromium 8/8 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 ## REV-M02 — 0 arama sonucunda `Henüz mükellef yok`
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-12.
 **Audit refs:** CG-15.
+
+**Root cause:** The client list used one generic zero-row branch, so both a truly empty office and a non-matching search rendered the onboarding message `Henüz mükellef yok`.
+**Decision / implementation:** Empty-office and filtered-zero-result states are now distinct. With no search text, the existing first-client onboarding state remains unchanged. With a non-empty search and zero matches, the list shows `Aramayla eşleşen mükellef bulunamadı`, echoes the query, and offers `Aramayı temizle`; it does not promote new-client creation.
+**Acceptance:** Source-contract 18/18 PASS; Chromium client-management flow verifies the filtered-zero-result copy, absence of the false empty-office message, and recovery through `Aramayı temizle`; full frontend Node suite 241/241 PASS; `ui-remediation` Chromium 8/8 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 ## REV-M03 — Liste/detail scope farkı
 **Status:** KONTROL EDİLECEK.

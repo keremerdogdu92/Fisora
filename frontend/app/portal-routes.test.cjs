@@ -197,6 +197,9 @@ test("client management defaults to the existing-client list and separates loadi
   assert.match(clientsView, /isLoading/);
   assert.match(clientsView, /Mükellefler yükleniyor/);
   assert.match(clientsView, /Henüz mükellef yok/);
+  assert.match(clientsView, /Aramayla eşleşen mükellef bulunamadı/);
+  assert.match(clientsView, /const hasClientSearch = Boolean\(clientSearch\.trim\(\)\)/);
+  assert.match(clientsView, /onClientSearchChange\(""\)/);
   assert.match(clientsView, /className="client-v13-list-surface"/);
   assert.match(clientsView, /className="client-v13-table-wrap panel"/);
   assert.match(clientsView, /clientSurface === "detail"/);

@@ -179,6 +179,12 @@ test("client management uses list/detail navigation and clear onboarding section
 
   await expect(page.getByLabel(/M.kellef listesi/)).toBeVisible();
   const clientSearch = page.getByPlaceholder(/M.kellef ara/);
+  await clientSearch.fill("bulunmayan");
+  await expect(page.getByText("Aramayla eşleşen mükellef bulunamadı")).toBeVisible();
+  await expect(page.getByText("Henüz mükellef yok")).toHaveCount(0);
+  await page.getByRole("button", { name: "Aramayı temizle" }).click();
+  await expect(clientSearch).toHaveValue("");
+  await expect(page.getByText("ARİF Pilot Test AŞ").first()).toBeVisible();
   await clientSearch.fill("ARIF");
   await expect(page.getByText("ARİF Pilot Test AŞ").first()).toBeVisible();
   await clientSearch.fill("");

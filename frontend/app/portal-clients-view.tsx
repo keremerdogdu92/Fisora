@@ -118,6 +118,7 @@ export function ClientManagementView({
   const [activeTab, setActiveTab] = useState<ClientManagementTab>("client-list");
   const [clientSurface, setClientSurface] = useState<ClientManagementSurface>("list");
   const hasSelectedClient = Boolean(selectedClient);
+  const hasClientSearch = Boolean(clientSearch.trim());
   const readyClientCount = clientRows.filter((row) => (
     row.documentCount > 0
     && row.pendingReviewCount === 0
@@ -257,6 +258,14 @@ export function ClientManagementView({
                   })}
                 </tbody>
               </table>
+            ) : hasClientSearch ? (
+              <div className="client-list-state empty" role="status" aria-live="polite">
+                <strong>Aramayla eşleşen mükellef bulunamadı</strong>
+                <small>{`"${clientSearch.trim()}" için sonuç yok. Yazımı kontrol edin veya aramayı temizleyin.`}</small>
+                <button className="secondary compact" onClick={() => onClientSearchChange("")} type="button">
+                  Aramayı temizle
+                </button>
+              </div>
             ) : (
               <div className="client-list-state empty">
                 <strong>Henüz mükellef yok</strong>

@@ -109,6 +109,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-12: REV-M01** - Client search is now tolerant of Turkish keyboard/diacritic differences without altering stored client identity. Search-only normalization lowercases with Turkish rules, strips combining marks, and folds dotless `ı` to `i`, so ASCII `ARIF` matches canonical `ARİF`; the same normalized comparison covers client name, client id, and tax id. Acceptance: normalization regression PASS, targeted Node 22/22, real Chromium client search PASS, frontend 241/241, `ui-remediation` Chromium 8/8, TypeScript/build PASS, `git diff --check` PASS. Next audit item: REV-M02 — distinguish a filtered zero-result state from a truly empty client workspace.
 
+**Completed 2026-09-12: REV-M02** - Client management now distinguishes a real empty office from a zero-result search. The original `Henüz mükellef yok` onboarding state remains only when no search is active. A non-empty query with no matches shows `Aramayla eşleşen mükellef bulunamadı`, keeps the typed query visible, and offers `Aramayı temizle` instead of steering the accountant toward duplicate client creation. Acceptance: source-contract 18/18, targeted Chromium PASS, frontend 241/241, `ui-remediation` 8/8, TypeScript/build PASS, `git diff --check` PASS. Next audit item: REV-M03.
+
 ## New decisions — 2026-09-09
 
 

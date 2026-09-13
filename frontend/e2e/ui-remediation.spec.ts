@@ -147,6 +147,34 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
 });
 
 
+test("empty bank and other workbench stay document-specific", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Çalışma Masası", exact: true }).click();
+
+  const workTabs = page.locator(".portal-next-work-tabs");
+  const bankTab = workTabs.getByRole("button", { name: /^Banka/ });
+  const otherTab = workTabs.getByRole("button", { name: /^Diğer Belgeler/ });
+  await expect(bankTab).toHaveClass(/empty/);
+  await expect(otherTab).toHaveClass(/empty/);
+
+  for (const item of [
+    { tab: bankTab, queue: "Banka Ekstreleri", empty: "Bu dönemde banka ekstresi yok" },
+    { tab: otherTab, queue: "Diğer Belgeler", empty: "Bu dönemde diğer belge yok" },
+  ]) {
+    await item.tab.click();
+    await expect(page.locator(".portal-next-command-direction")).toHaveCount(0);
+    await expect(page.locator(".portal-next-queue-head strong")).toHaveText(item.queue);
+    await expect(page.locator(".workbench-context-state strong")).toHaveText(item.empty);
+    await expect(page.locator(".focus-action")).toBeDisabled();
+  }
+
+  await workTabs.getByRole("button", { name: /^Faturalar/ }).click();
+  await expect(page.locator(".portal-next-command-direction").first()).toBeVisible();
+  await expect(page.locator(".portal-next-queue-head strong")).toHaveText("İncelenecek Faturalar");
+});
+
 test("mobile login keeps authentication first and remember control compact", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

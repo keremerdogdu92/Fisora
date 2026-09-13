@@ -65,23 +65,26 @@ function WorkbenchQueueFilters({
   workQueueFilter: WorkQueueFilter;
   workQueueOptions: WorkbenchQueueOption[];
 }) {
+  const showInvoiceDirection = ["purchase_invoices", "sales_invoices", "invoices"].includes(selectedDocumentSegment);
   return (
     <div className="portal-next-workbench-filter-cluster">
-      <div className="portal-next-command-direction" role="tablist" aria-label="Fatura yönü">
-        {segmentOptions.map((option) => (
-          <button
-            aria-selected={selectedDocumentSegment === option.id}
-            className={selectedDocumentSegment === option.id ? "active" : ""}
-            key={option.id}
-            onClick={() => onSelectSegment(option.id)}
-            role="tab"
-            type="button"
-          >
-            <span>{option.label}</span>
-            <strong>{option.count}</strong>
-          </button>
-        ))}
-      </div>
+      {showInvoiceDirection ? (
+        <div className="portal-next-command-direction" role="tablist" aria-label="Fatura yönü">
+          {segmentOptions.map((option) => (
+            <button
+              aria-selected={selectedDocumentSegment === option.id}
+              className={selectedDocumentSegment === option.id ? "active" : ""}
+              key={option.id}
+              onClick={() => onSelectSegment(option.id)}
+              role="tab"
+              type="button"
+            >
+              <span>{option.label}</span>
+              <strong>{option.count}</strong>
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="review-cockpit-queues" aria-label="İş kuyruğu">
         {workQueueOptions.map((option) => (
           <button className={workQueueFilter === option.id ? "active" : ""} key={option.id} onClick={() => onSelectQueue(option.id)} type="button">
@@ -347,6 +350,21 @@ export function AccountantWorkspace({
   const queueIsEmpty = queueDocuments.length === 0;
   const canonicalDocumentReady = Boolean(selectedDocument && selectedDocument.id === reconciledDocumentId);
   const contextReconciling = !queueIsEmpty && !canonicalDocumentReady;
+  const queueTitle = selectedDocumentSegment === "bank_statements" ? "Banka Ekstreleri"
+    : selectedDocumentSegment === "other_documents" ? "Diğer Belgeler"
+      : "İncelenecek Faturalar";
+  const hasQueueFilter = Boolean(documentQuery || workQueueFilter !== "all");
+  const emptyStateTitle = hasQueueFilter ? "Bu filtrede belge yok"
+    : selectedDocumentSegment === "bank_statements" ? "Bu dönemde banka ekstresi yok"
+      : selectedDocumentSegment === "other_documents" ? "Bu dönemde diğer belge yok"
+        : selectedDocumentSegment === "sales_invoices" ? "Bu dönemde satış faturası yok"
+          : selectedDocumentSegment === "purchase_invoices" ? "Bu dönemde alış faturası yok"
+            : "Bu dönemde fatura yok";
+  const emptyStateDetail = hasQueueFilter
+    ? "Aramayı veya kuyruk filtresini temizleyerek çalışma kuyruğuna dönebilirsiniz."
+    : selectedDocumentSegment === "bank_statements" ? "Seçili mükellef ve dönemde banka ekstresi bulunmuyor."
+      : selectedDocumentSegment === "other_documents" ? "Seçili mükellef ve dönemde diğer belge bulunmuyor."
+        : "Seçili mükellef ve dönemde fatura bulunmuyor.";
   const navigationDocuments = queueDocuments;
   const selectedDocumentPosition = canonicalDocumentReady && selectedDocument
     ? navigationDocuments.findIndex((document) => document.id === selectedDocument.id) + 1
@@ -498,7 +516,7 @@ export function AccountantWorkspace({
             <button className={`queue-action${queueHidden ? " active" : ""}`} onClick={() => setQueueHidden((current) => !current)} type="button">
               <span aria-hidden="true">☰</span> {queueHidden ? "Kuyruğu göster" : "Kuyruğu gizle"}
             </button>
-            <button className="focus-action" onClick={() => { setFocusMode(true); setJournalHidden(false); }} type="button">
+            <button className="focus-action" disabled={!canonicalDocumentReady} onClick={() => { setFocusMode(true); setJournalHidden(false); }} type="button">
               <span aria-hidden="true">▣</span> Belgeyi incele
             </button>
             <button className="fullscreen-action" onClick={() => void toggleWorkspaceFullscreen(true)} title="Çalışma masasını tarayıcı tam ekranında aç" type="button">
@@ -564,7 +582,7 @@ export function AccountantWorkspace({
           <header className="portal-next-focus-toolbar">
             <strong>Belge İnceleme</strong>
             <div className="portal-next-focus-document">
-              <span>{canonicalDocumentReady ? selectedDocument?.fileName : queueIsEmpty ? "Bu filtrede belge yok" : "Belge görünümü güncelleniyor"}</span>
+              <span>{canonicalDocumentReady ? selectedDocument?.fileName : queueIsEmpty ? emptyStateTitle : "Belge görünümü güncelleniyor"}</span>
               {queueHidden ? (
                 <strong>Kuyruk {canonicalDocumentReady && selectedDocumentPosition > 0 ? safeDocumentPosition : 0} / {navigationDocuments.length}</strong>
               ) : null}
@@ -586,9 +604,9 @@ export function AccountantWorkspace({
           </header>
         ) : null}
         {nextPresentation ? (
-          <aside className="portal-next-document-queue" aria-label="İncelenecek faturalar">
+          <aside className="portal-next-document-queue" aria-label={queueTitle}>
             <div className="portal-next-queue-head">
-              <strong>İncelenecek Faturalar</strong>
+              <strong>{queueTitle}</strong>
               <span>↑ ↓</span>
             </div>
             <div className="portal-next-queue-tools">
@@ -626,10 +644,10 @@ export function AccountantWorkspace({
         ) : null}
         <section className="document-review-main">
           {queueIsEmpty ? (
-            <section className="workbench-context-state" aria-label="Bu filtrede belge yok">
-              <strong>Bu filtrede belge yok</strong>
-              <span>Aramayı veya kuyruk filtresini temizleyerek çalışma kuyruğuna dönebilirsiniz.</span>
-              {(documentQuery || workQueueFilter !== "all") ? <button onClick={() => { setDocumentQuery(""); setWorkQueueFilter("all"); }} type="button">Filtreleri temizle</button> : null}
+            <section className="workbench-context-state" aria-label={emptyStateTitle}>
+              <strong>{emptyStateTitle}</strong>
+              <span>{emptyStateDetail}</span>
+              {hasQueueFilter ? <button onClick={() => { setDocumentQuery(""); setWorkQueueFilter("all"); }} type="button">Filtreleri temizle</button> : null}
             </section>
           ) : contextReconciling ? (
             <section className="workbench-context-state reconciling" aria-live="polite">

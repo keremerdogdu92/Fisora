@@ -46,6 +46,20 @@ test("invoice bank and other document navigation lives inside the next workbench
   assert.match(shell, />Diğer Belgeler <span>/);
   assert.match(shell, /"bank_statements"/);
   assert.match(shell, /"other_documents"/);
+  assert.ok(shell.includes('bankCount === 0 ? "empty" : ""'));
+  assert.ok(shell.includes('otherCount === 0 ? "empty" : ""'));
+});
+
+test("bank and other workbench states do not leak invoice-only controls or copy", () => {
+  const workspace = source("portal-workspace-view.tsx");
+
+  assert.ok(workspace.includes('const showInvoiceDirection = ["purchase_invoices", "sales_invoices", "invoices"].includes(selectedDocumentSegment);'));
+  assert.ok(workspace.includes('{showInvoiceDirection ? ('));
+  assert.ok(workspace.includes('selectedDocumentSegment === "bank_statements" ? "Banka Ekstreleri"'));
+  assert.ok(workspace.includes('selectedDocumentSegment === "other_documents" ? "Diğer Belgeler"'));
+  assert.ok(workspace.includes('Bu dönemde banka ekstresi yok'));
+  assert.ok(workspace.includes('Bu dönemde diğer belge yok'));
+  assert.ok(workspace.includes('className="focus-action" disabled={!canonicalDocumentReady}'));
 });
 test("next home mirrors the approved v13 office overview with period-scoped live data", () => {
   const dashboard = source("portal-dashboard-view.tsx");

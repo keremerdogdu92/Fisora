@@ -551,16 +551,27 @@
 # O — Banka / Diğer Belgeler
 
 ## REV-O01 — Boş modüllerin prominence'i
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-13.
 **Audit refs:** [CG-26](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-26--banka--diğer-belgeler-currently-carry-empty-scope)
 
+**Decision / implementation:** Banka ve Diğer Belgeler çalışma masasından kaldırılmadı; ürün kapsamı görünür kalıyor. Sıfır sayılı Banka / Diğer Belgeler sekmeleri aktif değilken daha düşük görsel ağırlıkta gösteriliyor, veri geldiğinde normal prominence korunuyor.
+**Acceptance:** 1366x768 Chromium, `Banka 0` ve `Diğer Belgeler 0` sekmelerinin `empty` durumunu ve seçildiğinde normal aktif hiyerarşiyi doğruluyor.
+
 ## REV-O02 — Banka/Diğer Belgeler boşken `İncelenecek Faturalar`
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-13.
 **Audit refs:** CX Working but poor UX.
 
+**Root cause:** Workbench queue başlığı ve boş durum metni belge segmentinden bağımsız, fatura odaklı sabit metin kullanıyordu.
+**Implementation:** Banka segmentinde kuyruk başlığı `Banka Ekstreleri`, Diğer Belgeler segmentinde `Diğer Belgeler` oldu. Filtresiz boş durumda belge türüne özel dönem mesajı gösteriliyor; gerçek arama/kuyruk filtresi aktifse `Bu filtrede belge yok` mesajı korunuyor.
+**Acceptance:** Chromium her iki sıfır segmentte doğru kuyruk başlığını ve belge türüne özel empty-state'i doğruluyor.
+
 ## REV-O03 — Banka/Diğer Belgeler'de Alış/Satış kontrolleri
-**Status:** KONTROL EDİLECEK.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-13.
 **Audit refs:** CX Working but poor UX.
+
+**Root cause:** Ortak WorkbenchQueueFilters bileşeni Alış/Satış yön kontrolünü aktif segmentten bağımsız render ediyordu.
+**Implementation:** Alış/Satış yalnız fatura segmentlerinde render ediliyor. Banka ve Diğer Belgeler'de kuyruk durum filtreleri kalıyor. Seçili/geçerli belge yokken `Belgeyi incele` aksiyonu disabled.
+**Acceptance:** Source-contract 24/24 PASS; dedicated Chromium PASS; full frontend Node 242/242 PASS; `ui-remediation` Chromium 11/11 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 # P — AI Ajanları / Okuma Kalitesi / Öğrenme
 

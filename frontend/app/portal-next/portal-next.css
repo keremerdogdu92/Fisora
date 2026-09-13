@@ -254,6 +254,16 @@
   color: var(--accent);
 }
 
+.portal-next-work-tabs button.empty:not(.active) {
+  color: #8190a2;
+  font-weight: 700;
+}
+
+.portal-next-work-tabs button.empty:not(.active) span {
+  background: #f3f6f8;
+  color: #8b99a9;
+}
+
 .portal-next-work-tabs span {
   background: #e9eef4;
   border-radius: 999px;

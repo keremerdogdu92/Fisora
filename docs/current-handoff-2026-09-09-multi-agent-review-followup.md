@@ -122,6 +122,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-13: REV-N04** - The shared login gateway no longer exposes role-specific default usernames. The username field starts blank with `Kullanıcı adı veya e-posta`, role switching clears the field, and password authentication refuses a blank identity rather than silently substituting `mali-musavir` or `mukellef-user`. Internal route defaults remain only for allowed localhost passwordless fallback. Acceptance: source-contract 23/23, targeted Chromium PASS, frontend 241/241, ui-remediation 10/10, TypeScript/build PASS, git diff --check PASS. Next audit group: REV-O01.
 
+**Completed 2026-09-13: REV-O01 + REV-O02 + REV-O03** - Workbench non-invoice states are now document-specific instead of leaking invoice UI. Empty Banka / Diğer Belgeler tabs stay visible but are visually quieter when their count is zero; queue headings and empty-state copy match the selected document type; Alış/Satış renders only for invoice segments; and Belgeyi incele is disabled when no canonical document is available. Real search/queue-filter empty states keep the existing filtered-result message. Acceptance: portal-next 24/24, dedicated Chromium PASS, frontend 242/242, ui-remediation 11/11, TypeScript/build PASS, git diff --check PASS. Next audit group: REV-P01.
+
 ## New decisions — 2026-09-09
 
 

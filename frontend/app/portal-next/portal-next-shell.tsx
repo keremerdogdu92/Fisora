@@ -192,8 +192,8 @@ export function PortalNextWorkTypeTabs({
   return (
     <nav className="portal-next-work-tabs" aria-label="Çalışma Masası belge türleri">
       <button className={invoiceActive ? "active" : ""} onClick={() => onSelect(invoiceActive ? selectedSegment : "purchase_invoices")} type="button">Faturalar <span>{invoiceCount}</span></button>
-      <button className={selectedSegment === "bank_statements" ? "active" : ""} onClick={() => onSelect("bank_statements")} type="button">Banka <span>{bankCount}</span></button>
-      <button className={selectedSegment === "other_documents" ? "active" : ""} onClick={() => onSelect("other_documents")} type="button">Diğer Belgeler <span>{otherCount}</span></button>
+      <button className={[selectedSegment === "bank_statements" ? "active" : "", bankCount === 0 ? "empty" : ""].filter(Boolean).join(" ")} onClick={() => onSelect("bank_statements")} type="button">Banka <span>{bankCount}</span></button>
+      <button className={[selectedSegment === "other_documents" ? "active" : "", otherCount === 0 ? "empty" : ""].filter(Boolean).join(" ")} onClick={() => onSelect("other_documents")} type="button">Diğer Belgeler <span>{otherCount}</span></button>
     </nav>
   );
 }

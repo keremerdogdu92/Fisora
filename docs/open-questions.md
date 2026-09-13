@@ -56,6 +56,14 @@ Durumlar:
      unsupported/scanned belge gerekcesiyle ayrilir.
    - Vergi levhasi OCR'i ayri onboarding kanali olarak kalabilir.
 
+6. **Hizli mukellef gecisi / Ctrl+K** (`saha testi`)
+   - Mevcut Mukellefler aramasi pilot icin yeterli; global gecis bir bug veya
+     pilot blokaji degil.
+   - Musavirle gercek kullanimda 50-80+ mukellef arasinda ne kadar sik gecis
+     yaptigi ve mevcut liste aramasinin surtunme yaratip yaratmadigi sorulacak.
+   - Ihtiyac dogrulanirsa ilk kapsam yalniz `Ctrl+K -> mukellef ara -> Enter ->
+     mukellef detayi` olacak; genel komut paletine donusturulmeyecek.
+
 ## Kapanan Kararlar
 
 ### Zirve ve Export

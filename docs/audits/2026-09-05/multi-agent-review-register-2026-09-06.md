@@ -507,8 +507,13 @@
 **Acceptance:** Dedicated two-period Chromium reproduction PASS; full frontend Node suite 241/241 PASS; `ui-remediation` Chromium 9/9 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 ## REV-M04 — Hızlı mükellef geçişi / Ctrl+K
-**Status:** STRATEJİ KARARI.
+**Status:** PARKED FOR ACCOUNTANT FIELD FEEDBACK - 2026-09-13.
 **Audit refs:** AG Missing Product Capabilities.
+
+**Decision:** Bu bir audit bug'ı veya pilot blokajı değil. Mevcut Mükellefler araması pilot için yeterli kabul edildi; global `Ctrl+K` geçişi ancak gerçek müşavir kullanımında anlamlı sürtünme doğrulanırsa alınacak.
+**Field question:** 50-80+ mükellef arasında gün içinde ne kadar sık geçiş yapılıyor ve mevcut Mükellefler araması bu akışta yavaşlatıyor mu?
+**If accepted later:** İlk kapsam yalnız `Ctrl+K -> mükellef ara -> Enter -> mükellef detayı`; genel command palette kapsamı açılmayacak.
+**Tracking:** `docs/open-questions.md` saha testi listesine eklendi.
 
 # N — Login / auth
 

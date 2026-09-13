@@ -541,8 +541,12 @@
 **Resolution:** No product CSS or component change. Treat development-toolbar chrome as non-product evidence in future visual audits. Production build PASS and dedicated production Chromium verification PASS.
 
 ## REV-N04 — Default login usernames
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-13.
 **Audit refs:** CG clean-incognito login observation; kullanıcı adları `mali-musavir` / `mukellef-user` hazır görünüyordu.
+
+**Decision:** Shared production login no longer pre-fills role-specific usernames. The username field starts empty, uses `Kullanıcı adı veya e-posta` as its placeholder, and role switching clears any previously typed identity instead of exposing `mali-musavir` / `mukellef-user`.
+**Auth behavior:** Password authentication now requires an explicit username/email and never silently substitutes the role default. Local passwordless fallback may still use the internal route default on allowed localhost/test environments; those IDs are not rendered into the product form.
+**Acceptance:** Source-contract 23/23 PASS; Chromium verifies blank initial value, blank value after role switch, placeholder copy, and explicit identity validation before password login; full frontend Node 241/241 PASS; `ui-remediation` Chromium 10/10 PASS; TypeScript and Next production build PASS; `git diff --check` PASS.
 
 # O — Banka / Diğer Belgeler
 

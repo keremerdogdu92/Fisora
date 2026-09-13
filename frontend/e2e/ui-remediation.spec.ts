@@ -151,6 +151,16 @@ test("mobile login keeps authentication first and remember control compact", asy
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
+  const username = page.locator('input[autocomplete="username"]');
+  await expect(username).toHaveValue("");
+  await expect(username).toHaveAttribute("placeholder", "Kullanıcı adı veya e-posta");
+  await username.fill("temporary-user");
+  await page.locator(".role-card").nth(1).click();
+  await expect(username).toHaveValue("");
+  await page.locator('input[autocomplete="current-password"]').fill("test-password");
+  await page.locator(".landing-login > .primary").click();
+  await expect(page.locator(".decision-status")).toHaveText("Kullanıcı adı veya e-posta girin.");
+
   await expect(page.locator(".role-copy")).toBeHidden();
   await expect(page.locator(".gateway-identity-foot")).toBeHidden();
 

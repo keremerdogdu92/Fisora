@@ -119,6 +119,9 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Closed 2026-09-13: REV-N03** - The reported clipped `N sora` mark is development chrome, not a Fisora production defect. It reproduces under `next dev` because the Next.js `N` dev-tools badge overlaps the lower-left `Fisora` footer; a production `next start` Chromium retest at 1280x900 removes the badge and leaves the footer fully visible. Mobile already hides that footer by the accepted REV-N01 layout. No product code change was required. Next: REV-N04 product decision.
 
+
+**Completed 2026-09-13: REV-N04** - The shared login gateway no longer exposes role-specific default usernames. The username field starts blank with `Kullanıcı adı veya e-posta`, role switching clears the field, and password authentication refuses a blank identity rather than silently substituting `mali-musavir` or `mukellef-user`. Internal route defaults remain only for allowed localhost passwordless fallback. Acceptance: source-contract 23/23, targeted Chromium PASS, frontend 241/241, ui-remediation 10/10, TypeScript/build PASS, git diff --check PASS. Next audit group: REV-O01.
+
 ## New decisions — 2026-09-09
 
 

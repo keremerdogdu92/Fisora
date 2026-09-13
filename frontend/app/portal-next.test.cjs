@@ -393,6 +393,10 @@ test("shared login gateway uses the portal-next product language", () => {
   assert.match(page, /gateway-login-heading/);
   assert.match(page, /Fisora&apos;ya giriş yap/);
   assert.match(page, /Beni hatırla/);
+  assert.match(page, /const \[userId, setUserId\] = useState\(""\)/);
+  assert.match(page, /placeholder="Kullanıcı adı veya e-posta"/);
+  assert.match(page, /if \(!effectiveUserId\) \{[\s\S]*Kullanıcı adı veya e-posta girin\./);
+  assert.doesNotMatch(page, /setUserId\(entry\.defaultUserId\)/);
   assert.match(page, /REMEMBERED_SESSION_TTL_HOURS = 30 \* 24/);
   assert.match(page, /ttlHours: rememberMe \? REMEMBERED_SESSION_TTL_HOURS : STANDARD_SESSION_TTL_HOURS/);
   assert.match(page, /storageScope: rememberMe \? "local" : "tab"/);

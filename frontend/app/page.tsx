@@ -25,7 +25,7 @@ const REMEMBERED_SESSION_TTL_HOURS = 30 * 24;
 export default function RoleGatewayLanding() {
   const entries = LANDING_ROLE_ENTRIES as LandingEntry[];
   const [selectedRole, setSelectedRole] = useState<LandingRole>("accountant");
-  const [userId, setUserId] = useState(() => portalEntryForRole("accountant").defaultUserId);
+  const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [status, setStatus] = useState("");
@@ -39,9 +39,8 @@ export default function RoleGatewayLanding() {
   );
 
   function selectRole(role: LandingRole) {
-    const entry = portalEntryForRole(role) as LandingEntry;
     setSelectedRole(role);
-    setUserId(entry.defaultUserId);
+    setUserId("");
     setPassword("");
     setStatus("");
     setResetMode(false);
@@ -73,9 +72,13 @@ export default function RoleGatewayLanding() {
   }
 
   async function enterPortal() {
-    const effectiveUserId = userId.trim() || selectedEntry.defaultUserId;
+    const effectiveUserId = userId.trim();
 
     if (password.trim()) {
+      if (!effectiveUserId) {
+        setStatus("Kullanıcı adı veya e-posta girin.");
+        return;
+      }
       setStatus("Oturum açılıyor.");
 
       try {
@@ -114,7 +117,7 @@ export default function RoleGatewayLanding() {
     }
 
     persistSession({
-      userId: effectiveUserId,
+      userId: effectiveUserId || selectedEntry.defaultUserId,
       role: selectedRole,
       storageScope: rememberMe ? "local" : "tab",
     });
@@ -178,6 +181,7 @@ export default function RoleGatewayLanding() {
                 aria-label="Kullanıcı"
                 autoComplete="username"
                 onChange={(event) => setUserId(event.target.value)}
+                placeholder="Kullanıcı adı veya e-posta"
                 value={userId}
               />
             </label>

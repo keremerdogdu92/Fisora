@@ -147,6 +147,38 @@ test("documents route has no horizontal overflow on desktop and mobile", async (
 });
 
 
+test("mobile login keeps authentication first and remember control compact", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(page.locator(".role-copy")).toBeHidden();
+  await expect(page.locator(".gateway-identity-foot")).toBeHidden();
+
+  const loginPanel = page.locator(".role-entry-panel");
+  await expect(loginPanel).toBeVisible();
+  const loginBox = await loginPanel.boundingBox();
+  expect(loginBox).not.toBeNull();
+  expect(loginBox?.y ?? 999).toBeLessThan(100);
+  expect((loginBox?.y ?? 0) + (loginBox?.height ?? 999)).toBeLessThan(844);
+
+  const remember = page.locator(".remember-session");
+  const checkbox = remember.locator('input[type="checkbox"]');
+  await expect(remember).toHaveCSS("display", "flex");
+  await expect(remember).toHaveCSS("align-items", "center");
+  const checkboxBox = await checkbox.boundingBox();
+  expect(checkboxBox).not.toBeNull();
+  expect(checkboxBox?.width ?? 999).toBeLessThanOrEqual(18);
+  expect(checkboxBox?.height ?? 999).toBeLessThanOrEqual(18);
+
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(page.locator(".role-copy")).toBeVisible();
+  const identityBox = await page.locator(".gateway-identity-panel").boundingBox();
+  const authBox = await page.locator(".gateway-auth-shell").boundingBox();
+  expect(identityBox).not.toBeNull();
+  expect(authBox).not.toBeNull();
+  expect(authBox?.x ?? 0).toBeGreaterThan(identityBox?.x ?? 999);
+});
+
 test("workspace backend failure does not stay as loading copy", async ({ page }) => {
   await setupAccountantSession(page);
   await page.route("**/phase0/store/clients", async (route) => {

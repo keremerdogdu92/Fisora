@@ -518,12 +518,19 @@
 # N — Login / auth
 
 ## REV-N01 — Mobil login hero-first
-**Status:** ÜRÜN KARARI.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-13.
 **Audit refs:** [CG-21](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-21--mobile-login-is-hero-first)
 
+**Decision / implementation:** Desktop keeps the approved split-screen gateway. At <=620 px the marketing hero copy and decorative footer are hidden, the brand collapses to a compact strip, and the authentication card moves into the first viewport without changing auth/session behavior.
+**Acceptance:** 390x844 Chromium verifies the hero copy is hidden, the login card starts within the first 100 px and fits inside the first viewport; the same test returns to 1280x900 and verifies the desktop split remains visible. Full frontend Node 241/241 PASS; ui-remediation Chromium 10/10 PASS; TypeScript and Next production build PASS; git diff --check PASS.
+
 ## REV-N02 — `Beni hatırla` checkbox görsel problemi
-**Status:** TEKRAR TEST.
+**Status:** ACCEPTED / IMPLEMENTED - 2026-09-13.
 **Audit refs:** [AG FINDING-08](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-08-giriş-ekranındaki-beni-hatırla-hizalama-faciası)
+
+**Root cause:** The modern gateway's generic label/input rules were more specific and later than the older remember-session rules, so the checkbox inherited grid layout plus full-width / 46 px input sizing.
+**Implementation:** Gateway-scoped remember-session selectors now restore a flex row, centered alignment, 8 px gap, a real 16x16 checkbox, and smaller supporting copy. Session persistence semantics are unchanged.
+**Acceptance:** Chromium measures the checkbox at 16x16 and verifies flex/center alignment at 390x844; full frontend Node 241/241 PASS; ui-remediation Chromium 10/10 PASS; TypeScript and Next production build PASS; git diff --check PASS.
 
 ## REV-N03 — Login kırpık logo iddiası
 **Status:** TEKRAR TEST.

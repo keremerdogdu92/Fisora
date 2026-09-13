@@ -115,6 +115,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Parked 2026-09-13: REV-M04** - Global `Ctrl+K` client switching is not a pilot bug or current blocker. Existing client search remains the pilot path. The feature was moved to `docs/open-questions.md` for accountant field feedback: validate whether frequent switching across 50-80+ clients creates enough friction to justify it. If accepted later, keep v1 narrow: client search + Enter to client detail, not a general command palette. Next audit group: REV-N01.
 
+**Completed 2026-09-13: REV-N01 + REV-N02** - Mobile login is now task-first while desktop keeps the existing split gateway. At <=620 px the large marketing hero/footer are removed in favor of a compact brand strip and the login card fits in the first viewport. The remember-session CSS cascade is also corrected: the control is a centered flex row with a 16x16 checkbox and smaller helper copy, while remember/session persistence behavior is untouched. Acceptance: targeted 390x844 + 1280x900 Chromium PASS, frontend 241/241, ui-remediation 10/10, TypeScript/build PASS, git diff --check PASS. Next: REV-N03 retest.
+
 ## New decisions — 2026-09-09
 
 

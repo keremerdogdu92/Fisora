@@ -533,8 +533,12 @@
 **Acceptance:** Chromium measures the checkbox at 16x16 and verifies flex/center alignment at 390x844; full frontend Node 241/241 PASS; ui-remediation Chromium 10/10 PASS; TypeScript and Next production build PASS; git diff --check PASS.
 
 ## REV-N03 — Login kırpık logo iddiası
-**Status:** TEKRAR TEST.
+**Status:** CLOSED / DEV-ONLY ARTIFACT - 2026-09-13.
 **Audit refs:** AG FINDING-08.
+
+**Retest:** The old `N sora` appearance is reproducible only under the Next.js development server: the framework's fixed `N` dev-tools badge visually overlaps the product footer text `Fisora`. The badge is not part of the Fisora DOM or production UI.
+**Production verification:** The same 1280x900 login rendered with `next start` contains no dev badge or lower-left overlay; the `Fisora` footer remains fully visible inside the identity panel. On the 390x844 mobile login the footer is intentionally hidden by REV-N01.
+**Resolution:** No product CSS or component change. Treat development-toolbar chrome as non-product evidence in future visual audits. Production build PASS and dedicated production Chromium verification PASS.
 
 ## REV-N04 — Default login usernames
 **Status:** ÜRÜN KARARI.

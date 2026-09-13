@@ -117,6 +117,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-13: REV-N01 + REV-N02** - Mobile login is now task-first while desktop keeps the existing split gateway. At <=620 px the large marketing hero/footer are removed in favor of a compact brand strip and the login card fits in the first viewport. The remember-session CSS cascade is also corrected: the control is a centered flex row with a 16x16 checkbox and smaller helper copy, while remember/session persistence behavior is untouched. Acceptance: targeted 390x844 + 1280x900 Chromium PASS, frontend 241/241, ui-remediation 10/10, TypeScript/build PASS, git diff --check PASS. Next: REV-N03 retest.
 
+**Closed 2026-09-13: REV-N03** - The reported clipped `N sora` mark is development chrome, not a Fisora production defect. It reproduces under `next dev` because the Next.js `N` dev-tools badge overlaps the lower-left `Fisora` footer; a production `next start` Chromium retest at 1280x900 removes the badge and leaves the footer fully visible. Mobile already hides that footer by the accepted REV-N01 layout. No product code change was required. Next: REV-N04 product decision.
+
 ## New decisions — 2026-09-09
 
 

@@ -584,9 +584,15 @@
 **Acceptance:** Three genuine HTML invoices (`0434.html`, `0435.html`, `0377.html`) processed through the production worker path at 5/5, 4/4, and 5/5 source/UI rows. Real Chromium showed Reader `1.0.0`, confidence 78%, all 14/14 rows matched, and clicking `1:2` highlighted the exact source `TR`. Backend service tests 28/28 PASS; frontend Node 242/242 PASS; `ui-remediation` Chromium 11/11 PASS; production build/TypeScript PASS.
 
 ## REV-P02 — Reader/Fisora satır eşleştirmesi için ortak kimlik
-**Status:** ÜRÜN KARARI.
+**Status:** CLOSED / ARCHITECTURE DECISION - 2026-09-14.
 **Derived from:** CX UXR-010 + source/provenance findings.
 
+**Decision:** No new `row_id`, `source_id`, table, migration, or parallel identity system will be added. After REV-P01, the existing `source_position` (`section:row`, for example `1:2`) is sufficient for Reader/Fisora comparison and HTML source focus within the same frozen Reader snapshot.
+**Identity contract:** `source_position` is a physical locator inside one snapshot, not durable business identity. Source revision remains `source_snapshot_id` + snapshot hash/version; accounting/provenance line identity remains the existing `canonical_line_id`; journal-to-source linkage remains `source_anchors` / `contributing_line_ids`.
+**Stability boundary:** `section:row` is reliable and repeatable inside the same immutable snapshot and deterministic Reader output. It may move when HTML structure, parser/Reader version, or extraction structure changes, so it is not a semantic identity across reprocesses. `canonical_line_id` is deterministic for the same extraction input, but is not promised as a semantic global ID across arbitrary parser transformations.
+**Future extension rule:** If Reading Quality later needs a direct machine join to canonical accounting rows, project the existing `canonical_line_id` into the relevant `source_review_row` instead of inventing another identifier.
+**Implementation:** No product code or database change. Keep the existing REV-P01 + REV-F04/F05 + normalized canonical persistence model.
+**Acceptance basis:** REV-P01 real HTML-Lab verification passed 14/14 Reader/Fisora row matches and exact `1:2` source highlighting; REV-F04/F05 canonical provenance and multi-source anchor regressions already pass.
 ## REV-P03 — Kalite ölçümü çalışıyor ama bazı belgelerde içerik boş
 **Status:** KONTROL EDİLECEK.
 **Audit refs:** CX UXR-010 · CG Verified strong areas (`Kalite ölçümünü çalıştır` başarı mesajı görüldü).

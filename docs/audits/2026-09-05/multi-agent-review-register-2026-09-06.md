@@ -604,9 +604,11 @@
 # Q — Navigasyon / route / sidebar
 
 ## REV-Q01 — Legacy `/portal` ile `/portal-next` sıçraması iddiası
-**Status:** TEKRAR TEST.
+**Status:** RETESTED / NOT REPRODUCED IN CURRENT ACCOUNTANT FLOW - 2026-09-14.
 **Audit refs:** [AG Bilgi Mimarisi ve Rota Sorunu](./fisora-antigravity-ux-ui-audit-2026-09-05.md#bilgi-mimarisi-ve-rota-sorunu)
-**Conflict:** CG ana alanları yeni shell içinde kullandı; CX bunu ana kritik olarak bağımsız doğrulamadı. Şimdilik ürün eksiği kabul edilmeyecek.
+**Retest:** Fresh Chromium started at `/portal-next`, clicked the accountant `Mükellefler` sidebar action, and remained on `/portal-next`; the next-generation sidebar stayed mounted, the legacy sidebar stayed absent, and the page title changed to `Mükellefler`. Current next-generation navigation uses in-shell mode changes rather than `/portal/*` accountant links. Targeted portal route/navigation tests passed 42/42.
+**Legacy boundary:** Direct navigation to legacy accountant URLs such as `/portal/mukellefler` still renders the old presentation. This is not reachable from the normal accountant login/sidebar flow, but the legacy accountant surface still exists in source.
+**Decision:** No audit-time bug fix is required for Q01. After the full audit/remediation pass is complete, remove the legacy accountant UI and accountant-only `/portal/*` routes, migrate or delete tests/fallback references that depend on them, and keep the current `/portal-next` accountant experience as the single accountant shell. The separate client-facing `/portal/mukellef` flow, including delegated-client access, is explicitly outside that cleanup unless reviewed separately.
 
 ## REV-Q02 — Route geçişinde sidebar state tutarlılığı
 **Status:** KONTROL EDİLECEK.

@@ -130,6 +130,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Closed 2026-09-14: REV-P03** - Fresh retest showed this register item mixed two separate surfaces. CX UXR-010 empty Reader/Fisora rows were the REV-P01 review-projection/locator defect and remain fixed; the CG success observation belongs to the separate Research / Knowledge Pool benchmark. Fresh benchmark regression PASS; a temporary empty research store returned HTTP 200 with five populated cases and metric fields, and forcing real-pilot cases unavailable still produced the five built-in golden fallback cases. Fresh frontend Reading Quality/workspace contracts passed 41/41 and the review source-evidence projection regression passed. No independent P03 defect, product-code change, or DB change. Next: REV-Q01.
 
+**Retested 2026-09-14: REV-Q01** - The audit-time `/portal-next` -> `/portal/mukellefler` shell jump is not reproducible in the current accountant flow. Fresh Chromium stayed on `/portal-next` when `Mükellefler` was selected, retained the next-generation sidebar, and rendered the Mükellefler view in-shell; targeted portal navigation/route tests passed 42/42. Direct legacy accountant URLs still render the old presentation, so a post-audit cleanup is now explicitly planned: after the full audit/remediation pass, remove legacy accountant UI/routes and migrate or delete dependent tests, fallback hrefs, and route references. Keep the separate client-facing `/portal/mukellef` and delegated-client flow out of that cleanup unless reviewed separately. Next: REV-Q02.
+
 
 ## New decisions — 2026-09-09
 

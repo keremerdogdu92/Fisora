@@ -146,6 +146,37 @@ class Phase0ServiceTests(unittest.TestCase):
         )
         self.assertEqual(review["document_pipeline_events"], [])
 
+    def test_review_workspace_payload_keeps_html_source_evidence_without_debug_history(self) -> None:
+        workspace = {
+            "chart_accounts": {"account_count": 0, "accounts": []},
+            "documents": [{
+                "document_ref": "html-1",
+                "result": {
+                    "file_name": "invoice.html",
+                    "source_review_rows": [{"source_position": "1:1", "source_text": "Kalem | 100"}],
+                    "source_snapshot": {
+                        "version": "1.0.0",
+                        "source": {"file": "invoice.html", "folder": None, "bytes": 120},
+                        "mode": "structural",
+                        "confidence": 0.78,
+                        "sections": [{"kind": "table", "title": None, "columns": [], "rows": [["Kalem", "100"]], "columnCount": 2, "meta": {}}],
+                        "warnings": [],
+                        "metrics": {"sectionCount": 1, "rowCount": 1, "columnCount": 2},
+                    },
+                    "technical_details": {"ai_trace": [{"large": "payload"}]},
+                },
+            }],
+            "uploaded_documents": [], "processing_jobs": [], "review_decisions": [],
+            "learning_events": [], "document_pipeline_events": [], "operation_events": [],
+        }
+
+        review = review_workspace_payload(workspace)
+        result = review["documents"][0]["result"]
+
+        self.assertEqual(result["source_review_rows"][0]["source_position"], "1:1")
+        self.assertEqual(result["source_snapshot"]["version"], "1.0.0")
+        self.assertNotIn("technical_details", result)
+
     def test_workspace_service_filters_clients_by_portal_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             store = JsonWorkflowStore(Path(temp_dir) / "store.json")

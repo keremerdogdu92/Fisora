@@ -38,13 +38,13 @@ function stageBucket(stageLabel: string) {
 }
 
 function readerRowsFor(document?: PilotDocument) {
-  return (document?.sourceSnapshot?.sections ?? []).flatMap((section) =>
-    section.rows.map((row) => row.filter(Boolean).join(" · ").trim()).filter(Boolean),
+  return (document?.sourceSnapshot?.sections ?? []).flatMap((section, sectionIndex) =>
+    section.rows.map((row, rowIndex) => ({ sourcePosition: `${sectionIndex + 1}:${rowIndex + 1}`, text: row.filter(Boolean).join(" · ").trim() })).filter((row) => row.text),
   );
 }
-function comparisonForRow(row: SourceReviewRow, readerRows: string[], index: number) {
-  const sourceIndex = Number.parseInt(String(row.sourcePosition || ""), 10);
-  const readerText = readerRows[Number.isInteger(sourceIndex) && sourceIndex > 0 ? sourceIndex - 1 : index] || row.sourceText || "";
+function comparisonForRow(row: SourceReviewRow, readerRows: { sourcePosition: string; text: string }[], index: number) {
+  const exactReaderRow = readerRows.find((readerRow) => readerRow.sourcePosition === row.sourcePosition);
+  const readerText = exactReaderRow?.text || readerRows[index]?.text || row.sourceText || "";
   const sourceText = row.sourceText || readerText;
   const readerNormalized = normalizeText(readerText);
   const sourceNormalized = normalizeText(sourceText);

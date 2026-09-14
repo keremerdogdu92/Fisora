@@ -89,8 +89,13 @@ function elementMatchesTarget(element: HTMLElement, target: SourceMatchTarget) {
   return textMatches && amountMatches;
 }
 
+function sourceRowIndex(sourcePosition: string | undefined) {
+  const match = String(sourcePosition || "").trim().match(/^(?:\d+:)?(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : Number.NaN;
+}
+
 function findBestSourceElement(document: Document, target: SourceMatchTarget) {
-  const sourceIndex = Number.parseInt(String(target.sourcePosition || ""), 10);
+  const sourceIndex = sourceRowIndex(target.sourcePosition);
   const lineRows = invoiceLineRows(document);
   const indexedRow = Number.isInteger(sourceIndex) && sourceIndex > 0 ? lineRows[sourceIndex - 1] : undefined;
 

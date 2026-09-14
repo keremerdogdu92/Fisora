@@ -576,8 +576,12 @@
 # P — AI Ajanları / Okuma Kalitesi / Öğrenme
 
 ## REV-P01 — Okuma Kalitesi `Fisora UI satırı oluşmamış`
-**Status:** KONTROL EDİLECEK.
+**Status:** CLOSED / FIXED - 2026-09-14.
 **Audit refs:** [CX UXR-010](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-010--p1--okuma-kalitesi-karşılaştırması-fisora-satırı-üretmiyor)
+
+**Root cause:** The normal frontend workspace request uses `?view=review`; that compact backend projection stripped `source_snapshot` and `source_review_rows` even though the frozen HTML Reader and full workspace had persisted them correctly.
+**Implementation:** The review workspace now preserves only those two source-evidence fields without reopening heavy debug history. Reader/Fisora comparison now uses the Reader's canonical `section:row` `sourcePosition` (for example `1:2`) instead of parsing it as integer `1`; HTML source focus resolves the row component of the same locator.
+**Acceptance:** Three genuine HTML invoices (`0434.html`, `0435.html`, `0377.html`) processed through the production worker path at 5/5, 4/4, and 5/5 source/UI rows. Real Chromium showed Reader `1.0.0`, confidence 78%, all 14/14 rows matched, and clicking `1:2` highlighted the exact source `TR`. Backend service tests 28/28 PASS; frontend Node 242/242 PASS; `ui-remediation` Chromium 11/11 PASS; production build/TypeScript PASS.
 
 ## REV-P02 — Reader/Fisora satır eşleştirmesi için ortak kimlik
 **Status:** ÜRÜN KARARI.

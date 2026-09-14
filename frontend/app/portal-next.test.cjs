@@ -138,6 +138,7 @@ test("next AI Agents separates overview, reading quality, and research while kee
   const agents = source("portal-next", "portal-next-agents-view.tsx");
   const portalApp = source("portal-app.tsx");
   const reviewPanels = source("portal-review-panels.tsx");
+  const htmlViewer = source("shared", "components", "document-viewers", "html-document-viewer.tsx");
 
   assert.match(agents, /Genel Bakış/);
   assert.match(agents, /Okuma Kalitesi/);
@@ -146,6 +147,9 @@ test("next AI Agents separates overview, reading quality, and research while kee
   assert.match(agents, /Muhasebe Ajanı/);
   assert.match(agents, /Araştırma Ajanı/);
   assert.match(agents, /sourceTarget=\{sourceTarget\}/);
+  assert.match(agents, /sourcePosition: `\$\{sectionIndex \+ 1\}:\$\{rowIndex \+ 1\}`/);
+  assert.match(agents, /readerRow\.sourcePosition === row\.sourcePosition/);
+  assert.match(htmlViewer, /sourceRowIndex\(target\.sourcePosition\)/);
   assert.match(agents, /Reader/);
   assert.match(agents, /Fisora'da/);
   assert.match(portalApp, /PortalNextAgentsView/);

@@ -124,6 +124,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Completed 2026-09-13: REV-O01 + REV-O02 + REV-O03** - Workbench non-invoice states are now document-specific instead of leaking invoice UI. Empty Banka / Diğer Belgeler tabs stay visible but are visually quieter when their count is zero; queue headings and empty-state copy match the selected document type; Alış/Satış renders only for invoice segments; and Belgeyi incele is disabled when no canonical document is available. Real search/queue-filter empty states keep the existing filtered-result message. Acceptance: portal-next 24/24, dedicated Chromium PASS, frontend 242/242, ui-remediation 11/11, TypeScript/build PASS, git diff --check PASS. Next audit group: REV-P01.
 
+**Closed 2026-09-14: REV-P01** - The HTML Reader was not failing: the frontend's normal `?view=review` workspace projection removed `source_snapshot` and `source_review_rows`, so Okuma Kalitesi displayed `Reader - / 0 / 0` despite persisted Reader evidence. Review projection now retains only those provenance fields. Comparison/highlight also respects canonical `section:row` positions such as `1:2` instead of collapsing every row to section `1`. Three genuine HTML invoices (`0434`, `0435`, `0377`) processed through the production worker path and were verified in Chromium: 5/5, 4/4, 5/5 source/UI rows, all 14/14 comparisons matched, and a `1:2` click highlighted the exact source table row. Acceptance: backend service 28/28, frontend 242/242, ui-remediation 11/11, production build/TypeScript PASS. Next: REV-P02 product decision.
+
 ## New decisions — 2026-09-09
 
 

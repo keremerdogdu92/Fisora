@@ -386,7 +386,23 @@ def compact_workspace_payload(workspace: dict[str, object]) -> dict[str, object]
 def review_workspace_payload(workspace: dict[str, object]) -> dict[str, object]:
     review = compact_workspace_payload(workspace)
     review["chart_accounts"] = review_chart_accounts(workspace.get("chart_accounts"))
+    review["documents"] = [review_document(document) for document in safe_list(workspace.get("documents"))]
     return review
+
+
+def review_document(document: object) -> dict[str, object]:
+    compact = compact_document(document)
+    if not isinstance(document, dict):
+        return compact
+    source_result = document.get("result")
+    if not isinstance(source_result, dict):
+        return compact
+    result = dict(compact.get("result") or {})
+    for key in ("source_review_rows", "source_snapshot"):
+        if key in source_result:
+            result[key] = source_result[key]
+    compact["result"] = result
+    return compact
 
 
 def compact_chart_accounts(value: object) -> dict[str, object]:

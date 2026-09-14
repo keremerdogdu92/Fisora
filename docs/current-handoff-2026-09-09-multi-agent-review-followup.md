@@ -128,6 +128,9 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Closed 2026-09-14: REV-P02** - No new row/source identity layer will be added. `source_position` remains a snapshot-scoped physical locator for Reader/Fisora comparison and source focus; it is not durable business identity across parser/HTML/extraction changes. Existing responsibilities stay separated: source revision = `source_snapshot_id` + hash/version, accounting/provenance line identity = `canonical_line_id`, and journal-to-source linkage = `source_anchors` / `contributing_line_ids`. `canonical_line_id` is deterministic for the same extraction input but is not promised as a semantic global ID across arbitrary parser transformations. If a future direct quality-row -> canonical-row join is needed, project the existing `canonical_line_id` instead of inventing another ID. No product code or DB change. Next: REV-P03.
 
+**Closed 2026-09-14: REV-P03** - Fresh retest showed this register item mixed two separate surfaces. CX UXR-010 empty Reader/Fisora rows were the REV-P01 review-projection/locator defect and remain fixed; the CG success observation belongs to the separate Research / Knowledge Pool benchmark. Fresh benchmark regression PASS; a temporary empty research store returned HTTP 200 with five populated cases and metric fields, and forcing real-pilot cases unavailable still produced the five built-in golden fallback cases. Fresh frontend Reading Quality/workspace contracts passed 41/41 and the review source-evidence projection regression passed. No independent P03 defect, product-code change, or DB change. Next: REV-Q01.
+
+
 ## New decisions — 2026-09-09
 
 

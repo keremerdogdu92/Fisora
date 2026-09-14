@@ -594,8 +594,12 @@
 **Implementation:** No product code or database change. Keep the existing REV-P01 + REV-F04/F05 + normalized canonical persistence model.
 **Acceptance basis:** REV-P01 real HTML-Lab verification passed 14/14 Reader/Fisora row matches and exact `1:2` source highlighting; REV-F04/F05 canonical provenance and multi-source anchor regressions already pass.
 ## REV-P03 — Kalite ölçümü çalışıyor ama bazı belgelerde içerik boş
-**Status:** KONTROL EDİLECEK.
+**Status:** CLOSED / MISCLASSIFIED AUDIT COMBINATION - 2026-09-14.
 **Audit refs:** CX UXR-010 · CG Verified strong areas (`Kalite ölçümünü çalıştır` başarı mesajı görüldü).
+
+**Retest finding:** This register item combined two separate surfaces. CX UXR-010 referred to AI Agents / Reading Quality showing `Reader - / source row 0 / Fisora row 0`; that root cause was REV-P01 and is fixed. The CG success observation referred to the separate Research / Knowledge Pool benchmark action, not Reader/Fisora document-row comparison.
+**Fresh verification:** The targeted research benchmark API regression passed. A fresh temporary empty research store returned HTTP 200 with `case_count=5`, `cases_len=5`, and all benchmark metric fields present. With real-pilot cases forced unavailable at runtime, `_benchmark_cases()` still returned the five built-in golden cases. Fresh frontend `portal-next.test.cjs + workspace-api.test.cjs` passed 41/41, including Reading Quality/source-position and source-review-row contracts; the targeted review workspace source-evidence projection regression also passed.
+**Decision:** No independent P03 product defect is reproduced. No product-code or database change is required. Keep Research benchmark and Reading Quality as separate concepts; if either later produces a genuinely empty successful result, open a new issue with a concrete reproduction instead of reusing UXR-010.
 
 # Q — Navigasyon / route / sidebar
 

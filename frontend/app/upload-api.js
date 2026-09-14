@@ -964,6 +964,7 @@ async function storeReviewDecision({
   documentRef,
   action,
   reviewer,
+  operationKind = "decision",
   correctedAccountCode = "",
   correctedCounterpartyCode = "",
   category = "",
@@ -1014,6 +1015,7 @@ async function storeReviewDecision({
       document_ref: String(documentRef || ""),
       action: String(action || "approve"),
       reviewer: String(reviewer || normalizedUserId),
+      operation_kind: operationKind === "undo" ? "undo" : "decision",
       corrected_account_code: String(correctedAccountCode || ""),
       corrected_counterparty_code: String(correctedCounterpartyCode || ""),
       category: String(category || ""),
@@ -1063,7 +1065,7 @@ async function storeReviewDecision({
   return response.json();
 }
 
-async function reopenJournal({ apiBaseUrl, clientId, documentRef, expectedRevision, reason, userId = "", sessionToken = "", fetchImpl = fetch }) {
+async function reopenJournal({ apiBaseUrl, clientId, documentRef, expectedRevision, reason, operationKind = "reopen", userId = "", sessionToken = "", fetchImpl = fetch }) {
   return postJson({
     apiBaseUrl,
     path: "/phase0/store/journal/reopen",
@@ -1073,11 +1075,32 @@ async function reopenJournal({ apiBaseUrl, clientId, documentRef, expectedRevisi
       expected_revision: Number(expectedRevision || 0),
       reviewer: String(userId || "").trim(),
       reason: String(reason || "").trim(),
+      operation_kind: operationKind === "undo" ? "undo" : "reopen",
     },
     headers: backendAuthHeaders({ sessionToken, userId }),
     fetchImpl,
   });
 }
+async function fetchAuditHistory({
+  apiBaseUrl, clientId, query = "", actor = "", action = "", startDate = "", endDate = "",
+  limit = 100, userId = "", sessionToken = "", fetchImpl = fetch,
+}) {
+  const params = new URLSearchParams();
+  if (query) params.set("q", String(query));
+  if (actor) params.set("actor", String(actor));
+  if (action) params.set("action", String(action));
+  if (startDate) params.set("start_date", String(startDate));
+  if (endDate) params.set("end_date", String(endDate));
+  params.set("limit", String(Math.min(Math.max(Number(limit || 100), 1), 200)));
+  const suffix = params.toString();
+  return getJson({
+    apiBaseUrl,
+    path: `/phase0/store/audit-history/${encodeURIComponent(String(clientId || "").trim())}${suffix ? `?${suffix}` : ""}`,
+    headers: backendAuthHeaders({ sessionToken, userId }),
+    fetchImpl,
+  });
+}
+
 async function reviewCollaborationRequest({ apiBaseUrl, path, method = "POST", payload, userId = "", sessionToken = "", fetchImpl = fetch }) {
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}${path}`, {
     method,
@@ -1339,6 +1362,7 @@ module.exports = {
   disableQnbConnection,
   ensureUploadWorkspace,
   fetchAuthSession,
+  fetchAuditHistory,
   fetchQnbConnectionStatus,
   fetchQnbHealth,
   fetchQnbSyncPolicy,

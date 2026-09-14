@@ -1082,6 +1082,51 @@ class PostgresWorkflowStore:
         events = self._payloads(client_id, "operation_event")
         return events[-max(limit, 1):]
 
+    def list_audit_history(
+        self,
+        *,
+        client_id: str,
+        query: str = "",
+        actor: str = "",
+        action: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        if self.normalized_accounting_enabled and self.normalized_repository is not None:
+            return self.normalized_repository.list_audit_history(
+                client_id=client_id, query=query, actor=actor, action=action,
+                start_date=start_date, end_date=end_date, limit=limit,
+            )
+        rows = self._payloads(client_id, "review_decision")
+        needle = query.strip().casefold()
+        actor_needle = actor.strip().casefold()
+        result: list[dict[str, Any]] = []
+        for record in reversed(rows):
+            decision = record.get("decision") if isinstance(record.get("decision"), dict) else {}
+            decision_action = str(decision.get("action") or "")
+            decision_actor = str(decision.get("reviewer") or "")
+            created_at = str(record.get("created_at") or "")
+            if action.strip() and decision_action != action.strip(): continue
+            if actor_needle and actor_needle not in decision_actor.casefold(): continue
+            if start_date.strip() and created_at[:10] < start_date.strip(): continue
+            if end_date.strip() and created_at[:10] > end_date.strip(): continue
+            searchable = " ".join([str(decision.get("document_ref") or ""), decision_actor, decision_action, str(decision.get("reason") or "")]).casefold()
+            if needle and needle not in searchable: continue
+            operation_kind = str(decision.get("operation_kind") or "decision")
+            approved = decision_action in {"approve", "approve_with_changes", "suggest_for_similar"}
+            excluded = decision_action in {"exclude_export", "exclude_from_export", "out_of_scope", "business_out_of_scope"}
+            result.append({
+                "event_id": str(record.get("id") or ""), "client_id": client_id,
+                "event_type": "journal_undo" if operation_kind == "undo" else "journal_approved" if approved else "journal_review_saved",
+                "status": "ok", "actor": decision_actor,
+                "details": {"action": decision_action, "operation_kind": operation_kind, "before_state": "", "after_state": "approved" if approved else "rejected" if excluded else "review_required", "reason": str(decision.get("reason") or "")},
+                "created_at": created_at, "document_ref": str(decision.get("document_ref") or ""),
+                "file_name": "", "invoice_number": "", "invoice_date": "", "amount": "",
+            })
+            if len(result) >= min(max(int(limit or 100), 1), 200): break
+        return result
+
     def save_qnb_connection(self, *, client_id: str, connection: dict[str, Any]) -> dict[str, Any]:
         existing = self._get_record(client_id, "qnb_connection", client_id) or {}
         timestamp = utc_now()
@@ -3479,6 +3524,7 @@ class PostgresWorkflowStore:
         expected_revision: int,
         reviewer: str,
         reason: str,
+        operation_kind: str = "reopen",
     ) -> dict[str, Any]:
         if not self.normalized_accounting_enabled:
             raise RuntimeError("journal reopen requires normalized accounting storage")
@@ -3494,6 +3540,7 @@ class PostgresWorkflowStore:
                     expected_revision=expected_revision,
                     reviewer=reviewer,
                     reason=reason,
+                    operation_kind=operation_kind,
                 )
                 if document is not None:
                     updated = self._reopened_document_projection(
@@ -3515,6 +3562,7 @@ class PostgresWorkflowStore:
             expected_revision=expected_revision,
             reviewer=reviewer,
             reason=reason,
+            operation_kind=operation_kind,
         )
         if document is not None:
             updated = self._reopened_document_projection(

@@ -155,6 +155,7 @@ class FakeNormalizedRepository:
         expected_revision: int,
         reviewer: str,
         reason: str,
+        operation_kind: str = "reopen",
     ) -> dict[str, object]:
         history = self.histories[document_ref]
         current = int(history[-1]["revision_no"])

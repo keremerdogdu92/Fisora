@@ -274,6 +274,7 @@ class ReviewDecisionPayload(BaseModel):
     document_ref: str
     action: ReviewAction
     reviewer: str
+    operation_kind: Literal["decision", "undo"] = "decision"
     corrected_account_code: str = ""
     corrected_counterparty_code: str = ""
     category: str = ""
@@ -536,6 +537,7 @@ class JournalReopenPayload(BaseModel):
     expected_revision: int
     reviewer: str
     reason: str
+    operation_kind: Literal["reopen", "undo"] = "reopen"
 
 
 class ReviewRulePreviewPayload(BaseModel):

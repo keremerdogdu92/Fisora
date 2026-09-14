@@ -1690,6 +1690,10 @@ class NormalizedAccountingRepository:
                 document_id, journal_id, current_revision = self._locked_current_journal(
                     cursor, taxpayer_id=taxpayer_id, document_ref=document_ref
                 )
+                cursor.execute("select status, export_status from journal_entries where id = %s", (journal_id,))
+                before_row = cursor.fetchone()
+                before_state = str(before_row[0] or "") if before_row else ""
+                before_export_status = str(before_row[1] or "") if before_row else ""
                 if expected < 1 or expected != current_revision:
                     raise NormalizedRevisionConflict(expected=expected, actual=current_revision)
                 cursor.execute("select currency from documents where id = %s", (document_id,))
@@ -1971,14 +1975,26 @@ class NormalizedAccountingRepository:
                     "update documents set current_revision_no = %s, status = %s, updated_at = now() where id = %s",
                     (revision_no, status, document_id),
                 )
+                operation_kind = "undo" if str(decision.get("operation_kind") or "") == "undo" else "decision"
                 self._append_event(
                     cursor,
                     taxpayer_id=taxpayer_id,
                     document_id=document_id,
-                    event_type="journal_approved" if approved else "journal_review_saved",
+                    event_type=("journal_undo" if operation_kind == "undo" else "journal_approved" if approved else "journal_review_saved"),
                     status="ok",
                     actor=str(decision.get("reviewer") or ""),
-                    details={"revision_no": revision_no, "base_revision_no": current_revision},
+                    details={
+                        "action": action,
+                        "operation_kind": operation_kind,
+                        "before_state": before_state,
+                        "after_state": status,
+                        "before_export_status": before_export_status,
+                        "after_export_status": export_status,
+                        "before_revision": current_revision,
+                        "after_revision": revision_no,
+                        "review_decision_id": str(review_decision_id),
+                        "reason": str(decision.get("reason") or ""),
+                    },
                 )
         return {
             "revision_no": revision_no,
@@ -1996,6 +2012,7 @@ class NormalizedAccountingRepository:
         expected_revision: int,
         reviewer: str,
         reason: str,
+        operation_kind: str = "reopen",
     ) -> dict[str, Any]:
         if not reason.strip():
             raise NormalizedAccountingError("reopen reason is required")
@@ -2020,6 +2037,10 @@ class NormalizedAccountingRepository:
                     raise NormalizedAccountingError("only the current approved revision can be reopened")
                 approved_revision_id = approved_row[0]
                 snapshot = dict(approved_row[1])
+                cursor.execute("select status, export_status from journal_entries where id = %s", (journal_id,))
+                before_row = cursor.fetchone()
+                before_state = str(before_row[0] or "approved") if before_row else "approved"
+                before_export_status = str(before_row[1] or "export_ready") if before_row else "export_ready"
                 cursor.execute(
                     """
                     select distinct a.invoice_line_id
@@ -2077,16 +2098,95 @@ class NormalizedAccountingRepository:
                     "update documents set current_revision_no = %s, status = 'working_draft', updated_at = now() where id = %s",
                     (revision_no, document_id),
                 )
+                normalized_operation_kind = "undo" if operation_kind == "undo" else "reopen"
                 self._append_event(
                     cursor,
                     taxpayer_id=taxpayer_id,
                     document_id=document_id,
-                    event_type="journal_reopened",
+                    event_type="journal_undo" if normalized_operation_kind == "undo" else "journal_reopened",
                     status="ok",
                     actor=reviewer,
-                    details={"revision_no": revision_no, "approved_revision_no": current_revision, "reason": reason},
+                    details={
+                        "action": "review_required",
+                        "operation_kind": normalized_operation_kind,
+                        "before_state": before_state,
+                        "after_state": "working_draft",
+                        "before_export_status": before_export_status,
+                        "after_export_status": "review_required",
+                        "before_revision": current_revision,
+                        "after_revision": revision_no,
+                        "approved_revision_no": current_revision,
+                        "reason": reason,
+                    },
                 )
         return {"document_ref": document_ref, "revision_no": revision_no, "result": snapshot}
+
+    def list_audit_history(
+        self,
+        *,
+        client_id: str,
+        query: str = "",
+        actor: str = "",
+        action: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        taxpayer_id = _uuid_for("taxpayer", f"{self.tenant_id}:{client_id}")
+        search = f"%{query.strip()}%"
+        actor_search = f"%{actor.strip()}%"
+        safe_limit = min(max(int(limit or 100), 1), 200)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select events.id, events.event_type, events.status, events.actor, events.details,
+                           events.created_at, documents.source_ref, documents.source_filename,
+                           documents.invoice_number, documents.invoice_date, documents.gross_total
+                    from workflow_events events
+                    left join documents on documents.id = events.document_id
+                    where events.tenant_id = %s and events.taxpayer_id = %s
+                      and events.event_type in ('journal_approved', 'journal_review_saved', 'journal_reopened', 'journal_undo')
+                      and (%s = '%%' or coalesce(documents.source_ref, '') ilike %s
+                           or coalesce(documents.source_filename, '') ilike %s
+                           or coalesce(documents.invoice_number, '') ilike %s
+                           or coalesce(events.actor, '') ilike %s
+                           or coalesce(events.details->>'reason', '') ilike %s)
+                      and (%s = '%%' or coalesce(events.actor, '') ilike %s)
+                      and (%s = '' or coalesce(events.details->>'action', '') = %s)
+                      and (%s = '' or events.created_at >= %s::date)
+                      and (%s = '' or events.created_at < (%s::date + interval '1 day'))
+                    order by events.created_at desc
+                    limit %s
+                    """,
+                    (
+                        self.tenant_id, taxpayer_id,
+                        search, search, search, search, search, search,
+                        actor_search, actor_search,
+                        action.strip(), action.strip(),
+                        start_date.strip(), start_date.strip() or None,
+                        end_date.strip(), end_date.strip() or None,
+                        safe_limit,
+                    ),
+                )
+                rows = cursor.fetchall()
+        return [
+            {
+                "event_id": str(row[0]),
+                "client_id": client_id,
+                "event_type": str(row[1] or ""),
+                "status": str(row[2] or ""),
+                "actor": str(row[3] or ""),
+                "details": dict(row[4] or {}),
+                "created_at": row[5].isoformat() if hasattr(row[5], "isoformat") else str(row[5] or ""),
+                "document_ref": str(row[6] or ""),
+                "file_name": str(row[7] or ""),
+                "invoice_number": str(row[8] or ""),
+                "invoice_date": row[9].isoformat() if row[9] is not None and hasattr(row[9], "isoformat") else str(row[9] or ""),
+                "amount": str(row[10] or ""),
+            }
+            for row in rows
+        ]
 
     def project_documents(self, *, client_id: str, approved_only: bool = False) -> list[dict[str, Any]]:
         taxpayer_id = _uuid_for("taxpayer", f"{self.tenant_id}:{client_id}")

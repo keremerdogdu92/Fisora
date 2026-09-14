@@ -57,6 +57,26 @@ def reopen_journal(
     )
 
 
+@router.get("/store/audit-history/{client_id}")
+def audit_history(
+    client_id: str,
+    q: str = "",
+    actor: str = "",
+    action: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    limit: int = 100,
+    x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"),
+    x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
+    fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+) -> dict[str, object]:
+    return get_review_service().audit_history(
+        client_id=client_id,
+        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
+        query=q, actor=actor, action=action, start_date=start_date, end_date=end_date, limit=limit,
+    )
+
+
 @router.post("/store/review-rule/preview")
 def preview_review_rule(
     payload: ReviewRulePreviewPayload,

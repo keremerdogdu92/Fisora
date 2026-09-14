@@ -213,6 +213,7 @@ export function useReviewCommands({
             documentRef: document.id,
             expectedRevision: document.normalizedRevision || 0,
             reason: "Müşavir onayı geri alındı; fiş taslağı ve kaynağı korunarak yeniden kontrole açıldı.",
+            operationKind: "reopen",
             userId: reviewer,
             sessionToken: session?.sessionToken || "",
           });
@@ -333,6 +334,7 @@ export function useReviewCommands({
           documentRef: reviewAction.documentRef,
           expectedRevision: reviewAction.revisionNo,
           reason: "Son müşavir onayı işlem bazlı geri alındı.",
+          operationKind: "undo",
           userId: reviewer,
           sessionToken: session?.sessionToken || "",
         });
@@ -344,6 +346,7 @@ export function useReviewCommands({
           documentRef: reviewAction.documentRef,
           action: reviewAction.restoreAction,
           reviewer,
+          operationKind: "undo",
           category: reviewAction.category,
           reason: "Son müşavir işlemi geri alındı.",
           decisionNote: "Son müşavir işlemi geri alındı.",

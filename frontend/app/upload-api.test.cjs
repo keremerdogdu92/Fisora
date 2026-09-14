@@ -17,6 +17,7 @@ const {
   deleteClientDocuments,
   ensureUploadWorkspace,
   fetchAuthSession,
+  fetchAuditHistory,
   fetchQnbConnectionStatus,
   loginWithPassword,
   requestPasswordReset,
@@ -38,6 +39,7 @@ const {
   saveQnbConnectionToBackend,
   setPortalPassword,
   storeReviewDecision,
+  reopenJournal,
   syncQnbIncomingInvoices,
   updateClientPortalAccess,
   uploadChartAccountsToBackend,
@@ -1224,6 +1226,7 @@ test("storeReviewDecision posts statement line accountant decisions", async () =
       document_ref: "mayis-banka-ekstresi.xlsx",
       action: "approve_with_changes",
       reviewer: "mali-musavir",
+      operation_kind: "decision",
       corrected_account_code: "",
       corrected_counterparty_code: "320.01.040",
       category: "",
@@ -1605,4 +1608,75 @@ test("resetTestData posts guarded accountant reset request", async () => {
     deleted_client_count: 2,
     preserved_portal_user_count: 1,
   });
+});
+
+
+test("audit history transport keeps filters tenant-scoped and authenticated", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ client_id: "client-1", events: [] }) };
+  };
+
+  const result = await fetchAuditHistory({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    query: "ABC2026",
+    actor: "mali-musavir",
+    action: "approve_with_changes",
+    startDate: "2026-09-01",
+    endDate: "2026-09-14",
+    limit: 250,
+    userId: "mali-musavir",
+    sessionToken: "session-token-1",
+    fetchImpl,
+  });
+
+  const url = new URL(request.url);
+  assert.equal(url.pathname, "/phase0/store/audit-history/client-1");
+  assert.equal(url.searchParams.get("q"), "ABC2026");
+  assert.equal(url.searchParams.get("actor"), "mali-musavir");
+  assert.equal(url.searchParams.get("action"), "approve_with_changes");
+  assert.equal(url.searchParams.get("start_date"), "2026-09-01");
+  assert.equal(url.searchParams.get("end_date"), "2026-09-14");
+  assert.equal(url.searchParams.get("limit"), "200");
+  assert.equal(request.init.method, "GET");
+  assert.deepEqual(request.init.headers, {
+    "X-Fisora-Session": "session-token-1",
+    "X-Fisora-User-Id": "mali-musavir",
+  });
+  assert.deepEqual(result, { client_id: "client-1", events: [] });
+});
+
+test("undo transports are explicitly distinguished from deliberate reopen actions", async () => {
+  const requests = [];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ revision_no: 4 }) };
+  };
+
+  await reopenJournal({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    documentRef: "fatura-1",
+    expectedRevision: 3,
+    reason: "Son m??avir onay? i?lem bazl? geri al?nd?.",
+    operationKind: "undo",
+    userId: "mali-musavir",
+    fetchImpl,
+  });
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    documentRef: "fatura-1",
+    action: "approve",
+    reviewer: "mali-musavir",
+    operationKind: "undo",
+    expectedRevision: 4,
+    userId: "mali-musavir",
+    fetchImpl,
+  });
+
+  assert.equal(JSON.parse(requests[0].init.body).operation_kind, "undo");
+  assert.equal(JSON.parse(requests[1].init.body).decision.operation_kind, "undo");
 });

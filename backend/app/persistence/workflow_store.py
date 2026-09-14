@@ -720,6 +720,69 @@ class JsonWorkflowStore:
         ]
         return events[-max(limit, 1):]
 
+    def list_audit_history(
+        self,
+        *,
+        client_id: str,
+        query: str = "",
+        actor: str = "",
+        action: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        needle = query.strip().casefold()
+        actor_needle = actor.strip().casefold()
+        rows: list[dict[str, Any]] = []
+        for record in reversed(self._read()["review_decisions"]):
+            if str(record.get("client_id") or "") != client_id:
+                continue
+            decision = record.get("decision") if isinstance(record.get("decision"), dict) else {}
+            decision_action = str(decision.get("action") or "")
+            decision_actor = str(decision.get("reviewer") or "")
+            created_at = str(record.get("created_at") or "")
+            if action.strip() and decision_action != action.strip():
+                continue
+            if actor_needle and actor_needle not in decision_actor.casefold():
+                continue
+            if start_date.strip() and created_at[:10] < start_date.strip():
+                continue
+            if end_date.strip() and created_at[:10] > end_date.strip():
+                continue
+            searchable = " ".join([
+                str(decision.get("document_ref") or ""), decision_actor, decision_action,
+                str(decision.get("reason") or ""),
+            ]).casefold()
+            if needle and needle not in searchable:
+                continue
+            operation_kind = str(decision.get("operation_kind") or "decision")
+            approved = decision_action in {"approve", "approve_with_changes", "suggest_for_similar"}
+            excluded = decision_action in {"exclude_export", "exclude_from_export", "out_of_scope", "business_out_of_scope"}
+            after_state = "approved" if approved else "rejected" if excluded else "review_required"
+            rows.append({
+                "event_id": str(record.get("id") or ""),
+                "client_id": client_id,
+                "event_type": "journal_undo" if operation_kind == "undo" else "journal_approved" if approved else "journal_review_saved",
+                "status": "ok",
+                "actor": decision_actor,
+                "details": {
+                    "action": decision_action,
+                    "operation_kind": operation_kind,
+                    "before_state": "",
+                    "after_state": after_state,
+                    "reason": str(decision.get("reason") or ""),
+                },
+                "created_at": created_at,
+                "document_ref": str(decision.get("document_ref") or ""),
+                "file_name": "",
+                "invoice_number": "",
+                "invoice_date": "",
+                "amount": "",
+            })
+            if len(rows) >= min(max(int(limit or 100), 1), 200):
+                break
+        return rows
+
     def save_qnb_connection(self, *, client_id: str, connection: dict[str, Any]) -> dict[str, Any]:
         data = self._read()
         timestamp = utc_now()

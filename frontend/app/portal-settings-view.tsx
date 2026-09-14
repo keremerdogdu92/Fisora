@@ -2,14 +2,47 @@
 // Summary: Renders office/session settings and QNB integration controls with shared operational timestamp formatting.
 "use client";
 
+import { useState } from "react";
 import { formatPortalDateTime } from "./portal-formatters";
 import { Info } from "./portal-shared";
 import type { LocalSession, PilotClient, PilotReadinessView } from "./portal-types";
+import { fetchAuditHistory, resolveApiBaseUrl } from "./upload-api";
 
 const roleLabels: Record<LocalSession["role"], string> = {
   accountant: "Müşavir",
   client_user: "Mükellef",
 };
+
+type AuditHistoryEvent = {
+  event_id: string;
+  event_type: string;
+  actor: string;
+  created_at: string;
+  document_ref: string;
+  file_name: string;
+  invoice_number: string;
+  details: Record<string, unknown>;
+};
+
+function auditStateLabel(value: unknown) {
+  const state = String(value || "");
+  if (state === "approved") return "Onaylandı";
+  if (state === "working_draft") return "Kontrolde";
+  if (state === "review_required") return "Kontrol gerekli";
+  if (state === "rejected") return "Hariç";
+  if (state === "export_ready") return "Çıktıya hazır";
+  return state || "-";
+}
+
+function auditEventLabel(event: AuditHistoryEvent) {
+  const action = String(event.details?.action || "");
+  if (event.event_type === "journal_undo") return "Geri alındı";
+  if (event.event_type === "journal_reopened") return "Kontrole geri alındı";
+  if (event.event_type === "journal_approved") return action === "approve_with_changes" ? "Düzeltip onayladı" : "Onayladı";
+  if (["exclude_export", "exclude_from_export", "out_of_scope", "business_out_of_scope"].includes(action)) return "Hariç tuttu";
+  if (action === "review_required") return "Kontrolde tuttu";
+  return "Karar kaydetti";
+}
 
 function SessionPanel({
   loginPassword,
@@ -171,6 +204,48 @@ export function SettingsView({
   setLoginUserId: (value: string) => void;
   source: string;
 }) {
+  const [auditEvents, setAuditEvents] = useState<AuditHistoryEvent[]>([]);
+  const [auditLoadedClientId, setAuditLoadedClientId] = useState("");
+  const [auditQuery, setAuditQuery] = useState("");
+  const [auditActor, setAuditActor] = useState("");
+  const [auditAction, setAuditAction] = useState("");
+  const [auditStartDate, setAuditStartDate] = useState("");
+  const [auditEndDate, setAuditEndDate] = useState("");
+  const [auditStatus, setAuditStatus] = useState("");
+
+  async function loadAuditHistory() {
+    if (!selectedClient) {
+      setAuditEvents([]);
+      setAuditLoadedClientId("");
+      setAuditStatus("Önce mükellef seçin.");
+      return;
+    }
+    setAuditStatus("İşlem geçmişi aranıyor...");
+    try {
+      const payload = await fetchAuditHistory({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        clientId: selectedClient.clientId,
+        query: auditQuery.trim(),
+        actor: auditActor.trim(),
+        action: auditAction,
+        startDate: auditStartDate,
+        endDate: auditEndDate,
+        userId: session?.userId || "",
+        sessionToken: session?.sessionToken || "",
+      }) as { events?: AuditHistoryEvent[] };
+      const events = Array.isArray(payload?.events) ? payload.events : [];
+      setAuditEvents(events);
+      setAuditLoadedClientId(selectedClient.clientId);
+      setAuditStatus(events.length ? `${events.length} kayıt bulundu.` : "Bu aramada işlem kaydı bulunamadı.");
+    } catch {
+      setAuditEvents([]);
+      setAuditLoadedClientId(selectedClient.clientId);
+      setAuditStatus("İşlem geçmişi alınamadı. Tekrar deneyin.");
+    }
+  }
+
+  const visibleAuditEvents = auditLoadedClientId === selectedClient?.clientId ? auditEvents : [];
+
   return (
     <section className="settings-page">
       <SessionPanel
@@ -275,6 +350,64 @@ export function SettingsView({
             <Info label="Son sonuç" value={`${qnbHealth.listedCount} listelendi / ${qnbHealth.downloadedCount} alındı / ${qnbHealth.duplicateCount} tekrar / ${qnbHealth.failedCount} hata`} />
           </div>
         </section>
+      ) : null}
+      {session?.role === "accountant" ? (
+        <details
+          className="panel settings-card settings-audit-card"
+          onToggle={(event) => {
+            if (event.currentTarget.open && selectedClient && auditLoadedClientId !== selectedClient.clientId) void loadAuditHistory();
+          }}
+        >
+          <summary className="settings-audit-summary">
+            <span><small>Gelişmiş</small><strong>İşlem geçmişi</strong></span>
+            <em>Yalnız sorun incelemesi için</em>
+          </summary>
+          <div className="settings-audit-body">
+            <p>Günlük çalışma ekranına eklenmez. Seçili mükellefte kim, ne zaman, hangi muhasebe kararını değiştirdi diye aramak için kullanılır.</p>
+            <div className="settings-audit-context">
+              <strong>{selectedClient?.clientName || "Mükellef seçilmedi"}</strong>
+              <span>{selectedClient ? "Sonuçlar yalnız seçili mükellefe aittir." : "Üstten bir mükellef seçin."}</span>
+            </div>
+            <div className="settings-audit-filters">
+              <input aria-label="İşlem geçmişinde belge ara" onChange={(event) => setAuditQuery(event.target.value)} placeholder="Belge no, dosya veya açıklama" value={auditQuery} />
+              <input aria-label="İşlem geçmişinde kullanıcı ara" onChange={(event) => setAuditActor(event.target.value)} placeholder="Kullanıcı" value={auditActor} />
+              <select aria-label="İşlem türü" onChange={(event) => setAuditAction(event.target.value)} value={auditAction}>
+                <option value="">Tüm işlemler</option>
+                <option value="approve">Onay</option>
+                <option value="approve_with_changes">Düzeltip onay</option>
+                <option value="review_required">Kontrolde tut / geri al</option>
+                <option value="exclude_export">Hariç tut</option>
+              </select>
+              <input aria-label="İşlem geçmişi başlangıç tarihi" onChange={(event) => setAuditStartDate(event.target.value)} type="date" value={auditStartDate} />
+              <input aria-label="İşlem geçmişi bitiş tarihi" onChange={(event) => setAuditEndDate(event.target.value)} type="date" value={auditEndDate} />
+              <button className="secondary" disabled={!selectedClient} onClick={() => void loadAuditHistory()} type="button">Ara</button>
+            </div>
+            {auditStatus ? <p className="decision-status" role="status">{auditStatus}</p> : null}
+            {visibleAuditEvents.length ? (
+              <div className="settings-audit-table-wrap">
+                <table className="settings-audit-table">
+                  <thead><tr><th>Tarih</th><th>Belge</th><th>Kullanıcı</th><th>İşlem</th><th>Değişim</th></tr></thead>
+                  <tbody>
+                    {visibleAuditEvents.map((event) => {
+                      const beforeState = auditStateLabel(event.details?.before_state);
+                      const afterState = auditStateLabel(event.details?.after_state);
+                      const reason = String(event.details?.reason || "");
+                      return (
+                        <tr key={event.event_id}>
+                          <td>{formatPortalDateTime(event.created_at)}</td>
+                          <td><strong>{event.invoice_number || event.file_name || event.document_ref || "-"}</strong>{event.file_name && event.invoice_number ? <small>{event.file_name}</small> : null}</td>
+                          <td>{event.actor || "-"}</td>
+                          <td>{auditEventLabel(event)}</td>
+                          <td><strong>{beforeState !== "-" ? `${beforeState} → ${afterState}` : afterState}</strong>{reason ? <small>{reason}</small> : null}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        </details>
       ) : null}
     </section>
   );

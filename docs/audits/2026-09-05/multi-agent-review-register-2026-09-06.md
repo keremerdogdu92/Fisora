@@ -626,12 +626,17 @@
 # R — Feature / strategy candidates — audit bug'ı değildir
 
 ## REV-R01 — Tam audit trail
-**Status:** STRATEJİ KARARI.
-**Source:** CG product capability candidate.
+**Status:** CLOSED / IMPLEMENTED - 2026-09-14.
+**Source:** CG product capability candidate + accepted B05 review-state decision.
+**Decision:** Review audit scope covers approve, undo, deliberate reopen, keep-in-review, exclude, and restore. Every new normalized review mutation is appended to existing `workflow_events` with actor, document, timestamp, action, operation kind, before/after state, before/after export state, revision lineage, and reason. No parallel `audit_logs` table was introduced. `undo` and deliberate `reopen` are distinct event kinds.
+**UX:** No new control was added to the daily workbench. Accountant history lives under the collapsed advanced history panel in Settings and makes no audit API request until explicitly opened. Search is scoped to the selected client and supports document/file, actor, action, and date filters.
+**Acceptance:** Fresh Chromium: history absent from the home surface, Settings history closed by default, 0 audit requests before opening, 1 request after opening, and the event row rendered approved -> in-review correctly; search produced a second selected-client scoped request. Frontend 253/253 PASS, backend 1158 passed / 37 skipped, targeted audit/reopen tests PASS, TypeScript/build PASS. PostgreSQL integration tests remain environment-gated when `FISORA_TEST_POSTGRES_DSN` is absent.
 
 ## REV-R02 — Onaylanmış kaydı yeniden açma
-**Status:** STRATEJİ KARARI.
-**Sources:** CG + AG Missing Product Capabilities.
+**Status:** CLOSED / IMPLEMENTED - 2026-09-14.
+**Sources:** CG + AG Missing Product Capabilities + accepted B02 review-state decision.
+**Decision:** Approval is not terminal. Approved documents remain reachable through the Workbench all-documents queue and can be deliberately reopened. Backend does not mutate the approved revision; it creates a new `working_draft` revision from it, copies draft lines and source allocations/provenance, and returns export state to `review_required`. Deliberate reopen writes its own audit event; Ctrl+Z restore is marked `operation_kind=undo` so it remains distinguishable from deliberate reopen.
+**Acceptance:** Existing normalized journal regression verifies preservation of the approved snapshot plus creation of the new working revision. Frontend contracts verify the approved-document reopen affordance, explicit `operationKind: reopen`, and operation-based undo. Full frontend/backend suites and production build PASS as recorded under R01.
 
 ## REV-R03 — Müşavir notu
 **Status:** STRATEJİ KARARI.

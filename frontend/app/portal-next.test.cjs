@@ -333,6 +333,31 @@ test("excluded invoices stay visible, reversible, and outside active review cock
   assert.match(workflow, /document\.status === "no_posting_required" \|\| document\.status === "excluded"/);
 });
 
+test("approved invoices can be deliberately reopened without losing the prior approved revision", () => {
+  const review = source("portal-review-panels.tsx");
+  const commands = source("features", "review", "use-review-commands.ts");
+  const workflow = source("features", "documents", "document-workflow-model.js");
+
+  assert.match(review, /document\.status === "export_ready" \? "Kontrole geri al" : "Kontrolde tut"/);
+  assert.match(commands, /action === "review_required" && previousStatus === "export_ready"/);
+  assert.match(commands, /reopenJournal\(\{/);
+  assert.match(commands, /setUndoableReviewAction\(revisionNo > 0/);
+  assert.match(commands, /operationKind: "reopen"/);
+  assert.match(workflow, /document\.status === "no_posting_required" \|\| document\.status === "excluded" \|\| document\.status === "export_ready"/);
+});
+
+test("settings keeps accountant audit history hidden and lazy until explicitly opened", () => {
+  const settings = source("portal-settings-view.tsx");
+  const transport = source("upload-api.js");
+
+  assert.match(settings, /<details[\s\S]*?settings-audit-card/);
+  assert.match(settings, /onToggle=\{\(event\) => \{/);
+  assert.match(settings, /event\.currentTarget\.open && selectedClient && auditLoadedClientId !== selectedClient\.clientId/);
+  assert.match(settings, /void loadAuditHistory\(\)/);
+  assert.match(settings, /settings-audit-summary/);
+  assert.match(transport, /\/phase0\/store\/audit-history\//);
+});
+
 test("journal source links locate and highlight the matching PDF or sandboxed HTML evidence", () => {
   const workspace = source("portal-workspace-view.tsx");
   const review = source("portal-review-panels.tsx");

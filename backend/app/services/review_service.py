@@ -308,6 +308,7 @@ class ReviewService:
             metadata={
                 "document_ref": decision.document_ref,
                 "action": decision.action,
+                "operation_kind": decision.operation_kind,
                 "reviewer": decision.reviewer,
                 "automation_candidate": event.get("automation_candidate", False),
             },
@@ -328,6 +329,7 @@ class ReviewService:
                 expected_revision=payload.expected_revision,
                 reviewer=authenticated_actor,
                 reason=payload.reason,
+                operation_kind=payload.operation_kind,
             )
         except NormalizedRevisionConflict as exc:
             raise HTTPException(
@@ -340,6 +342,30 @@ class ReviewService:
             ) from exc
         except (NormalizedAccountingError, RuntimeError) as exc:
             raise HTTPException(status_code=409, detail={"code": "journal_reopen_failed", "message": str(exc)}) from exc
+
+    def audit_history(
+        self,
+        *,
+        client_id: str,
+        user_id: str | None,
+        query: str = "",
+        actor: str = "",
+        action: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        limit: int = 100,
+    ) -> dict[str, object]:
+        self.require_client_access(
+            client_id=client_id, user_id=user_id, allowed_roles=("accountant", "admin"),
+        )
+        reader = getattr(self.store, "list_audit_history", None)
+        if not callable(reader):
+            return {"client_id": client_id, "events": []}
+        events = reader(
+            client_id=client_id, query=query, actor=actor, action=action,
+            start_date=start_date, end_date=end_date, limit=min(max(limit, 1), 200),
+        )
+        return {"client_id": client_id, "events": events}
 
     def _persist_confirmed_learning_rule(
         self,

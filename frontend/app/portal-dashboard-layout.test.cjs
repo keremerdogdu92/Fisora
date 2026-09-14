@@ -37,17 +37,17 @@ test("sidebar uses semantic icons instead of two-letter navigation badges", () =
   assert.doesNotMatch(shell, /\{item\.symbol\}/);
 });
 
-test("portal sidebar can collapse so document review has more workspace width", () => {
+test("portal sidebar can collapse without persisting a global next-shell preference", () => {
   const portalApp = source("portal-app.tsx");
   const shell = source("portal-shell-components.tsx");
   const styles = source("styles.css");
 
-  assert.match(portalApp, /const \[sidebarCollapsed, setSidebarCollapsed\] = useState\(false\);/);
+  assert.match(portalApp, /const \[sidebarCollapsed, setSidebarCollapsed\] = useState\(isNextPresentation && portalConfig\.initialMode === "documents"\);/);
   assert.match(portalApp, /sidebar-collapsed/);
   assert.match(portalApp, /collapsed=\{sidebarCollapsed\}/);
   assert.match(portalApp, /function toggleSidebarCollapsed\(\)/);
-  assert.match(portalApp, /fisora\.portal\.sidebar\.collapsed/);
-  assert.match(portalApp, /localStorage\.setItem\(SIDEBAR_COLLAPSED_STORAGE_KEY/);
+  assert.doesNotMatch(portalApp, /fisora\.portal\.sidebar\.collapsed/);
+  assert.match(portalApp, /setSidebarCollapsed\(nextMode === "documents"\)/);
   assert.match(portalApp, /onToggleCollapse=\{toggleSidebarCollapsed\}/);
   assert.match(shell, /aria-label=\{collapsed \? "Menüyü genişlet" : "Menüyü daralt"\}/);
   assert.match(shell, /className=\{collapsed \? "portal-sidebar collapsed" : "portal-sidebar"\}/);

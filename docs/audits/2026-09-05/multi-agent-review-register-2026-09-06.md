@@ -611,12 +611,17 @@
 **Decision:** No audit-time bug fix is required for Q01. After the full audit/remediation pass is complete, remove the legacy accountant UI and accountant-only `/portal/*` routes, migrate or delete tests/fallback references that depend on them, and keep the current `/portal-next` accountant experience as the single accountant shell. The separate client-facing `/portal/mukellef` flow, including delegated-client access, is explicitly outside that cleanup unless reviewed separately.
 
 ## REV-Q02 — Route geçişinde sidebar state tutarlılığı
-**Status:** KONTROL EDİLECEK.
+**Status:** CLOSED / IMPLEMENTED - 2026-09-14.
 **Audit refs:** CX Working but poor UX · AG navigation observations.
+**Decision:** The next-generation sidebar is route-aware. `Çalışma Masası` (`documents`) opens with the compact 64 px rail; every other main accountant destination opens with the full 232 px sidebar. A manual expand/collapse remains valid while staying on the current screen, but the next navigation action reapplies the destination default. The old global `localStorage` collapse preference was removed so a workbench-space preference cannot leak into unrelated screens.
+**Fresh verification:** Chromium confirmed `Ana Sayfa -> Çalışma Masası -> Mükellefler -> AI Ajanları -> Çalışma Masası -> manual expand -> Ayarlar` with the expected open/collapsed state at every step. Full frontend regression passed 243/243; TypeScript and production build passed.
 
 ## REV-Q03 — Dar sidebar tooltip/label yeterliliği
-**Status:** ÜRÜN KARARI.
+**Status:** CLOSED / IMPLEMENTED - 2026-09-14.
 **Audit refs:** CX P2 recommendations.
+**Decision:** Keep the compact rail icon-first instead of auto-expanding the whole sidebar on hover. Collapsed navigation now exposes immediate custom tooltips plus explicit accessible labels. Hover and active states are visually separated, with the active destination receiving a persistent left inset marker. `Çalışma Masası` now uses `Columns3`, matching the three-pane workbench, and `Öğrenilen Kurallar` uses `ListChecks` instead of the ambiguous AI-like `Sparkles` icon.
+**Deferred by design:** No hover-driven full-sidebar expansion/overlay was added. If real use shows the rail still slows navigation, a Visual-Studio-style delayed overlay peek can be evaluated separately without introducing layout shift.
+**Acceptance:** Fresh Chromium confirmed visible tooltip content, distinct hover/active styling, route-aware expansion, and reversible manual expansion. Frontend 243/243 PASS; TypeScript/build PASS.
 
 # R — Feature / strategy candidates — audit bug'ı değildir
 

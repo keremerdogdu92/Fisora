@@ -52,7 +52,6 @@ import { previousCompletedPeriod } from "./portal-periods";
 import { emptyCorrectionDraft, useReviewCommands } from "./features/review";
 import { useReviewEditLease } from "./features/review";
 type WorkspaceSourceState = { label: string; status: "loading" | "backend" | "empty" | "fallback" | "error"; detail: string };
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "fisora.portal.sidebar.collapsed";
 export function FisoraPortalApp({ routeKey = "home", presentation = "legacy" }: { routeKey?: PortalRouteKey | string; presentation?: PortalPresentation }) {
   return (
     <PilotQueryProvider>
@@ -110,33 +109,10 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   const [dashboardResumeState, setDashboardResumeState] = useState<DashboardResumeState | null>(null);
   const [selectedIntakeCategory, setSelectedIntakeCategory] = useState<IntakeCategory>("purchase_invoice");
   const [clientSearch, setClientSearch] = useState("");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(isNextPresentation && portalConfig.initialMode === "documents");
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  useEffect(() => {
-    if (!isNextPresentation || typeof window === "undefined") return;
-    try {
-      setSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true");
-    } catch {
-      // Local preferences are optional; the portal must remain usable when storage is blocked.
-    }
-  }, [isNextPresentation]);
-
-  useEffect(() => {
-    if (isNextPresentation && mode === "documents") setSidebarCollapsed(true);
-  }, [isNextPresentation, mode]);
-
   function toggleSidebarCollapsed() {
-    setSidebarCollapsed((current) => {
-      const next = !current;
-      if (isNextPresentation && typeof window !== "undefined") {
-        try {
-          window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(next));
-        } catch {
-          // Keep the in-memory toggle working even when local storage is unavailable.
-        }
-      }
-      return next;
-    });
+    setSidebarCollapsed((current) => !current);
   }
   const [nextAgentSection, setNextAgentSection] = useState<PortalNextAgentSection>("agents");
   const { session, sessionHydrated, setSession } = usePortalSessionGuard({ lockedRole, portalConfig, routeKey: String(routeKey), setLocalFallbackAllowed });
@@ -356,7 +332,9 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
   }, [dashboardView.dashboardClientRows, filteredClients]);
 
   function setMode(nextMode: PilotMode) {
-    if (portalConfig.visibleModes.includes(nextMode)) setModeState(nextMode);
+    if (!portalConfig.visibleModes.includes(nextMode)) return;
+    setModeState(nextMode);
+    if (isNextPresentation) setSidebarCollapsed(nextMode === "documents");
   }
 
   function dashboardSegmentForDocument(document: PilotData["documents"][number]): DocumentSegment {

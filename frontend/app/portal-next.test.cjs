@@ -37,6 +37,22 @@ test("next sidebar uses the approved accountant navigation order", () => {
   assert.doesNotMatch(sidebar, /label: "Diğer Belgeler"/);
 });
 
+test("next sidebar is route-aware, readable as a rail, and uses distinct semantic icons", () => {
+  const portalApp = source("portal-app.tsx");
+  const shell = source("portal-next", "portal-next-shell.tsx");
+  const styles = source("portal-next", "portal-next.css");
+
+  assert.match(portalApp, /setSidebarCollapsed\(nextMode === "documents"\)/);
+  assert.doesNotMatch(portalApp, /fisora\.portal\.sidebar\.collapsed/);
+  assert.match(shell, /label: "Çalışma Masası", mode: "documents", icon: Columns3/);
+  assert.match(shell, /label: "Öğrenilen Kurallar", mode: "agents", icon: ListChecks/);
+  assert.match(shell, /data-tooltip=\{item\.label\}/);
+  assert.match(shell, /aria-label=\{item\.label\}/);
+  assert.match(styles, /\.portal-next-nav-item:hover \{[\s\S]*?rgba\(255, 255, 255, 0\.08\)/);
+  assert.match(styles, /\.portal-next-nav-item\.active \{[\s\S]*?box-shadow: inset 3px 0 0 #9fd0c2/);
+  assert.match(styles, /content: attr\(data-tooltip\)/);
+});
+
 test("invoice bank and other document navigation lives inside the next workbench", () => {
   const shell = source("portal-next", "portal-next-shell.tsx");
 

@@ -8,9 +8,9 @@ import {
   CircleCheckBig,
   Home,
   LogOut,
-  PanelTop,
+  Columns3,
   Settings,
-  Sparkles,
+  ListChecks,
   Upload,
   Users,
 } from "lucide-react";
@@ -30,12 +30,12 @@ type SidebarItem = {
 
 const NEXT_SIDEBAR_ITEMS: SidebarItem[] = [
   { key: "home", label: "Ana Sayfa", mode: "accountant", icon: Home },
-  { key: "workspace", label: "Çalışma Masası", mode: "documents", icon: PanelTop },
+  { key: "workspace", label: "Çalışma Masası", mode: "documents", icon: Columns3 },
   { key: "exports", label: "Onay & Çıktılar", mode: "exports", icon: CircleCheckBig },
   { key: "clients", label: "Mükellefler", mode: "clients", icon: Users },
   { key: "uploads", label: "Yeni Yükleme", mode: "uploads", icon: Upload },
   { key: "agents", label: "AI Ajanları", mode: "agents", icon: Bot, agentSection: "agents" },
-  { key: "rules", label: "Öğrenilen Kurallar", mode: "agents", icon: Sparkles, agentSection: "rules" },
+  { key: "rules", label: "Öğrenilen Kurallar", mode: "agents", icon: ListChecks, agentSection: "rules" },
   { key: "operations", label: "İşlem Durumu", mode: "operations", icon: Activity },
   { key: "settings", label: "Ayarlar", mode: "settings", icon: Settings },
 ];
@@ -98,7 +98,8 @@ export function PortalNextSidebar({
                 onNavigate(item.mode, item.agentSection);
                 onCloseMobile();
               }}
-              title={collapsed ? item.label : undefined}
+              aria-label={item.label}
+              data-tooltip={item.label}
               type="button"
             >
               <Icon aria-hidden="true" />

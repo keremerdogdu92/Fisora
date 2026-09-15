@@ -247,6 +247,43 @@ function accountingDirectionForDocument(document: PilotDocument) {
   return "";
 }
 
+function counterpartyFamilyForDocument(document: PilotDocument, requestedCode = "", suggestedCode = "") {
+  const requested = normalizeAccountCodeInput(requestedCode);
+  const suggested = normalizeAccountCodeInput(suggestedCode);
+  if (requested.startsWith("120")) return "120";
+  if (requested.startsWith("320")) return "320";
+  if (suggested.startsWith("120")) return "120";
+  if (suggested.startsWith("320")) return "320";
+  return accountingDirectionForDocument(document) === "sales" ? "120" : "320";
+}
+
+function counterpartyDefaultCodeForLine(document: PilotDocument, line?: DraftLine) {
+  const requestedCode = normalizeAccountCodeInput(line?.account_code || "");
+  const rawSuggestion = asRecord(document.counterpartyCreationSuggestion);
+  const suggestedCode = normalizeAccountCodeInput(
+    document.suggestedCounterpartyAccount || String(rawSuggestion.suggested_code || ""),
+  );
+  const family = counterpartyFamilyForDocument(document, requestedCode, suggestedCode);
+  if (requestedCode.startsWith(`${family}.`)) return requestedCode;
+  if (suggestedCode.startsWith(`${family}.`)) return suggestedCode;
+  const taxId = String(document.counterpartyTaxId || "").replace(/\D/g, "");
+  return taxId ? `${family}.${taxId}` : "";
+}
+
+function likelyCounterpartyDraftLine(document: PilotDocument, line?: DraftLine) {
+  if (!line) return false;
+  const direction = accountingDirectionForDocument(document);
+  if (direction !== "sales" && direction !== "purchase") return false;
+  const debit = parseAmount(line.debit);
+  const credit = parseAmount(line.credit);
+  const amountSideMatches = direction === "sales" ? debit > 0 && credit === 0 : credit > 0 && debit === 0;
+  if (!amountSideMatches) return false;
+  const description = String(line.description || "").toLocaleLowerCase("tr-TR");
+  const title = String(document.counterpartyTitle || "").trim().toLocaleLowerCase("tr-TR");
+  const roleHint = /(receivable|payable|cari|alıcı|alici|satıcı|satici|müşteri|musteri|tedarikçi|tedarikci)/i.test(description);
+  return Boolean(title && description.includes(title)) || roleHint || Boolean(document.counterpartyTitle || document.counterpartyTaxId);
+}
+
 function directionLabel(direction: string) {
   if (direction === "sales") return "Satış";
   if (direction === "purchase") return "Alış";
@@ -742,14 +779,18 @@ export function JournalPanel({
   const [rulePreviewStatus, setRulePreviewStatus] = useState("");
   const [counterpartyDrawerLineIndex, setCounterpartyDrawerLineIndex] = useState<number | null>(null);
   const [counterpartySearch, setCounterpartySearch] = useState("");
+  const [counterpartyCode, setCounterpartyCode] = useState("");
   const [counterpartyName, setCounterpartyName] = useState("");
+  const [counterpartyTaxId, setCounterpartyTaxId] = useState("");
   const [counterpartyStatus, setCounterpartyStatus] = useState("");
   const [counterpartyCreating, setCounterpartyCreating] = useState(false);
 
   useEffect(() => {
     setCounterpartyDrawerLineIndex(null);
     setCounterpartySearch("");
+    setCounterpartyCode("");
     setCounterpartyName("");
+    setCounterpartyTaxId("");
     setCounterpartyStatus("");
     setCounterpartyCreating(false);
   }, [document?.id]);
@@ -780,6 +821,14 @@ export function JournalPanel({
   const hasInvalidDraftAccounts = invalidAccountCodes.length > 0;
   const hasUnresolvedDraftAccounts = accountResolutionIssues.length > 0;
   const firstNewCounterpartyIssue = accountResolutionIssues.find((issue) => issue.kind === "new_counterparty");
+  const blankCounterpartyIssue = accountResolutionIssues.find(
+    (issue) => issue.kind === "blank" && !isStatement && likelyCounterpartyDraftLine(activeDocument, activeDraftLines[issue.index]),
+  );
+  const counterpartyResolutionIssue = firstNewCounterpartyIssue || blankCounterpartyIssue;
+  const counterpartyResolutionLineIndexes = accountResolutionIssues
+    .filter((issue) => issue.kind === "new_counterparty"
+      || (issue.kind === "blank" && !isStatement && likelyCounterpartyDraftLine(activeDocument, activeDraftLines[issue.index])))
+    .map((issue) => issue.index);
   const sourceReviewNeedsAccounting = !noPosting && sourceReviewMode && (
     !activeDraftLines.length ||
     activeDraftLines.some((line) => !normalizeAccountCodeInput(line.account_code)) ||
@@ -802,16 +851,14 @@ export function JournalPanel({
   const suggestedCounterpartyCode = normalizeAccountCodeInput(
     document.suggestedCounterpartyAccount || String(rawCounterpartySuggestion.suggested_code || ""),
   );
-  const drawerFamily = drawerRequestedCode.startsWith("120") || suggestedCounterpartyCode.startsWith("120")
-    ? "120"
-    : "320";
-  const drawerCreateCode = drawerRequestedCode.startsWith(`${drawerFamily}.`)
-    ? drawerRequestedCode
-    : suggestedCounterpartyCode.startsWith(`${drawerFamily}.`)
-      ? suggestedCounterpartyCode
-      : document.counterpartyTaxId
-        ? `${drawerFamily}.${String(document.counterpartyTaxId).replace(/\D/g, "")}`
-        : "";
+  const drawerFamily = counterpartyFamilyForDocument(activeDocument, counterpartyCode || drawerRequestedCode, suggestedCounterpartyCode);
+  const normalizedCounterpartyCode = normalizeAccountCodeInput(counterpartyCode);
+  const counterpartyCodeValid = normalizedCounterpartyCode.startsWith("120.") || normalizedCounterpartyCode.startsWith("320.");
+  const existingAccountForCreateCode = document.chartAccounts.find(
+    (account) => normalizeAccountCodeInput(account.code) === normalizedCounterpartyCode,
+  );
+  const existingCounterpartyForCreateCode = existingAccountForCreateCode?.isDetail ? existingAccountForCreateCode : undefined;
+  const counterpartyCodeCollidesWithHeader = Boolean(existingAccountForCreateCode && !existingAccountForCreateCode.isDetail);
   const normalizedCounterpartySearch = counterpartySearch.trim().toLocaleLowerCase("tr-TR");
   const drawerCandidates = document.chartAccounts.filter((account) => {
     if (!account.isDetail || !normalizeAccountCodeInput(account.code).startsWith(`${drawerFamily}.`)) return false;
@@ -889,9 +936,12 @@ export function JournalPanel({
   }
 
   function openCounterpartyDrawer(index: number) {
+    const line = activeDraftLines[index] || blankDraftLine();
     setCounterpartyDrawerLineIndex(index);
     setCounterpartySearch("");
+    setCounterpartyCode(counterpartyDefaultCodeForLine(activeDocument, line));
     setCounterpartyName(activeDocument.counterpartyTitle || "");
+    setCounterpartyTaxId(activeDocument.counterpartyTaxId || "");
     setCounterpartyStatus("");
   }
 
@@ -903,16 +953,21 @@ export function JournalPanel({
   }
 
   async function createCounterpartyAccount() {
-    if (counterpartyDrawerLineIndex === null || !drawerCreateCode || !counterpartyName.trim()) return;
+    if (counterpartyDrawerLineIndex === null || !counterpartyCodeValid || counterpartyCodeCollidesWithHeader || !counterpartyName.trim()) return;
+    if (existingCounterpartyForCreateCode) {
+      setManualDraftLine(counterpartyDrawerLineIndex, { account_code: existingCounterpartyForCreateCode.code });
+      setCounterpartyDrawerLineIndex(null);
+      return;
+    }
     setCounterpartyCreating(true);
     setCounterpartyStatus("Cari hesap oluşturuluyor...");
     try {
       await createCounterpartyAccountToBackend({
         apiBaseUrl: resolvePreviewApiBaseUrl(), clientId: activeDocument.clientId,
         userId: session?.userId || activeDocument.uploadedBy || "mali-musavir", sessionToken: session?.sessionToken || "",
-        accountCode: drawerCreateCode, accountName: counterpartyName.trim(), taxId: activeDocument.counterpartyTaxId || "",
+        accountCode: normalizedCounterpartyCode, accountName: counterpartyName.trim(), taxId: counterpartyTaxId.trim(),
       });
-      setManualDraftLine(counterpartyDrawerLineIndex, { account_code: drawerCreateCode });
+      setManualDraftLine(counterpartyDrawerLineIndex, { account_code: normalizedCounterpartyCode });
       await onRefreshWorkspace?.();
       setCounterpartyStatus("Cari hesap oluşturuldu ve fiş satırına bağlandı.");
       setCounterpartyDrawerLineIndex(null);
@@ -969,8 +1024,8 @@ export function JournalPanel({
         {accountResolutionIssues.length ? (
           <section className="journal-readiness-warning" role="alert" aria-label="Fiş tamamlanmalı">
             <div><strong>Fiş tamamlanmalı</strong><span>Boş, seçilemeyen veya henüz oluşturulmamış hesap varken onay verilemez.</span></div>
-            {firstNewCounterpartyIssue ? (
-              <button onClick={() => openCounterpartyDrawer(firstNewCounterpartyIssue.index)} type="button">Cariyi seç / oluştur</button>
+            {counterpartyResolutionIssue ? (
+              <button onClick={() => openCounterpartyDrawer(counterpartyResolutionIssue.index)} type="button">Cariyi seç / oluştur</button>
             ) : null}
           </section>
         ) : null}
@@ -1002,6 +1057,7 @@ export function JournalPanel({
           <ManualDraftEditor
             activeDraftLines={activeDraftLines}
             chartAccounts={document.chartAccounts}
+            counterpartyResolutionLineIndexes={counterpartyResolutionLineIndexes}
             generatedDraftLines={generatedDraftLines}
             invalidAccountCodes={invalidAccountCodes}
             newCounterpartyAccountCodes={newCounterpartyAccountCodes}
@@ -1152,10 +1208,23 @@ export function JournalPanel({
             </section>
             <section className="counterparty-create-section">
               <div><strong>Yeni cari oluştur</strong><span>Hesap planına tek bir detay hesap eklenir; mevcut hesaplar korunur.</span></div>
-              <label><span>Hesap kodu</span><input readOnly value={drawerCreateCode} /></label>
+              <label>
+                <span>Hesap kodu</span>
+                <input
+                  aria-label="Yeni cari hesap kodu"
+                  onBlur={() => setCounterpartyCode(normalizedCounterpartyCode)}
+                  onChange={(event) => setCounterpartyCode(event.target.value)}
+                  placeholder={`${drawerFamily}.01.001`}
+                  value={counterpartyCode}
+                />
+                <small className="counterparty-field-hint">{counterpartyCode ? "Önerilen kodu değiştirebilirsiniz." : `${drawerFamily} grubunda kullanacağınız detay hesap kodunu yazın.`}</small>
+              </label>
+              {!counterpartyCodeValid && counterpartyCode ? <small className="field-warning">Cari hesap kodu 120. veya 320. ile başlayan bir detay hesap olmalı.</small> : null}
+              {counterpartyCodeCollidesWithHeader ? <small className="field-warning">Bu kod hesap planında üst hesap olarak kullanılıyor. Bir detay hesap kodu girin.</small> : null}
+              {existingCounterpartyForCreateCode ? <small className="counterparty-field-hint">Bu kod zaten hesap planında. Yeni kayıt açmadan fiş satırına bağlanacak.</small> : null}
               <label><span>Cari unvanı</span><input onChange={(event) => setCounterpartyName(event.target.value)} value={counterpartyName} /></label>
-              {document.counterpartyTaxId ? <label><span>Vergi / T.C. no</span><input readOnly value={document.counterpartyTaxId} /></label> : null}
-              <button className="primary" disabled={counterpartyCreating || !drawerCreateCode || !counterpartyName.trim()} onClick={() => void createCounterpartyAccount()} type="button">{counterpartyCreating ? "Oluşturuluyor..." : "Yeni cari oluştur"}</button>
+              <label><span>Vergi / T.C. no</span><input inputMode="numeric" onChange={(event) => setCounterpartyTaxId(event.target.value)} value={counterpartyTaxId} /></label>
+              <button className="primary" disabled={counterpartyCreating || !counterpartyCodeValid || counterpartyCodeCollidesWithHeader || !counterpartyName.trim()} onClick={() => void createCounterpartyAccount()} type="button">{counterpartyCreating ? "Oluşturuluyor..." : existingCounterpartyForCreateCode ? "Mevcut cariyi fişe bağla" : "Oluştur ve fişe bağla"}</button>
               {counterpartyStatus ? <p className="counterparty-resolution-status" role="status">{counterpartyStatus}</p> : null}
             </section>
           </aside>
@@ -1327,6 +1396,7 @@ function QualityScorecardPanel({ document }: { document: PilotDocument }) {
 function ManualDraftEditor({
   activeDraftLines,
   chartAccounts,
+  counterpartyResolutionLineIndexes,
   generatedDraftLines,
   invalidAccountCodes,
   newCounterpartyAccountCodes,
@@ -1343,6 +1413,7 @@ function ManualDraftEditor({
 }: {
   activeDraftLines: DraftLine[];
   chartAccounts: ChartAccountOption[];
+  counterpartyResolutionLineIndexes: number[];
   generatedDraftLines: DraftLine[];
   invalidAccountCodes: string[];
   newCounterpartyAccountCodes: string[];
@@ -1480,6 +1551,11 @@ function ManualDraftEditor({
                     <div className="field-notice field-notice-with-action">
                       <span>Yeni cari hesabı önerisi. Hesap planında henüz yok.</span>
                       <button onClick={() => onResolveCounterparty?.(index)} type="button">Cariyi çöz</button>
+                    </div>
+                  ) : counterpartyResolutionLineIndexes.includes(index) ? (
+                    <div className="field-notice field-notice-with-action">
+                      <span>Cari hesap seçilmedi. Mevcut cariyi seçebilir veya yenisini oluşturabilirsiniz.</span>
+                      <button onClick={() => onResolveCounterparty?.(index)} type="button">Cari seç / oluştur</button>
                     </div>
                   ) : null}
                   <input

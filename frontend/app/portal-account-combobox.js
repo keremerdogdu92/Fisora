@@ -128,6 +128,7 @@ function classifyDraftAccountCode(options, accountCode, suggestedNewCounterparty
 
 function applyAccountSelectionToLine(line, account, options = []) {
   return {
+    ...line,
     account_code: safeText(account?.code),
     description: safeText(line?.description),
     debit: safeText(line?.debit, "0.00"),

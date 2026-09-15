@@ -103,6 +103,20 @@ test("applyAccountSelectionToLine preserves the journal description while changi
   );
 });
 
+test("applyAccountSelectionToLine preserves source provenance while changing only the selected account", () => {
+  const sourceAnchors = [{ canonical_line_id: "line-1", source_position: "2", source_text: "EMIN KORKMAZ" }];
+  const updated = applyAccountSelectionToLine(
+    { account_code: "", description: "Receivable from EMIN KORKMAZ", debit: "20000.00", credit: "0.00", source_role: "posting_candidate", source_anchors: sourceAnchors, source_line_numbers: [2] },
+    accounts[2],
+    accounts,
+  );
+
+  assert.equal(updated.account_code, "320.B04");
+  assert.equal(updated.source_role, "posting_candidate");
+  assert.deepEqual(updated.source_anchors, sourceAnchors);
+  assert.deepEqual(updated.source_line_numbers, [2]);
+});
+
 test("classifyDraftAccountCode treats a missing suggested cari as a warning, not an invalid account", () => {
   assert.equal(classifyDraftAccountCode(accounts, "191.01.020", ["320.19736107464"]), "valid");
   assert.equal(classifyDraftAccountCode(accounts, "153.99.999", ["320.19736107464"]), "invalid");

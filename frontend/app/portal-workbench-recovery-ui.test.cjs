@@ -23,6 +23,11 @@ test("unresolved counterparty blocks approval and opens an in-workbench recovery
   assert.match(source, /draftAccountResolutionIssues/);
   assert.match(source, /createCounterpartyAccountToBackend/);
   assert.match(source, /counterparty-resolution-drawer/);
+  assert.match(source, /counterpartyResolutionLineIndexes/);
+  assert.match(source, /Cari hesap seçilmedi/);
+  assert.match(source, /Yeni cari hesap kodu/);
+  assert.match(source, /Oluştur ve fişe bağla/);
+  assert.match(source, /setCounterpartyTaxId/);
   assert.match(source, /Mevcut cariyi seç/);
   assert.match(source, /Yeni cari oluştur/);
   assert.match(source, /onRefreshWorkspace/);

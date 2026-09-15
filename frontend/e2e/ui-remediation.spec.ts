@@ -371,3 +371,46 @@ test("accountant opens selected client portal in a delegated tab without return 
   await expect(popup.getByText(/Müşavir vekaletinde|MÃ¼ÅŸavir vekaletinde|MÃƒÂ¼ÅŸavir vekaletinde|Musavir vekaletinde/i)).toBeVisible();
   await expect(popup.getByRole("button", { name: /Müşavir ekranına dön|MÃ¼ÅŸavir ekranÄ±na dÃ¶n|sekme kapat|kapat/i })).toHaveCount(0);
 });
+
+
+test("office invite link accepts the first password", async ({ page }) => {
+  let acceptedPayload: Record<string, unknown> | null = null;
+  await page.route("**/phase0/store/auth/invite/accept", async (route) => {
+    acceptedPayload = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({ json: { credential: { has_password: true } } });
+  });
+
+  await page.goto("/portal/invite?token=office-invite-1");
+  await page.getByLabel("Şifre", { exact: true }).fill("PilotSifre123");
+  await page.getByLabel("Şifre tekrar", { exact: true }).fill("PilotSifre123");
+  await page.getByRole("button", { name: "Hesabı oluştur" }).click();
+
+  await expect(page.getByText("Hesabınız hazır. Giriş ekranına yönlendiriliyorsunuz.")).toBeVisible();
+  expect(acceptedPayload).toEqual({ invite_token: "office-invite-1", password: "PilotSifre123" });
+});
+
+test("second accountant sees the active editor and cannot edit the same journal", async ({ page }) => {
+  const lockedWorkspace = structuredClone(pilotWorkspace);
+  Object.assign(lockedWorkspace.documents[0], { normalized_revision: 4, normalized_revision_status: "working_draft" });
+  let acquireCount = 0;
+  await setupPilotRoutes(page, lockedWorkspace);
+  await page.route("**/phase0/store/journal/edit-lease/acquire", async (route) => {
+    acquireCount += 1;
+    await route.fulfill({
+      status: 409,
+      json: { detail: { allowed: false, reason: "edit_lease_conflict", message: "held", owner_actor_id: "office-assistant" } },
+    });
+  });
+
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Çalışma Masası", exact: true }).click();
+
+  const lockNotice = page.getByRole("status", { name: "Belge düzenleme kilidi" });
+  await expect(lockNotice).toBeVisible();
+  await expect(lockNotice).toContainText("office-assistant bu belgeyi düzenliyor");
+  await expect(page.locator(".journal-panel")).toHaveClass(/review-read-only/);
+  expect(acquireCount).toBe(1);
+
+  await page.getByRole("button", { name: "Tekrar dene" }).click();
+  await expect.poll(() => acquireCount).toBe(2);
+});

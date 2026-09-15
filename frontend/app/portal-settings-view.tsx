@@ -6,7 +6,7 @@ import { useState } from "react";
 import { formatPortalDateTime } from "./portal-formatters";
 import { Info } from "./portal-shared";
 import type { LocalSession, PilotClient, PilotReadinessView } from "./portal-types";
-import { fetchAuditHistory, resolveApiBaseUrl } from "./upload-api";
+import { createPortalInvite, fetchAuditHistory, resolveApiBaseUrl, userSafeErrorMessage } from "./upload-api";
 
 const roleLabels: Record<LocalSession["role"], string> = {
   accountant: "Müşavir",
@@ -212,6 +212,30 @@ export function SettingsView({
   const [auditStartDate, setAuditStartDate] = useState("");
   const [auditEndDate, setAuditEndDate] = useState("");
   const [auditStatus, setAuditStatus] = useState("");
+  const [officeInviteEmail, setOfficeInviteEmail] = useState("");
+  const [officeInviteName, setOfficeInviteName] = useState("");
+  const [officeInviteStatus, setOfficeInviteStatus] = useState("");
+  const [officeInviteBusy, setOfficeInviteBusy] = useState(false);
+
+  async function inviteOfficeUser() {
+    const email = officeInviteEmail.trim().toLowerCase();
+    if (!email || !email.includes("@")) { setOfficeInviteStatus("Geçerli bir e-posta adresi girin."); return; }
+    setOfficeInviteBusy(true);
+    setOfficeInviteStatus("Davet hazırlanıyor...");
+    try {
+      const result = await createPortalInvite({
+        apiBaseUrl: resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href),
+        userId: email, email, displayName: officeInviteName.trim() || email,
+        role: "accountant", clientId: "*", invitedBy: session?.userId || "",
+        ttlHours: 48, userHeader: session?.userId || "", sessionToken: session?.sessionToken || "",
+      });
+      const delivery = String((result as { email_delivery?: { status?: string } })?.email_delivery?.status || "");
+      setOfficeInviteStatus(delivery === "sent" ? "Davet e-postası gönderildi. Bağlantı 48 saat geçerli." : "Davet oluşturuldu. E-posta gönderimi yapılandırmasını kontrol edin.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setOfficeInviteStatus(userSafeErrorMessage(message, "Ofis kullanıcısı davet edilemedi. Tekrar deneyin."));
+    } finally { setOfficeInviteBusy(false); }
+  }
 
   async function loadAuditHistory() {
     if (!selectedClient) {
@@ -273,6 +297,22 @@ export function SettingsView({
           <Info label="Çıktı" value={readinessView.exportLabel} />
         </div>
       </section>
+      {session?.role === "accountant" ? (
+        <section className="panel settings-card" aria-label="Ofis kullanıcısı daveti">
+          <div className="section-heading">
+            <span>Ofis erişimi</span><strong>Kullanıcı davet et</strong>
+          </div>
+          <p>Ofiste birlikte çalışacak kişi ayrı hesabıyla giriş yapar. Bu kullanıcı tüm mükelleflere erişebilir; aynı belgeyi iki kişi aynı anda düzenleyemez.</p>
+          <div className="qnb-settings-form">
+            <input aria-label="Ofis kullanıcısı adı" onChange={(event) => setOfficeInviteName(event.target.value)} placeholder="Ad soyad" value={officeInviteName} />
+            <input aria-label="Ofis kullanıcısı e-posta" onChange={(event) => setOfficeInviteEmail(event.target.value)} placeholder="E-posta" type="email" value={officeInviteEmail} />
+          </div>
+          <div className="session-controls">
+            <button disabled={officeInviteBusy || !officeInviteEmail.trim()} onClick={() => void inviteOfficeUser()} type="button">{officeInviteBusy ? "Gönderiliyor..." : "Davet gönder"}</button>
+          </div>
+          {officeInviteStatus ? <p className="decision-status" role="status">{officeInviteStatus}</p> : null}
+        </section>
+      ) : null}
       {session?.role === "accountant" ? (
         <section className="panel settings-card" aria-label="QNB gelen e-Fatura">
           <div className="section-heading">

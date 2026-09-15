@@ -16,7 +16,9 @@ class ReviewCollaborationError(Exception):
 
 
 class EditLeaseConflict(ReviewCollaborationError):
-    pass
+    def __init__(self, message: str, *, owner_actor_id: str = "") -> None:
+        super().__init__(message)
+        self.owner_actor_id = owner_actor_id
 
 
 class EditLeaseActivityError(ValueError, ReviewCollaborationError):
@@ -235,7 +237,10 @@ class ReviewCollaborationService:
                 raise NormalizedRevisionConflict(expected=expected_revision, actual=int(current["current_revision"]))
         existing = self._active_lease(journal_entry_id=journal_entry_id, now=observed_at)
         if existing and existing["owner_actor_id"] != actor_id:
-            raise EditLeaseConflict("journal edit lease is held by another actor")
+            raise EditLeaseConflict(
+                "journal edit lease is held by another actor",
+                owner_actor_id=str(existing["owner_actor_id"]),
+            )
         if existing:
             return self._lease_view(existing)
 
@@ -261,7 +266,10 @@ class ReviewCollaborationService:
         self._validate_activity(user_activity_at=user_activity_at, now=observed_at)
         lease = self._active_lease(journal_entry_id=journal_entry_id, now=observed_at)
         if not lease or lease["owner_actor_id"] != actor_id:
-            raise EditLeaseConflict("matching active journal edit lease is required")
+            raise EditLeaseConflict(
+                "matching active journal edit lease is required",
+                owner_actor_id=str((lease or {}).get("owner_actor_id") or ""),
+            )
         if user_activity_at <= lease["last_user_activity_at"]:
             raise EditLeaseActivityError("user_activity_at must be newer than the prior real activity")
 
@@ -273,7 +281,10 @@ class ReviewCollaborationService:
     def release(self, *, journal_entry_id: str, actor_id: str) -> None:
         lease = self._repository.read_lease(self._tenant_id, journal_entry_id)
         if lease and lease["owner_actor_id"] != actor_id:
-            raise EditLeaseConflict("only the edit lease owner can release it")
+            raise EditLeaseConflict(
+                "only the edit lease owner can release it",
+                owner_actor_id=str(lease["owner_actor_id"]),
+            )
         self._repository.delete_lease(self._tenant_id, journal_entry_id)
 
     def takeover(
@@ -323,7 +334,10 @@ class ReviewCollaborationService:
         observed_at = self._resolve_now(now)
         lease = self._active_lease(journal_entry_id=journal_entry_id, now=observed_at)
         if not lease or lease["owner_actor_id"] != actor_id:
-            raise EditLeaseConflict("matching active journal edit lease is required")
+            raise EditLeaseConflict(
+                "matching active journal edit lease is required",
+                owner_actor_id=str((lease or {}).get("owner_actor_id") or ""),
+            )
 
         current = self._repository.read_current_journal_state(self._tenant_id, journal_entry_id)
         actual_revision = int(current["current_revision"])

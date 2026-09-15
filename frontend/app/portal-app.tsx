@@ -462,7 +462,14 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     setSelectedDocumentId,
   });
   const hasUnsavedReviewChanges = useMemo(() => Boolean(correctionDraft.accountCode.trim() || correctionDraft.counterpartyCode.trim() || correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim() || correctionDraft.applyToSimilar || correctionDraft.manualDraftLines.length), [correctionDraft]);
-  useReviewEditLease({ correctionDraft, hasUnsavedReviewChanges, loginUserId, selectedDocument, session, onStatus: (status) => { if (status !== "idle") setDecisionStatus(status); } });
+  const reviewLease = useReviewEditLease({
+    correctionDraft, hasUnsavedReviewChanges, loginUserId, selectedDocument, session,
+    onStatus: (status) => {
+      if (status === "saving") setDecisionStatus("Taslak kaydediliyor...");
+      else if (status === "stale") setDecisionStatus("Bu belge için daha yeni bir sürüm oluştu. Çalışma alanını yenileyin.");
+      else if (status === "offline") setDecisionStatus("Düzenleme kilidi doğrulanamadı. Bağlantıyı kontrol edip tekrar deneyin.");
+    },
+  });
   const { approveSelectedAndMoveNext, reprocessSelectedDocument, requestStatementAiForSelectedDocument,
     saveDecision, saveStatementLineDecision, lastReviewActionLabel, undoAvailable, undoLastReviewAction } = useReviewCommands({
     activeReviewDocuments,
@@ -481,6 +488,18 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
     setSelectedStatementLineNo,
     setStatementAiStatus,
   });
+  const requiresReviewLease = Boolean(session?.role === "accountant" && selectedDocument && Number(selectedDocument.normalizedRevision || 0) > 0);
+  const reviewMutationBlocked = requiresReviewLease && reviewLease.status !== "saved";
+  const reviewBlockMessage = reviewLease.status === "locked"
+    ? `Bu belge şu anda ${reviewLease.conflictOwner || "başka bir kullanıcı"} tarafından düzenleniyor.`
+    : "Bu belge için düzenleme kilidi hazırlanıyor. Tekrar deneyin.";
+  const guardReviewMutation = <T extends unknown[], R>(fn: (...args: T) => R) => (...args: T): R | undefined => {
+    if (reviewMutationBlocked) {
+      setDecisionStatus(reviewBlockMessage);
+      return;
+    }
+    return fn(...args);
+  };
   const testDataReset = useTestDataReset({ loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session, setSelectedClientId, setSelectedDocumentId });
   const { deleteRetentionDocuments, extendRetentionDocuments, previewRetention, retentionDocuments, retentionStatus } = useDocumentRetentionCommands({
     defaultUserId: portalConfig.defaultUserId, loginUserId, refreshBackendPilotData: () => refreshBackendPilotData(), session,
@@ -620,7 +639,7 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           newClientTaxCertificateFile={newClientTaxCertificateFile}
           newClientTaxCertificateInputKey={newClientTaxCertificateInputKey}
           onAddToBasket={addSelectedClientToBasket}
-          onApproveAndNext={approveSelectedAndMoveNext}
+          onApproveAndNext={guardReviewMutation(approveSelectedAndMoveNext)}
           onCreateNewClient={createNewClient}
           onClientSearchChange={setClientSearch}
           onTaxCertificateFileChange={selectNewClientTaxCertificate}
@@ -631,9 +650,12 @@ function FisoraPortalContent({ routeKey = "home", presentation = "legacy" }: { r
           onRequestStatementAi={requestStatementAiForSelectedDocument}
           onRefreshWorkspace={() => refreshBackendPilotData()}
           onResolveCancellation={resolveCancellation}
-          onSaveDecision={saveDecision}
-          onSaveStatementDecision={saveStatementLineDecision}
+          onSaveDecision={guardReviewMutation(saveDecision)}
+          onSaveStatementDecision={guardReviewMutation(saveStatementLineDecision)}
           reviewFilter={reviewFilter}
+          reviewReadOnly={reviewMutationBlocked}
+          reviewLockedBy={reviewLease.status === "locked" ? reviewLease.conflictOwner : ""}
+          onRetryReviewLock={reviewLease.retryAcquire}
           selectedClient={selectedClient}
           selectedDocument={progressiveSelectedDocument}
           selectedDocumentSegment={selectedDocumentSegment}

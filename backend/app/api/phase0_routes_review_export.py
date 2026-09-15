@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Cookie, Header, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -12,6 +13,9 @@ from app.api.phase0_context import (
     request_user_id,
 )
 from app.api.rate_limit import enforce_rate_limit
+from app.api.phase0_routes_review_collaboration import _lease_conflict_http_error, _service as _review_edit_service
+from app.persistence.normalized_accounting_repository import NormalizedRevisionConflict
+from app.services.review_collaboration_service import EditLeaseConflict
 from app.api.phase0_schemas import (
     ExportPackagePayload,
     JournalReopenPayload,
@@ -38,10 +42,27 @@ def store_review_decision(
     x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"),
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
-    return get_review_service().store_review_decision(
-        payload=payload,
-        user_id=request_user_id(x_fisora_user_id, x_fisora_session, fisora_session),
-    )
+    user_id = request_user_id(x_fisora_user_id, x_fisora_session, fisora_session)
+    store = get_review_service().store
+    if getattr(store, "normalized_accounting_enabled", False) and payload.decision.expected_revision > 0:
+        service, actor, _, role = _review_edit_service(
+            payload.client_id,
+            (x_fisora_user_id, x_fisora_session, fisora_session),
+        )
+        try:
+            service.acquire(
+                journal_entry_id=payload.decision.document_ref,
+                actor_id=actor,
+                actor_role=role,
+                expected_revision=payload.decision.expected_revision,
+                user_activity_at=datetime.now(UTC),
+                now=datetime.now(UTC),
+            )
+        except EditLeaseConflict as exc:
+            raise _lease_conflict_http_error(exc) from exc
+        except NormalizedRevisionConflict as exc:
+            raise HTTPException(status_code=409, detail={"allowed": False, "reason": str(exc)}) from exc
+    return get_review_service().store_review_decision(payload=payload, user_id=user_id)
 
 
 @router.post("/store/journal/reopen")

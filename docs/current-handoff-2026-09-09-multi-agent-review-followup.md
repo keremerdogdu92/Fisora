@@ -281,6 +281,8 @@ Completed 2026-09-10: **`REV-C03`** - all journal rows are rendered and the appr
 Completed 2026-09-10: **`REV-F02` retest** - current HTML/PDF source focus could not reproduce the old visible-text/anchor failure. Browser acceptance 4/4 PASS, including duplicate HTML text disambiguation and PDF source highlighting. No code change.
 
 Completed 2026-09-10: **REV-F03** - the Workbench no longer invents KDV %0 from source-line linkage alone. Valid chart-account names were verified through backend review mapping and a Playwright user flow, including interactive account selection; the old missing-description observation was not reproduced. REV-F04 and REV-F05 are both completed: canonical source anchors now support single- and multi-source HTML/PDF highlighting.
+
+Completed 2026-09-15: **REV-R04 multi-user edit safety** - two office accountants now use separate invited accounts; `/portal/invite` provides first-password setup. Normalized journals acquire the existing edit lease when opened. A second accountant can read the source document but the journal is read-only, names the active editor, and can retry after release. Review persistence independently rejects mutations when another actor owns the lease. The production workspace adapter now preserves normalized revision metadata so lease acquisition actually runs. Assignment/task ownership remains parked; no `assigned_to` or `Benim işlerim` UI was added. Acceptance: backend 1159 passed / 37 skipped; frontend app 253/253; build/TypeScript PASS; targeted Chromium invite + collision smoke 2/2 PASS.
 ## Required acceptance matrix for this pass
 
 ### Account combobox

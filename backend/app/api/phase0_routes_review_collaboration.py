@@ -40,12 +40,25 @@ def _headers(x_user: str | None, x_session: str | None, cookie: str | None) -> t
     return x_user, x_session, cookie
 
 
+def _lease_conflict_http_error(exc: EditLeaseConflict) -> HTTPException:
+    detail: dict[str, object] = {
+        "allowed": False,
+        "reason": "edit_lease_conflict",
+        "message": str(exc),
+    }
+    if exc.owner_actor_id:
+        detail["owner_actor_id"] = exc.owner_actor_id
+    return HTTPException(status_code=409, detail=detail)
+
+
 @router.post("/store/journal/edit-lease/acquire")
 def acquire_edit_lease(payload: JournalEditLeaseAcquirePayload, x_fisora_user_id: str | None = Header(default=None, alias="X-Fisora-User-Id"), x_fisora_session: str | None = Header(default=None, alias="X-Fisora-Session"), fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME)) -> dict[str, object]:
     service, actor, _, role = _service(payload.client_id, _headers(x_fisora_user_id, x_fisora_session, fisora_session))
     try:
         return service.acquire(journal_entry_id=payload.document_ref, actor_id=actor, actor_role=role, expected_revision=payload.expected_revision, user_activity_at=datetime.now(UTC), now=datetime.now(UTC))
-    except (EditLeaseConflict, NormalizedRevisionConflict) as exc:
+    except EditLeaseConflict as exc:
+        raise _lease_conflict_http_error(exc) from exc
+    except NormalizedRevisionConflict as exc:
         raise HTTPException(status_code=409, detail={"allowed": False, "reason": str(exc)}) from exc
 
 
@@ -54,7 +67,9 @@ def renew_edit_lease(payload: JournalEditLeaseRenewPayload, x_fisora_user_id: st
     service, actor, _, _ = _service(payload.client_id, _headers(x_fisora_user_id, x_fisora_session, fisora_session))
     try:
         return service.renew(journal_entry_id=payload.document_ref, actor_id=actor, user_activity_at=_at(payload.user_activity_at))
-    except (EditLeaseConflict, ValueError, NormalizedRevisionConflict) as exc:
+    except EditLeaseConflict as exc:
+        raise _lease_conflict_http_error(exc) from exc
+    except (ValueError, NormalizedRevisionConflict) as exc:
         raise HTTPException(status_code=409, detail={"allowed": False, "reason": str(exc)}) from exc
 
 
@@ -64,7 +79,7 @@ def release_edit_lease(payload: JournalEditLeaseRenewPayload, x_fisora_user_id: 
     try:
         service.release(journal_entry_id=payload.document_ref, actor_id=actor)
     except EditLeaseConflict as exc:
-        raise HTTPException(status_code=409, detail={"allowed": False, "reason": str(exc)}) from exc
+        raise _lease_conflict_http_error(exc) from exc
     return {"released": True}
 
 
@@ -73,7 +88,9 @@ def takeover_edit_lease(payload: JournalEditLeaseTakeoverPayload, x_fisora_user_
     service, actor, _, role = _service(payload.client_id, _headers(x_fisora_user_id, x_fisora_session, fisora_session))
     try:
         return service.takeover(journal_entry_id=payload.document_ref, actor_id=actor, actor_role=role, expected_revision=payload.expected_revision, reason=payload.reason, user_activity_at=_at(payload.user_activity_at))
-    except (EditLeaseConflict, ValueError, NormalizedRevisionConflict) as exc:
+    except EditLeaseConflict as exc:
+        raise _lease_conflict_http_error(exc) from exc
+    except (ValueError, NormalizedRevisionConflict) as exc:
         raise HTTPException(status_code=409, detail={"allowed": False, "reason": str(exc)}) from exc
 
 
@@ -82,7 +99,9 @@ def save_working_draft(payload: JournalWorkingDraftPayload, x_fisora_user_id: st
     service, actor, _, _ = _service(payload.client_id, _headers(x_fisora_user_id, x_fisora_session, fisora_session))
     try:
         return service.save_working_draft(journal_entry_id=payload.document_ref, actor_id=actor, expected_revision=payload.expected_revision, payload={"draft_lines": payload.draft_lines, "reason": payload.reason})
-    except (EditLeaseConflict, ValueError, NormalizedRevisionConflict) as exc:
+    except EditLeaseConflict as exc:
+        raise _lease_conflict_http_error(exc) from exc
+    except (ValueError, NormalizedRevisionConflict) as exc:
         raise HTTPException(status_code=409, detail={"allowed": False, "reason": str(exc)}) from exc
 
 

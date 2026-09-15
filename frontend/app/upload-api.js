@@ -479,6 +479,7 @@ async function createPortalInvite({
   email = "",
   displayName = "",
   clientId,
+  role = "client_user",
   invitedBy = "",
   ttlHours = 48,
   sessionToken = "",
@@ -492,13 +493,22 @@ async function createPortalInvite({
     payload: {
       user_id: String(userId || "").trim(),
       display_name: String(displayName || userId || "").trim(),
-      role: "client_user",
+      role: String(role || "client_user").trim(),
       allowed_client_ids: [String(clientId || "").trim()].filter(Boolean),
       invited_by: String(invitedBy || "").trim(),
       email: String(email || "").trim(),
       ttl_hours: Number(ttlHours || 48),
     },
     headers,
+    fetchImpl,
+  });
+}
+
+async function acceptPortalInvite({ apiBaseUrl, inviteToken, password, fetchImpl = fetch }) {
+  return postJson({
+    apiBaseUrl,
+    path: "/phase0/store/auth/invite/accept",
+    payload: { invite_token: String(inviteToken || "").trim(), password: String(password || "") },
     fetchImpl,
   });
 }
@@ -1107,7 +1117,22 @@ async function reviewCollaborationRequest({ apiBaseUrl, path, method = "POST", p
     headers: { "Content-Type": "application/json", ...backendAuthHeaders({ userId, sessionToken }) },
     body: JSON.stringify(payload),
   });
-  if (!response.ok) throw new Error(await responseErrorMessage(response, `${path} failed with ${response.status}`));
+  if (!response.ok) {
+    let detail = null;
+    try {
+      const payload = await response.json();
+      detail = payload?.detail ?? payload;
+    } catch {
+      detail = null;
+    }
+    const message = typeof detail === "string"
+      ? detail
+      : String(detail?.message || detail?.reason || `${path} failed with ${response.status}`);
+    const error = new Error(message);
+    error.code = String(detail?.reason || "");
+    error.ownerActorId = String(detail?.owner_actor_id || "");
+    throw error;
+  }
   return response.json();
 }
 
@@ -1357,6 +1382,7 @@ module.exports = {
   createClientOnboardingPackage,
   createCounterpartyAccountToBackend,
   createPortalInvite,
+  acceptPortalInvite,
   createWorkspaceExportPackage,
   deleteClientDocuments,
   disableQnbConnection,

@@ -13,6 +13,8 @@ const {
   createDelegatedClientSession,
   createClientOnboardingPackage,
   createPortalInvite,
+  acceptPortalInvite,
+  acquireReviewEditLease,
   createWorkspaceExportPackage,
   deleteClientDocuments,
   ensureUploadWorkspace,
@@ -880,6 +882,39 @@ test("createPortalInvite posts invite payload without sending email", async () =
     ttl_hours: 48,
   });
   assert.deepEqual(result, { invite_token: "invite-1" });
+});
+
+test("createPortalInvite supports office accountant wildcard access", async () => {
+  let request;
+  const fetchImpl = async (url, init) => { request = { url, init }; return { ok: true, json: async () => ({ invite_token: "invite-office" }) }; };
+  await createPortalInvite({ apiBaseUrl: "http://localhost:8000", userId: "office@example.com", email: "office@example.com", displayName: "Office User", clientId: "*", role: "accountant", invitedBy: "mali-musavir", sessionToken: "session-1", userHeader: "mali-musavir", fetchImpl });
+  const payload = JSON.parse(request.init.body);
+  assert.equal(payload.role, "accountant");
+  assert.deepEqual(payload.allowed_client_ids, ["*"]);
+  assert.equal(payload.ttl_hours, 48);
+});
+
+test("acceptPortalInvite posts the invite token and first password", async () => {
+  let request;
+  const fetchImpl = async (url, init) => { request = { url, init }; return { ok: true, json: async () => ({ credential: { has_password: true } }) }; };
+  await acceptPortalInvite({ apiBaseUrl: "http://localhost:8000", inviteToken: "invite-1", password: "strong-pass", fetchImpl });
+  assert.equal(new URL(request.url).pathname, "/phase0/store/auth/invite/accept");
+  assert.deepEqual(JSON.parse(request.init.body), { invite_token: "invite-1", password: "strong-pass" });
+});
+
+test("review collaboration conflict preserves the active lease owner", async () => {
+  const fetchImpl = async () => ({
+    ok: false, status: 409,
+    json: async () => ({ detail: { reason: "edit_lease_conflict", message: "held", owner_actor_id: "accountant-a" } }),
+  });
+  await assert.rejects(
+    acquireReviewEditLease({ apiBaseUrl: "http://localhost:8000", clientId: "client-1", documentRef: "doc-1", expectedRevision: 4, userId: "accountant-b", sessionToken: "session-b", fetchImpl }),
+    (error) => {
+      assert.equal(error.code, "edit_lease_conflict");
+      assert.equal(error.ownerActorId, "accountant-a");
+      return true;
+    },
+  );
 });
 
 test("createPortalInvite includes recipient email when provided", async () => {

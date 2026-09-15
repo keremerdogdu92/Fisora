@@ -148,7 +148,7 @@ test("document processing workbench keeps the journal review explicit", () => {
   assert.match(reviewSource, /Fisora.n.n anlad/);
   assert.match(reviewSource, /Netleştirme gerekiyor/);
   assert.doesNotMatch(reviewSource, /Müşavir notu|Benzer belge öğrenme talimatı/);
-  assert.doesNotMatch(reviewSource, /Kuralı onayla|Sadece bu belgeye uygula|Düzenle|Kural yapma/);
+  assert.doesNotMatch(reviewSource, /Kuralı onayla|Sadece bu belgeye uygula|>Düzenle<|Kural yapma/);
   assert.doesNotMatch(journalPanelSource, /className="accountant-summary"/);
   assert.match(reviewSource, /Yeniden işle/);
   assert.match(stylesSource, /\.journal-scroll-area/);
@@ -176,6 +176,20 @@ test("document processing workbench keeps the journal review explicit", () => {
   assert.doesNotMatch(stylesSource, /\.journal-account-summary/);
   assert.doesNotMatch(stylesSource, /\.journal-workspace-tabs/);
   assert.match(stylesSource, /\.journal-ledger/);
+});
+
+test("two-user pilot exposes office invite and read-only review lock", () => {
+  const appSource = source("portal-app.tsx");
+  const workspaceSource = source("portal-workspace-view.tsx");
+  const reviewSource = source("portal-review-panels.tsx");
+  const settingsSource = source("portal-settings-view.tsx");
+  assert.match(appSource, /reviewMutationBlocked/);
+  assert.match(workspaceSource, /reviewReadOnly/);
+  assert.match(reviewSource, /review-lock-notice/);
+  assert.match(reviewSource, /Tekrar dene/);
+  assert.match(settingsSource, /Ofis kullanıcısı daveti/);
+  assert.match(settingsSource, /role: "accountant"/);
+  assert.match(settingsSource, /clientId: "\*"/);
 });
 
 test("review data mapper preserves existing rule interpretation without new visible UX", () => {

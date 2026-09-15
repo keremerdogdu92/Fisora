@@ -217,6 +217,9 @@ export function AccountantWorkspace({
   onUndoLastReviewAction,
   lastReviewActionLabel,
   reviewFilter,
+  reviewReadOnly = false,
+  reviewLockedBy = "",
+  onRetryReviewLock,
   selectedClient,
   selectedDocument,
   selectedDocumentSegment,
@@ -271,6 +274,9 @@ export function AccountantWorkspace({
   onUndoLastReviewAction: () => void | Promise<boolean>;
   lastReviewActionLabel?: string;
   reviewFilter: ReviewFilter;
+  reviewReadOnly?: boolean;
+  reviewLockedBy?: string;
+  onRetryReviewLock?: () => void;
   selectedClient?: PilotClient;
   selectedDocument?: PilotDocument;
   selectedDocumentSegment: DocumentSegment;
@@ -667,6 +673,9 @@ export function AccountantWorkspace({
             document={selectedDocument}
             hasUnsavedReviewChanges={hasUnsavedReviewChanges}
             nextKeyboardShortcuts={nextPresentation}
+            reviewReadOnly={reviewReadOnly}
+            reviewLockedBy={reviewLockedBy}
+            onRetryReviewLock={onRetryReviewLock}
             onApproveAndNext={onApproveAndNext}
             onResetDraft={() => setCorrectionDraft({ accountCode: "", applyToSimilar: false, readerValidation: "", accountingValidation: "", counterpartyCode: "", manualDraftLines: [], reason: "", ruleInstruction: "" })}
             onFocusSource={focusDocumentSource}

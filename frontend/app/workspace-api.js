@@ -676,6 +676,8 @@ function processedBackendDocument(document, workspace, client) {
     canonicalValidationStatus: safeText(result.canonical_validation_status),
     canonicalValidationReasons: safeList(result.canonical_validation_reasons).map(String),
     canonicalExtractionAiUsed: Boolean(result.canonical_extraction_ai_used),
+    normalizedRevision: safeNumber(document?.normalized_revision ?? result.normalized_revision),
+    normalizedRevisionStatus: safeText(document?.normalized_revision_status || result.normalized_revision_status),
     deterministicSummary: safeList(result.deterministic_checks).join(", "),
     exportGateReason: safeText(result.export_gate_reason),
     draftStatus: safeText(result.draft_status, safeList(result.draft_lines).length ? "draft_ready" : "manual_draft_required"),

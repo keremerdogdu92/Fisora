@@ -737,6 +737,9 @@ export function JournalPanel({
   document,
   hasUnsavedReviewChanges,
   nextKeyboardShortcuts = false,
+  reviewReadOnly = false,
+  reviewLockedBy = "",
+  onRetryReviewLock,
   onApproveAndNext,
   onResetDraft,
   onFocusSource,
@@ -758,6 +761,9 @@ export function JournalPanel({
   document?: PilotDocument;
   hasUnsavedReviewChanges: boolean;
   nextKeyboardShortcuts?: boolean;
+  reviewReadOnly?: boolean;
+  reviewLockedBy?: string;
+  onRetryReviewLock?: () => void;
   onApproveAndNext: () => void | Promise<void>;
   onResetDraft: () => void;
   onFocusSource?: (target: DocumentSourceTarget) => void;
@@ -980,6 +986,7 @@ export function JournalPanel({
   }
 
   function handleJournalShortcut(event: KeyboardEvent<HTMLElement>) {
+    if (reviewReadOnly) return;
     if (nextKeyboardShortcuts) return;
     if (pendingDirectionConflict) return;
     if (blocksApproval) return;
@@ -990,7 +997,7 @@ export function JournalPanel({
   }
 
   return (
-    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}${nextKeyboardShortcuts ? " next-review" : ""}`} onKeyDown={handleJournalShortcut}>
+    <section className={`review-panel journal-panel ${isStatement ? "statement-mode" : ""}${nextKeyboardShortcuts ? " next-review" : ""}${reviewReadOnly ? " review-read-only" : ""}`} onKeyDown={handleJournalShortcut}>
       <div className="journal-scroll-area">
         <div className="panel-heading journal-next-heading">
           <div>
@@ -1021,6 +1028,15 @@ export function JournalPanel({
             )}
           </div>
         </section>
+        {reviewReadOnly ? (
+          <section className="review-lock-notice" role="status" aria-label="Belge düzenleme kilidi">
+            <div>
+              <strong>{reviewLockedBy ? `${reviewLockedBy} bu belgeyi düzenliyor` : "Düzenleme kilidi hazırlanıyor"}</strong>
+              <span>{reviewLockedBy ? "Belgeyi görüntüleyebilirsiniz; diğer kullanıcı işlemi bitirene kadar fişte değişiklik yapamazsınız." : "Fişte değişiklik yapmadan önce düzenleme hakkı doğrulanıyor."}</span>
+            </div>
+            {onRetryReviewLock ? <button className="secondary review-lock-retry" onClick={onRetryReviewLock} type="button">Tekrar dene</button> : null}
+          </section>
+        ) : null}
         {accountResolutionIssues.length ? (
           <section className="journal-readiness-warning" role="alert" aria-label="Fiş tamamlanmalı">
             <div><strong>Fiş tamamlanmalı</strong><span>Boş, seçilemeyen veya henüz oluşturulmamış hesap varken onay verilemez.</span></div>

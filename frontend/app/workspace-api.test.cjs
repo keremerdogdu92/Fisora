@@ -1057,3 +1057,20 @@ test("HTML source progress stays source-only and exposes the immutable reader sn
   assert.match(document.accountantSummary, /muhasebe/);
   assert.match(document.accountantSummary, /denemede/);
 });
+
+
+test("processed workspace documents preserve normalized revision for collaboration leases", () => {
+  const workspace = structuredClone(workspaceRecord);
+  workspace.documents[0].normalized_revision = 7;
+  workspace.documents[0].normalized_revision_status = "working_draft";
+
+  const data = normalizeBackendWorkspaces({
+    clients: [clientRecord],
+    workspaces: [workspace],
+    source: "test",
+  });
+  const document = data.documents.find((item) => item.id === "processed-1");
+
+  assert.equal(document.normalizedRevision, 7);
+  assert.equal(document.normalizedRevisionStatus, "working_draft");
+});

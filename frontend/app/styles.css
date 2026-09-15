@@ -5592,3 +5592,8 @@ code {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+.review-lock-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px; border:1px solid var(--border); border-radius:8px; background:var(--surface-soft, #f7f8f7); }
+.review-lock-notice > div { display:grid; gap:3px; }
+.review-lock-notice span { color:var(--muted); font-size:.86rem; }
+.review-read-only .journal-scroll-area input, .review-read-only .journal-scroll-area textarea, .review-read-only .journal-scroll-area select, .review-read-only .journal-scroll-area button:not(.review-lock-retry), .review-read-only .journal-next-actions button { pointer-events:none; opacity:.62; }

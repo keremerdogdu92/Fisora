@@ -48,7 +48,7 @@ class ReviewCollaborationServiceTests(unittest.TestCase):
 
         self.assertEqual(lease["owner_actor_id"], "accountant-a")
         self.assertEqual(lease["expires_at"], (NOW + timedelta(minutes=5)).isoformat())
-        with self.assertRaises(EditLeaseConflict):
+        with self.assertRaises(EditLeaseConflict) as conflict:
             self.service.acquire(
                 journal_entry_id="journal-1",
                 actor_id="accountant-b",
@@ -56,6 +56,7 @@ class ReviewCollaborationServiceTests(unittest.TestCase):
                 user_activity_at=NOW + timedelta(minutes=1),
                 now=NOW + timedelta(minutes=1),
             )
+        self.assertEqual(conflict.exception.owner_actor_id, "accountant-a")
 
         replacement = self.service.acquire(
             journal_entry_id="journal-1",

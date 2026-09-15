@@ -643,8 +643,11 @@
 **Source:** CG.
 
 ## REV-R04 — Multi-user assignment / handoff
-**Status:** STRATEJİ KARARI.
-**Source:** CG.
+**Status:** CLOSED / IMPLEMENTED FOR MULTI-USER EDIT SAFETY - 2026-09-15. Belge/görev assignment katmanı PARKED.
+**Source:** CG strategy candidate; two-user office pilot requirement.
+**Decision:** The pilot needs separate accountant identities and collision safety, not a new task-management system. Settings can invite a second office accountant with 48-hour first-password setup and office-wide client access. Opening a normalized journal acquires the existing five-minute edit lease; a second accountant may view the document but the journal becomes read-only, shows the active editor, and offers `Tekrar dene`. Existing privileged takeover remains a backend emergency mechanism and is not promoted into the daily Workbench. Per-document `assigned_to`, `Benim işlerim`, bulk assignment, notifications, and reassignment remain parked until real office use proves a need.
+**Safety:** Final review mutations are also protected server-side: if another actor owns the active lease, review decision persistence returns `409 edit_lease_conflict` with the owner identity. Frontend mutation guards are therefore not the only protection layer. Live workspace mapping now carries `normalized_revision` / `normalized_revision_status`; without that bridge the lease hook would never activate on production workspace documents.
+**Acceptance:** Backend full suite 1159 passed / 37 skipped; frontend app suite 253/253 PASS; collaboration/API targeted tests PASS; TypeScript + production build PASS. Chromium: invite first-password flow PASS and second-accountant conflict PASS, including active-owner copy, read-only journal state, and retry issuing a new lease request.
 
 ## REV-R05 — Gelişmiş belge araması
 **Status:** STRATEJİ KARARI.

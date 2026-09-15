@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { acquireReviewEditLease, releaseReviewEditLease, renewReviewEditLease, resolveApiBaseUrl, saveReviewWorkingDraft } from "../../upload-api";
+import {
+  acquireReviewEditLease,
+  releaseReviewEditLease,
+  renewReviewEditLease,
+  resolveApiBaseUrl,
+  saveReviewWorkingDraft,
+} from "../../upload-api";
 import type { CorrectionDraft, LocalSession, PilotDocument } from "../../portal-types";
 
-type LeaseStatus = "idle" | "acquiring" | "saving" | "saved" | "stale" | "offline";
+type LeaseStatus = "idle" | "acquiring" | "saving" | "saved" | "locked" | "stale" | "offline";
+type CollaborationError = Error & { code?: string; ownerActorId?: string };
 
 export function useReviewEditLease({
   correctionDraft,
@@ -23,11 +30,14 @@ export function useReviewEditLease({
 }) {
   const [status, setStatus] = useState<LeaseStatus>("idle");
   const [editLeaseId, setEditLeaseId] = useState("");
-  const previousDirty = useRef(false);
+  const [conflictOwner, setConflictOwner] = useState("");
+  const [retryNonce, setRetryNonce] = useState(0);
   const lastActivity = useRef(0);
   const documentRef = selectedDocument?.originalDocumentRef || selectedDocument?.id || "";
   const expectedRevision = Number(selectedDocument?.normalizedRevision || 0);
   const userId = session?.userId || loginUserId;
+  const clientId = selectedDocument?.clientId || "";
+  const sessionToken = session?.sessionToken || "";
   const apiBaseUrl = resolveApiBaseUrl(typeof window === "undefined" ? "" : window.location.href);
 
   function report(next: LeaseStatus) {
@@ -36,25 +46,35 @@ export function useReviewEditLease({
   }
 
   useEffect(() => {
-    previousDirty.current = false;
     setEditLeaseId("");
+    setConflictOwner("");
     report("idle");
   }, [documentRef]);
 
   useEffect(() => {
-    if (!hasUnsavedReviewChanges || previousDirty.current || !documentRef || expectedRevision <= 0) {
-      previousDirty.current = hasUnsavedReviewChanges;
-      return;
-    }
-    previousDirty.current = true;
-    lastActivity.current = Date.now();
+    if (!documentRef || !clientId || expectedRevision <= 0 || !userId || session?.role !== "accountant") return;
     let cancelled = false;
     report("acquiring");
-    void acquireReviewEditLease({ apiBaseUrl, clientId: selectedDocument?.clientId || "", documentRef, expectedRevision, userId, sessionToken: session?.sessionToken || "" })
-      .then((lease) => { if (!cancelled) { setEditLeaseId(String(lease?.lease_id || documentRef)); report("saved"); } })
-      .catch((error) => { if (!cancelled) report(String(error).includes("revision") ? "stale" : "offline"); });
+    lastActivity.current = Date.now();
+    void acquireReviewEditLease({ apiBaseUrl, clientId, documentRef, expectedRevision, userId, sessionToken })
+      .then((lease) => {
+        if (cancelled) return;
+        setEditLeaseId(String(lease?.lease_id || documentRef));
+        setConflictOwner("");
+        report("saved");
+      })
+      .catch((error: CollaborationError) => {
+        if (cancelled) return;
+        if (error?.code === "edit_lease_conflict") {
+          setConflictOwner(String(error.ownerActorId || ""));
+          report("locked");
+          return;
+        }
+        setConflictOwner("");
+        report(String(error?.message || "").includes("revision") ? "stale" : "offline");
+      });
     return () => { cancelled = true; };
-  }, [apiBaseUrl, documentRef, expectedRevision, hasUnsavedReviewChanges, selectedDocument?.clientId, session?.sessionToken, userId]);
+  }, [apiBaseUrl, clientId, documentRef, expectedRevision, retryNonce, session?.role, sessionToken, userId]);
 
   useEffect(() => {
     if (!hasUnsavedReviewChanges || !editLeaseId || !documentRef || expectedRevision <= 0) return;
@@ -62,7 +82,7 @@ export function useReviewEditLease({
       report("saving");
       void saveReviewWorkingDraft({
         apiBaseUrl,
-        clientId: selectedDocument?.clientId || "",
+        clientId,
         documentRef,
         editLeaseId,
         expectedRevision,
@@ -71,11 +91,19 @@ export function useReviewEditLease({
         correctedCounterpartyCode: correctionDraft.counterpartyCode,
         reason: correctionDraft.reason || correctionDraft.ruleInstruction,
         userId,
-        sessionToken: session?.sessionToken || "",
-      }).then(() => report("saved")).catch((error) => report(String(error).includes("revision") ? "stale" : "offline"));
+        sessionToken,
+      }).then(() => report("saved")).catch((error: CollaborationError) => {
+        if (error?.code === "edit_lease_conflict") {
+          setEditLeaseId("");
+          setConflictOwner(String(error.ownerActorId || ""));
+          report("locked");
+          return;
+        }
+        report(String(error?.message || "").includes("revision") ? "stale" : "offline");
+      });
     }, 750);
     return () => window.clearTimeout(timer);
-  }, [apiBaseUrl, correctionDraft, documentRef, editLeaseId, expectedRevision, hasUnsavedReviewChanges, selectedDocument?.clientId, session?.sessionToken, userId]);
+  }, [apiBaseUrl, clientId, correctionDraft, documentRef, editLeaseId, expectedRevision, hasUnsavedReviewChanges, sessionToken, userId]);
 
   useEffect(() => {
     const markActivity = () => { lastActivity.current = Date.now(); };
@@ -84,7 +112,22 @@ export function useReviewEditLease({
     window.addEventListener("input", markActivity);
     const timer = window.setInterval(() => {
       if (!editLeaseId || !documentRef || document.visibilityState !== "visible" || Date.now() - lastActivity.current > 60000) return;
-      void renewReviewEditLease({ apiBaseUrl, clientId: selectedDocument?.clientId || "", documentRef, userActivityAt: new Date(lastActivity.current).toISOString(), userId, sessionToken: session?.sessionToken || "" }).catch(() => report("offline"));
+      void renewReviewEditLease({
+        apiBaseUrl,
+        clientId,
+        documentRef,
+        userActivityAt: new Date(lastActivity.current).toISOString(),
+        userId,
+        sessionToken,
+      }).catch((error: CollaborationError) => {
+        if (error?.code === "edit_lease_conflict") {
+          setEditLeaseId("");
+          setConflictOwner(String(error.ownerActorId || ""));
+          report("locked");
+          return;
+        }
+        report("offline");
+      });
     }, 60000);
     return () => {
       window.removeEventListener("keydown", markActivity);
@@ -92,13 +135,18 @@ export function useReviewEditLease({
       window.removeEventListener("input", markActivity);
       window.clearInterval(timer);
     };
-  }, [apiBaseUrl, documentRef, editLeaseId, selectedDocument?.clientId, session?.sessionToken, userId]);
+  }, [apiBaseUrl, clientId, documentRef, editLeaseId, sessionToken, userId]);
 
   useEffect(() => () => {
-    if (editLeaseId && documentRef && selectedDocument?.clientId) {
-      void releaseReviewEditLease({ apiBaseUrl, clientId: selectedDocument.clientId, documentRef, userId, sessionToken: session?.sessionToken || "" });
+    if (editLeaseId && documentRef && clientId) {
+      void releaseReviewEditLease({ apiBaseUrl, clientId, documentRef, userId, sessionToken });
     }
-  }, [apiBaseUrl, documentRef, editLeaseId, selectedDocument?.clientId, session?.sessionToken, userId]);
+  }, [apiBaseUrl, clientId, documentRef, editLeaseId, sessionToken, userId]);
 
-  return { editLeaseId, status };
+  return {
+    conflictOwner,
+    editLeaseId,
+    retryAcquire: () => setRetryNonce((value) => value + 1),
+    status,
+  };
 }

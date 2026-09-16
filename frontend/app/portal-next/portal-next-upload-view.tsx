@@ -1,5 +1,5 @@
 // File: frontend/app/portal-next/portal-next-upload-view.tsx
-// Summary: Renders the accountant quick-upload workspace, stages invoice files safely, and delegates persistence to the existing authenticated upload action.
+// Summary: Renders the accountant quick-upload workspace, auto-dispatches selected invoice files, and keeps failed batches retryable.
 "use client";
 
 import { FileText, Upload, X } from "lucide-react";
@@ -8,7 +8,7 @@ import type { IntakeCategory, PilotClient, PilotDocument, PilotStatus } from "..
 import { formatPortalDateTime } from "../portal-formatters";
 
 const invoiceCategories = new Set<IntakeCategory>(["purchase_invoice", "sales_invoice"]);
-const acceptedExtensions = new Set(["pdf", "html", "htm", "xml", "zip"]);
+const acceptedExtensions = new Set(["pdf", "html", "htm", "xml"]);
 
 type InvoiceCategory = "purchase_invoice" | "sales_invoice";
 
@@ -100,27 +100,34 @@ export function PortalNextUploadView({
       .slice(0, 8),
     [documents],
   );
-  function appendFiles(files: File[]) {
+  function selectFilesAndUpload(files: File[]) {
+    if (!selectedClient || isUploading) return;
     const accepted = files.filter(isAcceptedFile);
     const skippedCount = files.length - accepted.length;
-    setPendingFiles((current) => {
-      const known = new Set(current.map(fileKey));
-      const uniqueFiles = accepted.filter((file) => !known.has(fileKey(file)));
-      const duplicateCount = accepted.length - uniqueFiles.length;
-      setSelectionStatus([
-        skippedCount ? `${skippedCount} desteklenmeyen dosya atlandı.` : "",
-        duplicateCount ? `${duplicateCount} tekrar dosya eklenmedi.` : "",
-      ].filter(Boolean).join(" "));
-      return [...current, ...uniqueFiles];
+    const known = new Set(pendingFiles.map(fileKey));
+    const uniqueFiles = accepted.filter((file) => {
+      const key = fileKey(file);
+      if (known.has(key)) return false;
+      known.add(key);
+      return true;
     });
+    const duplicateCount = accepted.length - uniqueFiles.length;
+    setSelectionStatus([
+      skippedCount ? `${skippedCount} desteklenmeyen dosya atlandı.` : "",
+      duplicateCount ? `${duplicateCount} tekrar dosya eklenmedi.` : "",
+    ].filter(Boolean).join(" "));
+    if (!uniqueFiles.length) return;
+    const batch = [...pendingFiles, ...uniqueFiles];
+    setPendingFiles(batch);
+    void startUpload(batch);
   }
 
-  async function startUpload() {
-    if (!selectedClient || !pendingFiles.length || isUploading) return;
+  async function startUpload(filesToUpload: File[] = pendingFiles) {
+    if (!selectedClient || !filesToUpload.length || isUploading) return;
+    setPendingFiles(filesToUpload);
     setIsUploading(true);
-    setSelectionStatus("");
     try {
-      const completed = await onUpload(pendingFiles);
+      const completed = await onUpload(filesToUpload);
       if (completed) setPendingFiles([]);
     } finally {
       setIsUploading(false);
@@ -183,15 +190,15 @@ export function PortalNextUploadView({
           onDrop={(event) => {
             event.preventDefault();
             setIsDragging(false);
-            appendFiles(Array.from(event.dataTransfer.files));
+            selectFilesAndUpload(Array.from(event.dataTransfer.files));
           }}
         >
           <input
-            accept=".pdf,.html,.htm,.xml,.zip"
+            accept=".pdf,.html,.htm,.xml"
             disabled={!selectedClient || isUploading}
             multiple
             onChange={(event) => {
-              appendFiles(Array.from(event.currentTarget.files ?? []));
+              selectFilesAndUpload(Array.from(event.currentTarget.files ?? []));
               event.currentTarget.value = "";
             }}
             type="file"
@@ -199,7 +206,7 @@ export function PortalNextUploadView({
           <span className="portal-next-upload-drop-icon"><Upload aria-hidden="true" /></span>
           <div>
             <strong>Dosyaları buraya bırakabilirsiniz</strong>
-            <span>PDF · HTML · XML · ZIP</span>
+            <span>PDF · HTML · XML</span>
             <small>Çoklu seçim desteklenir</small>
           </div>
           <span className="portal-next-upload-browse">Gözat</span>
@@ -233,10 +240,14 @@ export function PortalNextUploadView({
               <p>Belgeler seçili mükellefin {categoryLabel(activeCategory).toLocaleLowerCase("tr-TR")} faturası kuyruğuna gider.</p>
             )}
           </div>
-          <button className="portal-next-upload-secondary" disabled={!pendingFiles.length || isUploading} onClick={() => { setPendingFiles([]); setSelectionStatus(""); }} type="button">Temizle</button>
-          <button className="portal-next-upload-primary" disabled={!selectedClient || !pendingFiles.length || isUploading} onClick={() => void startUpload()} type="button">
-            {isUploading ? "Yükleniyor…" : `Yüklemeyi Başlat${pendingFiles.length ? ` (${pendingFiles.length})` : ""}`}
-          </button>
+          {pendingFiles.length ? (
+            <>
+              <button className="portal-next-upload-secondary" disabled={isUploading} onClick={() => { setPendingFiles([]); setSelectionStatus(""); }} type="button">Temizle</button>
+              <button className="portal-next-upload-primary" disabled={!selectedClient || isUploading} onClick={() => void startUpload(pendingFiles)} type="button">
+                {isUploading ? "Yükleniyor…" : `Tekrar Dene (${pendingFiles.length})`}
+              </button>
+            </>
+          ) : null}
         </div>
       </section>
 

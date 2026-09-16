@@ -1,5 +1,5 @@
 // File: frontend/e2e/upload-retest.spec.ts
-// Summary: Verifies the canonical accountant upload screen sends every selected invoice file with the correct client, period, direction, and duplicate-safe summary.
+// Summary: Verifies the canonical accountant upload screen auto-dispatches selected invoice files with correct client, period, direction, file type, and duplicate-safe summary.
 import { expect, test, type Page } from "@playwright/test";
 
 const pilotClient = {
@@ -9,6 +9,7 @@ const pilotClient = {
 
 type CapturedUpload = {
   fileName: string;
+  documentType: string;
   intakeCategory: string;
   period: string;
   clientId: string;
@@ -74,16 +75,17 @@ function multipartFileName(body: string) {
   await page.route("**/phase0/store/document-upload-multipart", async (route) => {
     const body = route.request().postDataBuffer()?.toString("utf8") ?? "";
     const fileName = multipartFileName(body);
+    const documentType = multipartValue(body, "document_type");
     const intakeCategory = multipartValue(body, "intake_category");
     const period = multipartValue(body, "period");
     const clientId = multipartValue(body, "client_id");
-    capturedUploads.push({ fileName, intakeCategory, period, clientId, body });
+    capturedUploads.push({ fileName, documentType, intakeCategory, period, clientId, body });
     const deduplicated = fileName === "already-there.xml";
     if (!deduplicated) {
       workspace.uploaded_documents.push({
         document_ref: fileName,
         original_file_name: fileName,
-        document_type: "invoice",
+        document_type: documentType,
         intake_category: intakeCategory,
         period,
         uploaded_by: "mali-musavir",
@@ -113,14 +115,11 @@ test("new upload sends every selected invoice file and reports duplicate-safe ba
     { name: "ignore-me.txt", mimeType: "text/plain", buffer: Buffer.from("skip") },
   ]);
 
-  await expect(page.getByLabel("Yüklenecek dosyalar").locator(".portal-next-upload-pending-row")).toHaveCount(3);
   await expect(page.getByText("1 desteklenmeyen dosya atlandı.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Yüklemeyi Başlat (3)" })).toBeEnabled();
-
-  await page.getByRole("button", { name: "Yüklemeyi Başlat (3)" }).click();
+  await expect.poll(() => capturedUploads.length).toBe(3);
   await expect(page.getByRole("status")).toContainText("3 dosya · 2 işleme alındı · 1 daha önce yüklenmiş.");
   await expect(page.getByLabel("Yüklenecek dosyalar")).toHaveCount(0);
-  await expect.poll(() => capturedUploads.length).toBe(3);
+  await expect(page.getByRole("button", { name: /Yüklemeyi Başlat/ })).toHaveCount(0);
 
   expect(capturedUploads.map((upload) => upload.fileName).sort()).toEqual([
     "already-there.xml", "invoice-a.pdf", "invoice-b.html",
@@ -129,6 +128,7 @@ test("new upload sends every selected invoice file and reports duplicate-safe ba
     expect(upload.intakeCategory).toBe("purchase_invoice");
     expect(upload.period).toBe("2026-08");
     expect(upload.clientId).toBe("pilot-client");
+    expect(upload.documentType).toBe(upload.fileName.endsWith(".xml") ? "einvoice_xml" : "invoice");
     expect(upload.body).toContain('name="uploaded_by_user_id"');
   }
   await expect(page.getByRole("cell", { name: "invoice-a.pdf" })).toBeVisible();
@@ -147,12 +147,10 @@ test("new upload preserves sales direction for a multi-file batch", async ({ pag
     { name: "sales-a.pdf", mimeType: "application/pdf", buffer: Buffer.from("sales-a") },
     { name: "sales-b.xml", mimeType: "application/xml", buffer: Buffer.from("<xml />") },
   ]);
-  await expect(page.getByRole("button", { name: "Yüklemeyi Başlat (2)" })).toBeEnabled();
-  await expect(page.getByLabel("Yüklenecek dosyalar")).toContainText("Satış");
-
-  await page.getByRole("button", { name: "Yüklemeyi Başlat (2)" }).click();
-  await expect(page.getByRole("status")).toContainText("2 dosya · 2 işleme alındı.");
   await expect.poll(() => capturedUploads.length).toBe(2);
+  await expect(page.getByRole("status")).toContainText("2 dosya · 2 işleme alındı.");
+  await expect(page.getByLabel("Yüklenecek dosyalar")).toHaveCount(0);
   expect(capturedUploads.map((upload) => upload.intakeCategory)).toEqual(["sales_invoice", "sales_invoice"]);
+  expect(capturedUploads.map((upload) => upload.documentType)).toEqual(["invoice", "einvoice_xml"]);
   expect(capturedUploads.every((upload) => upload.period === "2026-08")).toBe(true);
 });

@@ -1,5 +1,6 @@
 // File: frontend/app/upload-api.js
 // Summary: Provides frontend API transport helpers and honest tax-certificate parse status messaging.
+const { documentTypeForUploadFile } = require("./upload-intake");
 const DEFAULT_BACKEND_PORT = "8000";
 const DEFAULT_UPLOAD_USER_ID = "ofis-mukellef-user";
 
@@ -895,12 +896,15 @@ async function uploadDocumentsToBackend({
   const results = [];
   for (const file of uploads) {
     try {
+      const effectiveDocumentType = documentType === "invoice"
+        ? documentTypeForUploadFile(intakeCategory, file?.name)
+        : documentType;
       const payload = await uploadDocumentToBackend({
         apiBaseUrl,
         clientId,
         userId,
         uploadedBy,
-        documentType,
+        documentType: effectiveDocumentType,
         intakeCategory,
         period,
         file,

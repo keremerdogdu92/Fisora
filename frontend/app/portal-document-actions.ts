@@ -6,7 +6,7 @@ import { normalizeRulePrompt, normalizeStatementAiSuggestions, normalizeStatus, 
 import { applyStatementLineDecision } from "./portal-review-actions";
 import type { CorrectionDraft, IntakeCategory, LocalSession, PilotClient, PilotData, PilotDocument, PilotStatus, ReviewLearningDecisionOptions } from "./portal-types";
 import { previousCompletedPeriod } from "./portal-periods";
-import { buildUploadIntakeMetadata } from "./upload-intake";
+import { buildUploadIntakeMetadata, documentTypeForUploadFile } from "./upload-intake";
 import {
   ensureUploadWorkspace,
   pickUploadUser,
@@ -55,7 +55,7 @@ export async function addLocalUploadsAction({
     clientId: selectedClient.clientId,
     clientName: selectedClient.clientName,
     fileName: file.name,
-    documentType: intakeMetadata.documentType,
+    documentType: documentTypeForUploadFile(selectedIntakeCategory, file.name),
     intakeCategory: intakeMetadata.intakeCategory as IntakeCategory,
     period,
     uploadedAt: now.toLocaleString("tr-TR"),

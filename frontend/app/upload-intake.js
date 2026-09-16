@@ -1,3 +1,5 @@
+// File: frontend/app/upload-intake.js
+// Summary: Defines upload intake metadata and resolves backend document types from invoice file formats.
 const DEFAULT_INTAKE_CATEGORY = "purchase_invoice";
 
 const INTAKE_CONFIG = {
@@ -6,7 +8,7 @@ const INTAKE_CONFIG = {
     label: "Satış faturaları",
     documentType: "invoice",
     status: "queued",
-    accept: ".pdf,.html,.htm,.xml,.zip",
+    accept: ".pdf,.html,.htm,.xml",
     provider: "Satış faturası yükleme",
     productLine: "Satış faturası otomatik kuyruğa alındı.",
     productCategory: "Satış faturası",
@@ -20,7 +22,7 @@ const INTAKE_CONFIG = {
     label: "Alış faturaları",
     documentType: "invoice",
     status: "queued",
-    accept: ".pdf,.html,.htm,.xml,.zip",
+    accept: ".pdf,.html,.htm,.xml",
     provider: "Alış faturası yükleme",
     productLine: "Alış faturası otomatik kuyruğa alındı.",
     productCategory: "Alış faturası",
@@ -74,6 +76,16 @@ function documentTypeForIntakeCategory(value) {
   return INTAKE_CONFIG[normalizeIntakeCategory(value)].documentType;
 }
 
+function documentTypeForUploadFile(value, fileName) {
+  const category = normalizeIntakeCategory(value);
+  const baseDocumentType = INTAKE_CONFIG[category].documentType;
+  const extension = String(fileName || "").split(".").pop()?.toLocaleLowerCase("tr-TR") ?? "";
+  if ((category === "sales_invoice" || category === "purchase_invoice") && extension === "xml") {
+    return "einvoice_xml";
+  }
+  return baseDocumentType;
+}
+
 function labelForIntakeCategory(value) {
   return INTAKE_CONFIG[normalizeIntakeCategory(value)].label;
 }
@@ -106,6 +118,7 @@ module.exports = {
   acceptForIntakeCategory,
   buildUploadIntakeMetadata,
   documentTypeForIntakeCategory,
+  documentTypeForUploadFile,
   labelForIntakeCategory,
   normalizeIntakeCategory,
 };

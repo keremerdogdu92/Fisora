@@ -614,6 +614,32 @@ test("uploadDocumentsToBackend uploads multiple files sequentially with the same
   );
 });
 
+test("uploadDocumentsToBackend classifies XML invoice files as e-invoice XML", async () => {
+  const requests = [];
+  const files = [{ name: "fatura.pdf" }, { name: "efatura.xml" }];
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, init });
+    return { ok: true, json: async () => ({ document_ref: `doc-${requests.length}` }) };
+  };
+
+  await uploadDocumentsToBackend({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "client-user",
+    uploadedBy: "Client User",
+    documentType: "invoice",
+    intakeCategory: "purchase_invoice",
+    files,
+    fetchImpl,
+    FormDataCtor: CapturingFormData,
+  });
+
+  assert.deepEqual(
+    requests.map((request) => request.init.body.fields.find(([key]) => key === "document_type")[1]),
+    ["invoice", "einvoice_xml"],
+  );
+});
+
 test("uploadChartAccountsToBackend posts chart account files to parser endpoint", async () => {
   let request;
   const file = { name: "hesap-plani.csv" };

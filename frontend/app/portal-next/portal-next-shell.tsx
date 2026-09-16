@@ -1,5 +1,5 @@
 // File: frontend/app/portal-next/portal-next-shell.tsx
-// Summary: Provides the isolated next-generation Fisora shell, navigation, topbar, and agent overview while reusing the existing portal controller and business-state boundaries.
+// Summary: Provides the canonical accountant Fisora shell, navigation, topbar, and agent overview while reusing shared portal controller and business-state boundaries.
 "use client";
 
 import {

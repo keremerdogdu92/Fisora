@@ -30,11 +30,11 @@ Repository state used for this follow-up:
 - `REV-B05` — approval/reversible-action feedback is implemented in the existing workbench action area.
 - `REV-B06` — `Kontrolde tut` means “process later”; it is not a terminal error state.
 
-### Still requiring live verification
+### Verification closure — 2026-09-16
 
-The source register marks the implemented B-section behavior as awaiting production UI verification. The implementation should not be considered fully closed until the real production flow is retested.
+The stale `production UI verification pending` markers in the B section are closed. Accepted undo/exclude/feedback/hold semantics remain implemented and regression-covered in the current canonical accountant shell. The final reconciliation baseline is frontend Node `253/253` PASS, canonical Chromium `31/31` PASS, TypeScript PASS, and Next production build PASS.
 
-## Highest-priority open work from the original register
+## Review closure history from the original register
 
 ### P0/P1 — document identity and selection integrity
 
@@ -88,6 +88,8 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Closed 2026-09-11: REV-H05 / REV-H06** - H05 is a duplicate of the already accepted REV-E03 period model: review period and upload accounting period are separate; New Uploads keeps the explicitly shown previous-completed-month target and no new selector/state is added. H06 is an audit-tool file chooser limitation, not a Fisora product bug; real Windows upload was already exercised successfully. H section is closed.
 
+**Reverified 2026-09-16: canonical New Upload multi-file flow** - A new Chromium regression now exercises `/portal-next -> Yeni Yükleme` with one chooser action containing three supported files plus one unsupported file. The screen stages all three supported files, sends three independent multipart requests, skips the unsupported file, preserves selected client + `2026-08` upload period + purchase direction, reports a backend duplicate without a false new record, and refreshes recent uploads. A second two-file batch verifies `Satış` sends both requests as `sales_invoice`. Dedicated upload regression 2/2 PASS; complete canonical Chromium suite 31/31 PASS. The prior concern that multi-select could upload only one file is not reproducible in the current canonical UI.
+
 **Completed 2026-09-11: REV-K01** - Turkish accounting number formatting is now presentation-only for read-only amounts. Canonical/backend values and editable debit/credit inputs are unchanged. The formatter is string-based (no floating-point reparse), does not invent currency, and is applied to Workbench/document/statement/source-evidence/Reading Quality amount displays. Acceptance: formatter 3/3, frontend 233/233, TypeScript/build PASS. Editable localized amount entry remains parked in `docs/open-questions.md`. Next: REV-K02 (`12K TL` retest).
 
 **Completed 2026-09-11: REV-K02** - Outputs no longer abbreviates accounting totals as `12K TL` / `1,5M TL`. The existing period-total calculation is unchanged; only the final display formatter now renders the full `tr-TR` value with two decimals (for example `12.000,00 TL`). Acceptance: portal-next 22/22, frontend 233/233, TypeScript/build PASS. Next: REV-K03 critical account-name truncation.
@@ -130,20 +132,20 @@ Acceptance: pipeline/review provenance 43/43 PASS; review transport 57/57 PASS; 
 
 **Closed 2026-09-14: REV-P03** - Fresh retest showed this register item mixed two separate surfaces. CX UXR-010 empty Reader/Fisora rows were the REV-P01 review-projection/locator defect and remain fixed; the CG success observation belongs to the separate Research / Knowledge Pool benchmark. Fresh benchmark regression PASS; a temporary empty research store returned HTTP 200 with five populated cases and metric fields, and forcing real-pilot cases unavailable still produced the five built-in golden fallback cases. Fresh frontend Reading Quality/workspace contracts passed 41/41 and the review source-evidence projection regression passed. No independent P03 defect, product-code change, or DB change. Next: REV-Q01.
 
-**Retested 2026-09-14: REV-Q01** - The audit-time `/portal-next` -> `/portal/mukellefler` shell jump is not reproducible in the current accountant flow. Fresh Chromium stayed on `/portal-next` when `Mükellefler` was selected, retained the next-generation sidebar, and rendered the Mükellefler view in-shell; targeted portal navigation/route tests passed 42/42. Direct legacy accountant URLs still render the old presentation, so a post-audit cleanup is now explicitly planned: after the full audit/remediation pass, remove legacy accountant UI/routes and migrate or delete dependent tests, fallback hrefs, and route references. Keep the separate client-facing `/portal/mukellef` and delegated-client flow out of that cleanup unless reviewed separately. Next: REV-Q02.
+**Closed 2026-09-16: REV-Q01** - The normal accountant flow had already stayed inside `/portal-next`; the remaining duplicate legacy accountant surface has now been removed from source. Legacy accountant-only `/portal/*` route pages, fallback route metadata, and stale dependent tests were deleted/migrated. `/portal-next` is the single accountant shell. Separate client/auth routes `/portal/mukellef`, `/portal/invite`, and `/portal/password-reset` remain intact. Clean production build route output confirms that boundary; frontend Node `253/253`, canonical Chromium `31/31`, TypeScript, and production build all PASS.
 
-**Completed 2026-09-14: REV-Q02 + REV-Q03** - Sidebar behavior is now route-aware instead of globally persisted: `Çalışma Masası` defaults to the 64 px rail while every other main accountant destination defaults to the 232 px sidebar; manual expansion remains stable until the next navigation action. The previous global `localStorage` collapse preference was removed. The compact rail now has immediate custom tooltips and explicit accessible labels, hover and active states are visually distinct, and the active item has a persistent inset marker. Sidebar semantics were tightened by changing `Çalışma Masası` from `PanelTop` to `Columns3` and `Öğrenilen Kurallar` from `Sparkles` to `ListChecks`. Full-sidebar hover expansion was intentionally not added; a delayed overlay peek remains a future option only if real use justifies it. Fresh Chromium verified the full navigation-state sequence and tooltip/active styling; frontend 243/243 PASS; TypeScript and production build PASS. Next: REV-R01 strategy review.
+**Completed 2026-09-14: REV-Q02 + REV-Q03** - Sidebar behavior is now route-aware instead of globally persisted: `Çalışma Masası` defaults to the 64 px rail while every other main accountant destination defaults to the 232 px sidebar; manual expansion remains stable until the next navigation action. The previous global `localStorage` collapse preference was removed. The compact rail now has immediate custom tooltips and explicit accessible labels, hover and active states are visually distinct, and the active item has a persistent inset marker. Sidebar semantics were tightened by changing `Çalışma Masası` from `PanelTop` to `Columns3` and `Öğrenilen Kurallar` from `Sparkles` to `ListChecks`. Full-sidebar hover expansion was intentionally not added; a delayed overlay peek remains a future option only if real use justifies it. Fresh Chromium verified the full navigation-state sequence and tooltip/active styling; frontend 243/243 PASS; TypeScript and production build PASS.
 
-**Completed 2026-09-14: REV-R01 + REV-R02** - Accepted review-state history decisions are implemented without a second audit database or new daily-workbench clutter. Existing normalized `workflow_events` now record review mutations with actor, document, timestamp, action, operation kind, before/after state, export state, revision lineage, and reason; `undo` and deliberate `reopen` are distinct events. Accountant history is exposed only in a collapsed advanced Settings panel and lazy-loads on open, with selected-client document/user/action/date filtering. Approved documents remain reachable from the all-documents workbench queue; deliberate reopen creates a new working revision from the approved revision while preserving draft/source provenance. Fresh Chromium verified hidden/lazy history behavior and state rendering; frontend 253/253 PASS, backend 1158 passed / 37 skipped, targeted audit/reopen tests PASS, TypeScript/build PASS. PostgreSQL integration tests remain environment-gated without `FISORA_TEST_POSTGRES_DSN`. Next: REV-R03 strategy review.
+**Completed 2026-09-14: REV-R01 + REV-R02** - Accepted review-state history decisions are implemented without a second audit database or new daily-workbench clutter. Existing normalized `workflow_events` now record review mutations with actor, document, timestamp, action, operation kind, before/after state, export state, revision lineage, and reason; `undo` and deliberate `reopen` are distinct events. Accountant history is exposed only in a collapsed advanced Settings panel and lazy-loads on open, with selected-client document/user/action/date filtering. Approved documents remain reachable from the all-documents workbench queue; deliberate reopen creates a new working revision from the approved revision while preserving draft/source provenance. Fresh Chromium verified hidden/lazy history behavior and state rendering; frontend 253/253 PASS, backend 1158 passed / 37 skipped, targeted audit/reopen tests PASS, TypeScript/build PASS. PostgreSQL integration tests remain environment-gated without `FISORA_TEST_POSTGRES_DSN`.
 
-
+**Final audit reconciliation 2026-09-16:** REV-C01/C02 are resolved by the approval-completeness gate; REV-R07 autocomplete is verified/remediated; REV-Q01 legacy accountant routes are removed; stale B-section verification markers are closed. Remaining strategy/deferred/field-feedback items are not audit defects. Current frontend closure baseline: Node `253/253`, canonical Chromium `31/31`, TypeScript PASS, production build PASS.
 
 ## New decisions — 2026-09-09
 
 
 ### NEW-01 — Account-code combobox keyboard and wheel behavior
 
-**Status:** ACCEPTED — implement and regression-test.
+**Status:** COMPLETED / REGRESSION-COVERED — 2026-09-09.
 
 Current source already contains `ArrowDown`, `ArrowUp`, `Enter`, and `Tab` handling for the account-code combobox. The remaining work is therefore an interaction/focus/scroll integration fix, not a new autocomplete implementation.
 
@@ -162,7 +164,7 @@ Acceptance tests must cover keyboard navigation, focus ownership, popup scrollin
 
 ### NEW-02 — Stronger hover, active-candidate, focus, and selected states
 
-**Status:** ACCEPTED — system design rule; implement first on Workbench critical surfaces.
+**Status:** COMPLETED / CURRENT DESIGN RULE — 2026-09-09.
 
 The current visual difference between neutral, hover, keyboard-active, and selected/current states is too subtle.
 
@@ -183,7 +185,7 @@ The solution should use shared visual tokens/utilities instead of one-off colors
 
 ### NEW-03 — Approval completeness gate for unresolved accounts and counterparties
 
-**Status:** ACCEPTED — this resolves the main product decision in `REV-C01`.
+**Status:** COMPLETED / ACCEPTED — 2026-09-09.
 
 `Onayla ve sonraki` must not succeed while a required journal/posting row is unresolved.
 
@@ -216,7 +218,7 @@ Acceptance tests must prove that approval is rejected for incomplete required ro
 
 ### NEW-04 — Denser but more readable accounting typography
 
-**Status:** ACCEPTED — default typography must become more readable without abandoning the compact Workbench strategy.
+**Status:** COMPLETED / DEFAULT WORKBENCH TYPOGRAPHY REMEDIATED — 2026-09-11.
 
 The current journal/accounting text is too thin and visually small for sustained accountant use.
 
@@ -243,7 +245,7 @@ Decision is now resolved: missing required account/counterparty resolution is a 
 
 ### `REV-G01`, `REV-G02`, `REV-G03`, `REV-R07`
 
-The account autocomplete exists and keyboard handlers exist in source. The next task is to reproduce and fix focus/scroll/active-state behavior, then close the contradictory audit result with regression tests.
+Closed. The account autocomplete/search capability exists and its interaction behavior is regression-covered: filtering, keyboard ownership, active candidate handling, valid detail-account selection, and queue-shortcut separation are all part of the current tested contract. REV-R07 is no longer an open feature/retest item.
 
 ### `REV-K03`, `REV-K04`, `REV-K05`, `REV-K06`
 

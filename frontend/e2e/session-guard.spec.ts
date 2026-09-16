@@ -30,7 +30,7 @@ test("rejected stored session cannot open a locked portal route", async ({ page 
     });
   });
 
-  await page.goto("/portal/musavir");
+  await page.goto("/portal-next");
 
   await expect(page).toHaveURL("/");
   await expect(page.locator(".portal-main-shell")).toHaveCount(0);

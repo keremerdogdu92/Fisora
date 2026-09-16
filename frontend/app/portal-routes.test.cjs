@@ -33,37 +33,26 @@ test("root page is the private pilot role gateway", () => {
   assert.doesNotMatch(rootPage, /aria-label="Portal girişleri"/);
 });
 
-test("same-domain portal paths open the correct private pilot screen", () => {
+test("canonical portal paths open the correct private pilot screen", () => {
   assert.deepEqual(portalConfigForPath("/portal/mukellef"), {
-    routeKey: "mukellef",
-    initialMode: "client",
-    defaultUserId: "mukellef-user",
-    defaultRole: "client_user",
-    lockedRole: "client_user",
-    visibleModes: ["client"],
+    routeKey: "mukellef", initialMode: "client", defaultUserId: "mukellef-user",
+    defaultRole: "client_user", lockedRole: "client_user", visibleModes: ["client"],
   });
-  assert.deepEqual(portalConfigForPath("/portal/musavir"), {
-    routeKey: "musavir",
-    initialMode: "accountant",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
+  assert.deepEqual(portalConfigForPath("/portal-next"), {
+    routeKey: "musavir", initialMode: "accountant", defaultUserId: "mali-musavir",
+    defaultRole: "accountant", lockedRole: "accountant",
     visibleModes: ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"],
   });
+  assert.equal(portalConfigForPath("/portal/removed-accountant-route").routeKey, "home");
 });
 
-test("accountant subpaths stay under the accountant link family", () => {
-  assert.equal(portalConfigForPath("/portal/ajanlar").initialMode, "agents");
-  assert.equal(portalConfigForPath("/portal/belgeler").initialMode, "documents");
-  assert.equal(portalConfigForPath("/portal/mukellefler").initialMode, "clients");
-  assert.equal(portalConfigForPath("/portal/bilgi-havuzu").initialMode, "agents");
-  assert.equal(portalConfigForPath("/portal/ayarlar").initialMode, "settings");
-  assert.equal(portalConfigForPath("/portal/cikti").initialMode, "exports");
-  assert.equal(portalConfigForPath("/portal/operasyon").initialMode, "operations");
-  assert.deepEqual(portalConfigForRouteKey("ajanlar").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("belgeler").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("bilgi-havuzu").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
-  assert.deepEqual(portalConfigForRouteKey("ayarlar").visibleModes, ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"]);
+test("accountant navigation uses only the canonical portal-next route", () => {
+  const { PORTAL_NAV_ITEMS } = require("./portal-routes");
+  const accountantItems = PORTAL_NAV_ITEMS.filter((item) => item.mode !== "client");
+  assert.ok(accountantItems.length > 0);
+  assert.equal(accountantItems.every((item) => item.href === "/portal-next"), true);
+  assert.equal(portalConfigForRouteKey("belgeler").routeKey, "home");
+  assert.equal(portalConfigForRouteKey("ajanlar").routeKey, "home");
 });
 
 test("research knowledge is an AI agents subview, not a sidebar destination", () => {
@@ -76,7 +65,7 @@ test("research knowledge is an AI agents subview, not a sidebar destination", ()
   assert.equal(ACCOUNTANT_MODES.includes("research"), false);
   assert.deepEqual(
     PORTAL_NAV_ITEMS.find((item) => item.mode === "agents"),
-    { mode: "agents", label: "AI ajanları", href: "/portal/ajanlar" },
+    { mode: "agents", label: "AI ajanları", href: "/portal-next" },
   );
   assert.equal(PORTAL_NAV_ITEMS.some((item) => item.mode === "research"), false);
 });
@@ -94,22 +83,17 @@ test("research view reads legacy labels only from non-authoritative display", ()
   assert.doesNotMatch(researchView, /selectedProfile\?\.key === profile\.key/);
 });
 
-test("website entry paths have Next app route files", () => {
+test("website entry paths expose one accountant shell and preserve separate client/auth routes", () => {
   const rootPage = require("node:fs").readFileSync(join(__dirname, "page.tsx"), "utf8");
   assert.match(rootPage, /RoleGatewayLanding/);
-  assert.doesNotMatch(rootPage, /return <FisoraPortalApp routeKey="home" \/>/);
-
-  const musavirPage = require("node:fs").readFileSync(join(__dirname, "portal", "musavir", "page.tsx"), "utf8");
-  assert.match(musavirPage, /portal-app/);
-  assert.doesNotMatch(musavirPage, /\.\.\/\.\.\/page/);
-
+  const accountantPage = require("node:fs").readFileSync(join(__dirname, "portal-next", "page.tsx"), "utf8");
+  assert.match(accountantPage, /presentation="next"/);
   assert.equal(existsSync(join(__dirname, "portal", "mukellef", "page.tsx")), true);
-  assert.equal(existsSync(join(__dirname, "portal", "musavir", "page.tsx")), true);
-  assert.equal(existsSync(join(__dirname, "portal", "ajanlar", "page.tsx")), true);
-  assert.equal(existsSync(join(__dirname, "portal", "belgeler", "page.tsx")), true);
-  assert.equal(existsSync(join(__dirname, "portal", "mukellefler", "page.tsx")), true);
-  assert.equal(existsSync(join(__dirname, "portal", "bilgi-havuzu", "page.tsx")), true);
-  assert.equal(existsSync(join(__dirname, "portal", "ayarlar", "page.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal", "invite", "page.tsx")), true);
+  assert.equal(existsSync(join(__dirname, "portal", "password-reset", "page.tsx")), true);
+  for (const route of ["musavir", "ajanlar", "belgeler", "mukellefler", "bilgi-havuzu", "ayarlar", "cikti", "operasyon"]) {
+    assert.equal(existsSync(join(__dirname, "portal", route, "page.tsx")), false);
+  }
 });
 
 test("portal implementation is split into route view modules", () => {

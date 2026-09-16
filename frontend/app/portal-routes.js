@@ -1,3 +1,6 @@
+// File: frontend/app/portal-routes.js
+// Summary: Defines canonical portal role entries, in-shell navigation modes, and route/session guards for accountant and client experiences.
+
 const ACCOUNTANT_MODES = ["accountant", "agents", "documents", "clients", "uploads", "exports", "operations", "settings"];
 
 const LANDING_ROLE_ENTRIES = [
@@ -21,13 +24,13 @@ const LANDING_ROLE_ENTRIES = [
 
 const PORTAL_NAV_ITEMS = [
   { mode: "client", label: "Mükellef portalı", href: "/portal/mukellef" },
-  { mode: "accountant", label: "Anasayfa", href: "/portal/musavir" },
-  { mode: "agents", label: "AI ajanları", href: "/portal/ajanlar" },
-  { mode: "documents", label: "Belge işleme", href: "/portal/belgeler" },
-  { mode: "clients", label: "Mükellefler", href: "/portal/mukellefler" },
-  { mode: "exports", label: "Çıktı listesi", href: "/portal/cikti" },
-  { mode: "settings", label: "Ayarlar", href: "/portal/ayarlar" },
-  { mode: "operations", label: "Operasyon", href: "/portal/operasyon" },
+  { mode: "accountant", label: "Anasayfa", href: "/portal-next" },
+  { mode: "agents", label: "AI ajanları", href: "/portal-next" },
+  { mode: "documents", label: "Belge işleme", href: "/portal-next" },
+  { mode: "clients", label: "Mükellefler", href: "/portal-next" },
+  { mode: "exports", label: "Çıktı listesi", href: "/portal-next" },
+  { mode: "settings", label: "Ayarlar", href: "/portal-next" },
+  { mode: "operations", label: "Operasyon", href: "/portal-next" },
 ];
 
 const PORTAL_ROUTE_CONFIGS = {
@@ -54,62 +57,6 @@ const PORTAL_ROUTE_CONFIGS = {
     lockedRole: "accountant",
     visibleModes: ACCOUNTANT_MODES,
   },
-  belgeler: {
-    routeKey: "belgeler",
-    initialMode: "documents",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
-  ajanlar: {
-    routeKey: "ajanlar",
-    initialMode: "agents",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
-  mukellefler: {
-    routeKey: "mukellefler",
-    initialMode: "clients",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
-  "bilgi-havuzu": {
-    routeKey: "bilgi-havuzu",
-    initialMode: "agents",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
-  ayarlar: {
-    routeKey: "ayarlar",
-    initialMode: "settings",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
-  cikti: {
-    routeKey: "cikti",
-    initialMode: "exports",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
-  operasyon: {
-    routeKey: "operasyon",
-    initialMode: "operations",
-    defaultUserId: "mali-musavir",
-    defaultRole: "accountant",
-    lockedRole: "accountant",
-    visibleModes: ACCOUNTANT_MODES,
-  },
 };
 
 function portalConfigForRouteKey(routeKey) {
@@ -123,14 +70,7 @@ function portalEntryForRole(role) {
 function portalConfigForPath(pathname) {
   const path = String(pathname || "").replace(/\/+$/, "") || "/";
   if (path === "/portal/mukellef") return PORTAL_ROUTE_CONFIGS.mukellef;
-  if (path === "/portal/musavir") return PORTAL_ROUTE_CONFIGS.musavir;
-  if (path === "/portal/ajanlar") return PORTAL_ROUTE_CONFIGS.ajanlar;
-  if (path === "/portal/belgeler") return PORTAL_ROUTE_CONFIGS.belgeler;
-  if (path === "/portal/mukellefler") return PORTAL_ROUTE_CONFIGS.mukellefler;
-  if (path === "/portal/bilgi-havuzu") return PORTAL_ROUTE_CONFIGS["bilgi-havuzu"];
-  if (path === "/portal/ayarlar") return PORTAL_ROUTE_CONFIGS.ayarlar;
-  if (path === "/portal/cikti") return PORTAL_ROUTE_CONFIGS.cikti;
-  if (path === "/portal/operasyon") return PORTAL_ROUTE_CONFIGS.operasyon;
+  if (path === "/portal-next") return PORTAL_ROUTE_CONFIGS.musavir;
   return PORTAL_ROUTE_CONFIGS.home;
 }
 

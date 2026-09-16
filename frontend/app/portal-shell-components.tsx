@@ -19,31 +19,22 @@ import { roleLabels } from "./portal-session";
 import type { PortalNotification } from "./portal-notifications";
 import type { DocumentSegment, DraftLine, LocalSession, PilotClient, PilotDocument, PilotMode, PilotStatus, PortalNavItem } from "./portal-types";
 
-export function ModeButton({ active, href, label }: { active: boolean; href: string; label: string }) {
-  return (
-    <a aria-current={active ? "page" : undefined} className={active ? "mode-tab active" : "mode-tab"} href={href}>
-      {label}
-    </a>
-  );
-}
-
 const sidebarItems: {
   key: string;
   label: string;
   mode: PilotMode;
   segment?: DocumentSegment;
-  fallbackHref: string;
   icon: LucideIcon;
 }[] = [
-  { key: "workspace", label: "Çalışma Alanı", mode: "accountant", fallbackHref: "/portal/musavir", icon: LayoutDashboard },
-  { key: "agents", label: "AI Ajanları", mode: "agents", fallbackHref: "/portal/ajanlar", icon: Bot },
-  { key: "clients", label: "Mükellefler", mode: "clients", fallbackHref: "/portal/mukellefler", icon: Users },
-  { key: "documents", label: "Faturalar", mode: "documents", segment: "purchase_invoices", fallbackHref: "/portal/belgeler", icon: FileText },
-  { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", fallbackHref: "/portal/belgeler", icon: Landmark },
-  { key: "other", label: "Diğer Belgeler", mode: "documents", segment: "other_documents", fallbackHref: "/portal/belgeler", icon: Files },
-  { key: "exports", label: "Çıktı / Kontroller", mode: "exports", fallbackHref: "/portal/cikti", icon: CircleCheckBig },
-  { key: "operations", label: "Operasyon", mode: "operations", fallbackHref: "/portal/operasyon", icon: Activity },
-  { key: "settings", label: "Ayarlar", mode: "settings", fallbackHref: "/portal/ayarlar", icon: Settings },
+  { key: "workspace", label: "Çalışma Alanı", mode: "accountant", icon: LayoutDashboard },
+  { key: "agents", label: "AI Ajanları", mode: "agents", icon: Bot },
+  { key: "clients", label: "Mükellefler", mode: "clients", icon: Users },
+  { key: "documents", label: "Faturalar", mode: "documents", segment: "purchase_invoices", icon: FileText },
+  { key: "bank", label: "Banka Ekstreleri", mode: "documents", segment: "bank_statements", icon: Landmark },
+  { key: "other", label: "Diğer Belgeler", mode: "documents", segment: "other_documents", icon: Files },
+  { key: "exports", label: "Çıktı / Kontroller", mode: "exports", icon: CircleCheckBig },
+  { key: "operations", label: "Operasyon", mode: "operations", icon: Activity },
+  { key: "settings", label: "Ayarlar", mode: "settings", icon: Settings },
 ];
 
 const statusLabels: Record<PilotStatus, string> = {

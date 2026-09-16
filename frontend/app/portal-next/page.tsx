@@ -1,5 +1,5 @@
 // File: frontend/app/portal-next/page.tsx
-// Summary: Exposes the isolated next-generation accountant UI at /portal-next while preserving the existing /portal routes.
+// Summary: Exposes /portal-next as the canonical accountant shell while client, invite, and password-reset flows remain separate.
 
 import { FisoraPortalApp } from "../portal-app";
 

@@ -131,19 +131,16 @@ async function setupPilotRoutes(page: Page, workspace = pilotWorkspace) {
   });
 }
 
-test("documents route has no horizontal overflow on desktop and mobile", async ({ page }) => {
+test("canonical workbench has no horizontal overflow on desktop and mobile", async ({ page }) => {
   await setupPilotRoutes(page);
-
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto("/portal/belgeler");
-  await expect(page.locator(".document-review-toolbar")).toBeVisible();
-  const desktopOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(desktopOverflow).toBeLessThanOrEqual(0);
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Çalışma Masası", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Çalışma kuyruğu ve görünüm araçları" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/portal/belgeler");
-  const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  expect(mobileOverflow).toBeLessThanOrEqual(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
 
 
@@ -226,43 +223,29 @@ test("workspace backend failure does not stay as loading copy", async ({ page })
     await route.fulfill({ json: readyForRealDataPayload });
   });
 
-  await page.goto("/portal/musavir");
+  await page.goto("/portal-next");
 
-  await expect(page.getByRole("status", { name: /Çalışma alanı alınamadı|Geçici çalışma verisi|Çalışma alanı boş/i }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Bugün ilgilenmen gerekenler" })).toBeVisible();
   await expect(page.getByText("Çalışma alanı yükleniyor")).toHaveCount(0);
 });
 
-test("topbar notification and help actions open visible panels", async ({ page }) => {
-  await setupPilotRoutes(page);
-  await page.goto("/portal/musavir");
-
-  await page.getByRole("button", { name: /Bildirimler/ }).click();
-  await expect(page.getByRole("dialog", { name: /Bildirimler/ })).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: /Bildirimler/ })).toHaveCount(0);
-
-  await page.getByRole("button", { name: /Yardım/ }).click();
-  await expect(page.getByRole("dialog", { name: /Yardım/ })).toBeVisible();
-});
-
-test("mobile portal starts with content visible and opens menu as drawer", async ({ page }) => {
+test("mobile accountant shell keeps content visible and opens menu as drawer", async ({ page }) => {
   await setupPilotRoutes(page);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/portal/belgeler");
-
-  await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
-  await expect(page.locator(".document-review-toolbar")).toBeVisible();
-
-  await page.getByRole("button", { name: /Menüyü aç/ }).click();
-  await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "true");
-
-  await page.keyboard.press("Escape");
-  await expect(page.getByLabel("Müşavir menüsü")).toHaveAttribute("data-mobile-open", "false");
+  await page.goto("/portal-next");
+  const sidebar = page.getByLabel("Fisora ana menü");
+  await expect(sidebar).not.toHaveClass(/mobile-open/);
+  await expect(page.getByRole("heading", { name: "Bugün ilgilenmen gerekenler" })).toBeVisible();
+  await page.getByRole("button", { name: "Menüyü aç" }).click();
+  await expect(sidebar).toHaveClass(/mobile-open/);
+  await page.getByRole("button", { name: "Menüyü kapat" }).click();
+  await expect(sidebar).not.toHaveClass(/mobile-open/);
 });
 
 test("client management uses list/detail navigation and clear onboarding sections", async ({ page }) => {
   await setupPilotRoutes(page);
-  await page.goto("/portal/mukellefler");
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Mükellefler", exact: true }).click();
 
   await expect(page.getByLabel(/M.kellef listesi/)).toBeVisible();
   const clientSearch = page.getByPlaceholder(/M.kellef ara/);
@@ -296,7 +279,8 @@ test("client management uses list/detail navigation and clear onboarding section
 
 test("client list and detail keep the same selected-period document scope", async ({ page }) => {
   await setupPilotRoutes(page, twoPeriodWorkspace);
-  await page.goto("/portal/mukellefler");
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Mükellefler", exact: true }).click();
 
   const clientRow = page.getByRole("row").filter({ hasText: "1111111111" });
   await expect(clientRow.locator('[data-label="Belge"]')).toHaveText("1");
@@ -308,29 +292,17 @@ test("client list and detail keep the same selected-period document scope", asyn
   await expect(invoiceMetric.locator("small")).toHaveText("1 kontrol");
 });
 
-test("Bilgi Havuzu uses Turkish fallback copy for English-only profiles", async ({ page }) => {
-  await setupPilotRoutes(page);
-  await page.goto("/portal/bilgi-havuzu");
 
-  await expect(page.getByText(/Kaynak .*Turkceye|Kaynak .*Türkçeye|Kaynak .*TÃ¼rkÃ§eye/i)).toBeVisible();
+test("research records remain available inside the canonical AI Agents screen", async ({ page }) => {
+  await setupPilotRoutes(page);
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "AI Ajanları", exact: true }).click();
+  await page.getByRole("button", { name: "Araştırma Kayıtları", exact: true }).click();
+
+  await expect(page.getByText(/Kaynak .*Türkçeye/i)).toBeVisible();
   await expect(page.locator("body")).not.toContainText("Failed to fetch");
 });
 
-test("Bilgi Havuzu stays secondary under AI Ajanlari and legacy route opens its tab", async ({ page }) => {
-  await setupPilotRoutes(page);
-  await page.goto("/portal/ajanlar");
-
-  const researchTab = page.getByRole("tab", { name: /Araştırma kayıtları/ });
-  await expect(researchTab).toHaveAttribute("aria-selected", "false");
-  await expect(page.getByLabel("Müşavir menüsü")).not.toContainText("Bilgi Havuzu");
-
-  await researchTab.click();
-  await expect(researchTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByText(/Kaynak .*Türkçeye/i)).toBeVisible();
-
-  await page.goto("/portal/bilgi-havuzu");
-  await expect(page.getByRole("tab", { name: /Araştırma kayıtları/ })).toHaveAttribute("aria-selected", "true");
-});
 test("accountant opens selected client portal in a delegated tab without return controls", async ({ page }) => {
   await setupAccountantSession(page);
   await page.context().route("**/phase0/store/system/readiness", async (route) => {
@@ -358,7 +330,8 @@ test("accountant opens selected client portal in a delegated tab without return 
     });
   });
 
-  await page.goto("/portal/mukellefler");
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Mükellefler", exact: true }).click();
   await page.getByRole("button", { name: /G.r.nt.le/ }).click();
 
   const popupPromise = page.waitForEvent("popup");

@@ -227,7 +227,8 @@ test.beforeEach(async ({ page }) => {
 
 test("operations screen presents accountant-facing readiness without developer telemetry", async ({ page }) => {
   await storeAccountantSession(page);
-  await page.goto("/portal/operasyon");
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "İşlem Durumu", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: /Belge ak/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Sistem durumu" })).toBeVisible();
@@ -245,31 +246,49 @@ test("landing role gateway enters accountant portal and document selection uses 
   await page.getByRole("button", { name: "\u00c7al\u0131\u015fma Masas\u0131", exact: true }).click();
 
   await expect(page.getByRole("combobox", { name: "Çalışılan mükellef" })).toHaveValue("pilot-client");
-  await expect(page.getByRole("button", { name: /invoice-ready\.pdf/ }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /Pilot Vendor Alış faturaları/ })).toBeVisible();
   await expect(page.locator(".journal-ledger")).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Fatura satırı açıklaması" }).first()).toHaveValue("Danismanlik");
+  await expect(page.getByRole("textbox", { name: "Fiş satırı açıklaması" }).first()).toHaveValue("Danismanlik");
 });
 
 test("accountant can review and approve a bank statement line", async ({ page }) => {
   await storeAccountantSession(page);
-  await page.goto("/portal/belgeler");
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Çalışma Masası", exact: true }).click();
 
-  await page.getByRole("button", { name: /Banka Ekstreleri/ }).click();
-  await expect(page.getByText("bank-haziran.csv").first()).toBeVisible();
-  await page.locator(".bottom-queue-actions button").click();
+  await page.locator(".portal-next-work-tabs").getByRole("button", { name: /^Banka/ }).click();
+  await expect(page.getByRole("complementary", { name: "Banka Ekstreleri" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Banka satırları" })).toBeVisible();
   await expect(page.locator('input[value="102.01"]').first()).toBeVisible();
+  const reviewRequestPromise = page.waitForRequest((request) =>
+    request.url().includes("/phase0/store/review-decision") && request.method() === "POST",
+  );
   await page.getByRole("button", { name: "Satırı onayla", exact: true }).click();
-  await expect(page.getByText(/bank-haziran.csv \/ 1\. satir.*backend.e kaydedildi/)).toBeVisible();
+  const reviewRequest = await reviewRequestPromise;
+  const reviewPayload = reviewRequest.postDataJSON() as { decision?: Record<string, unknown> };
+  expect(reviewPayload.decision).toMatchObject({
+    document_ref: "bank-doc-1",
+    statement_line_no: 1,
+    action: "approve",
+  });
 });
 
-test("export basket can be packaged from deterministic workspace data", async ({ page }) => {
+test("approved workspace data can be packaged from the canonical export view", async ({ page }) => {
+  const approvedWorkspace = structuredClone(pilotWorkspace);
+  approvedWorkspace.documents[0].export_status = "export_ready";
+  approvedWorkspace.documents[0].result.export_status = "export_ready";
+  await page.unroute("**/phase0/store/workspace/**");
+  await page.route("**/phase0/store/workspace/**", async (route) => {
+    await route.fulfill({ json: approvedWorkspace });
+  });
+
   await storeAccountantSession(page);
-  await page.goto("/portal/cikti");
+  await page.goto("/portal-next");
+  await page.getByRole("button", { name: "Onay & Çıktılar", exact: true }).click();
 
-  await expect(page.getByText("Pilot Test AS").first()).toBeVisible();
-  await expect(page.getByText(/Haz.r/).first()).toBeVisible();
-
-  await page.getByRole("button", { name: /haz.rla/i }).click();
-  await expect(page.getByText(/paket haz.r/i).last()).toBeVisible();
-  await expect(page.getByText(/Paketlendi/)).toBeVisible();
+  const outputSummary = page.getByRole("region", { name: "Çıktı özeti" });
+  await expect(outputSummary.locator("article").filter({ hasText: "Çıktıya hazır" }).locator("strong")).toHaveText("1");
+  await expect(page.getByRole("button", { name: "Paketi hazırla", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Paketi hazırla", exact: true }).click();
+  await expect(page.locator(".portal-next-export-status")).toContainText("1 paket hazır");
 });

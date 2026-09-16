@@ -7,12 +7,12 @@ const {
 } = require("./pilot-readiness");
 
 test("canUseLocalPilotFallback only allows localhost unless explicitly enabled", () => {
-  assert.equal(canUseLocalPilotFallback({ pageUrl: "http://localhost:3000/portal/musavir" }), true);
-  assert.equal(canUseLocalPilotFallback({ pageUrl: "http://127.0.0.1:3000/portal/musavir" }), true);
-  assert.equal(canUseLocalPilotFallback({ pageUrl: "http://185.184.208.188/portal/musavir" }), false);
+  assert.equal(canUseLocalPilotFallback({ pageUrl: "http://localhost:3000/portal-next" }), true);
+  assert.equal(canUseLocalPilotFallback({ pageUrl: "http://127.0.0.1:3000/portal-next" }), true);
+  assert.equal(canUseLocalPilotFallback({ pageUrl: "http://185.184.208.188/portal-next" }), false);
   assert.equal(
     canUseLocalPilotFallback({
-      pageUrl: "http://185.184.208.188/portal/musavir",
+      pageUrl: "http://185.184.208.188/portal-next",
       explicitAllow: true,
     }),
     true,

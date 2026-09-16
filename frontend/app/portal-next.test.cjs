@@ -1,5 +1,5 @@
 // File: frontend/app/portal-next.test.cjs
-// Summary: Locks the parallel UI migration boundary so the next-generation route can evolve without replacing the existing portal routes before cutover.
+// Summary: Locks the canonical accountant shell boundary and verifies portal-next behavior after legacy accountant route removal.
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
@@ -9,15 +9,13 @@ function source(...parts) {
   return readFileSync(join(__dirname, ...parts), "utf8");
 }
 
-test("portal-next opts into the new presentation while legacy portal stays default", () => {
+test("portal-next is the canonical accountant presentation after legacy route removal", () => {
   const nextPage = source("portal-next", "page.tsx");
-  const legacyPage = source("portal", "musavir", "page.tsx");
-  const portalApp = source("portal-app.tsx");
+  const clientPage = source("portal", "mukellef", "page.tsx");
 
   assert.match(nextPage, /presentation="next"/);
   assert.match(nextPage, /routeKey="musavir"/);
-  assert.doesNotMatch(legacyPage, /presentation="next"/);
-  assert.match(portalApp, /presentation = "legacy"/);
+  assert.match(clientPage, /routeKey="mukellef"/);
 });
 
 test("next sidebar uses the approved accountant navigation order", () => {

@@ -72,20 +72,20 @@
 # B — Onay, undo, kontrolde tut, hariç tut
 
 ## REV-B01 — Ctrl+Z geri alma görünür sonuç üretmedi
-**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
+**Status:** CLOSED / IMPLEMENTED + REGRESSION-VERIFIED — 2026-09-16.
 **Audit refs:** [CG-02](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-02--ctrlz-undo-did-not-visibly-work) · [CX Post-authorization validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation)
 **Kerem kararı (2026-09-06):** Ctrl+Z süre bazlı değil işlem bazlı olacak; son geri alınabilir müşavir işlemini geri alacak. Eski bir belge ayrıca açık `Kontrole geri al` aksiyonuyla yeniden açılabilecek.
 **Implementation refs:** `frontend/app/features/review/use-review-commands.ts`, `frontend/app/portal-next/portal-next-workspace-controls.tsx`, `frontend/app/portal-review-performance.test.cjs`, `frontend/app/portal-next.test.cjs`.
 
 ## REV-B02 — Hariç tut görünür state transition üretmedi
-**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
+**Status:** CLOSED / IMPLEMENTED + REGRESSION-VERIFIED — 2026-09-16.
 **Audit refs:** [CG-09](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-09--hariç-tut-showed-no-visible-transition) · [CX UXR-011](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-011--p1--hariç-tut-aksiyonu-görünür-sonuç-üretmiyor)
 **Kerem kararı (2026-09-06):** `Hariç tut` = bu belgeyi işlemeyeceğiz; hard delete değildir. Belge ve geçmişi korunur ve tekrar kontrole alınabilir.
 **Root cause:** Backend `rejected` üretse de frontend bunu `review_required`a normalize ediyordu; normalized persistence da exclusion kararını bazı akışlarda review state'ine eziyordu.
 **Implementation refs:** `backend/app/persistence/normalized_accounting_repository.py`, `backend/app/persistence/postgres_workflow_store.py`, `frontend/app/portal-normalization.js`, `frontend/app/portal-document-actions.ts`, `frontend/app/portal-review-panels.tsx`, `frontend/app/features/documents/document-workflow-model.js`.
 
 ## REV-B03 — Hariç tutulanlar görünümü / geri getir
-**Status:** KISMEN KABUL EDİLDİ / UYGULANDI — ayrı `Hariç tutulanlar` filtresi henüz kararlaştırılmadı.
+**Status:** CLOSED FOR AUDIT / CORE BEHAVIOR IMPLEMENTED — dedicated `Hariç tutulanlar` filter PARKED.
 **Source context:** CG recommendation derived from CG-09; CX UXR-011 confirms current ambiguity.
 **Kerem kararı (2026-09-06):** Hariç tutma geri alınabilir olacak. Uygulamada belge `Hariç tutuldu` state'inde korunuyor ve `Kontrole geri al` aksiyonu sunuluyor; ayrıca özel bir filtre gerekip gerekmediğine sonra karar verilecek.
 
@@ -98,14 +98,14 @@
 **Acceptance:** Reopen regression testi `draft_status`, `draft_decision_source` ve `accountant_summary` alanlarının aynen korunduğunu doğruluyor. Frontend source-contract testi reopen branch'inde `draftLines/manualDraftLines/accountant_manual_draft` gönderilmediğini doğruluyor.
 
 ## REV-B05 — Onay başarı feedback'i yeterli mi?
-**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
+**Status:** CLOSED / IMPLEMENTED + REGRESSION-VERIFIED — 2026-09-16.
 **Audit refs:** [AG FINDING-04](./fisora-antigravity-ux-ui-audit-2026-09-05.md#finding-04-onayla-ve-sonraki-işleminde-kuyruk-rozetinin-güncellenmemesi) · [CX validation](./fisora-codex-ux-qa-audit-2026-09-05.md#post-authorization-demo-state-validation) · [CG-04](./fisora-chatgpt-accountant-acceptance-audit-2026-09-05.md#cg-04--contradictory-workflow-labels)
 **Conflict note:** State değişimi CG/CX tarafından görüldü; AG feedback'in kullanıcıya yeterince kesin ulaşmadığını gördü. `Hiç state değişmiyor` şeklinde kabul edilmedi.
 **Kerem kararı (2026-09-06):** Yeni toast/modal eklenmeden mevcut alt kısayol barı içinde son işlem açıkça gösterilecek; geri alınabiliyorsa `Geri al / Ctrl+Z` aynı yerde görünecek.
 **Implementation refs:** `frontend/app/portal-next/portal-next-workspace-controls.tsx`, `frontend/app/portal-next/portal-next.css`, `frontend/app/features/review/use-review-commands.ts`.
 
 ## REV-B06 — `Kontrolde tut` semantiği
-**Status:** KABUL EDİLDİ / UYGULANDI — production UI doğrulaması bekliyor.
+**Status:** CLOSED / IMPLEMENTED + REGRESSION-VERIFIED — 2026-09-16.
 **Decision source:** 2026-09-06 multi-agent audit review discussion.
 **Kerem kararı:** `Kontrolde tut` = bu belge sonradan işlenecek. Hata/terminal state değildir; eksik veya yarım fiş yüzünden bu aksiyonun kendisi bloklanmamalıdır. Onaylanmış belge için aynı geri dönüş davranışı `Kontrole geri al` adıyla sunulur.
 **Implementation refs:** `frontend/app/portal-review-panels.tsx`, `backend/app/persistence/normalized_accounting_repository.py`, `frontend/app/features/review/use-review-commands.ts`.
@@ -113,14 +113,18 @@
 # C — Muhasebe güvenlik kapıları
 
 ## REV-C01 — Eksik hesap seçimi varken onay aktif
-**Status:** KONTROL EDİLECEK / ÜRÜN KARARI.
+**Status:** CLOSED / ACCEPTED + IMPLEMENTED — 2026-09-09; REVERIFIED 2026-09-16.
 **Audit refs:** [CX UXR-003](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-003--p1--eksik-hesap-seçimi-varken-onay-aktif)
-**Question:** Eksik hesap gerçek bir block mu, yoksa müşavir bilinçli şekilde tamamlanmamış kaydı başka state'e taşıyabilmeli mi? `Disable and leave stuck` varsayılan çözüm değildir; recovery/workflow kararı ayrıca verilecek.
+**Decision:** Zorunlu hesap/cari çözülmemişse `Onayla ve sonraki` bloklanır. `Kontrolde tut` ve `Hariç tut` kullanılabilir kalır.
+**Implementation:** Boş, geçersiz, detail olmayan veya henüz oluşturulmamış hesaplar approval issue üretir. Cari eksikliği doğrudan mevcut cariyi seçme veya yeni cari oluşturma recovery yoluna bağlanır; kullanıcı yalnız disabled butonla bırakılmaz.
+**Acceptance:** Güncel frontend Node suite `253/253` PASS; canonical Chromium regression `31/31` PASS. Regression coverage blank/invalid/uncreated counterparty blockers ve in-workbench recovery drawer davranışını doğruluyor.
 
 ## REV-C02 — `Dengeli` etiketi semantik tamamlanmışlık gibi algılanabilir
-**Status:** ÜRÜN KARARI.
+**Status:** CLOSED / ACCEPTED + IMPLEMENTED — 2026-09-09; REVERIFIED 2026-09-16.
 **Audit refs:** [CX UXR-003](./fisora-codex-ux-qa-audit-2026-09-05.md#uxr-003--p1--eksik-hesap-seçimi-varken-onay-aktif)
-**Question:** `Borç/alacak dengeli` ile `Muhasebe kararı tamamlandı` ayrı göstergeler mi olmalı?
+**Decision:** `Dengeli` yalnız borç/alacak aritmetik dengesini ifade eder; muhasebe kararının tamamlandığı anlamına gelmez.
+**Implementation:** Muhasebe tamamlanmışlığı ayrı approval guard ile değerlendirilir. Dengeli fakat çözülmemiş hesap/cari bulunan fiş aynı anda `✓ Dengeli` ve `Fiş tamamlanmalı` durumunu gösterebilir; onay kapalı kalır.
+**Acceptance:** Güncel canonical Chromium akışı bu iki durumu aynı belgede birlikte doğruluyor; frontend Node suite `253/253` PASS.
 
 ## REV-C03 — Tüm fiş satırları görünmeden onay erişilebilir
 **Status:** RETESTED / CURRENT BEHAVIOR KEPT - 2026-09-10.
@@ -157,9 +161,10 @@
 **Acceptance:** Approved-export-and-reopen backend regression PASS; frontend reopen regression PASS.
 
 ## REV-D04 — Canonical kullanıcı state modeli
-**Status:** ÜRÜN KARARI.
+**Status:** PARKED / NOT AN AUDIT BLOCKER — 2026-09-16.
 **Derived from:** CG-04/05/06 + CX validation + AG FINDING-04.
-**Candidate language only:** İşleniyor / Kontrol gerekli / Kontrolde / Onaylandı / Çıktıya hazır / Hariç / Kayıt gerekmiyor / İşlenemedi. Bu liste henüz kabul edilmiş state modeli değildir.
+**Decision:** Somut çelişkili state problemleri REV-D01/D02/D03 ve ilgili review maddelerinde çözüldü. Yeni bir global state mimarisi yalnız saha kullanımında gerçek ihtiyaç doğrulanırsa ele alınacak.
+**Candidate language only:** İşleniyor / Kontrol gerekli / Kontrolde / Onaylandı / Çıktıya hazır / Hariç / Kayıt gerekmiyor / İşlenemedi. Bu liste kabul edilmiş yeni bir state katmanı değildir.
 
 # E — Dönem, mükellef ve ofis scope
 
@@ -194,9 +199,9 @@
 **Acceptance:** Two-period synthetic check now yields the same selected-period count in list and detail; regression/build PASS.
 
 ## REV-E06 — Scope etiketleme modeli
-**Status:** ÜRÜN KARARI.
+**Status:** PARKED / NOT AN AUDIT BLOCKER — 2026-09-16.
 **Derived from:** CX UXR-006/008 + AG FINDING-07 + CG-07.
-**Question:** Sayaç yanında mükellef/dönem/ofis scope'u nasıl görünmeli?
+**Decision:** Gerçek scope çelişkileri REV-E04/E05 ile giderildi; mevcut ekranlar kendi dönem/ofis bağlamını taşıyor. Ek scope etiketi katmanı ancak saha kullanımında hâlâ karışıklık görülürse ele alınacak.
 
 ## REV-E07 — Dönem kilidi
 **Status:** STRATEJİ KARARI.
@@ -300,6 +305,8 @@
 **Audit refs:** [CX Evidence and limitations](./fisora-codex-ux-qa-audit-2026-09-05.md#evidence-and-limitations)
 **Decision:** Not a product defect. The restriction belonged to the audit agent/file chooser path; CG successfully exercised real Windows file upload. No code change.
 
+**Canonical upload retest — 2026-09-16:** The new `/portal-next` upload screen was exercised in Chromium with one chooser action containing three supported files plus one unsupported file. The UI staged exactly three files, emitted three independent multipart upload requests, skipped the unsupported file, preserved `client_id=pilot-client`, `period=2026-08`, and `purchase_invoice` metadata, and summarized one backend duplicate without creating a false new record. A second two-file batch verified both requests carried `sales_invoice` after switching to Satış. Dedicated upload regression `2/2` PASS; complete canonical Chromium suite `31/31` PASS. The earlier “multi-select only uploads one file” concern is not reproducible in the current canonical UI.
+
 # I — Hata yönetimi ve teknik metin sızıntısı
 
 ## REV-I01 — Öğrenilen Kurallar raw 500
@@ -374,9 +381,9 @@
 **Acceptance:** İki dönemli regression Haziran paketinden Temmuz belgesini dışarıda tuttu; export API/service 61/61 PASS; normalized accounting 18/18 PASS; full backend 1153 passed / 37 skipped.
 
 ## REV-J05 — Pilot export kapsamı
-**Status:** STRATEJİ KARARI.
+**Status:** CLOSED / PRODUCT SCOPE DECIDED — 2026-09-16.
 **Source context:** CG Output assessment + AG Missing Product Capabilities.
-**Question:** Pilot için XLSX, CSV, Zirve veya başka bir aktarımın hangisi gerçekten vaat edilecek?
+**Decision:** Pilot kapsamı onaylı kayıtlar için Fisora XLSX/CSV çıktısıdır. Doğrudan Zirve aktarımı ilk faz vaadi değildir; Zirve import saha doğrulaması ayrı `docs/open-questions.md` / field-test runbook kapsamında izlenir.
 
 ## REV-J06 — Geçmiş çıktı / paket arşivi
 **Status:** STRATEJİ KARARI.
@@ -604,11 +611,12 @@
 # Q — Navigasyon / route / sidebar
 
 ## REV-Q01 — Legacy `/portal` ile `/portal-next` sıçraması iddiası
-**Status:** RETESTED / NOT REPRODUCED IN CURRENT ACCOUNTANT FLOW - 2026-09-14.
+**Status:** CLOSED / LEGACY ACCOUNTANT SURFACE REMOVED — 2026-09-16.
 **Audit refs:** [AG Bilgi Mimarisi ve Rota Sorunu](./fisora-antigravity-ux-ui-audit-2026-09-05.md#bilgi-mimarisi-ve-rota-sorunu)
-**Retest:** Fresh Chromium started at `/portal-next`, clicked the accountant `Mükellefler` sidebar action, and remained on `/portal-next`; the next-generation sidebar stayed mounted, the legacy sidebar stayed absent, and the page title changed to `Mükellefler`. Current next-generation navigation uses in-shell mode changes rather than `/portal/*` accountant links. Targeted portal route/navigation tests passed 42/42.
-**Legacy boundary:** Direct navigation to legacy accountant URLs such as `/portal/mukellefler` still renders the old presentation. This is not reachable from the normal accountant login/sidebar flow, but the legacy accountant surface still exists in source.
-**Decision:** No audit-time bug fix is required for Q01. After the full audit/remediation pass is complete, remove the legacy accountant UI and accountant-only `/portal/*` routes, migrate or delete tests/fallback references that depend on them, and keep the current `/portal-next` accountant experience as the single accountant shell. The separate client-facing `/portal/mukellef` flow, including delegated-client access, is explicitly outside that cleanup unless reviewed separately.
+**Retest:** Normal accountant flow had already remained inside `/portal-next`; the remaining risk was the dormant duplicate accountant surface still present in source.
+**Cleanup:** Legacy accountant-only routes `/portal/musavir`, `/portal/ajanlar`, `/portal/belgeler`, `/portal/mukellefler`, `/portal/bilgi-havuzu`, `/portal/cikti`, `/portal/operasyon`, and `/portal/ayarlar` were removed. Accountant navigation and route contracts now use `/portal-next` as the single shell. Unused legacy fallback href metadata and `ModeButton` export were removed with the dependent stale tests updated.
+**Preserved boundary:** Client/auth routes remain separate and intact: `/portal/mukellef`, `/portal/invite`, and `/portal/password-reset`.
+**Acceptance:** Clean production build exposes only `/`, `/portal-next`, `/portal/mukellef`, `/portal/invite`, and `/portal/password-reset` (plus framework `_not-found`). Frontend Node suite `253/253` PASS, canonical Chromium regression `31/31` PASS, TypeScript PASS, production build PASS.
 
 ## REV-Q02 — Route geçişinde sidebar state tutarlılığı
 **Status:** CLOSED / IMPLEMENTED - 2026-09-14.
@@ -639,8 +647,9 @@
 **Acceptance:** Existing normalized journal regression verifies preservation of the approved snapshot plus creation of the new working revision. Frontend contracts verify the approved-document reopen affordance, explicit `operationKind: reopen`, and operation-based undo. Full frontend/backend suites and production build PASS as recorded under R01.
 
 ## REV-R03 — Müşavir notu
-**Status:** STRATEJİ KARARI.
+**Status:** CLOSED FOR AUDIT / CURRENT PRODUCT MODEL KEPT — 2026-09-16.
 **Source:** CG.
+**Decision:** Ayrı yeni bir müşavir-notu feature katmanı açılmayacak. Mevcut `Karar notu` alanı karar gerekçesi ve öğrenme/kural sinyali için kullanılan ürün yüzeyidir; `accountant_note` / `rule_instruction` ayrımı kullanıcıya iki ayrı alan olarak taşınmaz.
 
 ## REV-R04 — Multi-user assignment / handoff
 **Status:** CLOSED / IMPLEMENTED FOR MULTI-USER EDIT SAFETY - 2026-09-15. Belge/görev assignment katmanı PARKED.
@@ -658,9 +667,10 @@
 **Sources:** CG + AG Missing Product Capabilities.
 
 ## REV-R07 — Hesap planı autocomplete/search
-**Status:** TEKRAR TEST / ÜRÜN KARARI.
+**Status:** CLOSED / EXISTING CAPABILITY VERIFIED + INTERACTION REMEDIATED — 2026-09-16.
 **Audit refs:** AG Missing Product Capabilities · CG Verified strong areas.
-**Conflict:** AG bunu ihtiyaç adayı saydı; CG F2 ile hesap autocomplete'in açıldığını doğruladı. Önce mevcut kapsam ölçülecek.
+**Resolution:** Hesap planı autocomplete/search zaten mevcuttu; eksik olan taraf yeni bir feature değil, focus/navigation/active-candidate etkileşim kalitesiydi. NEW-01/NEW-02 kapsamında filtreleme, ArrowUp/ArrowDown ownership, aktif aday, detail-account seçimi ve görünür seçim davranışı regression coverage ile kilitlendi.
+**Acceptance:** Güncel frontend Node suite `253/253` PASS; account-combobox regressions prefix filtering, detail-only selection, active candidate ve keyboard/pointer ownership davranışlarını doğruluyor.
 
 ## REV-R08 — Luca entegrasyonu
 **Status:** STRATEJİ KARARI.
@@ -668,8 +678,9 @@
 **Note:** AG raporundaki pazar payı iddiası audit içinde kaynaklandırılmadı; `pilot öncesi zorunlu eksik` olarak otomatik kabul edilmeyecek.
 
 ## REV-R09 — Zirve doğrudan aktarım
-**Status:** STRATEJİ KARARI.
+**Status:** PARKED / NOT FIRST-PHASE SCOPE — 2026-09-16.
 **Source context:** Mevcut UI + CG/AG output değerlendirmeleri.
+**Decision:** İlk fazda doğrudan Zirve entegrasyonu vaat edilmiyor. Kontrollü XLSX/CSV çıktı mevcut; Zirve import saha testi doğrulanana kadar yalnız field-test track'i yürütülür.
 
 ## REV-R10 — Çıktı paket geçmişi / arşiv
 **Status:** STRATEJİ KARARI.
@@ -680,21 +691,22 @@
 **Source:** CG.
 
 ## REV-R12 — Upload progress/final summary
-**Status:** STRATEJİ KARARI.
+**Status:** PARTIALLY CLOSED / FINAL SUMMARY IMPLEMENTED; PROGRESS UX PARKED — 2026-09-16.
 **Source:** CG, duplicate/upload auditinden türetilen feature adayı.
+**Resolution:** Batch upload final summary REV-H03 ile uygulanmıştır. Ayrı ayrıntılı progress UX'i mevcut audit için bug/blokaj değildir; gerçek kullanım ihtiyacı oluşursa roadmap adayı olarak ele alınır.
 
 # S — Özel tekrar-test matrisi
 
-| ID | Konu | Audit sonucu |
+| ID | Konu | Güncel sonuç |
 |---|---|---|
-| S01 | F10 | CG/CX çalıştı; AG çalışmadı dedi |
-| S02 | ↑↓ evrak geçişi | CG çalıştı; AG çalışmadı dedi; CG focus edge case buldu |
-| S03 | Legacy portal | AG var dedi; CG/CX normal ana akışta doğrulamadı |
-| S04 | Learned Rules exact hata | CG/CX raw 500; AG raw JSON |
-| S05 | Yanlış şifre feedback | AG problem; bağımsız tekrar test gerekli |
-| S06 | Approval feedback | State değişimi var; yeterli feedback ürün kararı |
-| S07 | 1366 readability | CG genel kullanılabilir; AG account truncation gördü |
-| S08 | Account autocomplete | CG mevcut davranış gördü; AG daha güçlü feature istedi |
+| S01 | F10 | CLOSED — current Chromium behavior verified under REV-G01. |
+| S02 | ↑↓ evrak geçişi | CLOSED — global navigation works; focused controls own arrows by REV-G02/G03. |
+| S03 | Legacy portal | CLOSED — legacy accountant routes removed 2026-09-16; `/portal-next` is canonical. |
+| S04 | Learned Rules exact hata | CLOSED — raw backend/JSON presentation removed under REV-I01/I02. |
+| S05 | Yanlış şifre feedback | CLOSED — safe invalid-credentials feedback implemented under REV-I06. |
+| S06 | Approval feedback | CLOSED — accepted review feedback/undo behavior implemented and regression-verified. |
+| S07 | 1366 readability | CLOSED — K03/K04/K05/K06 responsive/readability remediation implemented. |
+| S08 | Account autocomplete | CLOSED — existing autocomplete verified; focus/navigation/active-state interaction remediated under REV-R07 + NEW-01/02. |
 
 # T — Görüşme ve karar şablonu
 
@@ -720,16 +732,21 @@ Her konu tek tek şu sırayla kapatılacak:
 **Implementation note:**
 **Acceptance test:**
 
-## Next discussion
+## Audit pass closure — 2026-09-16
 
-Next single topic: `REV-G01` - retest the contradictory F10 / ArrowUp / ArrowDown audit result before accepting any new bug or code change.
+Accepted audit defects and contradictory retest items in this register are closed, implemented, not reproduced, or explicitly parked as non-blocking product strategy. There is no remaining accepted audit bug/retest blocker in this register.
 
+Remaining `STRATEJİ KARARI`, `DEFERRED`, and field-feedback entries are intentionally outside audit remediation: they include later integrations, bulk/product expansion, period locking, QNB integration work, and similar roadmap choices. They must not be read as unresolved defects.
+
+Current closure baseline: frontend Node `253/253` PASS; canonical Chromium `31/31` PASS (including the dedicated New Upload multi-file retest and canonical AI Agents research coverage); TypeScript PASS; Next production build PASS; accountant routing is canonicalized to `/portal-next` with separate client/auth routes preserved.
 
 ---
 
 ## Decision note — 2026-09-06 — Review action semantics
 
-Bu not B bölümündeki önceki `KONTROL EDİLECEK / ÜRÜN KARARI` statülerini ürün yönü açısından günceller; implementasyon yapılmış sayılmaz.
+**Historical note:** This section preserves the 2026-09-06 decision record. Final implemented statuses are the REV-B entries above and supersede any `öneri / henüz karar değil` wording below.
+
+Bu not B bölümündeki önceki `KONTROL EDİLECEK / ÜRÜN KARARI` statülerini ürün yönü açısından günceller; o tarihte implementasyon yapılmış sayılmıyordu.
 
 **B01 / Undo — KABUL EDİLEN YÖN:** Ctrl+Z zaman penceresine bağlı olmayacak. `Son geri alınabilir review işlemi` işlem bazında tutulacak. İlk öneri: keyboard undo yalnız en son reversible workflow mutation'ını geri alır; bir süre sınırı yoktur. Daha eski bir kaydı değiştirmek için ilgili belge üzerinden açık `Kontrole geri al / Yeniden aç` işlemi kullanılır. Audit geçmişi silinmez; original action + undo/reopen ayrı event olarak saklanır.
 

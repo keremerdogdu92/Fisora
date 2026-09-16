@@ -467,7 +467,6 @@ test("generated HTML journal keeps source focus when accountant description diff
   await setupInspector(page, "generated-anchor.html", "text/html", html, (workspace) => {
     const result = workspace.documents[0].result as Record<string, unknown>;
     result["draft_status"] = "draft_ready";
-    result["source_review_rows"] = [];
     result["draft_lines"] = [{
       account_code: "770.01",
       description: "Kargo gideri",
@@ -481,6 +480,7 @@ test("generated HTML journal keeps source focus when accountant description diff
   });
   await openInspectorDocument(page, ".html-document-viewer");
   const journalRow = page.locator(".journal-source-row").first();
+  await expect(journalRow.locator("input").nth(0)).toHaveValue("770.01");
   await expect(journalRow.locator("input").nth(1)).toHaveValue("Kargo gideri");
   await journalRow.hover();
   await expect(page.frameLocator(".html-viewer-frame").locator("#lineTable #fisora-source-target")).toBeVisible();
@@ -490,7 +490,6 @@ test("generated PDF journal keeps source focus when accountant description diffe
   await setupInspector(page, "generated-anchor.pdf", "application/pdf", pdfBytes(SOURCE_TEXT), (workspace) => {
     const result = workspace.documents[0].result as Record<string, unknown>;
     result["draft_status"] = "draft_ready";
-    result["source_review_rows"] = [];
     result["draft_lines"] = [{
       account_code: "770.01",
       description: "Kargo gideri",
@@ -504,6 +503,7 @@ test("generated PDF journal keeps source focus when accountant description diffe
   });
   await openInspectorDocument(page, ".pdf-document-viewer");
   const journalRow = page.locator(".journal-source-row").first();
+  await expect(journalRow.locator("input").nth(0)).toHaveValue("770.01");
   await expect(journalRow.locator("input").nth(1)).toHaveValue("Kargo gideri");
   await journalRow.hover();
   await expect(page.locator(".pdf-source-highlight")).toBeVisible();
@@ -514,7 +514,6 @@ test("multi-source HTML journal highlights all contributing invoice rows", async
   await setupInspector(page, "multi-anchor.html", "text/html", html, (workspace) => {
     const result = workspace.documents[0].result as Record<string, unknown>;
     result["draft_status"] = "draft_ready";
-    result["source_review_rows"] = [];
     result["draft_lines"] = [{
       account_code: "770.01",
       description: "Toplam hizmet gideri",
@@ -550,7 +549,6 @@ test("multi-source PDF journal highlights all contributing invoice rows", async 
   await setupInspector(page, "multi-anchor.pdf", "application/pdf", pdfBytesLines([SOURCE_TEXT, SECOND_SOURCE_TEXT]), (workspace) => {
     const result = workspace.documents[0].result as Record<string, unknown>;
     result["draft_status"] = "draft_ready";
-    result["source_review_rows"] = [];
     result["draft_lines"] = [{
       account_code: "770.01",
       description: "Toplam hizmet gideri",
@@ -593,7 +591,6 @@ test("journal stays readable through narrow desktop two-tier layout", async ({ p
     });
     const result = workspace.documents[0].result as Record<string, unknown>;
     result["draft_status"] = "draft_ready";
-    result["source_review_rows"] = [];
     result["draft_lines"] = [{
       account_code: "770.01.003",
       description: "Kargo gideri",

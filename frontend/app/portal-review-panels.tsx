@@ -813,10 +813,10 @@ export function JournalPanel({
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const noPosting = document.status === "no_posting_required" || document.draftStatus === "no_posting_required";
   const excluded = document.status === "excluded";
-  const sourceReviewMode = !isStatement && Boolean(document.sourceReviewRows?.length);
   const accountingDraftLines = journalDraftLinesForDocument(document, selectedStatementLineNo);
-  const sourceReviewDraftLines = sourceReviewDraftLinesForDocument(document);
-  const generatedDraftLines = sourceReviewMode ? sourceReviewDraftLines : accountingDraftLines;
+  const sourceReviewMode = !isStatement && !accountingDraftLines.length && Boolean(document.sourceReviewRows?.length);
+  const sourceReviewDraftLines = sourceReviewMode ? sourceReviewDraftLinesForDocument(document) : [];
+  const generatedDraftLines = accountingDraftLines.length ? accountingDraftLines : sourceReviewDraftLines;
   const activeDraftLines = noPosting ? [] : (correctionDraft.manualDraftLines.length ? correctionDraft.manualDraftLines : generatedDraftLines);
   const totals = draftTotals(activeDraftLines);
   const needsManualDraft = !noPosting && !sourceReviewMode && (!generatedDraftLines.length || document.draftStatus === "manual_draft_required");

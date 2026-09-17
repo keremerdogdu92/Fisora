@@ -524,6 +524,22 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
     )
 
 
+def _build_final_accountant_provider(source: Mapping[str, str] | Any) -> object:
+    direct_key = str(source.get("DEEPSEEK_API_KEY", "") or "").strip()
+    if direct_key:
+        base_url = str(source.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com") or "https://api.deepseek.com").rstrip("/")
+        return ChatCompletionsAccountingProvider(
+            api_key=direct_key,
+            model=str(source.get("DEEPSEEK_FLASH_MODEL", "deepseek-v4-flash") or "deepseek-v4-flash"),
+            chat_completions_url=f"{base_url}/chat/completions",
+            provider_name="deepseek", key_name="DEEPSEEK_API_KEY",
+            timeout_seconds=float(source.get("FISORA_DEEPSEEK_TIMEOUT_SECONDS", "120")),
+            max_tokens=int(source.get("FISORA_DEEPSEEK_MAX_TOKENS", "16384")),
+            request_body_overrides={"thinking": {"type": "enabled"}, "reasoning_effort": str(source.get("FISORA_DEEPSEEK_REASONING_EFFORT", "low") or "low")},
+        )
+    return _accounting_provider_from_env("xkiro", source)
+
+
 SUPPORTED_ACCOUNTING_PROVIDERS = {
     "gemini",
     "openai",
@@ -1466,7 +1482,7 @@ def _run_gemini_pdf_v2_for_worker(
         profile = (workspace.get("client") or {}).get("profile") or {}
         source_hash = sha256(source_bytes).hexdigest()
         try:
-            final_provider = _accounting_provider_from_env("xkiro", environ)
+            final_provider = _build_final_accountant_provider(environ)
         except ValueError as exc:
             raise RetryableDocumentTechnicalError("three_stage_final_provider_unavailable") from exc
         processing_snapshot: dict[str, Any] = {
@@ -2873,7 +2889,7 @@ def _process_html_source_job(
                     )
                 planner_provider = runtime.provider
             try:
-                final_provider = _accounting_provider_from_env("xkiro", environ)
+                final_provider = _build_final_accountant_provider(environ)
             except ValueError as exc:
                 raise RetryableDocumentTechnicalError("html_accounting_final_provider_unavailable") from exc
 

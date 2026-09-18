@@ -463,7 +463,7 @@ test("shared login gateway uses the portal-next product language", () => {
   assert.match(styles, /--gateway-ink:\s*#172033/);
 });
 
-test("next quick upload keeps invoice staging separate from the accounting workbench", () => {
+test("next quick upload auto-dispatches invoice files outside the accounting workbench", () => {
   const portalApp = source("portal-app.tsx");
   const uploadView = source("portal-next", "portal-next-upload-view.tsx");
   const shell = source("portal-next", "portal-next-shell.tsx");
@@ -473,8 +473,11 @@ test("next quick upload keeps invoice staging separate from the accounting workb
   assert.match(portalApp, /<PortalNextUploadView/);
   assert.match(uploadView, /"purchase_invoice"/);
   assert.match(uploadView, /"sales_invoice"/);
-  assert.match(uploadView, /accept="\.pdf,\.html,\.htm,\.xml,\.zip"/);
-  assert.match(uploadView, /onUpload\(pendingFiles\)/);
+  assert.match(uploadView, /accept="\.pdf,\.html,\.htm,\.xml"/);
+  assert.doesNotMatch(uploadView, /accept="[^"]*\.zip/);
+  assert.match(uploadView, /selectFilesAndUpload\(Array\.from\(event\.currentTarget\.files/);
+  assert.match(uploadView, /void startUpload\(batch\)/);
+  assert.match(uploadView, /onUpload\(filesToUpload\)/);
   assert.match(uploadView, /formatPortalDateTime\(document\.uploadedAt\)/);
   assert.match(uploadView, /Son yüklemeler/);
 });

@@ -898,7 +898,7 @@ class Phase0ServiceTests(unittest.TestCase):
         candidate_details = learning_events[0]["details"]
         self.assertEqual(candidate_details["scope"], "client_counterparty")
         self.assertEqual(candidate_details["action"], "suggest_for_similar")
-        self.assertEqual(candidate_details["suggested_account_code"], "760.03.010")
+        self.assertEqual(candidate_details["suggested_account_code"], "")
         interpreted_details = learning_events[1]["details"]
         self.assertEqual(interpreted_details["reason_codes"], ["counterparty_tax_id_rule", "account_rule"])
         self.assertIn("760.03.010", interpreted_details["applied_effect_tr"])
@@ -996,7 +996,10 @@ class Phase0ServiceTests(unittest.TestCase):
             workspace = store.get_workspace("client-1")
 
         self.assertEqual(preview["rule_interpretation"]["status"], "ready")
-        self.assertEqual(preview["natural_language_rule_candidate"]["suggested_account_code"], "760.03.010")
+        candidate = preview["natural_language_rule_candidate"]
+        self.assertEqual(candidate["binding_mode"], "semantic_role")
+        self.assertEqual(candidate["semantic_accounting_intent"], "kargo_gideri")
+        self.assertEqual(candidate["suggested_account_code"], "")
         self.assertEqual(workspace["learning_events"], [])
 
     def test_confirmed_rule_interpretation_is_persisted_on_learning_event(self) -> None:
@@ -1110,7 +1113,10 @@ class Phase0ServiceTests(unittest.TestCase):
 
         self.assertEqual(saved["learning_rule"]["status"], "active")
         self.assertEqual(len(active), 1)
-        self.assertEqual(active[0]["account_code"], "760.03.010")
+        self.assertEqual(active[0]["binding_mode"], "semantic_role")
+        self.assertEqual(active[0]["semantic_role"], "expense")
+        self.assertEqual(active[0]["semantic_intent"], "kargo_gideri")
+        self.assertEqual(active[0]["account_code"], "")
         self.assertEqual(active[0]["confirmed_by"], "mali-musavir")
         self.assertIn(
             "learning_rule_activated",

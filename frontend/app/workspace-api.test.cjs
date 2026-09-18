@@ -155,11 +155,20 @@ const workspaceRecord = {
         },
         rule_prompt: {
           show: true,
+          status: "client_repeat_prompt",
+          prompt_key: "repeat:kargo:770.01.004",
           default_scope: "client_narrow",
           message: "Bu karari 3 kez benzer sekilde verdiniz.",
           client_consistent_decision_count: 3,
           office_distinct_client_count: 1,
           office_consistent_decision_count: 3,
+          evidence_documents: [
+            { document_ref: "doc-a", issue_date: "2026-09-01" },
+            { document_ref: "doc-b", issue_date: "2026-09-05" },
+            { document_ref: "doc-c", issue_date: "2026-09-10" },
+          ],
+          utility_precedent: {},
+          suggested_note: "Kargo hizmetlerini 770.01.004 hesabinda izle.",
         },
         accounting_direction: "sales",
         selected_expense_account: "",
@@ -423,11 +432,20 @@ test("normalizeBackendWorkspaces maps backend workspace records into portal data
   assert.equal(data.documents[0].accountingIntentConfidence, 84);
   assert.deepEqual(data.documents[0].rulePrompt, {
     show: true,
+    status: "client_repeat_prompt",
+    promptKey: "repeat:kargo:770.01.004",
     defaultScope: "client_narrow",
     message: "Bu karari 3 kez benzer sekilde verdiniz.",
     clientConsistentDecisionCount: 3,
     officeDistinctClientCount: 1,
     officeConsistentDecisionCount: 3,
+    evidenceDocuments: [
+      { documentRef: "doc-a", issueDate: "2026-09-01" },
+      { documentRef: "doc-b", issueDate: "2026-09-05" },
+      { documentRef: "doc-c", issueDate: "2026-09-10" },
+    ],
+    utilityPrecedent: {},
+    suggestedNote: "Kargo hizmetlerini 770.01.004 hesabinda izle.",
   });
   assert.equal(data.documents[0].learningRuleSourceSummary, "Bu oneride 3 onceki musavir karari kullanildi.");
   assert.deepEqual(data.documents[0].ruleInterpretation, {

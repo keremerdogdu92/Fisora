@@ -1057,7 +1057,9 @@ async function storeReviewDecision({
   if (normalizedInterpretation) {
     payload.decision.confirmed_rule_interpretation = normalizedInterpretation;
   }
-  if (normalizedDraftLines.length) {
+  const learningOnlyDecision = String(action || "") === "suggest_for_similar"
+    && Boolean(learningConfirmation && learningConfirmation !== "none");
+  if (normalizedDraftLines.length && !learningOnlyDecision) {
     payload.decision.draft_lines = normalizedDraftLines;
   }
   const readerStatus = String(validation?.readerStatus || validation?.reader_status || "");
@@ -1270,9 +1272,6 @@ async function previewReviewRule({
       statement_line_no: Number(statementLineNo || 0),
     },
   };
-  if (normalizedDraftLines.length) {
-    payload.decision.draft_lines = normalizedDraftLines;
-  }
   const response = await fetchImpl(`${trimSlashes(apiBaseUrl)}/phase0/store/review-rule/preview`, {
     method: "POST",
     headers: {

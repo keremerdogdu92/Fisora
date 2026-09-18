@@ -1445,7 +1445,7 @@ test("storeReviewDecision marks one-click rule requests as apply-to-similar", as
   assert.equal(JSON.parse(request.init.body).decision.action, "suggest_for_similar");
 });
 
-test("previewReviewRule posts accountant note and draft context without storing a decision", async () => {
+test("previewReviewRule posts accountant note without draft-line validation context", async () => {
   let request;
   const fetchImpl = async (url, init) => {
     request = { url, init };
@@ -1474,7 +1474,7 @@ test("previewReviewRule posts accountant note and draft context without storing 
   assert.equal(request.url, "http://localhost:8000/phase0/store/review-rule/preview");
   assert.equal(payload.client_id, "client-1");
   assert.equal(payload.decision.decision_note, "Bundan sonra bu VKN'den gelen faturalar kargo gideridir.");
-  assert.equal(payload.decision.draft_lines[0].account_code, "760.03.010");
+  assert.equal(Object.hasOwn(payload.decision, "draft_lines"), false);
   assert.equal(result.rule_interpretation.status, "ready");
 });
 
@@ -1511,6 +1511,44 @@ test("storeReviewDecision includes learning confirmation and confirmed interpret
   assert.equal(decision.learning_confirmation, "save_rule");
   assert.equal(decision.confirmed_rule_interpretation.summary_tr, "Kargo gideri onerilecek.");
   assert.deepEqual(decision.confirmed_rule_interpretation.reason_codes, ["account_rule"]);
+});
+
+test("storeReviewDecision omits draft lines for learning-only save_rule decisions", async () => {
+  let request;
+  const fetchImpl = async (url, init) => {
+    request = { url, init };
+    return { ok: true, json: async () => ({ learning_rule: { status: "active" } }) };
+  };
+
+  await storeReviewDecision({
+    apiBaseUrl: "http://localhost:8000",
+    clientId: "client-1",
+    userId: "mali-musavir",
+    documentRef: "pilot.html",
+    action: "suggest_for_similar",
+    reviewer: "mali-musavir",
+    correctedAccountCode: "770.01.004",
+    decisionNote: "FISORA PILOT TEST HIZMETI ALFA ve BETA 770.01.004 hesabina alinir.",
+    learningConfirmation: "save_rule",
+    confirmedRuleInterpretation: {
+      status: "ready",
+      summaryTr: "Pilot hizmet gideri 770.01.004 hesabina alinir.",
+      triggerTr: "FISORA PILOT TEST HIZMETI ALFA BETA",
+      actionTr: "Hesap 770.01.004",
+      guardrailTr: "Yalniz pilot test satirlarinda uygulanir.",
+      confidence: 95,
+      reasonCodes: ["account_rule"],
+    },
+    draftLines: [
+      { account_code: "770.01.004", description: "Pilot hizmet", debit: "352.34", credit: "0.00" },
+      { account_code: "320.", description: "Cari ust hesap", debit: "0.00", credit: "422.81" },
+    ],
+    fetchImpl,
+  });
+
+  const decision = JSON.parse(request.init.body).decision;
+  assert.equal(decision.learning_confirmation, "save_rule");
+  assert.equal(Object.hasOwn(decision, "draft_lines"), false);
 });
 
 test("reprocessDocument posts an existing document back to the processing queue", async () => {

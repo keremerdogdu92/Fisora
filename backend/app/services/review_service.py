@@ -19,6 +19,7 @@ from app.domain.chart_accounts import normalize_account_code
 from app.domain.learning_intelligence import enrich_learning_event
 from app.domain.review_rule_interpretation import build_review_rule_interpretation
 from app.domain.review_learning import ReviewDecision, build_learning_event
+from app.domain.workspace_review_updates import is_learning_only_review_decision
 from app.persistence.normalized_accounting_repository import (
     NormalizedAccountingError,
     NormalizedRevisionConflict,
@@ -175,6 +176,7 @@ class ReviewService:
         workspace = self.store.get_workspace(payload.client_id)
         document = workspace_document(workspace, payload.decision.document_ref)
         decision = self._validated_review_decision(payload.decision, workspace=workspace, document=document)
+        learning_only = is_learning_only_review_decision(decision.model_dump())
         event = self._enriched_learning_event(
             client_id=payload.client_id,
             decision=decision,
@@ -240,7 +242,7 @@ class ReviewService:
         if learning_rule_result is not None and isinstance(saved, dict):
             saved["learning_rule"] = learning_rule_result
         document_ref = decision.document_ref
-        if (
+        if not learning_only and (
             decision.corrected_account_code.strip()
             or decision.corrected_counterparty_code.strip()
             or decision.draft_lines
@@ -277,28 +279,29 @@ class ReviewService:
             )
         corrected_document = saved.get("corrected_document") if isinstance(saved, dict) else None
         corrected_result = corrected_document.get("result") if isinstance(corrected_document, dict) else {}
-        self.store.record_document_pipeline_event(
-            client_id=payload.client_id,
-            document_ref=document_ref,
-            step="journal_saved",
-            status="ok",
-            message_tr="Muhasebe fişi kaydedildi.",
-            debug_code="journal_saved",
-            details={
-                "action": decision.action,
-                "export_status": str(corrected_result.get("export_status") or ""),
-            },
-        )
-        if isinstance(corrected_result, dict) and corrected_result.get("export_status") == "export_ready":
+        if not learning_only:
             self.store.record_document_pipeline_event(
                 client_id=payload.client_id,
                 document_ref=document_ref,
-                step="export_ready",
+                step="journal_saved",
                 status="ok",
-                message_tr="Muhasebe fişi kaydedildi; exporta gönderilebilir durumda.",
-                debug_code="export_ready",
-                details={"action": decision.action},
+                message_tr="Muhasebe fişi kaydedildi.",
+                debug_code="journal_saved",
+                details={
+                    "action": decision.action,
+                    "export_status": str(corrected_result.get("export_status") or ""),
+                },
             )
+            if isinstance(corrected_result, dict) and corrected_result.get("export_status") == "export_ready":
+                self.store.record_document_pipeline_event(
+                    client_id=payload.client_id,
+                    document_ref=document_ref,
+                    step="export_ready",
+                    status="ok",
+                    message_tr="Muhasebe fişi kaydedildi; exporta gönderilebilir durumda.",
+                    debug_code="export_ready",
+                    details={"action": decision.action},
+                )
         self.record_operation_event(
             store=self.store,
             client_id=payload.client_id,

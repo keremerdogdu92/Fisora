@@ -16,6 +16,13 @@ REVIEW_REQUIRED_ACTIONS = {"wrong_account", "wrong_counterparty", "review_requir
 DIRECTION_CONFLICT_ACTIONS = {"accept_detected_direction", "keep_upload_direction"}
 
 
+def is_learning_only_review_decision(decision: dict[str, Any]) -> bool:
+    return (
+        str(decision.get("action") or "") == "suggest_for_similar"
+        and str(decision.get("learning_confirmation") or "") in {"save_rule", "suggest_similar"}
+    )
+
+
 def apply_review_decision_to_document(
     document: dict[str, Any],
     *,

@@ -24,6 +24,7 @@ from app.domain.session_auth import auth_token_public_payload, credential_public
 from app.domain.qnb_credentials import QnbCredentialCipher
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
+    is_learning_only_review_decision,
     mark_export_package_downloaded,
 )
 from app.persistence.workflow_store import (
@@ -3283,7 +3284,8 @@ class PostgresWorkflowStore:
         document_ref = str(decision.get("document_ref") or learning_event.get("document_ref") or "")
         document = self._get_record(client_id, "document", document_ref)
         corrected_document: dict[str, Any] | None = None
-        if document is not None:
+        learning_only = is_learning_only_review_decision(decision)
+        if document is not None and not learning_only:
             corrected_document = apply_review_decision_to_document(
                 document,
                 decision=decision,

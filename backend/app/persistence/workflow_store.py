@@ -25,6 +25,7 @@ from app.domain.portal_access import (
 from app.domain.session_auth import auth_token_public_payload, credential_public_payload, is_expired, session_public_payload
 from app.domain.workspace_review_updates import (
     apply_review_decision_to_document,
+    is_learning_only_review_decision,
     mark_export_package_downloaded,
 )
 from app.persistence.document_ai_artifact_repository import LocalDocumentAiArtifactRepository
@@ -2437,7 +2438,7 @@ class JsonWorkflowStore:
         )
         document_ref = str(decision.get("document_ref") or learning_event.get("document_ref") or "")
         document_key = self._document_key(client_id, document_ref)
-        if document_key in data["documents"]:
+        if document_key in data["documents"] and not is_learning_only_review_decision(decision):
             corrected_document = apply_review_decision_to_document(
                 data["documents"][document_key],
                 decision=decision,

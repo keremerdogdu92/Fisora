@@ -85,18 +85,53 @@ jobs:
             --output text)"
 
           echo "SSM command: $command_id"
-          set +e
-          aws ssm wait command-executed \
-            --command-id "$command_id" \
-            --instance-id "$INSTANCE_ID"
-          wait_status=$?
-          set -e
+          # The AWS CLI built-in waiter stops after roughly 100 seconds, which is
+          # shorter than a normal Docker rebuild. Poll until the SSM command is terminal.
+          final_status=""
+          wait_status=1
+          for attempt in $(seq 1 330); do
+            status="$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$INSTANCE_ID" \
+              --query 'Status' \
+              --output text 2>/dev/null || true)"
 
+            case "$status" in
+              Success)
+                final_status="$status"
+                wait_status=0
+                break
+                ;;
+              Failed|TimedOut|Cancelled|Cancelling)
+                final_status="$status"
+                wait_status=1
+                break
+                ;;
+              Pending|InProgress|Delayed|"")
+                if [ "$attempt" -eq 330 ]; then
+                  final_status="${status:-Unknown}"
+                  wait_status=124
+                  break
+                fi
+                sleep 5
+                ;;
+              *)
+                final_status="$status"
+                if [ "$attempt" -eq 330 ]; then
+                  wait_status=124
+                  break
+                fi
+                sleep 5
+                ;;
+            esac
+          done
+
+          echo "SSM final status: ${final_status:-Unknown}"
           aws ssm get-command-invocation \
             --command-id "$command_id" \
             --instance-id "$INSTANCE_ID" \
             --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
-            --output json
+            --output json || true
 
           echo "SSM command plugin details:"
           aws ssm list-command-invocations \
@@ -106,6 +141,6 @@ jobs:
             --output json || true
 
           if [ "$wait_status" -ne 0 ]; then
-            echo "Production deploy failed." >&2
+            echo "Production deploy failed with SSM status ${final_status:-Unknown}." >&2
             exit "$wait_status"
           fi

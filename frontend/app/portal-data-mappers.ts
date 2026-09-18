@@ -177,7 +177,13 @@ function normalizeReviewData(raw: ReviewData): PilotData {
       accountantActionHint: safeText(rowRecord.accountantActionHint ?? rowRecord.accountant_action_hint),
       accountantSummary: Array.isArray(row.draftLines) && row.draftLines.length ? "Fiş taslağı hazır." : "Fiş taslağı için manuel kontrol gerekiyor.",
       accountantExplanation: safeText(row.accountantExplanationTr ?? row.accountant_explanation_tr ?? row.aiClassificationReason ?? row.businessRelevanceReason),
-      technicalDetails: {},
+      technicalDetails: (
+        rowRecord.technicalDetails && typeof rowRecord.technicalDetails === "object" && !Array.isArray(rowRecord.technicalDetails)
+          ? rowRecord.technicalDetails
+          : rowRecord.technical_details && typeof rowRecord.technical_details === "object" && !Array.isArray(rowRecord.technical_details)
+            ? rowRecord.technical_details
+            : {}
+      ) as Record<string, unknown>,
       pipelineEvents: [],
       accountingDirection: safeText(row.accountingDirection, toIntakeCategory(row.intakeCategory || inferIntakeCategory("invoice", row.invoiceType)) === "sales_invoice" ? "sales" : "purchase"),
       staticFallbackAccount: safeText(row.staticFallbackAccount ?? rowRecord.static_fallback_account),

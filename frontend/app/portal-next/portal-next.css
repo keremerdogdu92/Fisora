@@ -520,6 +520,7 @@
 
 .portal-next-theme .journal-scroll-area > .panel-heading { order: 0; }
 .portal-next-theme .journal-status-strip { order: 1; }
+.portal-next-theme .learned-rule-audit-panel { order: 2; }
 .portal-next-theme .manual-draft-panel { order: 2; }
 .portal-next-theme .journal-primary-approve { order: 3; }
 .portal-next-theme .dirty-state-strip { order: 4; }
@@ -563,6 +564,36 @@
   border-radius: 0;
   gap: 8px;
   padding: 0;
+}
+
+
+.portal-next-theme .learned-rule-audit-panel {
+  border-radius: 6px;
+  gap: 6px;
+  padding: 7px 8px;
+}
+
+.portal-next-theme .learned-rule-audit-heading strong {
+  font-size: 0.76rem;
+}
+
+.portal-next-theme .learned-rule-audit-heading > div > span,
+.portal-next-theme .learned-rule-audit-copy small {
+  font-size: 0.64rem;
+}
+
+.portal-next-theme .learned-rule-audit-item {
+  gap: 7px;
+  padding: 6px 7px;
+}
+
+.portal-next-theme .learned-rule-audit-copy strong {
+  font-size: 0.72rem;
+}
+
+.portal-next-theme .learned-rule-audit-actions button {
+  min-height: 27px;
+  padding: 3px 7px;
 }
 
 .portal-next-theme .manual-draft-panel > .statement-review-heading {

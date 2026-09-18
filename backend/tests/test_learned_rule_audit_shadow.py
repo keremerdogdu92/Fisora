@@ -191,3 +191,75 @@ def test_shadow_feature_and_client_gates() -> None:
     assert learned_rule_audit_shadow_client_allowed(env, "a")
     assert not learned_rule_audit_shadow_client_allowed(env, "c")
     assert learned_rule_audit_shadow_client_allowed({}, "anything")
+
+
+def test_search_rules_returns_all_boolean_matches_without_scores_or_top_k() -> None:
+    from app.services.learned_rule_audit_shadow import _rule_document, _search_rules
+
+    rules = []
+    for index in range(12):
+        rule = _active_rule()
+        rule["rule_id"] = f"rule-{index:02d}"
+        rule["meaning_label"] = f"MINIFIT HOPARLOR family {index}"
+        rules.append(_rule_document(rule))
+
+    result = _search_rules(
+        rules,
+        query="MINIFIT HOPARLOR",
+        direction="purchase",
+        counterparty_identifier="",
+        result_limit=100,
+    )
+
+    assert result["total_matches"] == 12
+    assert result["overflow"] is False
+    assert len(result["items"]) == 12
+    assert all("search_score" not in item for item in result["items"])
+    assert {item["rule_id"] for item in result["items"]} == {f"rule-{index:02d}" for index in range(12)}
+
+
+def test_search_rules_marks_overflow_instead_of_silently_accepting_partial_results() -> None:
+    from app.services.learned_rule_audit_shadow import _rule_document, _search_rules
+
+    rules = []
+    for index in range(6):
+        rule = _active_rule()
+        rule["rule_id"] = f"overflow-{index}"
+        rules.append(_rule_document(rule))
+
+    result = _search_rules(
+        rules,
+        query="MINIFIT",
+        direction="purchase",
+        result_limit=3,
+    )
+
+    assert result["total_matches"] == 6
+    assert result["overflow"] is True
+    assert len(result["items"]) == 3
+
+
+def test_search_rules_discovers_exact_counterparty_scope_without_phrase_terms() -> None:
+    from app.services.learned_rule_audit_shadow import _rule_document, _search_rules
+
+    rule = {
+        "rule_id": "rule-counterparty",
+        "status": "active",
+        "client_id": "client-1",
+        "direction": "purchase",
+        "scope": "client_counterparty",
+        "counterparty_tax_id": "1234567890",
+        "semantic_role": "expense",
+        "meaning_label": "Counterparty-wide purchase treatment",
+        "account_code": "770.01",
+    }
+
+    result = _search_rules(
+        [_rule_document(rule)],
+        query="unrelated supplier wording",
+        direction="purchase",
+        counterparty_identifier="1234567890",
+    )
+
+    assert result["total_matches"] == 1
+    assert result["items"][0]["match_classes"] == ["exact_counterparty"]

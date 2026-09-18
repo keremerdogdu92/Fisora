@@ -539,6 +539,7 @@ def compact_result(result: object) -> dict[str, object]:
         "statement_ai_summary",
         "statement_entries",
         "statement_lines",
+        "technical_details",
         "static_fallback_account",
         "static_fallback_suppressed",
         "suggested_counterparty_account",

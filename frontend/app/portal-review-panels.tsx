@@ -301,6 +301,69 @@ function qualityText(record: Record<string, unknown>, key: string, fallback = "-
   return String(value);
 }
 
+type LearnedRuleAuditCorrection = {
+  rowId: string;
+  ruleId: string;
+  fromAccount: string;
+  toAccount: string;
+  reason: string;
+};
+
+type LearnedRuleAuditView = {
+  present: boolean;
+  status: string;
+  auditStatus: string;
+  model: string;
+  elapsedMs: number;
+  corrections: LearnedRuleAuditCorrection[];
+  unresolvedRows: string[];
+  validationErrors: string[];
+};
+
+function learnedRuleAuditView(document?: PilotDocument): LearnedRuleAuditView {
+  const technicalDetails = asRecord(document?.technicalDetails);
+  const audit = asRecord(technicalDetails.learned_rule_audit_shadow);
+  const rawCorrections = Array.isArray(audit.corrections) ? audit.corrections : [];
+  const corrections = rawCorrections.map((value) => {
+    const item = asRecord(value);
+    return {
+      rowId: qualityText(item, "row_id", ""),
+      ruleId: qualityText(item, "rule_id", ""),
+      fromAccount: qualityText(item, "from_account", ""),
+      toAccount: qualityText(item, "to_account", ""),
+      reason: qualityText(item, "reason", ""),
+    };
+  }).filter((item) => item.rowId && item.ruleId && item.fromAccount && item.toAccount);
+
+  return {
+    present: Object.keys(audit).length > 0,
+    status: qualityText(audit, "status", ""),
+    auditStatus: qualityText(audit, "audit_status", ""),
+    model: qualityText(audit, "model", ""),
+    elapsedMs: Number(audit.elapsed_ms || 0) || 0,
+    corrections,
+    unresolvedRows: Array.isArray(audit.unresolved_rows) ? audit.unresolved_rows.map(String).filter(Boolean) : [],
+    validationErrors: Array.isArray(audit.validation_errors) ? audit.validation_errors.map(String).filter(Boolean) : [],
+  };
+}
+
+function draftLineMatchesRuleAuditRow(line: DraftLine, rowId: string) {
+  const normalizedRowId = String(rowId || "").trim();
+  if (!normalizedRowId) return false;
+  if (String(line.source_position || "").trim() === normalizedRowId) return true;
+  if ((line.source_anchors || []).some((anchor) => String(anchor.source_position || "").trim() === normalizedRowId)) return true;
+  if ((line.source_line_numbers || []).some((lineNo) => String(lineNo) === normalizedRowId)) return true;
+  return false;
+}
+
+function appendDecisionNote(existing: string, note: string) {
+  const current = existing.trim();
+  if (!current) return note;
+  if (current.includes(note)) return current;
+  return current + "\n" + note;
+}
+
+
 function normalizeRuleInterpretationView(value: unknown): RuleInterpretationView | null {
   const record = asRecord(value);
   const status = qualityText(record, "status", "");
@@ -790,6 +853,7 @@ export function JournalPanel({
   const [counterpartyTaxId, setCounterpartyTaxId] = useState("");
   const [counterpartyStatus, setCounterpartyStatus] = useState("");
   const [counterpartyCreating, setCounterpartyCreating] = useState(false);
+  const [ruleAuditFeedback, setRuleAuditFeedback] = useState<Record<string, "rejected">>({});
 
   useEffect(() => {
     setCounterpartyDrawerLineIndex(null);
@@ -799,6 +863,7 @@ export function JournalPanel({
     setCounterpartyTaxId("");
     setCounterpartyStatus("");
     setCounterpartyCreating(false);
+    setRuleAuditFeedback({});
   }, [document?.id]);
 
   if (!document) {
@@ -810,6 +875,10 @@ export function JournalPanel({
     );
   }
   const activeDocument = document;
+  const ruleAudit = learnedRuleAuditView(document);
+  const ruleAuditActionable = ruleAudit.status === "completed"
+    && ruleAudit.auditStatus === "complete"
+    && ruleAudit.validationErrors.length === 0;
   const isStatement = document.intakeCategory === "bank_statement" || document.statementLines.length > 0;
   const noPosting = document.status === "no_posting_required" || document.draftStatus === "no_posting_required";
   const excluded = document.status === "excluded";
@@ -927,6 +996,49 @@ export function JournalPanel({
     });
   }
 
+  function ruleAuditDraftLineIndex(correction: LearnedRuleAuditCorrection) {
+    return activeDraftLines.findIndex((line) => draftLineMatchesRuleAuditRow(line, correction.rowId));
+  }
+
+  function applyLearnedRuleAuditCorrection(correction: LearnedRuleAuditCorrection) {
+    if (reviewReadOnly || !ruleAuditActionable) return;
+    const index = ruleAuditDraftLineIndex(correction);
+    if (index < 0) return;
+    const currentCode = normalizeAccountCodeInput(activeDraftLines[index]?.account_code || "");
+    const fromCode = normalizeAccountCodeInput(correction.fromAccount);
+    const toCode = normalizeAccountCodeInput(correction.toAccount);
+    if (currentCode !== fromCode && currentCode !== toCode) return;
+
+    const baseLines = correctionDraft.manualDraftLines.length
+      ? correctionDraft.manualDraftLines
+      : generatedDraftLines;
+    if (!baseLines[index]) return;
+    const note = `Öğrenilmiş kural ${correction.ruleId} uygulandı: ${correction.fromAccount} → ${correction.toAccount}. ${correction.reason}`;
+    setCorrectionDraft({
+      ...correctionDraft,
+      accountingValidation: "corrected",
+      manualDraftLines: baseLines.map((line, lineIndex) => (
+        lineIndex === index ? { ...line, account_code: correction.toAccount } : line
+      )),
+      reason: appendDecisionNote(correctionDraft.reason, note),
+    });
+    setRuleAuditFeedback((current) => {
+      const next = { ...current };
+      delete next[correction.rowId];
+      return next;
+    });
+  }
+
+  function rejectLearnedRuleAuditCorrection(correction: LearnedRuleAuditCorrection) {
+    if (reviewReadOnly || !ruleAuditActionable) return;
+    const note = `Öğrenilmiş kural ${correction.ruleId} uygulanmadı: ${correction.fromAccount} → ${correction.toAccount}. ${correction.reason}`;
+    setCorrectionDraft({
+      ...correctionDraft,
+      reason: appendDecisionNote(correctionDraft.reason, note),
+    });
+    setRuleAuditFeedback((current) => ({ ...current, [correction.rowId]: "rejected" }));
+  }
+
   function addManualDraftLine() {
     setCorrectionDraft({
       ...correctionDraft,
@@ -1028,6 +1140,64 @@ export function JournalPanel({
             )}
           </div>
         </section>
+        {session?.role === "accountant" && ruleAudit.present && !noPosting && !isStatement ? (
+          <section className={`learned-rule-audit-panel ${ruleAudit.corrections.length ? "has-corrections" : "no-corrections"}`} aria-label="Öğrenilmiş kural kontrolü">
+            <div className="learned-rule-audit-heading">
+              <div>
+                <strong>Öğrenilmiş kural kontrolü</strong>
+                <span>
+                  {ruleAudit.model || "Kural denetimi"}
+                  {ruleAudit.elapsedMs ? ` · ${(ruleAudit.elapsedMs / 1000).toFixed(1)} sn` : ""}
+                </span>
+              </div>
+              <span className={`learned-rule-audit-state ${ruleAuditActionable ? "ready" : "warning"}`}>
+                {ruleAuditActionable ? (ruleAudit.corrections.length ? `${ruleAudit.corrections.length} öneri` : "Değişiklik yok") : "Kontrol tamamlanamadı"}
+              </span>
+            </div>
+            {!ruleAuditActionable ? (
+              <div className="learned-rule-audit-warning">
+                <strong>Bu sonuç uygulanamaz.</strong>
+                <span>
+                  {[...ruleAudit.validationErrors, ...ruleAudit.unresolvedRows.map((rowId) => `Çözümlenemeyen satır: ${rowId}`)].join(" · ") || "Kural denetimi tamamlanmadı."}
+                </span>
+              </div>
+            ) : ruleAudit.corrections.length ? (
+              <div className="learned-rule-audit-list">
+                {ruleAudit.corrections.map((correction) => {
+                  const lineIndex = ruleAuditDraftLineIndex(correction);
+                  const currentCode = lineIndex >= 0 ? normalizeAccountCodeInput(activeDraftLines[lineIndex]?.account_code || "") : "";
+                  const fromCode = normalizeAccountCodeInput(correction.fromAccount);
+                  const toCode = normalizeAccountCodeInput(correction.toAccount);
+                  const applied = Boolean(currentCode && currentCode === toCode);
+                  const stale = Boolean(currentCode && currentCode !== fromCode && currentCode !== toCode);
+                  const rejected = ruleAuditFeedback[correction.rowId] === "rejected";
+                  const accountName = chartAccountNameForCode(document.chartAccounts, correction.toAccount);
+                  const applyDisabled = reviewReadOnly || lineIndex < 0 || stale || applied || rejected;
+                  return (
+                    <article className={`learned-rule-audit-item${applied ? " applied" : ""}${rejected ? " rejected" : ""}`} key={`${correction.rowId}-${correction.ruleId}`}>
+                      <div className="learned-rule-audit-copy">
+                        <span>Kaynak satır {correction.rowId} · Kural {correction.ruleId.slice(0, 8)}</span>
+                        <strong>{correction.fromAccount} → {correction.toAccount}{accountName ? ` · ${accountName}` : ""}</strong>
+                        <small>{correction.reason || "Aktif öğrenilmiş kural bu hesap değişikliğini öneriyor."}</small>
+                        {lineIndex < 0 ? <em>Fiş satırıyla kaynak eşleşmesi bulunamadı; manuel kontrol gerekli.</em> : null}
+                        {stale ? <em>Fiş bu öneriden sonra değişmiş; öneri otomatik uygulanamaz.</em> : null}
+                      </div>
+                      <div className="learned-rule-audit-actions">
+                        {applied ? <span className="learned-rule-audit-feedback">Uygulandı</span> : rejected ? <span className="learned-rule-audit-feedback">Doğru değil</span> : null}
+                        <button disabled={applyDisabled} onClick={() => applyLearnedRuleAuditCorrection(correction)} type="button">Uygula</button>
+                        <button className="secondary" disabled={reviewReadOnly || rejected || applied} onClick={() => rejectLearnedRuleAuditCorrection(correction)} type="button">Doğru değil</button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="learned-rule-audit-no-change">
+                Aktif öğrenilmiş kurallara göre fiş hesabında değişiklik önerilmedi.
+              </div>
+            )}
+          </section>
+        ) : null}
         {reviewReadOnly ? (
           <section className="review-lock-notice" role="status" aria-label="Belge düzenleme kilidi">
             <div>

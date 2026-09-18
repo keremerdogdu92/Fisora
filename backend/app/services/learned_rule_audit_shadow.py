@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-import re
 from typing import Any, Mapping, Sequence
 
 from app.domain.learning_intelligence import normalize_text
 
 
-PROMPT_VERSION = "learned-rule-audit-shadow-v3-20260918"
+PROMPT_VERSION = "learned-rule-audit-shadow-v4-20260918"
 _ENABLED_VALUES = {"1", "true", "yes", "on"}
 
 TEXT = {"type": "string"}
@@ -115,8 +114,8 @@ CANDIDATE_INSTRUCTIONS = """
 You are stage 2 of a learned-rule audit. You receive row-local candidate summaries returned by completed
 rule-store searches. Candidate refs such as C1, C2 are opaque and local to one row.
 For every row select every candidate whose summary could plausibly cover that exact row and therefore needs
-its full rule content opened. Search rank, lexical overlap, title, and account code are discovery signals only.
-A broad candidate does not eliminate a narrower one. Select only refs listed for that same row.
+its full rule content opened. Search matches, titles, declared terms, scope, and account codes are discovery
+signals only. A broad candidate does not eliminate a narrower one. Select only refs listed for that same row.
 Do not decide whether a rule actually applies and do not make accounting decisions.
 Return exactly one row_candidates item per row.
 """.strip()
@@ -223,6 +222,7 @@ def run_learned_rule_audit_shadow(
     search_plan = _row_map(search_stage.value.get("row_plans"), rows, "search_plan")
     search_results: dict[str, list[dict[str, Any]]] = {}
     search_call_count = 0
+    errors: list[str] = []
     for row in rows:
         row_id = row["row_id"]
         queries = _unique_texts(search_plan[row_id].get("queries") or ())
@@ -230,8 +230,18 @@ def run_learned_rule_audit_shadow(
             raise ValueError(f"learned_rule_audit_empty_search_plan:{row_id}")
         results = []
         for query in queries:
-            results.append(_search_rules(rules, query=query, direction=direction))
+            search_result = _search_rules(
+                rules,
+                query=query,
+                direction=direction,
+                counterparty_identifier=str(invoice.get("counterparty_identifier") or ""),
+            )
+            results.append(search_result)
             search_call_count += 1
+            if search_result.get("overflow"):
+                errors.append(
+                    f"search_result_overflow:{row_id}:{query}:{search_result.get('total_matches', 0)}"
+                )
         search_results[row_id] = results
 
     catalogs, ref_maps = _candidate_catalogs(search_results)
@@ -253,7 +263,6 @@ def run_learned_rule_audit_shadow(
 
     opened_by_row: dict[str, dict[str, dict[str, Any]]] = {}
     get_rule_call_count = 0
-    errors: list[str] = []
     rule_by_id = {item["rule_id"]: item for item in rules}
     for row in rows:
         row_id = row["row_id"]
@@ -510,47 +519,78 @@ def _search_rules(
     *,
     query: str,
     direction: str,
+    counterparty_identifier: str = "",
+    result_limit: int = 100,
 ) -> dict[str, Any]:
+    """Return boolean discovery matches without score thresholds or top-k ranking."""
     query_text = normalize_text(query)
-    query_terms = set(query_text.split())
-    query_compact = re.sub(r"[^a-z0-9]+", "", query_text)
-    scored: list[tuple[int, Mapping[str, Any]]] = []
+    query_terms = {term for term in query_text.split() if term}
+    counterparty_digits = "".join(character for character in counterparty_identifier if character.isdigit())
+    matches: list[dict[str, Any]] = []
+
     for rule in rules:
         if rule.get("direction") != direction:
             continue
-        text = normalize_text(
-            " ".join(
-                (
-                    str(rule.get("title") or ""),
-                    str(rule.get("counterparty") or ""),
-                    " ".join(str(item) for item in rule.get("search_terms") or ()),
-                    str(rule.get("meaning") or ""),
-                    str(rule.get("guardrail") or ""),
-                )
-            )
+
+        declared_terms = [
+            normalize_text(item)
+            for item in rule.get("search_terms") or ()
+            if normalize_text(item)
+        ]
+        searchable_parts = [
+            normalize_text(rule.get("title") or ""),
+            normalize_text(rule.get("meaning") or ""),
+            normalize_text(rule.get("service_profile") or ""),
+            *declared_terms,
+        ]
+        searchable_text = " ".join(part for part in searchable_parts if part)
+        searchable_terms = {term for term in searchable_text.split() if term}
+        rule_counterparty = "".join(
+            character for character in str(rule.get("counterparty") or "") if character.isdigit()
         )
-        terms = set(text.split())
-        score = 12 * len(query_terms & terms)
-        compact = re.sub(r"[^a-z0-9]+", "", text)
-        if len(query_compact) >= 5 and (
-            query_compact in compact or compact in query_compact
-        ):
-            score += 80
-        if score > 0:
-            scored.append((score, rule))
-    scored.sort(key=lambda item: (-item[0], str(item[1].get("rule_id") or "")))
-    items = [
-        {
-            "rule_id": str(rule.get("rule_id") or ""),
-            "title": str(rule.get("title") or ""),
-            "scope": str(rule.get("scope") or ""),
-            "counterparty": str(rule.get("counterparty") or ""),
-            "direction": str(rule.get("direction") or ""),
-            "search_score": score,
-        }
-        for score, rule in scored[:8]
-    ]
-    return {"query": query, "total_matches": len(scored), "items": items}
+
+        match_classes: list[str] = []
+        if counterparty_digits and rule_counterparty and counterparty_digits == rule_counterparty:
+            match_classes.append("exact_counterparty")
+
+        if query_text:
+            if query_text in searchable_text:
+                match_classes.append("phrase")
+            if query_terms and query_terms.issubset(searchable_terms):
+                match_classes.append("all_query_terms")
+            if any(
+                declared
+                and (declared in query_text or query_text in declared)
+                for declared in declared_terms
+            ):
+                match_classes.append("declared_term")
+
+        if not match_classes:
+            continue
+
+        matches.append(
+            {
+                "rule_id": str(rule.get("rule_id") or ""),
+                "title": str(rule.get("title") or ""),
+                "scope": str(rule.get("scope") or ""),
+                "counterparty": str(rule.get("counterparty") or ""),
+                "direction": str(rule.get("direction") or ""),
+                "search_terms": list(rule.get("search_terms") or ()),
+                "meaning": str(rule.get("meaning") or ""),
+                "service_profile": str(rule.get("service_profile") or ""),
+                "account_code": str(rule.get("account_code") or ""),
+                "match_classes": list(dict.fromkeys(match_classes)),
+            }
+        )
+
+    matches.sort(key=lambda item: str(item.get("rule_id") or ""))
+    overflow = len(matches) > result_limit
+    return {
+        "query": query,
+        "total_matches": len(matches),
+        "overflow": overflow,
+        "items": matches[:result_limit],
+    }
 
 
 def _candidate_catalogs(
@@ -559,31 +599,46 @@ def _candidate_catalogs(
     catalogs: dict[str, list[dict[str, Any]]] = {}
     ref_maps: dict[str, dict[str, str]] = {}
     for row_id, results in search_results.items():
-        seen: set[str] = set()
-        items: list[dict[str, Any]] = []
+        items_by_rule_id: dict[str, dict[str, Any]] = {}
         refs: dict[str, str] = {}
         index = 1
         for result in results:
+            query = str(result.get("query") or "")
             for raw in result.get("items") or ():
                 if not isinstance(raw, Mapping):
                     continue
                 rule_id = str(raw.get("rule_id") or "")
-                if not rule_id or rule_id in seen:
+                if not rule_id:
                     continue
-                seen.add(rule_id)
+                existing = items_by_rule_id.get(rule_id)
+                if existing is not None:
+                    origins = existing["discovered_by_queries"]
+                    if query and query not in origins:
+                        origins.append(query)
+                    classes = existing["match_classes"]
+                    for match_class in raw.get("match_classes") or ():
+                        value = str(match_class)
+                        if value and value not in classes:
+                            classes.append(value)
+                    continue
+
                 candidate_ref = f"C{index}"
                 index += 1
                 refs[candidate_ref] = rule_id
-                items.append(
-                    {
-                        "candidate_ref": candidate_ref,
-                        "title": str(raw.get("title") or ""),
-                        "scope": str(raw.get("scope") or ""),
-                        "counterparty": str(raw.get("counterparty") or ""),
-                        "direction": str(raw.get("direction") or ""),
-                    }
-                )
-        catalogs[row_id] = items
+                items_by_rule_id[rule_id] = {
+                    "candidate_ref": candidate_ref,
+                    "title": str(raw.get("title") or ""),
+                    "scope": str(raw.get("scope") or ""),
+                    "counterparty": str(raw.get("counterparty") or ""),
+                    "direction": str(raw.get("direction") or ""),
+                    "search_terms": list(raw.get("search_terms") or ()),
+                    "meaning": str(raw.get("meaning") or ""),
+                    "service_profile": str(raw.get("service_profile") or ""),
+                    "account_code": str(raw.get("account_code") or ""),
+                    "match_classes": [str(item) for item in raw.get("match_classes") or () if str(item)],
+                    "discovered_by_queries": [query] if query else [],
+                }
+        catalogs[row_id] = list(items_by_rule_id.values())
         ref_maps[row_id] = refs
     return catalogs, ref_maps
 

@@ -667,3 +667,108 @@ test("journal stays readable through narrow desktop two-tier layout", async ({ p
   await expect(page.locator(".portal-next-sidebar")).toHaveClass(/collapsed/);
   await expectReadableJournal(1093);
 });
+
+
+test("learned rule audit suggestion is visible and changes only the matching journal account when applied", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "rule-audit.html", "text/html", html, (workspace) => {
+    workspace.chart_accounts.accounts = [
+      { normalized_account_code: "153.01", account_name: "Cihaz stoku", is_detail_account: true, is_active: true },
+      { normalized_account_code: "153.02", account_name: "Aksesuar stoku", is_detail_account: true, is_active: true },
+    ];
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result.draft_status = "draft_ready";
+    result.draft_lines = [
+      {
+        account_code: "153.02",
+        description: "MINIFIT HOPARLÖR 3R 85",
+        debit: "540.00",
+        credit: "0.00",
+        source_position: "1",
+        source_text: SOURCE_TEXT,
+      },
+    ];
+    result.technical_details = {
+      learned_rule_audit_shadow: {
+        status: "completed",
+        audit_status: "complete",
+        model: "gemini-3.5-flash-lite",
+        elapsed_ms: 5100,
+        corrections: [
+          {
+            row_id: "1",
+            rule_id: "rule-minifit",
+            from_account: "153.02",
+            to_account: "153.01",
+            reason: "Aktif öğrenilmiş MINIFIT hoparlör kuralı bu satırı cihaz stok hesabına yönlendiriyor.",
+          },
+        ],
+        unresolved_rows: [],
+        validation_errors: [],
+      },
+    };
+  });
+
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const auditPanel = page.getByRole("region", { name: "Öğrenilmiş kural kontrolü" });
+  await expect(auditPanel).toBeVisible();
+  await expect(auditPanel).toContainText("153.02 → 153.01");
+  await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.02");
+
+  await auditPanel.getByRole("button", { name: "Uygula", exact: true }).click();
+
+  await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.01");
+  await expect(auditPanel).toContainText("Uygulandı");
+  await expect(page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?")).toContainText("rule-minifit");
+});
+
+test("learned rule audit suggestion can be rejected without changing the journal account", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "rule-audit-reject.html", "text/html", html, (workspace) => {
+    workspace.chart_accounts.accounts = [
+      { normalized_account_code: "153.01", account_name: "Cihaz stoku", is_detail_account: true, is_active: true },
+      { normalized_account_code: "153.02", account_name: "Aksesuar stoku", is_detail_account: true, is_active: true },
+    ];
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result.draft_status = "draft_ready";
+    result.draft_lines = [
+      {
+        account_code: "153.02",
+        description: "MINIFIT HOPARLÖR 3R 85",
+        debit: "540.00",
+        credit: "0.00",
+        source_position: "1",
+        source_text: SOURCE_TEXT,
+      },
+    ];
+    result.technical_details = {
+      learned_rule_audit_shadow: {
+        status: "completed",
+        audit_status: "complete",
+        model: "gemini-3.5-flash-lite",
+        elapsed_ms: 5100,
+        corrections: [
+          {
+            row_id: "1",
+            rule_id: "rule-minifit",
+            from_account: "153.02",
+            to_account: "153.01",
+            reason: "Aktif öğrenilmiş MINIFIT hoparlör kuralı bu satırı cihaz stok hesabına yönlendiriyor.",
+          },
+        ],
+        unresolved_rows: [],
+        validation_errors: [],
+      },
+    };
+  });
+
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const auditPanel = page.getByRole("region", { name: "Öğrenilmiş kural kontrolü" });
+  await auditPanel.getByRole("button", { name: "Doğru değil", exact: true }).click();
+
+  await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.02");
+  await expect(auditPanel).toContainText("Doğru değil");
+  await expect(page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?")).toContainText("uygulanmadı");
+});

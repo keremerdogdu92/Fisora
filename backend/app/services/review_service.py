@@ -497,6 +497,12 @@ class ReviewService:
         document: dict[str, object] | None,
     ) -> dict[str, object]:
         event = self.review_learning_event(decision)
+        office_rule_precedents: tuple[dict[str, object], ...] = ()
+        if self.learning_rule_service is not None:
+            try:
+                office_rule_precedents = tuple(self.learning_rule_service.list_active())
+            except Exception:
+                office_rule_precedents = ()
         return enrich_learning_event(
             event,
             client_id=client_id,
@@ -504,6 +510,7 @@ class ReviewService:
             document=document,
             client_profile=(workspace.get("client") or {}).get("profile") or {},
             prior_learning_events=workspace.get("learning_events") or (),
+            office_rule_precedents=office_rule_precedents,
         )
 
     def _rule_interpretation(

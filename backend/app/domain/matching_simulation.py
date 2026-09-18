@@ -1876,6 +1876,7 @@ def _ai_context(
     suggested_counterparty: str,
     counterparty_title: str,
     counterparty_tax_id: str,
+    semantic_rule_constraint: dict[str, str] | None = None,
 ) -> AiClassificationContext:
     direction_uncertainty = direction_confidence < 70
     if direction_uncertainty:
@@ -1921,7 +1922,18 @@ def _ai_context(
             for hint in utility_hints
         )
     )
-    if direction == "purchase" and utility_matches:
+    semantic_role = str((semantic_rule_constraint or {}).get("semantic_role") or "").strip()
+    if semantic_role and direction == "purchase":
+        allowed_groups = {
+            "stock": {"purchase_stock"},
+            "expense": {"purchase_expense"},
+            "non_deductible": {"non_deductible"},
+        }.get(semantic_role, set())
+        constrained = tuple(candidate for candidate in account_candidate_details if candidate.get("group") in allowed_groups)
+        if constrained:
+            account_candidate_details = constrained
+            utility_matches = ()
+    elif direction == "purchase" and utility_matches:
         account_candidate_details = utility_matches
     semantic_candidates = tuple(
         str(candidate.get("code") or "").strip()
@@ -2588,6 +2600,7 @@ def simulate_invoice(
     classification_override: ProductClassification | None = None,
     verified_rule_bindings: tuple[dict[str, object], ...] = (),
     verified_rule_authorities: tuple[VerifiedRuleAuthorityV1, ...] = (),
+    semantic_rule_constraint: dict[str, str] | None = None,
 ) -> SimulatedInvoiceResult:
     mode = _normalize_processing_mode(processing_mode)
     reasons = tuple(
@@ -2759,6 +2772,7 @@ def simulate_invoice(
             suggested_counterparty=suggested_counterparty,
             counterparty_title=counterparty_title,
             counterparty_tax_id=counterparty_tax_id,
+            semantic_rule_constraint=semantic_rule_constraint,
         )
         ai_account_candidate_count = len(base_context.account_candidates)
         ai_counterparty_candidate_count = len(base_context.counterparty_candidates)

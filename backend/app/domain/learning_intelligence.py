@@ -120,6 +120,7 @@ def enrich_learning_event(
     document: dict[str, Any] | None = None,
     client_profile: dict[str, Any] | None = None,
     prior_learning_events: Iterable[dict[str, Any]] = (),
+    office_rule_precedents: Iterable[dict[str, Any]] = (),
     policy: LearningPolicy | None = None,
 ) -> dict[str, Any]:
     resolved_policy = policy or LearningPolicy()
@@ -186,6 +187,7 @@ def enrich_learning_event(
             "counterparty_title": counterparty_title,
             "counterparty_identity_key": counterparty_identity_key,
             "utility_context": utility_context,
+            "issue_date": str(result.get("issue_date") or "").strip(),
             "posting_signature": _posting_signature(
                 nace_code=nace_code,
                 category=str(event.get("category") or decision.get("category") or result.get("product_category") or ""),
@@ -214,22 +216,27 @@ def enrich_learning_event(
             category=str(event.get("category") or decision.get("category") or result.get("product_category") or ""),
             corrected_account_code=str(enriched.get("corrected_account_code") or decision.get("corrected_account_code") or ""),
         )
-    client_count = _consistent_count(enriched, prior_learning_events, client_scoped=True)
-    office_events = [*prior_learning_events, enriched]
-    office_count = _consistent_count(enriched, prior_learning_events, client_scoped=False)
+    prior_events = tuple(prior_learning_events)
+    client_evidence = _consistent_document_evidence(enriched, prior_events, client_scoped=True)
+    office_evidence = _consistent_document_evidence(enriched, prior_events, client_scoped=False)
+    client_count = len(client_evidence)
+    office_count = len(office_evidence)
     office_client_count = len(
         {
             str(item.get("client_id") or "")
-            for item in office_events
+            for item in (*prior_events, enriched)
             if _office_match(enriched, item) and str(item.get("client_id") or "")
         }
     )
+    utility_precedent = _matching_utility_precedent(enriched, office_rule_precedents)
     prompt = _rule_prompt(
         event=enriched,
         policy=resolved_policy,
         client_count=client_count,
         office_count=office_count,
         office_client_count=office_client_count,
+        client_evidence=client_evidence,
+        utility_precedent=utility_precedent,
     )
     enriched.update(
         {
@@ -278,13 +285,70 @@ def _match_key(*, client_id: str, document_type: str, transaction_type: str, acc
 
 
 def _consistent_count(target: dict[str, Any], events: Iterable[dict[str, Any]], *, client_scoped: bool) -> int:
-    count = 1
+    return len(_consistent_document_evidence(target, events, client_scoped=client_scoped))
+
+
+def _consistent_document_evidence(
+    target: dict[str, Any], events: Iterable[dict[str, Any]], *, client_scoped: bool
+) -> list[dict[str, str]]:
+    matches = [target]
     for item in events:
         if client_scoped and str(item.get("client_id") or "") != str(target.get("client_id") or ""):
             continue
         if _office_match(target, item):
-            count += 1
-    return count
+            matches.append(item)
+    evidence: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in matches:
+        document_ref = str(item.get("document_ref") or "").strip()
+        if not document_ref or document_ref in seen:
+            continue
+        seen.add(document_ref)
+        evidence.append(
+            {
+                "document_ref": document_ref,
+                "issue_date": str(item.get("issue_date") or item.get("created_at") or "").strip(),
+            }
+        )
+    return evidence
+
+
+def _matching_utility_precedent(
+    event: dict[str, Any], rules: Iterable[dict[str, Any]]
+) -> dict[str, Any] | None:
+    utility = event.get("utility_context")
+    utility = utility if isinstance(utility, dict) else {}
+    service_profile = str(utility.get("service_profile") or "").strip()
+    if not service_profile:
+        return None
+    current_client = str(event.get("client_id") or "")
+    direction = str(utility.get("direction") or "").strip()
+    haystack = set(normalized_terms(str(event.get("source_text") or ""), limit=30))
+    for rule in rules:
+        if str(rule.get("status") or "") != "active":
+            continue
+        if str(rule.get("client_id") or "") == current_client:
+            continue
+        if str(rule.get("service_profile") or "").strip() != service_profile:
+            continue
+        if direction and str(rule.get("direction") or "").strip() not in {"", direction}:
+            continue
+        terms = tuple(str(term) for term in rule.get("normalized_terms") or () if str(term).strip())
+        if str(rule.get("line_match_mode") or "all_lines") == "normalized_terms_all" and terms:
+            if not set(terms).issubset(haystack):
+                continue
+        return {
+            "rule_key": str(rule.get("rule_key") or ""),
+            "source_client_id": str(rule.get("client_id") or ""),
+            "service_profile": service_profile,
+            "meaning_label": str(rule.get("meaning_label") or rule.get("reason") or "").strip(),
+            "semantic_role": str(rule.get("semantic_role") or "").strip(),
+            "semantic_intent": str(rule.get("semantic_intent") or "").strip(),
+            "binding_mode": str(rule.get("binding_mode") or "fixed_account").strip(),
+            "account_code": str(rule.get("account_code") or "").strip(),
+            "normalized_terms": list(terms),
+        }
+    return None
 
 
 def _office_match(target: dict[str, Any], item: dict[str, Any]) -> bool:
@@ -369,6 +433,8 @@ def _rule_prompt(
     client_count: int,
     office_count: int,
     office_client_count: int,
+    client_evidence: list[dict[str, str]] | None = None,
+    utility_precedent: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     action = str(event.get("action") or "")
     if action not in APPROVAL_ACTIONS:
@@ -381,37 +447,51 @@ def _rule_prompt(
             "office_distinct_client_count": office_client_count,
             "office_consistent_decision_count": office_count,
         }
-    office_ready = office_client_count >= policy.office_client_threshold and office_count >= policy.office_decision_threshold
     client_ready = client_count >= policy.client_rule_threshold
     direct_rule_request = action == "suggest_for_similar"
-    global_candidate = (
-        str(event.get("accounting_intent") or "") in GLOBAL_TEMPLATE_INTENTS
-        and int(event.get("accounting_intent_confidence") or 0) >= policy.global_prompt_confidence
-    )
-    show = client_ready or office_ready or direct_rule_request or global_candidate
-    if office_ready:
-        status = "office_policy_candidate"
-        message = f"Ofis geneli aday: {office_client_count}/{policy.office_client_threshold} mukellef, {office_count}/{policy.office_decision_threshold} karar."
-    elif direct_rule_request:
+    show = client_ready or direct_rule_request or utility_precedent is not None
+    if direct_rule_request:
         status = "client_rule_prompt"
-        message = "Musavir bu karari tek seferde benzerleri icin kural adayi yapti."
+        message = "Müşavir bu kararı kural adayı olarak açtı."
+    elif utility_precedent is not None:
+        status = "office_utility_precedent"
+        message = "Bu utility tedarikçisi için başka bir mükellefte onaylanmış kural var."
     elif client_ready:
-        status = "client_rule_prompt"
-        message = f"Bu karari {client_count} kez benzer sekilde verdiniz."
-    elif global_candidate:
-        status = "global_template_candidate"
-        message = f"Global sablon adayi: {event.get('accounting_intent')}."
+        status = "client_repeat_prompt"
+        message = f"Aynı karar bu mükellefte {client_count} farklı faturada doğrulandı."
     else:
         status = "learning_signal"
-        message = "Bu karar sonraki benzer belgeler icin ogrenme sinyali olarak saklandi."
+        message = "Bu karar sonraki benzer belgeler için öğrenme sinyali olarak saklandı."
+    prompt_key = "|".join(
+        (
+            status,
+            str(event.get("client_id") or ""),
+            str(event.get("counterparty_tax_id") or event.get("counterparty_identity_key") or ""),
+            str(event.get("accounting_intent") or ""),
+            str((utility_precedent or {}).get("rule_key") or ""),
+        )
+    )
+    suggested_note = str((utility_precedent or {}).get("meaning_label") or event.get("reason") or "").strip()
+    if not suggested_note:
+        title = str(event.get("counterparty_title") or "").strip()
+        account = str(event.get("corrected_account_code") or event.get("selected_account_code") or "").strip()
+        if title and account:
+            suggested_note = f"Bu mükellefte {title} faturalarında {account} hesabını kullan."
+        elif title and str(event.get("accounting_intent") or "").strip():
+            intent = str(event.get("accounting_intent") or "").replace("_", " ")
+            suggested_note = f"Bu mükellefte {title} faturalarını {intent} olarak işle."
     return {
         "show": show,
         "status": status,
+        "prompt_key": prompt_key,
         "default_scope": "client_narrow",
         "message": message,
         "client_consistent_decision_count": client_count,
         "office_distinct_client_count": office_client_count,
         "office_consistent_decision_count": office_count,
+        "evidence_documents": list((client_evidence or [])[-3:]),
+        "utility_precedent": utility_precedent or {},
+        "suggested_note": suggested_note,
     }
 
 

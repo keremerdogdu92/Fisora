@@ -40,6 +40,22 @@ function normalizedReviewFromPayload(payload: Record<string, unknown> | null) {
     : null;
 }
 
+function learningPromptFromPayload(payload: Record<string, unknown> | null) {
+  const correctedDocument = payload?.corrected_document;
+  if (!correctedDocument || typeof correctedDocument !== "object" || Array.isArray(correctedDocument)) return null;
+  const result = (correctedDocument as Record<string, unknown>).result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+  const prompt = (result as Record<string, unknown>).rule_prompt;
+  if (!prompt || typeof prompt !== "object" || Array.isArray(prompt)) return null;
+  return prompt as Record<string, unknown>;
+}
+
+function shouldPauseForLearningPrompt(payload: Record<string, unknown> | null) {
+  const prompt = learningPromptFromPayload(payload);
+  if (prompt?.show !== true) return false;
+  return ["client_repeat_prompt", "office_utility_precedent"].includes(String(prompt.status || ""));
+}
+
 function formatReviewAmount(value: string) {
   const parsed = Number(String(value || "").replace(",", "."));
   if (!Number.isFinite(parsed)) return String(value || "").trim();
@@ -310,6 +326,7 @@ export function useReviewCommands({
     }
     const result = await saveDecision(approveAction);
     if (!result?.ok) return;
+    if (shouldPauseForLearningPrompt(result.payload as Record<string, unknown> | null)) return;
     selectAdjacentReviewDocument(1);
   }, [
     hasUnsavedReviewChanges,

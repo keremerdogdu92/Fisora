@@ -312,6 +312,55 @@ def _counterparty_match_for_invoice(
     return match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
 
 
+
+def _active_semantic_rule_constraint(
+    *,
+    rules: tuple[dict[str, Any], ...],
+    client_id: str,
+    direction: str,
+    invoice_mode: str,
+    counterparty_tax_id: str,
+    service_profile: str,
+) -> dict[str, str] | None:
+    priorities = {"client_counterparty": 300, "client_service_profile": 200}
+    matches: list[tuple[int, dict[str, Any]]] = []
+    normalized_tax_id = "".join(ch for ch in str(counterparty_tax_id or "") if ch.isdigit())
+    for rule in rules:
+        if str(rule.get("status") or "") != "active" or str(rule.get("binding_mode") or "fixed_account") != "semantic_role":
+            continue
+        if str(rule.get("client_id") or "") != client_id or str(rule.get("direction") or "") != direction:
+            continue
+        if str(rule.get("invoice_mode") or "ordinary") != invoice_mode or str(rule.get("line_match_mode") or "all_lines") != "all_lines":
+            continue
+        scope = str(rule.get("scope") or "")
+        if scope == "client_counterparty":
+            rule_tax_id = "".join(ch for ch in str(rule.get("counterparty_tax_id") or "") if ch.isdigit())
+            if not rule_tax_id or rule_tax_id != normalized_tax_id:
+                continue
+        elif scope == "client_service_profile":
+            if not service_profile or str(rule.get("service_profile") or "") != service_profile:
+                continue
+        else:
+            continue
+        matches.append((priorities.get(scope, 0), rule))
+    if not matches:
+        return None
+    highest = max(priority for priority, _ in matches)
+    winners = [rule for priority, rule in matches if priority == highest]
+    roles = {str(rule.get("semantic_role") or "") for rule in winners if str(rule.get("semantic_role") or "")}
+    if len(roles) != 1:
+        return None
+    winner = sorted(
+        winners,
+        key=lambda rule: (str(rule.get("rule_key") or ""), int(rule.get("version") or 0)),
+    )[-1]
+    return {
+        "semantic_role": next(iter(roles)),
+        "semantic_intent": str(winner.get("semantic_intent") or ""),
+        "rule_key": str(winner.get("rule_key") or ""),
+    }
+
+
 def _serializable_simulation(
     invoice: ParsedInvoice,
     workspace: dict[str, Any],
@@ -337,6 +386,14 @@ def _serializable_simulation(
     )
     invoice_mode = "return" if bool(getattr(invoice, "is_return_invoice", False)) else "ordinary"
     active_rules = tuple(workspace.get("learning_rules") or ())
+    semantic_rule_constraint = _active_semantic_rule_constraint(
+        rules=active_rules,
+        client_id=profile.client_id if profile else "",
+        direction=direction if direction in {"purchase", "sales"} else "purchase",
+        invoice_mode=invoice_mode,
+        counterparty_tax_id=counterparty_tax_id,
+        service_profile=str(getattr(invoice, "service_profile", "") or ""),
+    )
     compiled_rules = compile_verified_rule_authorities(
         rules=active_rules,
         client_id=profile.client_id if profile else "",
@@ -357,6 +414,7 @@ def _serializable_simulation(
         intended_direction=intended_direction,
         classification_override=classification_override,
         verified_rule_authorities=compiled_rules.authorities,
+        semantic_rule_constraint=semantic_rule_constraint,
     )
     result = apply_learning_rules(
         result,

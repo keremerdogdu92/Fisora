@@ -30,6 +30,15 @@ def build_natural_language_rule_candidate(
     vague = _is_vague(normalized, match_phrase, product_category, corrected_account_code)
     counterparty_rule = _is_counterparty_rule(normalized)
     office_semantic = _is_office_semantic_rule(normalized, semantic_intent)
+    line_specific = _is_line_specific_rule(normalized)
+    binding_mode = _binding_mode(
+        normalized=normalized,
+        counterparty_rule=counterparty_rule,
+        line_specific=line_specific,
+        semantic_intent=semantic_intent,
+        account_treatment=account_treatment,
+        corrected_account_code=corrected_account_code,
+    )
     scope = _scope(vague=vague, match_phrase=match_phrase, counterparty_rule=counterparty_rule, office_semantic=office_semantic)
 
     return {
@@ -38,7 +47,12 @@ def build_natural_language_rule_candidate(
         "product_category": "" if vague else product_category or semantic_intent,
         "account_treatment": "" if vague else account_treatment,
         "semantic_accounting_intent": "" if vague else semantic_intent,
-        "suggested_account_code": "" if vague or office_semantic else str(corrected_account_code or "").strip(),
+        "binding_mode": "" if vague else binding_mode,
+        "line_match_mode": "normalized_terms_all" if line_specific else "all_lines",
+        "suggested_account_code": (
+            "" if vague or office_semantic or binding_mode == "semantic_role"
+            else str(corrected_account_code or "").strip()
+        ),
         "requires_review": True,
         "reason": "Not kural icin fazla muglak." if vague else _reason(product_category, account_treatment, match_phrase),
     }
@@ -79,6 +93,10 @@ def _product_category(normalized: str, category: str) -> str:
 
 
 def _semantic_accounting_intent(normalized: str, product_category: str) -> str:
+    if any(phrase in normalized for phrase in ("mal alim", "mal alis", "mal alimi", "stok alimi")):
+        return "mal_alim"
+    if "guvenlik" in normalized:
+        return "guvenlik_gideri"
     if product_category == "dogalgaz_gideri" or "dogalgaz" in normalized or "dogal gaz" in normalized or "igdas" in normalized:
         return "dogalgaz_gideri"
     if product_category in {"e_fatura_hizmeti"} or "e fatura" in normalized or "efatura" in normalized:
@@ -98,7 +116,7 @@ def _account_treatment(normalized: str, product_category: str, corrected_account
         return "stock_or_cogs"
     if account_family in {"740", "750", "760", "770", "780"}:
         return "expense"
-    if product_category in {"isitme_cihazi", "isitme_cihazi_pili"} or "stok" in normalized:
+    if product_category in {"isitme_cihazi", "isitme_cihazi_pili"} or "stok" in normalized or "mal alim" in normalized or "mal alis" in normalized:
         return "stock_or_cogs"
     if product_category in {"kargo", "isyeri_kirasi"}:
         return "expense"
@@ -126,6 +144,34 @@ def _is_counterparty_rule(normalized: str) -> bool:
         or "gelen fatura" in normalized
         or "bu mukellefte" in normalized
     )
+
+
+def _is_line_specific_rule(normalized: str) -> bool:
+    compact = normalized.replace(" ", "")
+    return bool(
+        {"oiv", "otv", "kdv", "atiksu", "vergi", "fon"}.intersection(set(normalized.split()))
+        or "ozeliletisimvergisi" in compact
+        or "atik su" in normalized
+        or "satir" in normalized
+        or "kalem" in normalized
+    )
+
+
+def _binding_mode(
+    *,
+    normalized: str,
+    counterparty_rule: bool,
+    line_specific: bool,
+    semantic_intent: str,
+    account_treatment: str,
+    corrected_account_code: str,
+) -> str:
+    explicit_account = bool(re.search(r"\b\d{3}(?:[ .]\d+)+\b", normalized)) or "hesab" in normalized
+    if line_specific or explicit_account:
+        return "fixed_account" if corrected_account_code else "semantic_role"
+    if counterparty_rule and semantic_intent and account_treatment in {"stock_or_cogs", "expense", "non_deductible"}:
+        return "semantic_role"
+    return "fixed_account" if corrected_account_code else "semantic_role"
 
 
 def _is_office_semantic_rule(normalized: str, semantic_intent: str) -> bool:

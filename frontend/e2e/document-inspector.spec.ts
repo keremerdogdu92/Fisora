@@ -913,3 +913,73 @@ test("learned rule teaching ignores counterparty account edits when resolving th
   expect(savePayload.decision?.learning_confirmation).toBe("save_rule");
   expect(savePayload.decision?.draft_lines).toBeUndefined();
 });
+
+
+test("learning prompt pauses review and opens the accountant rule preview flow", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "learning-prompt.html", "text/html", html, (workspace) => {
+    workspace.chart_accounts.accounts = [
+      { normalized_account_code: "770.01.004", account_name: "Kırtasiye gideri", is_detail_account: true, is_active: true },
+    ];
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result.draft_status = "draft_ready";
+    result.draft_lines = [
+      {
+        account_code: "770.01.004",
+        description: SOURCE_TEXT,
+        debit: "540.00",
+        credit: "0.00",
+        source_position: "1",
+        source_text: SOURCE_TEXT,
+      },
+    ];
+    result.rule_prompt = {
+      show: true,
+      status: "client_repeat_prompt",
+      prompt_key: "repeat:kargo:770.01.004",
+      default_scope: "client_narrow",
+      message: "Aynı karar üç farklı faturada tekrarlandı.",
+      client_consistent_decision_count: 3,
+      office_distinct_client_count: 1,
+      office_consistent_decision_count: 3,
+      evidence_documents: [
+        { document_ref: "doc-a", issue_date: "2026-09-01" },
+        { document_ref: "doc-b", issue_date: "2026-09-05" },
+        { document_ref: "doc-c", issue_date: "2026-09-10" },
+      ],
+      utility_precedent: {},
+      suggested_note: "Kargo hizmetlerini 770.01.004 hesabında izle.",
+    };
+  });
+
+  await page.route("**/phase0/store/review-rule/preview", async (route) => {
+    await route.fulfill({
+      json: {
+        rule_interpretation: {
+          source: "accountant_confirmed",
+          provider: "test",
+          status: "ready",
+          summary_tr: "Kargo hizmetlerini 770.01.004 hesabında izle.",
+          trigger_tr: "Kargo hizmeti",
+          action_tr: "770.01.004 hesabını öner.",
+          guardrail_tr: "Yalnız benzer kargo hizmetlerinde uygula.",
+          confidence: 100,
+          reason_codes: [],
+        },
+      },
+    });
+  });
+
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const prompt = page.getByRole("region", { name: "Fisora öğrenme önerisi" });
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toContainText("Fisora bir tekrar fark etti");
+  await expect(prompt).toContainText("3/3");
+  await expect(prompt).toContainText("Kargo hizmetlerini 770.01.004 hesabında izle.");
+
+  await prompt.getByRole("button", { name: "Kuralı incele", exact: true }).click();
+
+  await expect(page.getByRole("region", { name: "Fisora karar notu yorumu" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Kural olarak kaydet", exact: true })).toBeEnabled();
+});

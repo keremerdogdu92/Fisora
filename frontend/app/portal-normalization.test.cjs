@@ -96,11 +96,16 @@ test("portal normalization helpers preserve statement entries, AI suggestions, a
 
   assert.deepEqual(normalizeRulePrompt({ show: true, default_scope: "client_rule", office_consistent_decision_count: 4 }), {
     show: true,
+    status: "",
+    promptKey: "",
     defaultScope: "client_rule",
     message: "",
     clientConsistentDecisionCount: 0,
     officeDistinctClientCount: 0,
     officeConsistentDecisionCount: 4,
+    evidenceDocuments: [],
+    utilityPrecedent: {},
+    suggestedNote: "",
   });
 });
 

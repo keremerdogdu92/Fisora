@@ -933,20 +933,43 @@ function normalizeRulePrompt(value) {
   if (!value || typeof value !== "object") {
     return {
       show: false,
+      status: "",
+      promptKey: "",
       defaultScope: "",
       message: "",
       clientConsistentDecisionCount: 0,
       officeDistinctClientCount: 0,
       officeConsistentDecisionCount: 0,
+      evidenceDocuments: [],
+      utilityPrecedent: {},
+      suggestedNote: "",
     };
   }
+  const evidenceDocuments = Array.isArray(value.evidence_documents || value.evidenceDocuments)
+    ? (value.evidence_documents || value.evidenceDocuments).map((item) => {
+        const evidence = item && typeof item === "object" ? item : {};
+        return {
+          documentRef: safeText(evidence.document_ref || evidence.documentRef),
+          issueDate: safeText(evidence.issue_date || evidence.issueDate),
+        };
+      })
+    : [];
   return {
     show: Boolean(value.show),
+    status: safeText(value.status),
+    promptKey: safeText(value.prompt_key || value.promptKey),
     defaultScope: safeText(value.default_scope || value.defaultScope),
     message: safeText(value.message),
     clientConsistentDecisionCount: safeNumber(value.client_consistent_decision_count || value.clientConsistentDecisionCount),
     officeDistinctClientCount: safeNumber(value.office_distinct_client_count || value.officeDistinctClientCount),
     officeConsistentDecisionCount: safeNumber(value.office_consistent_decision_count || value.officeConsistentDecisionCount),
+    evidenceDocuments,
+    utilityPrecedent: value.utility_precedent && typeof value.utility_precedent === "object"
+      ? value.utility_precedent
+      : value.utilityPrecedent && typeof value.utilityPrecedent === "object"
+        ? value.utilityPrecedent
+        : {},
+    suggestedNote: safeText(value.suggested_note || value.suggestedNote),
   };
 }
 

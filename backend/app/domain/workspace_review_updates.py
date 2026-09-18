@@ -146,6 +146,14 @@ def apply_review_decision_to_document(
     rule_interpretation = learning_event.get("rule_interpretation")
     if isinstance(rule_interpretation, dict):
         result["rule_interpretation"] = deepcopy(rule_interpretation)
+    for learning_key in (
+        "accounting_intent",
+        "accounting_intent_confidence",
+        "learning_rule_source_summary",
+        "rule_prompt",
+    ):
+        if learning_key in learning_event:
+            result[learning_key] = deepcopy(learning_event[learning_key])
 
     result["accountant_decision_action"] = action
     result["accountant_decision_reason"] = reason

@@ -67,11 +67,16 @@ export type NormalizedStatementAiSuggestion = {
 
 export type NormalizedRulePrompt = {
   show: boolean;
+  status: string;
+  promptKey: string;
   defaultScope: string;
   message: string;
   clientConsistentDecisionCount: number;
   officeDistinctClientCount: number;
   officeConsistentDecisionCount: number;
+  evidenceDocuments: { documentRef: string; issueDate: string }[];
+  utilityPrecedent: Record<string, unknown>;
+  suggestedNote: string;
 };
 
 export type ReviewReasonGroup = {

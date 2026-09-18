@@ -54,6 +54,8 @@ Thumbs.db
 
 
 # Local development, diagnostic, and benchmark artifacts
+# Rule Harness benchmark runners/results and one-off UI/build diagnostics belong here.
+# Durable Rule Harness behavior must live in tracked runtime/tests/docs, not in tmp.
 /tmp/
 /backend/tmp/
 /.vs/

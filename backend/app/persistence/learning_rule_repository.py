@@ -214,8 +214,11 @@ class LearningRuleRepository:
     def _insert_values(self, row: Mapping[str, Any]) -> tuple[Any, ...]:
         scope = row.get("scope") or "general_candidate"
         action = row.get("action") or "suggest_for_similar"
+        source_review_id = row.get("source_review_decision_id") or None
+        if str(row.get("source_review_reference_kind") or "").strip() == "workflow":
+            source_review_id = None
         return (
-            row["id"], self.tenant_id, None, row.get("source_review_decision_id") or None,
+            row["id"], self.tenant_id, None, source_review_id,
             scope, action, row.get("category") or None, row.get("account_code") or None,
             row.get("corrected_counterparty_code") or None, row.get("reason") or None,
             False, 1, row["rule_key"], row["version"], row["status"], row["schema_version"],

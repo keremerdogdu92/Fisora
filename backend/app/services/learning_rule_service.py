@@ -83,9 +83,12 @@ class LearningRuleService:
             raise ValueError("learning_rule_account_not_selectable")
         normalized_review = saved_review.get("normalized_review")
         normalized_review = normalized_review if isinstance(normalized_review, Mapping) else {}
-        saved_review_id = str(normalized_review.get("review_decision_id") or saved_review.get("id") or "").strip()
+        normalized_review_id = str(normalized_review.get("review_decision_id") or "").strip()
+        workflow_review_id = str(saved_review.get("id") or "").strip()
+        saved_review_id = normalized_review_id or workflow_review_id
         if not saved_review_id:
             raise ValueError("learning_rule_source_review_required")
+        source_review_reference_kind = "normalized" if normalized_review_id else "workflow"
 
         scope_data = _narrow_scope(candidate=candidate, learning_event=learning_event)
         semantic_role = _semantic_role(direction=direction, account_code=account_code, account=account, candidate=candidate)
@@ -118,11 +121,13 @@ class LearningRuleService:
             "reason": str(decision.get("decision_note") or decision.get("reason") or "").strip(),
             "activation_event_id": saved_review_id,
             "source_review_decision_id": saved_review_id,
+            "source_review_reference_kind": source_review_reference_kind,
             "confirmed_actor_id": str(actor or "").strip(),
             "confirmation_provenance": {
                 "source": "accountant_confirmed",
                 "learning_confirmation": "save_rule",
                 "interpretation_source": str(interpretation.get("source") or "").strip(),
+                "review_reference_kind": source_review_reference_kind,
             },
         }
         versions = self.list_versions(rule_key)

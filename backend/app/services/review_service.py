@@ -397,8 +397,9 @@ class ReviewService:
                 chart_accounts=workspace.get("chart_accounts") if isinstance(workspace, dict) else None,
                 actor=decision.reviewer,
             )
-        except (ValueError, RuntimeError) as exc:
-            return self._learning_rule_failure(client_id=client_id, document_ref=decision.document_ref, reason=str(exc))
+        except Exception as exc:
+            reason = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else type(exc).__name__
+            return self._learning_rule_failure(client_id=client_id, document_ref=decision.document_ref, reason=reason)
         if not isinstance(rule, dict):
             return self._learning_rule_failure(client_id=client_id, document_ref=decision.document_ref, reason="learning_rule_not_created")
         self.store.record_document_pipeline_event(

@@ -191,7 +191,49 @@ class LearningRuleLifecycleTests(unittest.TestCase):
         self.assertEqual(active["scope"], "client_counterparty")
         self.assertEqual(active["counterparty_tax_id"], "1234567890")
         self.assertEqual(active["source_review_decision_id"], "review-42")
+        self.assertEqual(active["source_review_reference_kind"], "workflow")
+        self.assertEqual(active["confirmation_provenance"]["review_reference_kind"], "workflow")
         self.assertEqual(active["account_code"], "770.03.001")
+
+    def test_confirmed_review_rule_prefers_normalized_review_provenance_when_available(self) -> None:
+        service = LearningRuleService(repository=LearningRuleRepository())
+        active = service.save_confirmed_review_rule(
+            client_id="firma-1",
+            decision={
+                "learning_confirmation": "save_rule",
+                "corrected_account_code": "770.03.001",
+                "document_ref": "doc-1",
+                "decision_note": "Bu VKN için doğalgaz gideri hesabını kullan.",
+            },
+            learning_event={
+                "natural_language_rule_candidate": {
+                    "scope": "client_counterparty", "account_treatment": "expense", "match_phrase": "dogalgaz gideri"
+                },
+                "counterparty_tax_id": "1234567890",
+                "corrected_account_code": "770.03.001",
+                "category": "dogalgaz",
+                "utility_context": {},
+            },
+            interpretation={
+                "status": "ready", "summary_tr": "Doğalgaz gideri hesabı önerilecek.",
+                "guardrail_tr": "Müşavir kontrolü sürer.", "source": "accountant_confirmed",
+            },
+            saved_review={
+                "id": "workflow-review-42",
+                "normalized_review": {"review_decision_id": "normalized-review-42"},
+            },
+            document={"result": {"accounting_direction": "purchase", "file_name": "doc-1.html"}},
+            chart_accounts={"accounts": [{
+                "normalized_account_code": "770.03.001", "is_detail_account": True,
+                "is_active": True, "semantic_roles": ["expense"],
+            }]},
+            actor="accountant",
+        )
+
+        self.assertIsNotNone(active)
+        self.assertEqual(active["source_review_decision_id"], "normalized-review-42")
+        self.assertEqual(active["source_review_reference_kind"], "normalized")
+        self.assertEqual(active["confirmation_provenance"]["review_reference_kind"], "normalized")
 
     def test_full_vkn_rule_compiles_one_authority_per_canonical_line(self) -> None:
         authorities = compile_verified_rule_authorities(

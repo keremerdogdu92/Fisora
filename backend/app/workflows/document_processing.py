@@ -76,11 +76,13 @@ from app.domain.openai_provider import (
     DEFAULT_NVIDIA_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_ROUTEWAY_MODEL,
     DEFAULT_SAMBANOVA_MODEL,
     DEFAULT_XKIRO_MODEL,
     GEMINI_GENERATE_CONTENT_URL_TEMPLATE,
     NVIDIA_CHAT_COMPLETIONS_URL,
     OPENROUTER_CHAT_COMPLETIONS_URL,
+    ROUTEWAY_CHAT_COMPLETIONS_URL,
     SAMBANOVA_CHAT_COMPLETIONS_URL,
     XKIRO_CHAT_COMPLETIONS_URL,
     ChatCompletionsAccountingProvider,
@@ -567,6 +569,24 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
                 "X-Title": source.get("FISORA_OPENROUTER_APP_TITLE", ""),
             },
         )
+    if provider_name == "routeway":
+        return ChatCompletionsAccountingProvider(
+            api_key=source.get("ROUTEWAY_API_KEY", ""),
+            model=source.get("FISORA_ROUTEWAY_MODEL", DEFAULT_ROUTEWAY_MODEL),
+            chat_completions_url=source.get(
+                "FISORA_ROUTEWAY_CHAT_COMPLETIONS_URL",
+                ROUTEWAY_CHAT_COMPLETIONS_URL,
+            ),
+            provider_name="routeway",
+            key_name="ROUTEWAY_API_KEY",
+            extra_headers={
+                "User-Agent": source.get("FISORA_ROUTEWAY_USER_AGENT", "Fisora/1.0"),
+            },
+            timeout_seconds=float(source.get("FISORA_ROUTEWAY_TIMEOUT_SECONDS", "60")),
+            max_tokens=int(source.get("FISORA_ROUTEWAY_MAX_TOKENS", "4096")),
+            max_tokens_field="max_completion_tokens",
+            response_format_enabled=False,
+        )
     if provider_name == "cerebras":
         return ChatCompletionsAccountingProvider(
             api_key=source.get("CEREBRAS_API_KEY", ""),
@@ -639,6 +659,7 @@ SUPPORTED_ACCOUNTING_PROVIDERS = {
     "openai",
     "groq",
     "openrouter",
+    "routeway",
     "cerebras",
     "nvidia",
     "cloudflare",
@@ -715,7 +736,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_CANONICAL_PROVIDER_CHAIN",
-            preferred_order=("gemini", "xkiro", "nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
+            preferred_order=("gemini", "xkiro", "nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "routeway", "openai"),
         ),
         source,
     )
@@ -723,7 +744,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_CLASSIFICATION_PROVIDER_CHAIN",
-            preferred_order=("gemini", "nvidia", "groq", "cerebras", "cloudflare", "sambanova", "openrouter", "openai"),
+            preferred_order=("gemini", "nvidia", "groq", "cerebras", "cloudflare", "sambanova", "openrouter", "routeway", "openai"),
         ),
         source,
     )
@@ -736,7 +757,7 @@ def build_ai_runtime_from_env(env: dict[str, str] | None = None) -> dict[str, ob
         _task_provider_names(
             source,
             env_key="FISORA_AI_COUNTERPARTY_PROVIDER_CHAIN",
-            preferred_order=("gemini", "nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "openai"),
+            preferred_order=("gemini", "nvidia", "cerebras", "groq", "cloudflare", "sambanova", "openrouter", "routeway", "openai"),
         ),
         source,
     )

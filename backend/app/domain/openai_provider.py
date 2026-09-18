@@ -1,3 +1,5 @@
+# File: backend/app/domain/openai_provider.py
+# Summary: Implements AI provider adapters, structured transports, fallback routing, and provider-specific request compatibility.
 from __future__ import annotations
 
 import base64
@@ -23,6 +25,7 @@ from app.domain.statement_ai_suggestions import StatementAiSuggestionRequest
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 GROQ_RESPONSES_URL = "https://api.groq.com/openai/v1/responses"
 OPENROUTER_CHAT_COMPLETIONS_URL = "https://openrouter.ai/api/v1/chat/completions"
+ROUTEWAY_CHAT_COMPLETIONS_URL = "https://api.routeway.ai/v1/chat/completions"
 CEREBRAS_CHAT_COMPLETIONS_URL = "https://api.cerebras.ai/v1/chat/completions"
 NVIDIA_CHAT_COMPLETIONS_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 CLOUDFLARE_CHAT_COMPLETIONS_URL_TEMPLATE = (
@@ -38,6 +41,7 @@ DEFAULT_COMPARISON_MODEL = "gpt-5.4-nano"
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_GROQ_COMPARISON_MODEL = "openai/gpt-oss-120b"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+DEFAULT_ROUTEWAY_MODEL = "deepseek-v4-flash:free"
 DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
 DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
 DEFAULT_CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-120b"
@@ -870,6 +874,8 @@ class ChatCompletionsAccountingProvider:
         http_client: Any | None = None,
         timeout_seconds: float = 30.0,
         max_tokens: int | None = None,
+        max_tokens_field: str = "max_tokens",
+        response_format_enabled: bool = True,
         request_body_overrides: Mapping[str, object] | None = None,
     ) -> None:
         if not api_key.strip():
@@ -882,6 +888,10 @@ class ChatCompletionsAccountingProvider:
         self.http_client = http_client or httpx.Client()
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
+        if max_tokens_field not in {"max_tokens", "max_completion_tokens"}:
+            raise ValueError("max_tokens_field must be max_tokens or max_completion_tokens")
+        self.max_tokens_field = max_tokens_field
+        self.response_format_enabled = response_format_enabled
         self.request_body_overrides = dict(request_body_overrides or {})
         self.last_capacity_snapshot: dict[str, object] = {}
 
@@ -946,13 +956,14 @@ class ChatCompletionsAccountingProvider:
                     ),
                 },
             ],
-            "response_format": {"type": "json_object"},
             "temperature": 0.2,
             "top_p": 1,
             "stream": False,
         }
+        if self.response_format_enabled:
+            request_payload["response_format"] = {"type": "json_object"}
         if self.max_tokens is not None:
-            request_payload["max_tokens"] = self.max_tokens
+            request_payload[self.max_tokens_field] = self.max_tokens
         request_payload.update(self.request_body_overrides)
         response = self.http_client.post(
             self.chat_completions_url,

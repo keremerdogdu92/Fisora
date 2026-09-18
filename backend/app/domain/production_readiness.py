@@ -17,6 +17,7 @@ from app.domain.openai_provider import (
     DEFAULT_NVIDIA_MODEL,
     DEFAULT_OPENAI_MODEL,
     DEFAULT_OPENROUTER_MODEL,
+    DEFAULT_ROUTEWAY_MODEL,
     DEFAULT_SAMBANOVA_MODEL,
     DEFAULT_XKIRO_MODEL,
 )
@@ -56,6 +57,8 @@ def _ai_provider_model(provider_name: str, source: Mapping[str, str]) -> str:
         return source.get("FISORA_GROQ_MODEL", "").strip() or configured_ai_model or DEFAULT_GROQ_MODEL
     if provider_name == "openrouter":
         return source.get("FISORA_OPENROUTER_MODEL", "").strip() or DEFAULT_OPENROUTER_MODEL
+    if provider_name == "routeway":
+        return source.get("FISORA_ROUTEWAY_MODEL", "").strip() or DEFAULT_ROUTEWAY_MODEL
     if provider_name == "cerebras":
         return source.get("FISORA_CEREBRAS_MODEL", "").strip() or DEFAULT_CEREBRAS_MODEL
     if provider_name == "cloudflare":
@@ -72,6 +75,7 @@ def _ai_provider_key_present(provider_name: str, source: Mapping[str, str]) -> b
         "openai": "OPENAI_API_KEY",
         "groq": "GROQ_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
+        "routeway": "ROUTEWAY_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
         "nvidia": "NVIDIA_API_KEY",
         "cloudflare": "CLOUDFLARE_API_TOKEN",
@@ -96,6 +100,7 @@ def production_readiness_payload(
         "openai",
         "groq",
         "openrouter",
+        "routeway",
         "cerebras",
         "nvidia",
         "cloudflare",

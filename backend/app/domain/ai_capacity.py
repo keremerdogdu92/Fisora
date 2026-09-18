@@ -1,3 +1,5 @@
+# File: backend/app/domain/ai_capacity.py
+# Summary: Reports configured AI provider capacity, model metadata, quota snapshots, and conservative availability estimates.
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -8,6 +10,7 @@ from typing import Any, Mapping
 PROVIDER_KEY_ENV = {
     "groq": "GROQ_API_KEY",
     "openrouter": "OPENROUTER_API_KEY",
+    "routeway": "ROUTEWAY_API_KEY",
     "cerebras": "CEREBRAS_API_KEY",
     "openai": "OPENAI_API_KEY",
     "nvidia": "NVIDIA_API_KEY",
@@ -18,6 +21,7 @@ PROVIDER_KEY_ENV = {
 }
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-20b:free"
+DEFAULT_ROUTEWAY_MODEL = "deepseek-v4-flash:free"
 DEFAULT_CEREBRAS_MODEL = "gpt-oss-120b"
 DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
 DEFAULT_CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-120b"
@@ -136,7 +140,7 @@ def _provider_chain(env: Mapping[str, str]) -> list[str]:
     provider_name = str(env.get("FISORA_AI_PROVIDER", "")).strip().lower()
     if not chain and provider_name and provider_name != "disabled":
         chain = [provider_name]
-    supported = {"groq", "openrouter", "cerebras", "openai", "nvidia", "cloudflare", "sambanova", "xkiro", "gemini"}
+    supported = {"groq", "openrouter", "routeway", "cerebras", "openai", "nvidia", "cloudflare", "sambanova", "xkiro", "gemini"}
     return [provider for provider in chain if provider in supported]
 
 
@@ -149,6 +153,8 @@ def _provider_model(provider: str, env: Mapping[str, str]) -> str:
         return str(env.get("FISORA_GROQ_MODEL") or env.get("FISORA_AI_MODEL") or DEFAULT_GROQ_MODEL)
     if provider == "openrouter":
         return str(env.get("FISORA_OPENROUTER_MODEL") or DEFAULT_OPENROUTER_MODEL)
+    if provider == "routeway":
+        return str(env.get("FISORA_ROUTEWAY_MODEL") or DEFAULT_ROUTEWAY_MODEL)
     if provider == "cerebras":
         return str(env.get("FISORA_CEREBRAS_MODEL") or DEFAULT_CEREBRAS_MODEL)
     if provider == "cloudflare":

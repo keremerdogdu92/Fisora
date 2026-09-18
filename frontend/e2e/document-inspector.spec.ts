@@ -836,5 +836,80 @@ test("learned rule teaching uses the account actually applied in the journal", a
   const payload = previewRequest.postDataJSON() as { decision?: { corrected_account_code?: string; draft_lines?: Array<{ account_code?: string }> } };
 
   expect(payload.decision?.corrected_account_code).toBe("153.01");
-  expect(payload.decision?.draft_lines?.[0]?.account_code).toBe("153.01");
+  expect(payload.decision?.draft_lines).toBeUndefined();
+});
+
+
+test("learned rule teaching ignores counterparty account edits when resolving the business account", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>FISORA PILOT TEST HIZMETI ALFA</td><td>352,34 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "rule-teaching-counterparty.html", "text/html", html, (workspace) => {
+    workspace.chart_accounts.accounts = [
+      { normalized_account_code: "770.01.004", account_name: "Kırtasiye gideri", is_detail_account: true, is_active: true },
+      { normalized_account_code: "770.01.009", account_name: "Diğer çeşitli giderler", is_detail_account: true, is_active: true },
+      { normalized_account_code: "191.01.020", account_name: "İndirilecek KDV", is_detail_account: true, is_active: true },
+      { normalized_account_code: "320.A01", account_name: "Pilot satıcı", is_detail_account: true, is_active: true },
+    ];
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result.draft_status = "draft_ready";
+    result.draft_lines = [
+      { account_code: "770.01.009", description: "FISORA PILOT TEST HIZMETI ALFA", debit: "352.34", credit: "0.00", source_position: "1", source_text: SOURCE_TEXT },
+      { account_code: "191.01.020", description: "KDV", debit: "70.47", credit: "0.00" },
+      { account_code: "320.", description: "Pilot satıcı", debit: "0.00", credit: "422.81" },
+    ];
+  });
+
+  await page.route("**/phase0/store/review-rule/preview", async (route) => {
+    await route.fulfill({
+      json: {
+        rule_interpretation: {
+          source: "accountant_confirmed",
+          provider: "test",
+          status: "ready",
+          summary_tr: "Yalnız FISORA PILOT TEST HIZMETI ALFA satırlarında 770.01.004 kullan.",
+          trigger_tr: "FISORA PILOT TEST HIZMETI ALFA",
+          action_tr: "770.01.004 hesabını öner.",
+          guardrail_tr: "Başka satırlara genelleme.",
+          confidence: 100,
+          reason_codes: [],
+        },
+      },
+    });
+  });
+
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const accountInputs = page.getByLabel("Hesap kodu");
+  await accountInputs.nth(0).fill("770.01.004");
+  await accountInputs.nth(2).fill("320.A01");
+
+  const learningDetails = page.locator(".journal-learning-details");
+  const summary = learningDetails.locator("summary");
+  if (await summary.isVisible()) {
+    await summary.click();
+  }
+  await page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?")
+    .fill("Yalnız pilot hizmet satırını 770.01.004 hesabına al.");
+
+  const previewRequestPromise = page.waitForRequest((request) =>
+    request.url().includes("/phase0/store/review-rule/preview") && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Egitim notunu kaydet", exact: true }).click();
+  const previewRequest = await previewRequestPromise;
+  const payload = previewRequest.postDataJSON() as {
+    decision?: { corrected_account_code?: string; draft_lines?: Array<{ account_code?: string }> };
+  };
+
+  expect(payload.decision?.corrected_account_code).toBe("770.01.004");
+  expect(payload.decision?.draft_lines).toBeUndefined();
+
+  const saveRequestPromise = page.waitForRequest((request) =>
+    request.url().includes("/phase0/store/review-decision") && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Kural olarak kaydet", exact: true }).click();
+  const saveRequest = await saveRequestPromise;
+  const savePayload = saveRequest.postDataJSON() as {
+    decision?: { learning_confirmation?: string; draft_lines?: Array<{ account_code?: string }> };
+  };
+  expect(savePayload.decision?.learning_confirmation).toBe("save_rule");
+  expect(savePayload.decision?.draft_lines).toBeUndefined();
 });

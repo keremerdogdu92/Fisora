@@ -152,7 +152,7 @@ export function statementDirectionLabel(direction: StatementLineReview["directio
 }
 
 export function statementReviewStatus(action: string) {
-  if (action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar") return "approved";
+  if (action === "approve" || action === "approve_with_changes") return "approved";
   if (action === "exclude_export" || action === "exclude_from_export" || action === "out_of_scope") return "rejected";
   return "review_required";
 }

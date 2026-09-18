@@ -333,7 +333,9 @@ export async function saveDecisionAction({
     (line) => line.account_code.trim() || line.description.trim() || line.debit.trim() || line.credit.trim(),
   );
   const applyToSimilar = Boolean(correctionDraft.applyToSimilar || action === "suggest_for_similar");
-  const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes" || action === "suggest_for_similar"
+  const learningOnly = learningOptions.learningConfirmation === "save_rule"
+    || learningOptions.learningConfirmation === "suggest_similar";
+  const nextStatus: PilotStatus = action === "approve" || action === "approve_with_changes"
     ? "export_ready"
     : action === "exclude_export" || action === "exclude_from_export" || action === "out_of_scope"
       ? "excluded"
@@ -376,7 +378,7 @@ export async function saveDecisionAction({
       learningConfirmation: learningOptions.learningConfirmation || "none",
       confirmedRuleInterpretation: learningOptions.confirmedRuleInterpretation || null,
       suppressRulePromptKey: learningOptions.suppressRulePromptKey || "",
-      draftLines: manualDraftLines,
+      draftLines: learningOnly ? null : manualDraftLines,
       validation: { readerStatus: correctionDraft.readerValidation, accountingStatus: correctionDraft.accountingValidation },
       expectedRevision: selectedDocument.normalizedRevision || 0,
       sessionToken: session?.sessionToken,

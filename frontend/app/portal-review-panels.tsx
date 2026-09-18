@@ -969,7 +969,6 @@ export function JournalPanel({
         decisionNote,
         applyToSimilar: true,
         statementLineNo: selectedStatementLineNo,
-        draftLines: activeDraftLines,
         sessionToken: session?.sessionToken || "",
       });
       const interpretation = normalizeRuleInterpretationView(asRecord(payload).rule_interpretation);

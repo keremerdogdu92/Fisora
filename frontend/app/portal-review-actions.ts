@@ -19,16 +19,29 @@ export function reviewedStatementRiskFlags(flags: string[], status: string) {
   return Array.from(new Set([...flags, "statement_review_required"]));
 }
 
+const NON_BUSINESS_LEARNING_ACCOUNT_ROOTS = new Set(["120", "191", "320", "391"]);
+
+function normalizedLearningAccountCode(value: string) {
+  return String(value || "").replace(/\s+/g, "").trim();
+}
+
+function learningAccountRoot(value: string) {
+  const match = normalizedLearningAccountCode(value).match(/^(\d{3})/);
+  return match?.[1] || "";
+}
+
 export function resolvedLearningAccountCode(correctionDraft: CorrectionDraft, originalLines: DraftLine[]) {
-  const explicit = String(correctionDraft.accountCode || "").replace(/\s+/g, "").trim();
+  const explicit = normalizedLearningAccountCode(correctionDraft.accountCode);
   if (explicit) return explicit;
   if (!correctionDraft.manualDraftLines.length) return "";
 
   const changedCodes = correctionDraft.manualDraftLines
     .map((line, index) => {
-      const nextCode = String(line.account_code || "").replace(/\s+/g, "").trim();
-      const previousCode = String(originalLines[index]?.account_code || "").replace(/\s+/g, "").trim();
-      return nextCode && nextCode !== previousCode ? nextCode : "";
+      const nextCode = normalizedLearningAccountCode(line.account_code);
+      const previousCode = normalizedLearningAccountCode(originalLines[index]?.account_code || "");
+      if (!nextCode || nextCode === previousCode) return "";
+      if (NON_BUSINESS_LEARNING_ACCOUNT_ROOTS.has(learningAccountRoot(nextCode))) return "";
+      return nextCode;
     })
     .filter(Boolean);
   const uniqueCodes = Array.from(new Set(changedCodes));

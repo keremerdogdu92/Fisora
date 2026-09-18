@@ -5,14 +5,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 
-APPROVED_EXPORT_ACTIONS = {"approve", "approve_with_changes", "suggest_for_similar"}
+APPROVED_EXPORT_ACTIONS = {"approve", "approve_with_changes"}
 REJECTED_EXPORT_ACTIONS = {
     "exclude_export",
     "exclude_from_export",
     "out_of_scope",
     "business_out_of_scope",
 }
-REVIEW_REQUIRED_ACTIONS = {"wrong_account", "wrong_counterparty", "review_required"}
+REVIEW_REQUIRED_ACTIONS = {"wrong_account", "wrong_counterparty", "review_required", "suggest_for_similar"}
 DIRECTION_CONFLICT_ACTIONS = {"accept_detected_direction", "keep_upload_direction"}
 
 

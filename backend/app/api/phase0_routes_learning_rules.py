@@ -34,6 +34,20 @@ def _service_and_actor(
     return LearningRuleService(repository=repository), actor
 
 
+def _learning_rule_backend_reason(exc: Exception) -> str:
+    sqlstate = str(getattr(exc, "sqlstate", "") or "")
+    error_type = type(exc).__name__
+    if sqlstate == "42P01" or error_type == "UndefinedTable":
+        return "learning_rules_table_missing"
+    if sqlstate == "42703" or error_type == "UndefinedColumn":
+        return "learning_rules_schema_outdated"
+    if sqlstate.startswith("22") or error_type in {"DataError", "ValueError", "TypeError"}:
+        return "learning_rules_data_invalid"
+    if sqlstate.startswith(("08", "28", "53", "57")):
+        return "learning_rules_database_unavailable"
+    return "learning_rules_backend_error"
+
+
 def _rule_view(rule: dict[str, Any]) -> dict[str, Any]:
     snapshot = rule.get("rule_snapshot") if isinstance(rule.get("rule_snapshot"), dict) else rule
     return {
@@ -60,7 +74,18 @@ def list_learning_rules(
     fisora_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
     service, _ = _service_and_actor(x_fisora_user_id, x_fisora_session, fisora_session)
-    return {"items": [_rule_view(rule) for rule in service.list_active(client_id=client_id)]}
+    try:
+        items = [_rule_view(rule) for rule in service.list_active(client_id=client_id)]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "allowed": False,
+                "reason": _learning_rule_backend_reason(exc),
+                "error_type": type(exc).__name__,
+            },
+        ) from exc
+    return {"items": items}
 
 
 def _transition(rule_key: str, payload: LearningRuleLifecyclePayload, action: str, headers: tuple[str | None, str | None, str | None]) -> dict[str, object]:

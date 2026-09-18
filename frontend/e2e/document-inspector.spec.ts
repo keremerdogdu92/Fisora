@@ -772,3 +772,69 @@ test("learned rule audit suggestion can be rejected without changing the journal
   await expect(auditPanel).toContainText("Doğru değil");
   await expect(page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?")).toContainText("uygulanmadı");
 });
+
+
+test("learned rule teaching uses the account actually applied in the journal", async ({ page }) => {
+  const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
+  await setupInspector(page, "rule-teaching-account.html", "text/html", html, (workspace) => {
+    workspace.chart_accounts.accounts = [
+      { normalized_account_code: "153.01", account_name: "Cihaz stoku", is_detail_account: true, is_active: true },
+      { normalized_account_code: "153.02", account_name: "Aksesuar stoku", is_detail_account: true, is_active: true },
+    ];
+    const result = workspace.documents[0].result as Record<string, unknown>;
+    result.draft_status = "draft_ready";
+    result.draft_lines = [
+      {
+        account_code: "153.02",
+        description: "FISORA PILOT TEST HIZMETI",
+        debit: "540.00",
+        credit: "0.00",
+        source_position: "1",
+        source_text: SOURCE_TEXT,
+      },
+    ];
+    result.technical_details = {
+      learned_rule_audit_shadow: {
+        status: "completed",
+        audit_status: "complete",
+        model: "gemini-3.5-flash-lite",
+        elapsed_ms: 3100,
+        corrections: [
+          {
+            row_id: "1",
+            rule_id: "rule-pilot",
+            from_account: "153.02",
+            to_account: "153.01",
+            reason: "Pilot learned rule correction.",
+          },
+        ],
+        unresolved_rows: [],
+        validation_errors: [],
+      },
+    };
+  });
+
+  await openInspectorDocument(page, ".html-document-viewer");
+
+  const auditPanel = page.getByRole("region", { name: "Öğrenilmiş kural kontrolü" });
+  await auditPanel.getByRole("button", { name: "Uygula", exact: true }).click();
+  await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.01");
+
+  const learningDetails = page.locator(".journal-learning-details");
+  const summary = learningDetails.locator("summary");
+  if (await summary.isVisible()) {
+    await summary.click();
+  }
+  const note = page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?");
+  await note.fill("Bu pilot satır için 153.01 hesabını kullan; başka kapsamlara genelleme.");
+
+  const previewRequestPromise = page.waitForRequest((request) =>
+    request.url().includes("/phase0/store/review-rule/preview") && request.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Egitim notunu kaydet", exact: true }).click();
+  const previewRequest = await previewRequestPromise;
+  const payload = previewRequest.postDataJSON() as { decision?: { corrected_account_code?: string; draft_lines?: Array<{ account_code?: string }> } };
+
+  expect(payload.decision?.corrected_account_code).toBe("153.01");
+  expect(payload.decision?.draft_lines?.[0]?.account_code).toBe("153.01");
+});

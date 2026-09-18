@@ -1,6 +1,6 @@
 // File: frontend/app/portal-review-actions.ts
 // Summary: Applies accountant statement-line decisions and records review summaries using shared portal timestamp formatting.
-import type { DraftLine, PilotDocument } from "./portal-types";
+import type { CorrectionDraft, DraftLine, PilotDocument } from "./portal-types";
 import { formatPortalDateTime, statementReviewStatus, statementStatusLabel } from "./portal-formatters";
 
 export function reviewedStatementRiskFlags(flags: string[], status: string) {
@@ -17,6 +17,22 @@ export function reviewedStatementRiskFlags(flags: string[], status: string) {
   }
   if (status === "rejected") return Array.from(new Set([...flags, "statement_line_rejected"]));
   return Array.from(new Set([...flags, "statement_review_required"]));
+}
+
+export function resolvedLearningAccountCode(correctionDraft: CorrectionDraft, originalLines: DraftLine[]) {
+  const explicit = String(correctionDraft.accountCode || "").replace(/\s+/g, "").trim();
+  if (explicit) return explicit;
+  if (!correctionDraft.manualDraftLines.length) return "";
+
+  const changedCodes = correctionDraft.manualDraftLines
+    .map((line, index) => {
+      const nextCode = String(line.account_code || "").replace(/\s+/g, "").trim();
+      const previousCode = String(originalLines[index]?.account_code || "").replace(/\s+/g, "").trim();
+      return nextCode && nextCode !== previousCode ? nextCode : "";
+    })
+    .filter(Boolean);
+  const uniqueCodes = Array.from(new Set(changedCodes));
+  return uniqueCodes.length === 1 ? uniqueCodes[0] : "";
 }
 
 export function replaceStatementCounterpart(lines: DraftLine[], accountCode: string) {

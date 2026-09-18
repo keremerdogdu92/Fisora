@@ -13,6 +13,7 @@ import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-do
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DocumentSourceTarget, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
 import { backendAuthHeaders, createCounterpartyAccountToBackend, previewReviewRule, resolveApiBaseUrl, userSafeErrorMessage } from "./upload-api";
+import { resolvedLearningAccountCode } from "./portal-review-actions";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -961,7 +962,7 @@ export function JournalPanel({
         documentRef: activeDocument.id,
         action: "suggest_for_similar",
         reviewer: session?.userId || "mali-musavir",
-        correctedAccountCode: correctionDraft.accountCode.trim(),
+        correctedAccountCode: resolvedLearningAccountCode(correctionDraft, generatedDraftLines),
         correctedCounterpartyCode: correctionDraft.counterpartyCode.trim(),
         category: activeDocument.productCategory,
         reason: correctionDraft.reason.trim(),

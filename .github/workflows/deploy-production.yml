@@ -141,6 +141,15 @@ jobs:
             --output json || true
 
           if [ "$wait_status" -ne 0 ]; then
+            failure_message="$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$INSTANCE_ID" \
+              --query '[Status,ResponseCode,StandardErrorContent]' \
+              --output text 2>/dev/null | tail -c 3500 || true)"
+            failure_message="${failure_message//'%'/'%25'}"
+            failure_message="${failure_message//$'\r'/'%0D'}"
+            failure_message="${failure_message//$'\n'/'%0A'}"
+            echo "::error title=Production SSM deploy failed::${failure_message:-SSM status ${final_status:-Unknown}}"
             echo "Production deploy failed with SSM status ${final_status:-Unknown}." >&2
             exit "$wait_status"
           fi

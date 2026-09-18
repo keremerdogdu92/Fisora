@@ -87,19 +87,20 @@ class LearningRuleRepository:
             return [deepcopy(row) for row in rows if self._matches_filter(row, client_id, rule_key)]
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
+                sql = """
                     select id, rule_key, version, status, schema_version,
                            scope_snapshot, rule_snapshot, activation_event_id,
                            source_review_decision_id, confirmed_by,
                            supersedes_rule_id
                     from learning_rules
                     where tenant_id = %s and status = 'active'
-                      and (%s is null or rule_key = %s)
-                    order by rule_key, version
-                    """,
-                    (self.tenant_id, rule_key, rule_key),
-                )
+                """
+                params: list[Any] = [self.tenant_id]
+                if rule_key is not None:
+                    sql += " and rule_key = %s"
+                    params.append(rule_key)
+                sql += " order by rule_key, version"
+                cursor.execute(sql, tuple(params))
                 rows = [self._db_row(row) for row in cursor.fetchall()]
         return [row for row in rows if self._matches_filter(row, client_id, rule_key)]
 

@@ -62,7 +62,7 @@ function workspaceFor(fileName: string, contentType: string) {
   return {
     client,
     portal_users: [{ user_id: "mali-musavir", display_name: "Mali Musavir", role: "accountant" }],
-    chart_accounts: { accounts: [] },
+    chart_accounts: { accounts: [] as Array<Record<string, unknown>> },
     uploaded_documents: [
       {
         document_ref: documentRef,

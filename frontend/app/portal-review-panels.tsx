@@ -783,6 +783,7 @@ export function JournalPanel({
   const [learningModalOpen, setLearningModalOpen] = useState(false);
   const [rulePreview, setRulePreview] = useState<RuleInterpretationView | null>(null);
   const [rulePreviewStatus, setRulePreviewStatus] = useState("");
+  const [dismissedLearningPromptKey, setDismissedLearningPromptKey] = useState("");
   const [counterpartyDrawerLineIndex, setCounterpartyDrawerLineIndex] = useState<number | null>(null);
   const [counterpartySearch, setCounterpartySearch] = useState("");
   const [counterpartyCode, setCounterpartyCode] = useState("");
@@ -799,6 +800,10 @@ export function JournalPanel({
     setCounterpartyTaxId("");
     setCounterpartyStatus("");
     setCounterpartyCreating(false);
+    setLearningModalOpen(false);
+    setRulePreview(null);
+    setRulePreviewStatus("");
+    setDismissedLearningPromptKey("");
   }, [document?.id]);
 
   if (!document) {
@@ -876,10 +881,19 @@ export function JournalPanel({
     `Mükellef açısından: ${directionLabel(accountingDirection)}`,
   ].join(" / ");
 
-  async function onPreviewReviewRule() {
-    const decisionNote = correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim();
-    if (!decisionNote) {
-      setRulePreviewStatus("Karar notu yazmadan kural yorumu olusturulamaz.");
+  const learningPrompt = activeDocument.rulePrompt;
+  const learningPromptKey = learningPrompt.promptKey || `${activeDocument.id}:${learningPrompt.status || "learning"}`;
+  const learningPromptVisible = Boolean(
+    learningPrompt.show
+    && ["client_repeat_prompt", "office_utility_precedent"].includes(learningPrompt.status || "")
+    && dismissedLearningPromptKey !== learningPromptKey,
+  );
+  const utilityPrecedent = asRecord(learningPrompt.utilityPrecedent);
+
+  async function previewRuleCandidate(decisionNote: string, correctedAccountCode = correctionDraft.accountCode.trim()) {
+    const note = decisionNote.trim();
+    if (!note) {
+      setRulePreviewStatus("Karar notu yazmadan kural önerisi oluşturulamaz.");
       return;
     }
     setRulePreviewStatus("Fisora karar notunu yorumluyor...");
@@ -891,11 +905,11 @@ export function JournalPanel({
         documentRef: activeDocument.id,
         action: "suggest_for_similar",
         reviewer: session?.userId || "mali-musavir",
-        correctedAccountCode: correctionDraft.accountCode.trim(),
+        correctedAccountCode,
         correctedCounterpartyCode: correctionDraft.counterpartyCode.trim(),
         category: activeDocument.productCategory,
-        reason: correctionDraft.reason.trim(),
-        decisionNote,
+        reason: note,
+        decisionNote: note,
         applyToSimilar: true,
         statementLineNo: selectedStatementLineNo,
         draftLines: activeDraftLines,
@@ -904,19 +918,44 @@ export function JournalPanel({
       const interpretation = normalizeRuleInterpretationView(asRecord(payload).rule_interpretation);
       setRulePreview(interpretation);
       setLearningModalOpen(true);
-      setRulePreviewStatus(interpretation ? "Yorum hazir." : "Sistem bu nottan net kural olusturamadi.");
+      setRulePreviewStatus(interpretation ? "Kural önerisi hazır." : "Sistem bu nottan net kural oluşturamadı.");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRulePreviewStatus(userSafeErrorMessage(message, "Kural yorumu hazırlanamadı. Tekrar deneyin."));
+      setRulePreviewStatus(userSafeErrorMessage(message, "Kural önerisi hazırlanamadı. Tekrar deneyin."));
     }
   }
 
-  function saveLearningDecision(learningConfirmation: "save_rule" | "suggest_similar") {
+  async function onPreviewReviewRule() {
+    const decisionNote = correctionDraft.reason.trim() || correctionDraft.ruleInstruction.trim();
+    await previewRuleCandidate(decisionNote);
+  }
+
+  async function onReviewLearningPrompt() {
+    const precedentAccount = String(utilityPrecedent.account_code || utilityPrecedent.accountCode || "").trim();
+    const usablePrecedentAccount = precedentAccount && activeDocument.chartAccounts.some(
+      (account) => account.isDetail && normalizeAccountCodeInput(account.code) === normalizeAccountCodeInput(precedentAccount),
+    ) ? precedentAccount : "";
+    const currentAccount = correctionDraft.accountCode.trim() || activeDocument.selectedExpenseAccount || activeDocument.selectedRevenueAccount || "";
+    const fallbackNote = activeDocument.counterpartyTitle && currentAccount
+      ? `Bu mükellefte ${activeDocument.counterpartyTitle} faturalarında ${currentAccount} hesabını kullan.`
+      : learningPrompt.message;
+    const note = (learningPrompt.suggestedNote || String(utilityPrecedent.meaning_label || "") || fallbackNote || "").trim();
+    setCorrectionDraft({
+      ...correctionDraft,
+      reason: note,
+      accountCode: usablePrecedentAccount || correctionDraft.accountCode,
+      applyToSimilar: true,
+    });
+    await previewRuleCandidate(note, usablePrecedentAccount || correctionDraft.accountCode.trim());
+  }
+
+  function saveLearningDecision() {
     void onSaveDecision("suggest_for_similar", {
-      learningConfirmation,
+      learningConfirmation: "save_rule",
       confirmedRuleInterpretation: rulePreview,
     });
     setLearningModalOpen(false);
+    setDismissedLearningPromptKey(learningPromptKey);
   }
 
   function setManualDraftLine(index: number, patch: Partial<DraftLine>) {
@@ -1028,6 +1067,46 @@ export function JournalPanel({
             )}
           </div>
         </section>
+        {learningPromptVisible ? (
+          <section className={`learning-prompt-card ${learningPrompt.status === "office_utility_precedent" ? "utility" : "repeat"}`} aria-label="Fisora öğrenme önerisi">
+            <div className="learning-prompt-heading">
+              <div>
+                <strong>{learningPrompt.status === "office_utility_precedent" ? "Daha önce öğrettiğiniz bir kural var" : "Fisora bir tekrar fark etti"}</strong>
+                <span>{learningPrompt.message}</span>
+              </div>
+              <span className="learning-prompt-badge">
+                {learningPrompt.status === "client_repeat_prompt" ? `${learningPrompt.clientConsistentDecisionCount}/3` : "Ofis bilgisi"}
+              </span>
+            </div>
+            {learningPrompt.status === "client_repeat_prompt" && learningPrompt.evidenceDocuments?.length ? (
+              <div className="learning-prompt-evidence">
+                {learningPrompt.evidenceDocuments.slice(-3).map((evidence) => (
+                  <span key={evidence.documentRef}>
+                    <strong>{evidence.issueDate ? formatPortalDate(evidence.issueDate) : "Fatura"}</strong>
+                    <small>{evidence.documentRef}</small>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {learningPrompt.status === "office_utility_precedent" ? (
+              <div className="learning-prompt-rule">
+                <span>Önceki karar</span>
+                <strong>{String(utilityPrecedent.meaning_label || utilityPrecedent.semantic_intent || learningPrompt.suggestedNote || "Önceki utility kuralı")}</strong>
+              </div>
+            ) : learningPrompt.suggestedNote ? (
+              <div className="learning-prompt-rule">
+                <span>Önerilen kural</span>
+                <strong>{learningPrompt.suggestedNote}</strong>
+              </div>
+            ) : null}
+            <div className="learning-prompt-actions">
+              <button className="secondary" onClick={() => setDismissedLearningPromptKey(learningPromptKey)} type="button">Şimdilik geç</button>
+              <button className="primary" onClick={onReviewLearningPrompt} type="button">
+                {learningPrompt.status === "office_utility_precedent" ? "Burada da uygula" : "Kuralı incele"}
+              </button>
+            </div>
+          </section>
+        ) : null}
         {reviewReadOnly ? (
           <section className="review-lock-notice" role="status" aria-label="Belge düzenleme kilidi">
             <div>
@@ -1135,7 +1214,7 @@ export function JournalPanel({
             </label>
           </div>
           <div className="learning-rule-actions">
-            <button onClick={onPreviewReviewRule} type="button">Egitim notunu kaydet</button>
+            <button onClick={onPreviewReviewRule} type="button">Kural önerisini oluştur</button>
             {rulePreviewStatus ? <span>{rulePreviewStatus}</span> : null}
           </div>
           <RuleInterpretationCard document={document} />
@@ -1144,24 +1223,24 @@ export function JournalPanel({
               <div className="learning-rule-dialog">
                 <div className="statement-review-heading">
                   <div>
-                    <h3>Fisora bunu boyle anladi</h3>
-                    <span>Ilk uygulamalarda musavir kontrolu devam eder.</span>
+                    <h3>Fisora bunu böyle anladı</h3>
+                    <span>Kuralı kaydetmeden önce kapsamı ve uygulamayı kontrol edin.</span>
                   </div>
                   <button onClick={() => setLearningModalOpen(false)} type="button">Kapat</button>
                 </div>
                 {rulePreview ? (
                   <div className="rule-interpretation-details">
-                    <div><span>Ozet</span><strong>{rulePreview.summaryTr || "-"}</strong></div>
+                    <div><span>Özet</span><strong>{rulePreview.summaryTr || "-"}</strong></div>
                     <div><span>Tetikleyici</span><strong>{rulePreview.triggerTr || "-"}</strong></div>
                     <div><span>Uygulama</span><strong>{rulePreview.actionTr || "-"}</strong></div>
-                    <div><span>Guvenlik</span><strong>{rulePreview.guardrailTr || "Ilk uygulamalarda musavir kontrolu istenir."}</strong></div>
+                    <div><span>Kontrol</span><strong>{rulePreview.guardrailTr || "İlk uygulamalarda müşavir kontrolü istenir."}</strong></div>
                   </div>
                 ) : (
-                  <p className="empty">Bu nottan net kural olusmadi; karar notunu daha dar yazin.</p>
+                  <p className="empty">Bu nottan net kural oluşmadı; karar notunu daha açık yazın.</p>
                 )}
-                <div className="decision-actions secondary-actions">
-                  <button disabled={!rulePreview || rulePreview.status !== "ready"} onClick={() => saveLearningDecision("save_rule")} type="button">Kural olarak kaydet</button>
-                  <button disabled={!rulePreview} onClick={() => saveLearningDecision("suggest_similar")} type="button">Benzerlerde oner</button>
+                <div className="decision-actions secondary-actions learning-confirm-actions">
+                  <button className="secondary" onClick={() => setLearningModalOpen(false)} type="button">Notu düzenle</button>
+                  <button className="primary" disabled={!rulePreview || rulePreview.status !== "ready"} onClick={saveLearningDecision} type="button">Bu mükellefte kural yap</button>
                 </div>
               </div>
             </section>

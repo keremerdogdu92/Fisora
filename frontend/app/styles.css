@@ -5597,3 +5597,100 @@ code {
 .review-lock-notice > div { display:grid; gap:3px; }
 .review-lock-notice span { color:var(--muted); font-size:.86rem; }
 .review-read-only .journal-scroll-area input, .review-read-only .journal-scroll-area textarea, .review-read-only .journal-scroll-area select, .review-read-only .journal-scroll-area button:not(.review-lock-retry), .review-read-only .journal-next-actions button { pointer-events:none; opacity:.62; }
+
+
+.learning-prompt-card {
+  background: #fffaf0;
+  border: 1px solid #e5b85c;
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 11px 12px;
+}
+
+.learning-prompt-card.utility {
+  background: #f5f9ff;
+  border-color: #aac5e8;
+}
+
+.learning-prompt-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.learning-prompt-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.learning-prompt-heading strong {
+  font-size: 0.9rem;
+}
+
+.learning-prompt-heading span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.learning-prompt-badge {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text) !important;
+  flex: 0 0 auto;
+  font-size: 0.7rem !important;
+  font-weight: 900;
+  padding: 4px 7px;
+}
+
+.learning-prompt-evidence {
+  display: grid;
+  gap: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.learning-prompt-evidence > span,
+.learning-prompt-rule {
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+}
+
+.learning-prompt-evidence strong,
+.learning-prompt-rule strong {
+  font-size: 0.78rem;
+}
+
+.learning-prompt-evidence small,
+.learning-prompt-rule span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.learning-prompt-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.learning-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1120px) {
+  .learning-prompt-evidence { grid-template-columns: 1fr; }
+  .learning-prompt-evidence small { display: none; }
+  .learning-rule-dialog .rule-interpretation-details { grid-template-columns: 1fr; }
+}

@@ -73,13 +73,14 @@ class LearningRuleService:
         direction = str(result.get("accounting_direction") or "").strip()
         if direction not in {"purchase", "sales"}:
             raise ValueError("learning_rule_direction_unresolved")
+        binding_mode = str(candidate.get("binding_mode") or "fixed_account").strip()
         account_code = _account_code(
             decision.get("corrected_account_code")
             or learning_event.get("corrected_account_code")
             or learning_event.get("selected_account_code")
         )
-        account = _selectable_detail_account(account_code, chart_accounts)
-        if account is None:
+        account = _selectable_detail_account(account_code, chart_accounts) if account_code else None
+        if binding_mode == "fixed_account" and account is None:
             raise ValueError("learning_rule_account_not_selectable")
         normalized_review = saved_review.get("normalized_review")
         normalized_review = normalized_review if isinstance(normalized_review, Mapping) else {}
@@ -88,7 +89,11 @@ class LearningRuleService:
             raise ValueError("learning_rule_source_review_required")
 
         scope_data = _narrow_scope(candidate=candidate, learning_event=learning_event)
-        semantic_role = _semantic_role(direction=direction, account_code=account_code, account=account, candidate=candidate)
+        semantic_role = (
+            _semantic_role(direction=direction, account_code=account_code, account=account, candidate=candidate)
+            if account is not None
+            else _candidate_semantic_role(direction=direction, candidate=candidate)
+        )
         if not semantic_role:
             raise ValueError("learning_rule_semantic_role_unresolved")
         invoice_mode = "return" if bool(result.get("is_return_invoice")) else "ordinary"
@@ -108,7 +113,9 @@ class LearningRuleService:
             "line_match_mode": scope_data["line_match_mode"],
             "normalized_terms": scope_data["normalized_terms"],
             "semantic_role": semantic_role,
-            "account_code": account_code,
+            "semantic_intent": str(candidate.get("semantic_accounting_intent") or "").strip(),
+            "binding_mode": binding_mode,
+            "account_code": account_code if binding_mode == "fixed_account" else "",
             "corrected_counterparty_code": str(learning_event.get("corrected_counterparty_code") or "").strip(),
             "category": str(learning_event.get("category") or "").strip(),
             "document_ref": str(decision.get("document_ref") or "").strip(),
@@ -174,14 +181,17 @@ def _narrow_scope(*, candidate: Mapping[str, Any], learning_event: Mapping[str, 
     utility = learning_event.get("utility_context")
     utility = utility if isinstance(utility, Mapping) else {}
     service_profile = str(utility.get("service_profile") or "").strip()
+    requested_line_mode = str(candidate.get("line_match_mode") or "all_lines").strip()
+    line_terms = _terms(candidate.get("match_phrase")) if requested_line_mode == "normalized_terms_all" else ()
+    line_mode = "normalized_terms_all" if line_terms else "all_lines"
     if candidate_scope == "client_counterparty" and tax_id:
         return {
             "scope": "client_counterparty",
             "qualifier": tax_id,
             "counterparty_tax_id": tax_id,
             "service_profile": "",
-            "line_match_mode": "all_lines",
-            "normalized_terms": (),
+            "line_match_mode": line_mode,
+            "normalized_terms": line_terms,
         }
     if service_profile:
         return {
@@ -189,8 +199,8 @@ def _narrow_scope(*, candidate: Mapping[str, Any], learning_event: Mapping[str, 
             "qualifier": service_profile,
             "counterparty_tax_id": "",
             "service_profile": service_profile,
-            "line_match_mode": "all_lines",
-            "normalized_terms": (),
+            "line_match_mode": line_mode,
+            "normalized_terms": line_terms,
         }
     terms = _terms(candidate.get("match_phrase")) or _terms(learning_event.get("normalized_terms"))
     if not terms:
@@ -203,6 +213,20 @@ def _narrow_scope(*, candidate: Mapping[str, Any], learning_event: Mapping[str, 
         "line_match_mode": "normalized_terms_all",
         "normalized_terms": terms,
     }
+
+def _candidate_semantic_role(*, direction: str, candidate: Mapping[str, Any]) -> str:
+    treatment = _key_part(candidate.get("account_treatment"))
+    intent = _key_part(candidate.get("semantic_accounting_intent"))
+    if direction == "sales":
+        return "revenue"
+    if treatment == "stock_or_cogs" or intent == "mal_alim":
+        return "stock"
+    if treatment == "non_deductible":
+        return "non_deductible"
+    if treatment == "expense" or intent.endswith("_gideri"):
+        return "expense"
+    return ""
+
 
 def _semantic_role(
     *,
@@ -237,7 +261,8 @@ def _rule_key(*, client_id: str, direction: str, scope: str, qualifier: str) -> 
 def _same_authority(current: Mapping[str, Any], snapshot: Mapping[str, Any]) -> bool:
     fields = (
         "client_id", "scope", "direction", "invoice_mode", "counterparty_tax_id",
-        "service_profile", "line_match_mode", "semantic_role", "account_code",
+        "service_profile", "line_match_mode", "semantic_role", "semantic_intent", "binding_mode",
+        "account_code",
     )
     if any(str(current.get(field) or "") != str(snapshot.get(field) or "") for field in fields):
         return False

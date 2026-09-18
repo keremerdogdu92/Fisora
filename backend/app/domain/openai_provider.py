@@ -43,7 +43,7 @@ DEFAULT_NVIDIA_MODEL = "openai/gpt-oss-120b"
 DEFAULT_CLOUDFLARE_MODEL = "@cf/openai/gpt-oss-120b"
 DEFAULT_SAMBANOVA_MODEL = "gpt-oss-120b"
 DEFAULT_XKIRO_MODEL = "anthropic/claude-opus-4.8"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 PRODUCT_CLASSIFICATION_PROMPT_VERSION = "invoice-semantic-decision-v1"
 
 
@@ -870,6 +870,7 @@ class ChatCompletionsAccountingProvider:
         http_client: Any | None = None,
         timeout_seconds: float = 30.0,
         max_tokens: int | None = None,
+        request_body_overrides: Mapping[str, object] | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError(f"{key_name} is required when FISORA_AI_PROVIDER={provider_name}")
@@ -881,6 +882,7 @@ class ChatCompletionsAccountingProvider:
         self.http_client = http_client or httpx.Client()
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
+        self.request_body_overrides = dict(request_body_overrides or {})
         self.last_capacity_snapshot: dict[str, object] = {}
 
     def classify_product(self, request: AiClassificationRequest) -> dict[str, Any]:
@@ -951,6 +953,7 @@ class ChatCompletionsAccountingProvider:
         }
         if self.max_tokens is not None:
             request_payload["max_tokens"] = self.max_tokens
+        request_payload.update(self.request_body_overrides)
         response = self.http_client.post(
             self.chat_completions_url,
             headers={

@@ -116,21 +116,26 @@ mustavir kontrolu zorunlu
 
 ## Ogrenme Modeli
 
-Mustavir her duzeltme yaptiginda sistem bir ogrenme olayi kaydeder:
+Ilk urun asamasinda ogrenme iki kanaldan gelir:
 
-- ham belge ve kalem
-- onceki kategori ve hesap onerisi
-- mustavirin duzelttigi kategori, hesap veya cari
-- red/accept/export karari
-- karar kapsamı: genel aday, mustavir/ofis, mukellef ozel
-- gerekce
+- Mustavirin fatura uzerinde yaptigi duzeltmeler sistem icin ogrenme sinyalidir.
+- Mustavir, fatura uzerindeki `kural karar notu` alanina dogal dilde kararini yazar; sistem bu notu AI ile yapilandirilmis kurala cevirir. Bu aksiyon kural olusturmanin ana yoludur.
 
-Tekrar kurali:
+Kural yalnizca tek bir hesap koduna baglanmak zorunda degildir. Muhasebe niyetini veya belge sinifini da kilitleyebilir. Ornegin belirli mukellef + belirli tedarikci icin `bu firmadan gelen her sey mal alistir` karari verildiginde, satir aciklamasi `bakim/onarim` olsa bile ana muhasebe yonu mal alis olarak kalir; uygun alt hesap belge icerigine gore secilebilir.
 
-- Ayni veya cok benzer karar 3 kez tutarli onaylanirsa otomasyon adayi olur.
-- Otomasyon adayi kayit, mustavir/ofis politikasi izin vermeden otomatik export'a
-  girmez.
-- Is alani disi kararlar mukellef ozelinde guclu negatif sinyal olarak saklanir.
+Utility/genel gider tedarikcileri ayri ele alinir. Su, elektrik, telefon, internet ve dogalgaz gibi firmalarda tedarikci sinifi sabittir; fatura icindeki belirli vergi veya bedel satirlari icin ek kurallar calisabilir. Ornegin atiksu bedeli veya OIV gibi kalemler kendi ozel muhasebe davranisina sahip olabilir. Ayni tedarikci hem utility hem mal alim firmasi olarak kullanilmaz.
+
+Kural ilk kez bir mukellefte ogretildiginde o mukellef icin kesinlesir. Ayni tedarikci veya ayni utility davranisi baska bir mukellefte goruldugunde sistem onceki kurali hazir onerir ancak otomatik uygulamaz. Mustavir her mukellef icin ayri onay verir. Boylece ofis genelinde standardizasyon hizlanir fakat denetim korunur.
+
+Egitimin ana arayuzu fatura inceleme ekranidir. Ayri kural/egitim ekrani varsa aktif kurallari gorme, duzenleme veya devre disi birakma gibi ikincil yonetim icin kullanilir.
+
+Ayni mukellefte ayni kural niteligindeki duzeltme 3 farkli faturada ayni sekilde yapilip onaylanirsa sistem bunu otomatik olarak kural adayi haline getirir ve mustavire onerir. Bu tekrar sinyali kurali kendiliginden aktif etmez; mustavir onayi gerekir.
+
+> PIN / ACIK KONU: 3-fatura tekrar eslestirmesi productiona gecmeden once kural fingerprint mantigiyla yeniden netlestirilecek. Hesap kodu tek basina eslesme anahtari olmayacak; tedarikci/utility kimligi + semantik karar + kapsam esas alinacak. Bu konu simdilik beklemede.
+
+Normal kural olusturma akisi mustavirin fatura uzerinde karar notu yazmasiyla baslar. Sistem her tekil duzeltmeye mudahale etmez; utility tedarikcilerinde onceki mukellef kurallarinin yeniden kullanimi ve ayni mukellefte 3 farkli faturada tekrarlanan kararlar icin proaktif onay onerisi gosterebilir.
+
+Uzun vadede yeterli veri ve ekonomik kaynak olustugunda, bu birikmis onayli kararlar gercek model egitimi/fine-tune icin degerlendirilebilir; ilk urun asamasinda ana mekanizma kural ogrenmesi ve mustavir onayidir.
 
 ## Yeni Mustavirlerde Kullanim
 

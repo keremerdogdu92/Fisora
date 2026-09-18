@@ -22,6 +22,7 @@ from app.domain.verified_rule_authority import (
 )
 from app.persistence.learning_rule_repository import LearningRuleRepository
 from app.services.learning_rule_service import LearningRuleService
+from app.workflows.document_processing import _active_semantic_rule_constraint
 
 
 def _snapshot(**overrides: object) -> dict[str, object]:
@@ -192,6 +193,82 @@ class LearningRuleLifecycleTests(unittest.TestCase):
         self.assertEqual(active["counterparty_tax_id"], "1234567890")
         self.assertEqual(active["source_review_decision_id"], "review-42")
         self.assertEqual(active["account_code"], "770.03.001")
+
+    def test_confirmed_supplier_semantic_rule_keeps_role_without_freezing_subaccount(self) -> None:
+        service = LearningRuleService(repository=LearningRuleRepository())
+        active = service.save_confirmed_review_rule(
+            client_id="firma-1",
+            decision={
+                "learning_confirmation": "save_rule",
+                "corrected_account_code": "153.03.001",
+                "document_ref": "doc-stock-1",
+                "decision_note": "Bu firmadan gelen her sey mal alistir.",
+            },
+            learning_event={
+                "natural_language_rule_candidate": {
+                    "scope": "client_counterparty",
+                    "account_treatment": "stock_or_cogs",
+                    "semantic_accounting_intent": "mal_alim",
+                    "binding_mode": "semantic_role",
+                    "line_match_mode": "all_lines",
+                    "match_phrase": "medikal tedarik",
+                },
+                "counterparty_tax_id": "1234567890",
+                "corrected_account_code": "153.03.001",
+                "category": "mal_alim",
+                "utility_context": {},
+            },
+            interpretation={
+                "status": "ready",
+                "summary_tr": "Bu tedarikciden gelen faturalar mal alimi olarak islenecek.",
+                "guardrail_tr": "Alt hesap fatura icerigine gore secilir.",
+                "source": "accountant_confirmed",
+            },
+            saved_review={"id": "review-stock-1"},
+            document={"result": {"accounting_direction": "purchase", "file_name": "doc-stock-1.pdf"}},
+            chart_accounts={"accounts": [{
+                "normalized_account_code": "153.03.001",
+                "is_detail_account": True,
+                "is_active": True,
+                "semantic_roles": ["stock"],
+            }]},
+            actor="accountant",
+        )
+
+        self.assertIsNotNone(active)
+        self.assertEqual(active["binding_mode"], "semantic_role")
+        self.assertEqual(active["semantic_role"], "stock")
+        self.assertEqual(active["semantic_intent"], "mal_alim")
+        self.assertEqual(active["account_code"], "")
+
+    def test_supplier_semantic_rule_matches_only_same_client_and_counterparty(self) -> None:
+        rule = {
+            "status": "active",
+            "binding_mode": "semantic_role",
+            "client_id": "firma-1",
+            "direction": "purchase",
+            "invoice_mode": "ordinary",
+            "scope": "client_counterparty",
+            "counterparty_tax_id": "1234567890",
+            "line_match_mode": "all_lines",
+            "semantic_role": "stock",
+            "semantic_intent": "mal_alim",
+            "rule_key": "client:firma-1:purchase:client_counterparty:1234567890",
+            "version": 1,
+        }
+
+        matched = _active_semantic_rule_constraint(
+            rules=(rule,), client_id="firma-1", direction="purchase", invoice_mode="ordinary",
+            counterparty_tax_id="1234567890", service_profile="",
+        )
+        other_supplier = _active_semantic_rule_constraint(
+            rules=(rule,), client_id="firma-1", direction="purchase", invoice_mode="ordinary",
+            counterparty_tax_id="9999999999", service_profile="",
+        )
+
+        self.assertEqual(matched["semantic_role"], "stock")
+        self.assertEqual(matched["semantic_intent"], "mal_alim")
+        self.assertIsNone(other_supplier)
 
     def test_full_vkn_rule_compiles_one_authority_per_canonical_line(self) -> None:
         authorities = compile_verified_rule_authorities(

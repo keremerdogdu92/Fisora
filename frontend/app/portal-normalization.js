@@ -130,13 +130,27 @@ function normalizeStatementAiSuggestions(value) {
 
 function normalizeRulePrompt(value) {
   const row = safeRecord(value);
+  const evidenceDocuments = Array.isArray(row.evidenceDocuments ?? row.evidence_documents)
+    ? (row.evidenceDocuments ?? row.evidence_documents).map((item) => {
+        const evidence = safeRecord(item);
+        return {
+          documentRef: safeText(evidence.documentRef ?? evidence.document_ref),
+          issueDate: safeText(evidence.issueDate ?? evidence.issue_date),
+        };
+      })
+    : [];
   return {
     show: Boolean(row.show),
+    status: safeText(row.status),
+    promptKey: safeText(row.promptKey ?? row.prompt_key),
     defaultScope: safeText(row.defaultScope ?? row.default_scope),
     message: safeText(row.message),
     clientConsistentDecisionCount: safeNumber(row.clientConsistentDecisionCount ?? row.client_consistent_decision_count),
     officeDistinctClientCount: safeNumber(row.officeDistinctClientCount ?? row.office_distinct_client_count),
     officeConsistentDecisionCount: safeNumber(row.officeConsistentDecisionCount ?? row.office_consistent_decision_count),
+    evidenceDocuments,
+    utilityPrecedent: safeRecord(row.utilityPrecedent ?? row.utility_precedent),
+    suggestedNote: safeText(row.suggestedNote ?? row.suggested_note),
   };
 }
 

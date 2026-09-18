@@ -12528,6 +12528,14 @@ TOPLAM: 1200.00"""
             },
             {
                 **base_event,
+                "document_ref": "kolaysoft-bir.pdf",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "corrected_account_code": "770.05",
+                "corrected_counterparty_code": "320.01.888",
+            },
+            {
+                **base_event,
                 "document_ref": "kolaysoft-iki.pdf",
                 "client_id": "client-1",
                 "accounting_intent": "e_fatura_yazilim_gideri",
@@ -12557,8 +12565,62 @@ TOPLAM: 1200.00"""
         self.assertEqual(enriched["accounting_intent"], "e_fatura_yazilim_gideri")
         self.assertEqual(enriched["client_consistent_decision_count"], 3)
         self.assertEqual(enriched["rule_prompt"]["show"], True)
+        self.assertEqual(enriched["rule_prompt"]["status"], "client_repeat_prompt")
         self.assertEqual(enriched["rule_prompt"]["default_scope"], "client_narrow")
+        self.assertEqual(len(enriched["rule_prompt"]["evidence_documents"]), 3)
         self.assertIn("kolay", enriched["normalized_terms"])
+
+    def test_utility_rule_from_other_client_is_offered_as_client_specific_precedent(self) -> None:
+        event = {
+            "document_ref": "aski-2026-09.pdf",
+            "scope": "client_rule",
+            "action": "approve",
+            "category": "su_gideri",
+            "corrected_account_code": "770.10",
+            "reason": "",
+        }
+        document = {
+            "document_ref": "aski-2026-09.pdf",
+            "result": {
+                "accounting_direction": "purchase",
+                "invoice_type": "ALIS",
+                "provider_hint": "ASKI",
+                "product_line_hint": "Su ve atik su bedeli",
+                "product_category": "su_gideri",
+                "service_profile": "water",
+                "selected_expense_account": "770.10",
+                "selected_supplier_account": "320.01",
+            },
+        }
+        precedent = {
+            "status": "active",
+            "rule_key": "client:other:purchase:client_service_profile:water",
+            "client_id": "other-client",
+            "direction": "purchase",
+            "service_profile": "water",
+            "line_match_mode": "all_lines",
+            "semantic_role": "expense",
+            "semantic_intent": "su_gideri",
+            "binding_mode": "fixed_account",
+            "account_code": "770.10",
+            "meaning_label": "Su faturalarini su gideri olarak isle.",
+        }
+
+        enriched = enrich_learning_event(
+            event,
+            client_id="client-1",
+            decision=event,
+            document=document,
+            prior_learning_events=(),
+            office_rule_precedents=(precedent,),
+        )
+
+        prompt = enriched["rule_prompt"]
+        self.assertTrue(prompt["show"])
+        self.assertEqual(prompt["status"], "office_utility_precedent")
+        self.assertEqual(prompt["utility_precedent"]["source_client_id"], "other-client")
+        self.assertEqual(prompt["utility_precedent"]["account_code"], "770.10")
+        self.assertIn("Su faturalarini", prompt["suggested_note"])
 
     def test_learning_event_uses_approved_draft_account_with_nace_vat_signature(self) -> None:
         event = {
@@ -13103,7 +13165,9 @@ TOPLAM: 1200.00"""
 
         self.assertEqual(candidate["scope"], "client_counterparty")
         self.assertEqual(candidate["account_treatment"], "stock_or_cogs")
-        self.assertEqual(candidate["suggested_account_code"], "153.03")
+        self.assertEqual(candidate["binding_mode"], "semantic_role")
+        self.assertEqual(candidate["semantic_accounting_intent"], "mal_alim")
+        self.assertEqual(candidate["suggested_account_code"], "")
         self.assertTrue(candidate["requires_review"])
 
     def test_enriched_natural_language_candidate_uses_selected_account_when_decision_account_is_blank(self) -> None:

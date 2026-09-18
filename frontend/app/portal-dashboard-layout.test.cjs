@@ -193,8 +193,10 @@ test("document cockpit exposes accountant learning preview modal controls", () =
 
   assert.match(reviewPanels, /learning-rule-modal/);
   assert.match(reviewPanels, /onPreviewReviewRule/);
-  assert.match(reviewPanels, /Kural olarak kaydet/);
-  assert.match(reviewPanels, /Benzerlerde oner/);
+  assert.match(reviewPanels, /Kural .nerisini olu.tur/);
+  assert.match(reviewPanels, /Bu m.kellefte kural yap/);
+  assert.match(reviewPanels, /Fisora bir tekrar fark etti/);
+  assert.match(reviewPanels, /office_utility_precedent/);
 });
 
 test("accountant dashboard promotes review work and keeps agent metrics off the home surface", () => {

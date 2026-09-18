@@ -57,6 +57,14 @@ from app.domain.matching_simulation import (
     simulate_invoice,
 )
 from app.domain.verified_rule_authority import compile_verified_rule_authorities
+from app.persistence.learning_rule_repository import LearningRuleRepository
+from app.services.learned_rule_audit_shadow import (
+    PROMPT_VERSION as LEARNED_RULE_AUDIT_PROMPT_VERSION,
+    learned_rule_audit_shadow_client_allowed,
+    learned_rule_audit_shadow_enabled,
+    learned_rule_audit_shadow_model,
+    run_learned_rule_audit_shadow,
+)
 from app.domain.nace_research import resolve_nace_research_profile
 from app.domain.openai_provider import (
     CEREBRAS_CHAT_COMPLETIONS_URL,
@@ -82,6 +90,7 @@ from app.domain.openai_provider import (
     OpenAiAccountingProvider,
     TaskRoutingAccountingProvider,
 )
+from app.domain.xkiro_plan_fallback import build_xkiro_final_provider
 from app.domain.document_ai_artifacts import ArtifactKind, ArtifactWrite
 from app.domain.gemini_pdf_runtime import (
     build_gemini_pdf_runtime_from_env,
@@ -302,6 +311,51 @@ def _counterparty_match_for_invoice(
     return match_counterparty(accounts, tax_ids=invoice.tax_ids, name_hint=invoice.provider_hint)
 
 
+def _active_semantic_rule_constraint(
+    *,
+    rules: tuple[dict[str, Any], ...],
+    client_id: str,
+    direction: str,
+    invoice_mode: str,
+    counterparty_tax_id: str,
+    service_profile: str,
+) -> dict[str, str] | None:
+    priorities = {"client_counterparty": 300, "client_service_profile": 200}
+    matches: list[tuple[int, dict[str, Any]]] = []
+    normalized_tax_id = "".join(ch for ch in str(counterparty_tax_id or "") if ch.isdigit())
+    for rule in rules:
+        if str(rule.get("status") or "") != "active" or str(rule.get("binding_mode") or "fixed_account") != "semantic_role":
+            continue
+        if str(rule.get("client_id") or "") != client_id or str(rule.get("direction") or "") != direction:
+            continue
+        if str(rule.get("invoice_mode") or "ordinary") != invoice_mode or str(rule.get("line_match_mode") or "all_lines") != "all_lines":
+            continue
+        scope = str(rule.get("scope") or "")
+        if scope == "client_counterparty":
+            rule_tax_id = "".join(ch for ch in str(rule.get("counterparty_tax_id") or "") if ch.isdigit())
+            if not rule_tax_id or rule_tax_id != normalized_tax_id:
+                continue
+        elif scope == "client_service_profile":
+            if not service_profile or str(rule.get("service_profile") or "") != service_profile:
+                continue
+        else:
+            continue
+        matches.append((priorities.get(scope, 0), rule))
+    if not matches:
+        return None
+    highest = max(priority for priority, _ in matches)
+    winners = [rule for priority, rule in matches if priority == highest]
+    roles = {str(rule.get("semantic_role") or "") for rule in winners if str(rule.get("semantic_role") or "")}
+    if len(roles) != 1:
+        return None
+    winner = sorted(winners, key=lambda rule: (str(rule.get("rule_key") or ""), int(rule.get("version") or 0)))[-1]
+    return {
+        "semantic_role": next(iter(roles)),
+        "semantic_intent": str(winner.get("semantic_intent") or ""),
+        "rule_key": str(winner.get("rule_key") or ""),
+    }
+
+
 def _serializable_simulation(
     invoice: ParsedInvoice,
     workspace: dict[str, Any],
@@ -327,6 +381,14 @@ def _serializable_simulation(
     )
     invoice_mode = "return" if bool(getattr(invoice, "is_return_invoice", False)) else "ordinary"
     active_rules = tuple(workspace.get("learning_rules") or ())
+    semantic_rule_constraint = _active_semantic_rule_constraint(
+        rules=active_rules,
+        client_id=profile.client_id if profile else "",
+        direction=direction if direction in {"purchase", "sales"} else "purchase",
+        invoice_mode=invoice_mode,
+        counterparty_tax_id=counterparty_tax_id,
+        service_profile=str(getattr(invoice, "service_profile", "") or ""),
+    )
     compiled_rules = compile_verified_rule_authorities(
         rules=active_rules,
         client_id=profile.client_id if profile else "",
@@ -347,6 +409,7 @@ def _serializable_simulation(
         intended_direction=intended_direction,
         classification_override=classification_override,
         verified_rule_authorities=compiled_rules.authorities,
+        semantic_rule_constraint=semantic_rule_constraint,
     )
     result = apply_learning_rules(
         result,
@@ -429,6 +492,92 @@ def _three_stage_gemini_runtime(source: Mapping[str, str] | Any):
         source.get("FISORA_GEMINI_MODEL", "") or DEFAULT_GEMINI_MODEL
     )
     return build_gemini_pdf_runtime_from_env(runtime_env)
+
+
+def _run_learned_rule_audit_shadow_for_three_stage(
+    *,
+    store: Any,
+    client_id: str,
+    workspace: Mapping[str, object],
+    source_package: Mapping[str, object],
+    semantic_plan: Mapping[str, object],
+    final_output: Mapping[str, object],
+    source: Mapping[str, str] | Any,
+) -> dict[str, Any] | None:
+    if not learned_rule_audit_shadow_enabled(source):
+        return None
+    if not learned_rule_audit_shadow_client_allowed(source, client_id):
+        return None
+    if not hasattr(store, "_connect"):
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "status": "skipped",
+            "reason": "learning_rule_repository_unavailable",
+            "mutated_accounting": False,
+        }
+
+    repository = LearningRuleRepository(
+        connect=store._connect,
+        tenant_id=getattr(store, "tenant_id", None),
+        json_value=getattr(store, "_json", None),
+    )
+    active_rules = repository.list_active(client_id=client_id)
+    if not active_rules:
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "status": "skipped",
+            "reason": "no_active_rules",
+            "active_rule_count": 0,
+            "mutated_accounting": False,
+        }
+
+    model = learned_rule_audit_shadow_model(source)
+    runtime_env = dict(source)
+    runtime_env["FISORA_GEMINI_PDF_V2_MODEL"] = model
+    runtime = build_gemini_pdf_runtime_from_env(runtime_env)
+    if not runtime.available or runtime.provider is None:
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "model": model,
+            "status": "error",
+            "error_type": "gemini_runtime_unavailable",
+            "mutated_accounting": False,
+        }
+
+    try:
+        result = run_learned_rule_audit_shadow(
+            provider=runtime.provider,
+            active_rules=active_rules,
+            source_package=source_package,
+            semantic_plan=semantic_plan,
+            final_output=final_output,
+            workspace=workspace,
+        )
+        result["model"] = model
+        return result
+    except Exception as exc:
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "model": model,
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "mutated_accounting": False,
+        }
+
+
+def _attach_learned_rule_audit_shadow(
+    result: dict[str, Any],
+    shadow: Mapping[str, object] | None,
+) -> None:
+    if shadow is None:
+        return
+    details = dict(result.get("technical_details") or {})
+    details["learned_rule_audit_shadow"] = dict(shadow)
+    result["technical_details"] = details
 
 
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
@@ -522,6 +671,22 @@ def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | A
         api_key=source.get("OPENAI_API_KEY", ""),
         model=source.get("FISORA_OPENAI_MODEL", source.get("FISORA_AI_MODEL", DEFAULT_OPENAI_MODEL)),
     )
+
+
+def _build_final_accountant_provider(source: Mapping[str, str] | Any) -> object:
+    direct_key = str(source.get("DEEPSEEK_API_KEY", "") or "").strip()
+    if direct_key:
+        base_url = str(source.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com") or "https://api.deepseek.com").rstrip("/")
+        return ChatCompletionsAccountingProvider(
+            api_key=direct_key,
+            model=str(source.get("DEEPSEEK_FLASH_MODEL", "deepseek-v4-flash") or "deepseek-v4-flash"),
+            chat_completions_url=f"{base_url}/chat/completions",
+            provider_name="deepseek", key_name="DEEPSEEK_API_KEY",
+            timeout_seconds=float(source.get("FISORA_DEEPSEEK_TIMEOUT_SECONDS", "120")),
+            max_tokens=int(source.get("FISORA_DEEPSEEK_MAX_TOKENS", "16384")),
+            request_body_overrides={"thinking": {"type": "enabled"}, "reasoning_effort": str(source.get("FISORA_DEEPSEEK_REASONING_EFFORT", "low") or "low")},
+        )
+    return _accounting_provider_from_env("xkiro", source)
 
 
 SUPPORTED_ACCOUNTING_PROVIDERS = {
@@ -1466,7 +1631,7 @@ def _run_gemini_pdf_v2_for_worker(
         profile = (workspace.get("client") or {}).get("profile") or {}
         source_hash = sha256(source_bytes).hexdigest()
         try:
-            final_provider = _accounting_provider_from_env("xkiro", environ)
+            final_provider = _build_final_accountant_provider(environ)
         except ValueError as exc:
             raise RetryableDocumentTechnicalError("three_stage_final_provider_unavailable") from exc
         processing_snapshot: dict[str, Any] = {
@@ -1570,6 +1735,16 @@ def _run_gemini_pdf_v2_for_worker(
             )
             receipt_ids.append(receipt.artifact_id)
         result = dict(three_stage.result)
+        shadow = _run_learned_rule_audit_shadow_for_three_stage(
+            store=store,
+            client_id=client_id,
+            workspace=workspace,
+            source_package=three_stage.source_package,
+            semantic_plan=three_stage.semantic_plan,
+            final_output=three_stage.final_output,
+            source=environ,
+        )
+        _attach_learned_rule_audit_shadow(result, shadow)
         result["gemini_pdf_v2_used"] = True
         result["document_ai_artifact_ids"] = receipt_ids
         return result, provider
@@ -2873,7 +3048,7 @@ def _process_html_source_job(
                     )
                 planner_provider = runtime.provider
             try:
-                final_provider = _accounting_provider_from_env("xkiro", environ)
+                final_provider = _build_final_accountant_provider(environ)
             except ValueError as exc:
                 raise RetryableDocumentTechnicalError("html_accounting_final_provider_unavailable") from exc
 
@@ -2983,6 +3158,16 @@ def _process_html_source_job(
                 "html_accountant_source_chars": len(accountant_text),
             })
             result["technical_details"] = details
+            shadow = _run_learned_rule_audit_shadow_for_three_stage(
+                store=store,
+                client_id=client_id,
+                workspace=workspace,
+                source_package=prepared.source_package,
+                semantic_plan=prepared.semantic_plan,
+                final_output=prepared.final_output,
+                source=environ,
+            )
+            _attach_learned_rule_audit_shadow(result, shadow)
             ai_ms = (
                 int(prepared.stage_elapsed_ms.get("planner", 0))
                 + int(prepared.stage_elapsed_ms.get("accountant", 0))

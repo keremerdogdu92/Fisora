@@ -57,6 +57,14 @@ from app.domain.matching_simulation import (
     simulate_invoice,
 )
 from app.domain.verified_rule_authority import compile_verified_rule_authorities
+from app.persistence.learning_rule_repository import LearningRuleRepository
+from app.services.learned_rule_audit_shadow import (
+    PROMPT_VERSION as LEARNED_RULE_AUDIT_PROMPT_VERSION,
+    learned_rule_audit_shadow_client_allowed,
+    learned_rule_audit_shadow_enabled,
+    learned_rule_audit_shadow_model,
+    run_learned_rule_audit_shadow,
+)
 from app.domain.nace_research import resolve_nace_research_profile
 from app.domain.openai_provider import (
     CEREBRAS_CHAT_COMPLETIONS_URL,
@@ -429,6 +437,92 @@ def _three_stage_gemini_runtime(source: Mapping[str, str] | Any):
         source.get("FISORA_GEMINI_MODEL", "") or DEFAULT_GEMINI_MODEL
     )
     return build_gemini_pdf_runtime_from_env(runtime_env)
+
+
+def _run_learned_rule_audit_shadow_for_three_stage(
+    *,
+    store: Any,
+    client_id: str,
+    workspace: Mapping[str, object],
+    source_package: Mapping[str, object],
+    semantic_plan: Mapping[str, object],
+    final_output: Mapping[str, object],
+    source: Mapping[str, str] | Any,
+) -> dict[str, Any] | None:
+    if not learned_rule_audit_shadow_enabled(source):
+        return None
+    if not learned_rule_audit_shadow_client_allowed(source, client_id):
+        return None
+    if not hasattr(store, "_connect"):
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "status": "skipped",
+            "reason": "learning_rule_repository_unavailable",
+            "mutated_accounting": False,
+        }
+
+    repository = LearningRuleRepository(
+        connect=store._connect,
+        tenant_id=getattr(store, "tenant_id", None),
+        json_value=getattr(store, "_json", None),
+    )
+    active_rules = repository.list_active(client_id=client_id)
+    if not active_rules:
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "status": "skipped",
+            "reason": "no_active_rules",
+            "active_rule_count": 0,
+            "mutated_accounting": False,
+        }
+
+    model = learned_rule_audit_shadow_model(source)
+    runtime_env = dict(source)
+    runtime_env["FISORA_GEMINI_PDF_V2_MODEL"] = model
+    runtime = build_gemini_pdf_runtime_from_env(runtime_env)
+    if not runtime.available or runtime.provider is None:
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "model": model,
+            "status": "error",
+            "error_type": "gemini_runtime_unavailable",
+            "mutated_accounting": False,
+        }
+
+    try:
+        result = run_learned_rule_audit_shadow(
+            provider=runtime.provider,
+            active_rules=active_rules,
+            source_package=source_package,
+            semantic_plan=semantic_plan,
+            final_output=final_output,
+            workspace=workspace,
+        )
+        result["model"] = model
+        return result
+    except Exception as exc:
+        return {
+            "mode": "shadow",
+            "prompt_version": LEARNED_RULE_AUDIT_PROMPT_VERSION,
+            "model": model,
+            "status": "error",
+            "error_type": type(exc).__name__,
+            "mutated_accounting": False,
+        }
+
+
+def _attach_learned_rule_audit_shadow(
+    result: dict[str, Any],
+    shadow: Mapping[str, object] | None,
+) -> None:
+    if shadow is None:
+        return
+    details = dict(result.get("technical_details") or {})
+    details["learned_rule_audit_shadow"] = dict(shadow)
+    result["technical_details"] = details
 
 
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
@@ -1586,6 +1680,16 @@ def _run_gemini_pdf_v2_for_worker(
             )
             receipt_ids.append(receipt.artifact_id)
         result = dict(three_stage.result)
+        shadow = _run_learned_rule_audit_shadow_for_three_stage(
+            store=store,
+            client_id=client_id,
+            workspace=workspace,
+            source_package=three_stage.source_package,
+            semantic_plan=three_stage.semantic_plan,
+            final_output=three_stage.final_output,
+            source=environ,
+        )
+        _attach_learned_rule_audit_shadow(result, shadow)
         result["gemini_pdf_v2_used"] = True
         result["document_ai_artifact_ids"] = receipt_ids
         return result, provider
@@ -2999,6 +3103,16 @@ def _process_html_source_job(
                 "html_accountant_source_chars": len(accountant_text),
             })
             result["technical_details"] = details
+            shadow = _run_learned_rule_audit_shadow_for_three_stage(
+                store=store,
+                client_id=client_id,
+                workspace=workspace,
+                source_package=prepared.source_package,
+                semantic_plan=prepared.semantic_plan,
+                final_output=prepared.final_output,
+                source=environ,
+            )
+            _attach_learned_rule_audit_shadow(result, shadow)
             ai_ms = (
                 int(prepared.stage_elapsed_ms.get("planner", 0))
                 + int(prepared.stage_elapsed_ms.get("accountant", 0))

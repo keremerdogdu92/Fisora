@@ -335,9 +335,10 @@ function learnedRuleAuditView(document?: PilotDocument): LearnedRuleAuditView {
     };
   }).filter((item) => item.rowId && item.ruleId && item.fromAccount && item.toAccount);
 
+  const status = qualityText(audit, "status", "");
   return {
-    present: Object.keys(audit).length > 0,
-    status: qualityText(audit, "status", ""),
+    present: Object.keys(audit).length > 0 && status !== "skipped",
+    status,
     auditStatus: qualityText(audit, "audit_status", ""),
     model: qualityText(audit, "model", ""),
     elapsedMs: Number(audit.elapsed_ms || 0) || 0,
@@ -1158,7 +1159,9 @@ export function JournalPanel({
               <div className="learned-rule-audit-warning">
                 <strong>Bu sonuç uygulanamaz.</strong>
                 <span>
-                  {[...ruleAudit.validationErrors, ...ruleAudit.unresolvedRows.map((rowId) => `Çözümlenemeyen satır: ${rowId}`)].join(" · ") || "Kural denetimi tamamlanmadı."}
+                  {ruleAudit.unresolvedRows.length
+                    ? `Manuel kontrol gereken satırlar: ${ruleAudit.unresolvedRows.join(", ")}`
+                    : "Kural denetimi doğrulaması tamamlanmadı."}
                 </span>
               </div>
             ) : ruleAudit.corrections.length ? (

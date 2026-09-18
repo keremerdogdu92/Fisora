@@ -539,13 +539,57 @@ def compact_result(result: object) -> dict[str, object]:
         "statement_ai_summary",
         "statement_entries",
         "statement_lines",
-        "technical_details",
         "static_fallback_account",
         "static_fallback_suppressed",
         "suggested_counterparty_account",
         "vat_rates",
     }
-    return {key: value for key, value in result.items() if key in allowed_result_keys}
+    compact = {key: value for key, value in result.items() if key in allowed_result_keys}
+    audit = compact_learned_rule_audit_details(result.get("technical_details"))
+    if audit:
+        compact["technical_details"] = {"learned_rule_audit_shadow": audit}
+    return compact
+
+
+def compact_learned_rule_audit_details(value: object) -> dict[str, object]:
+    details = value if isinstance(value, dict) else {}
+    audit = details.get("learned_rule_audit_shadow")
+    if not isinstance(audit, dict):
+        return {}
+    status = str(audit.get("status") or "")
+    if status == "skipped":
+        return {}
+
+    corrections = []
+    for raw in safe_list(audit.get("corrections")):
+        if not isinstance(raw, dict):
+            continue
+        correction = {
+            key: raw.get(key)
+            for key in ("row_id", "rule_id", "from_account", "to_account", "reason")
+            if key in raw
+        }
+        if correction:
+            corrections.append(correction)
+
+    unresolved_rows = [
+        str(row_id)
+        for row_id in safe_list(audit.get("unresolved_rows"))
+        if str(row_id).strip()
+    ]
+    validation_errors = safe_list(audit.get("validation_errors"))
+
+    return {
+        "status": status,
+        "audit_status": str(audit.get("audit_status") or ""),
+        "model": str(audit.get("model") or ""),
+        "elapsed_ms": int(audit.get("elapsed_ms") or 0),
+        "prompt_version": str(audit.get("prompt_version") or ""),
+        "correction_count": len(corrections),
+        "corrections": corrections,
+        "unresolved_rows": unresolved_rows,
+        "validation_errors": ["validation_failed"] if validation_errors else [],
+    }
 
 
 def compact_uploaded_document(document: object) -> dict[str, object]:

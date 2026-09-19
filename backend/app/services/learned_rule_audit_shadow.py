@@ -1,5 +1,5 @@
 # File: backend/app/services/learned_rule_audit_shadow.py
-# Summary: Runs a non-authoritative three-stage learned-rule audit beside production accounting without mutating the draft.
+# Summary: Produces validated three-stage learned-rule audit corrections; the workflow applies only safe corrections with provenance.
 from __future__ import annotations
 
 from dataclasses import dataclass

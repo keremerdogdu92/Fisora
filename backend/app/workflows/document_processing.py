@@ -585,6 +585,151 @@ def _attach_learned_rule_audit_shadow(
     result["technical_details"] = details
 
 
+def _normalized_rule_audit_row_id(value: object) -> str:
+    text = str(value or "").strip().upper()
+    match = re.match(r"^(?:SATIR\s+)?(\d+)", text)
+    return match.group(1) if match else re.sub(r"^SATIR\s+", "", text).strip()
+
+
+def _draft_line_matches_rule_audit_row(line: Mapping[str, object], row_id: str) -> bool:
+    target = _normalized_rule_audit_row_id(row_id)
+    if not target:
+        return False
+    values: list[object] = [line.get("source_position")]
+    values.extend(line.get("source_basis") or ())
+    values.extend(line.get("source_line_numbers") or ())
+    for anchor in line.get("source_anchors") or ():
+        if isinstance(anchor, Mapping):
+            values.append(anchor.get("source_position"))
+    return any(_normalized_rule_audit_row_id(value) == target for value in values)
+
+
+def _apply_learned_rule_audit_corrections(
+    result: dict[str, Any],
+    shadow: Mapping[str, object] | None,
+    workspace: Mapping[str, object],
+) -> None:
+    if shadow is None:
+        return
+
+    audit = dict(shadow)
+    audit["mutated_accounting"] = False
+    if (
+        str(audit.get("status") or "") != "completed"
+        or str(audit.get("audit_status") or "") != "complete"
+        or list(audit.get("validation_errors") or ())
+    ):
+        audit["application_status"] = "blocked"
+        _attach_learned_rule_audit_shadow(result, audit)
+        return
+
+    corrections = [dict(item) for item in audit.get("corrections") or () if isinstance(item, Mapping)]
+    if not corrections:
+        audit["application_status"] = "no_change"
+        audit["applied_correction_count"] = 0
+        _attach_learned_rule_audit_shadow(result, audit)
+        return
+
+    chart_names = {
+        account.normalized_account_code: account.account_name
+        for account in _chart_accounts(dict(workspace))
+        if account.normalized_account_code
+    }
+    draft_lines = [dict(line) for line in result.get("draft_lines") or () if isinstance(line, Mapping)]
+    plan: list[tuple[int, dict[str, Any], str, str]] = []
+    application_errors: list[str] = []
+
+    for correction in corrections:
+        row_id = str(correction.get("row_id") or "").strip()
+        rule_id = str(correction.get("rule_id") or "").strip()
+        from_account = normalize_account_code(str(correction.get("from_account") or ""))
+        to_account = normalize_account_code(str(correction.get("to_account") or ""))
+        matches = [
+            index
+            for index, line in enumerate(draft_lines)
+            if (
+                _draft_line_matches_rule_audit_row(line, row_id)
+                and normalize_account_code(str(line.get("account_code") or "")) in {from_account, to_account}
+            )
+        ]
+        if not row_id or not rule_id or not from_account or not to_account:
+            application_errors.append(f"invalid_correction:{row_id or 'missing_row'}")
+            continue
+        if len(matches) != 1:
+            application_errors.append(f"draft_row_match_count:{row_id}:{len(matches)}")
+            continue
+        if to_account not in chart_names:
+            application_errors.append(f"target_account_not_in_chart:{row_id}:{to_account}")
+            continue
+        current_account = normalize_account_code(str(draft_lines[matches[0]].get("account_code") or ""))
+        if current_account not in {from_account, to_account}:
+            application_errors.append(
+                f"draft_account_changed:{row_id}:{current_account}:{from_account}:{to_account}"
+            )
+            continue
+        if any(planned_index == matches[0] for planned_index, *_ in plan):
+            application_errors.append(f"draft_line_multiple_corrections:{row_id}:{matches[0]}")
+            continue
+        plan.append((matches[0], correction, from_account, to_account))
+
+    if application_errors or len(plan) != len(corrections):
+        audit["application_status"] = "blocked"
+        audit["application_errors"] = application_errors or ["correction_plan_incomplete"]
+        _attach_learned_rule_audit_shadow(result, audit)
+        return
+
+    applied_corrections: list[dict[str, Any]] = []
+    for line_index, correction, from_account, to_account in plan:
+        line = draft_lines[line_index]
+        line["account_code"] = to_account
+        line["account_name"] = chart_names.get(to_account, str(line.get("account_name") or ""))
+        line["ai_original_account_code"] = from_account
+        line["learned_rule_id"] = str(correction.get("rule_id") or "")
+        line["learned_rule_reason"] = str(correction.get("reason") or "")
+        applied = dict(correction)
+        applied["application_status"] = "applied"
+        applied_corrections.append(applied)
+
+    result["draft_lines"] = draft_lines
+    first_business = next(
+        (line for line in draft_lines if str(line.get("account_code") or "").startswith(("6", "7", "15"))),
+        {},
+    )
+    first_vat = next(
+        (line for line in draft_lines if str(line.get("account_code") or "").startswith(("191", "391"))),
+        {},
+    )
+    direction = str(result.get("accounting_direction") or "")
+    if direction == "sales":
+        result["selected_revenue_account"] = str(first_business.get("account_code") or "")
+    else:
+        result["selected_expense_account"] = str(first_business.get("account_code") or "")
+    result["selected_vat_account"] = str(first_vat.get("account_code") or "")
+    if direction == "sales":
+        result["selected_sales_vat_account"] = str(first_vat.get("account_code") or "")
+    else:
+        result["selected_purchase_vat_account"] = str(first_vat.get("account_code") or "")
+
+    narrative = result.get("decision_narrative")
+    if isinstance(narrative, dict) and first_business:
+        narrative = dict(narrative)
+        narrative["account_code"] = str(first_business.get("account_code") or "")
+        narrative["account_name"] = str(first_business.get("account_name") or "")
+        result["decision_narrative"] = narrative
+    primary = result.get("primary_suggestion")
+    if isinstance(primary, dict) and first_business:
+        primary = dict(primary)
+        primary["account"] = str(first_business.get("account_code") or "")
+        primary["draft_lines"] = draft_lines
+        result["primary_suggestion"] = primary
+
+    audit["corrections"] = applied_corrections
+    audit["mutated_accounting"] = True
+    audit["application_status"] = "applied"
+    audit["applied_correction_count"] = len(applied_corrections)
+    _attach_learned_rule_audit_shadow(result, audit)
+
+
 def _accounting_provider_from_env(provider_name: str, source: dict[str, str] | Any) -> OpenAiAccountingProvider:
     if provider_name == "gemini":
         model = source.get("FISORA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
@@ -1768,7 +1913,7 @@ def _run_gemini_pdf_v2_for_worker(
             final_output=three_stage.final_output,
             source=environ,
         )
-        _attach_learned_rule_audit_shadow(result, shadow)
+        _apply_learned_rule_audit_corrections(result, shadow, workspace)
         result["gemini_pdf_v2_used"] = True
         result["document_ai_artifact_ids"] = receipt_ids
         return result, provider
@@ -3191,7 +3336,7 @@ def _process_html_source_job(
                 final_output=prepared.final_output,
                 source=environ,
             )
-            _attach_learned_rule_audit_shadow(result, shadow)
+            _apply_learned_rule_audit_corrections(result, shadow, workspace)
             ai_ms = (
                 int(prepared.stage_elapsed_ms.get("planner", 0))
                 + int(prepared.stage_elapsed_ms.get("accountant", 0))

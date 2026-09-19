@@ -12,6 +12,8 @@ def test_review_projection_exposes_only_sanitized_learned_rule_audit_details() -
                 "model": "gemini-3.5-flash-lite",
                 "elapsed_ms": 4200,
                 "prompt_version": "learned-rule-audit-shadow-v4-20260918",
+                "application_status": "applied",
+                "applied_correction_count": 1,
                 "corrections": [
                     {
                         "row_id": "1",
@@ -19,6 +21,7 @@ def test_review_projection_exposes_only_sanitized_learned_rule_audit_details() -
                         "from_account": "153.02",
                         "to_account": "153.01",
                         "reason": "Confirmed rule applies.",
+                        "application_status": "applied",
                         "hidden_field": "must-not-pass",
                     }
                 ],
@@ -35,6 +38,8 @@ def test_review_projection_exposes_only_sanitized_learned_rule_audit_details() -
     audit = projected["technical_details"]["learned_rule_audit_shadow"]
     assert audit["status"] == "completed"
     assert audit["audit_status"] == "complete"
+    assert audit["application_status"] == "applied"
+    assert audit["applied_correction_count"] == 1
     assert audit["corrections"] == [
         {
             "row_id": "1",
@@ -42,6 +47,7 @@ def test_review_projection_exposes_only_sanitized_learned_rule_audit_details() -
             "from_account": "153.02",
             "to_account": "153.01",
             "reason": "Confirmed rule applies.",
+            "application_status": "applied",
         }
     ]
     assert "provider_internal" not in projected["technical_details"]

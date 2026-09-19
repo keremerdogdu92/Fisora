@@ -669,7 +669,7 @@ test("journal stays readable through narrow desktop two-tier layout", async ({ p
 });
 
 
-test("learned rule audit suggestion is visible and changes only the matching journal account when applied", async ({ page }) => {
+test("learned rule audit auto-applies the validated correction and preserves the AI provenance", async ({ page }) => {
   const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
   await setupInspector(page, "rule-audit.html", "text/html", html, (workspace) => {
     workspace.chart_accounts.accounts = [
@@ -680,7 +680,7 @@ test("learned rule audit suggestion is visible and changes only the matching jou
     result.draft_status = "draft_ready";
     result.draft_lines = [
       {
-        account_code: "153.02",
+        account_code: "153.01",
         description: "MINIFIT HOPARLÖR 3R 85",
         debit: "540.00",
         credit: "0.00",
@@ -694,6 +694,8 @@ test("learned rule audit suggestion is visible and changes only the matching jou
         audit_status: "complete",
         model: "gemini-3.5-flash-lite",
         elapsed_ms: 5100,
+        application_status: "applied",
+        applied_correction_count: 1,
         corrections: [
           {
             row_id: "1",
@@ -701,6 +703,7 @@ test("learned rule audit suggestion is visible and changes only the matching jou
             from_account: "153.02",
             to_account: "153.01",
             reason: "Aktif öğrenilmiş MINIFIT hoparlör kuralı bu satırı cihaz stok hesabına yönlendiriyor.",
+            application_status: "applied",
           },
         ],
         unresolved_rows: [],
@@ -713,17 +716,15 @@ test("learned rule audit suggestion is visible and changes only the matching jou
 
   const auditPanel = page.getByRole("region", { name: "Öğrenilmiş kural kontrolü" });
   await expect(auditPanel).toBeVisible();
-  await expect(auditPanel).toContainText("153.02 → 153.01");
-  await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.02");
-
-  await auditPanel.getByRole("button", { name: "Uygula", exact: true }).click();
-
+  await expect(auditPanel).toContainText("Muhasebe AI: 153.02");
+  await expect(auditPanel).toContainText("Kural: 153.01");
+  await expect(auditPanel).toContainText("Kural uygulandı");
   await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.01");
-  await expect(auditPanel).toContainText("Uygulandı");
-  await expect(page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?")).toContainText("rule-minifit");
+  await expect(auditPanel.getByRole("button", { name: "Uygula", exact: true })).toHaveCount(0);
+  await expect(auditPanel.getByRole("button", { name: "Doğru değil", exact: true })).toHaveCount(0);
 });
 
-test("learned rule audit suggestion can be rejected without changing the journal account", async ({ page }) => {
+test("learned rule audit keeps the AI draft unchanged when automatic application is blocked", async ({ page }) => {
   const html = `<!doctype html><html><body><table id="lineTable"><tbody><tr><td>Sıra No</td><td>Malzeme/Hizmet</td><td>Tutar</td></tr><tr><td>1</td><td>${SOURCE_TEXT}</td><td>540,00 TL</td></tr></tbody></table></body></html>`;
   await setupInspector(page, "rule-audit-reject.html", "text/html", html, (workspace) => {
     workspace.chart_accounts.accounts = [
@@ -748,6 +749,8 @@ test("learned rule audit suggestion can be rejected without changing the journal
         audit_status: "complete",
         model: "gemini-3.5-flash-lite",
         elapsed_ms: 5100,
+        application_status: "blocked",
+        applied_correction_count: 0,
         corrections: [
           {
             row_id: "1",
@@ -766,11 +769,11 @@ test("learned rule audit suggestion can be rejected without changing the journal
   await openInspectorDocument(page, ".html-document-viewer");
 
   const auditPanel = page.getByRole("region", { name: "Öğrenilmiş kural kontrolü" });
-  await auditPanel.getByRole("button", { name: "Doğru değil", exact: true }).click();
-
   await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.02");
-  await expect(auditPanel).toContainText("Doğru değil");
-  await expect(page.getByPlaceholder("Bu fişte neyi neden değiştirdiniz? Benzer belgelerde nasıl uygulanmalı?")).toContainText("uygulanmadı");
+  await expect(auditPanel).toContainText("Kural uygulaması durduruldu");
+  await expect(auditPanel).toContainText("mevcut fiş değiştirilmedi");
+  await expect(auditPanel.getByRole("button", { name: "Uygula", exact: true })).toHaveCount(0);
+  await expect(auditPanel.getByRole("button", { name: "Doğru değil", exact: true })).toHaveCount(0);
 });
 
 
@@ -785,7 +788,7 @@ test("learned rule teaching uses the account actually applied in the journal", a
     result.draft_status = "draft_ready";
     result.draft_lines = [
       {
-        account_code: "153.02",
+        account_code: "153.01",
         description: "FISORA PILOT TEST HIZMETI",
         debit: "540.00",
         credit: "0.00",
@@ -799,6 +802,8 @@ test("learned rule teaching uses the account actually applied in the journal", a
         audit_status: "complete",
         model: "gemini-3.5-flash-lite",
         elapsed_ms: 3100,
+        application_status: "applied",
+        applied_correction_count: 1,
         corrections: [
           {
             row_id: "1",
@@ -806,6 +811,7 @@ test("learned rule teaching uses the account actually applied in the journal", a
             from_account: "153.02",
             to_account: "153.01",
             reason: "Pilot learned rule correction.",
+            application_status: "applied",
           },
         ],
         unresolved_rows: [],
@@ -817,7 +823,7 @@ test("learned rule teaching uses the account actually applied in the journal", a
   await openInspectorDocument(page, ".html-document-viewer");
 
   const auditPanel = page.getByRole("region", { name: "Öğrenilmiş kural kontrolü" });
-  await auditPanel.getByRole("button", { name: "Uygula", exact: true }).click();
+  await expect(auditPanel).toContainText("Kural uygulandı");
   await expect(page.getByLabel("Hesap kodu").first()).toHaveValue("153.01");
 
   const learningDetails = page.locator(".journal-learning-details");

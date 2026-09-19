@@ -13,7 +13,7 @@ import { HtmlDocumentViewer } from "./shared/components/document-viewers/html-do
 import { PdfDocumentViewer } from "./shared/components/document-viewers/pdf-document-viewer";
 import type { ChartAccountOption, CorrectionDraft, DocumentPipelineEvent, DocumentSourceTarget, DraftLine, LocalSession, PilotDocument, PilotStatus, ReviewLearningDecisionOptions, RuleInterpretationView, StatementLineReview } from "./portal-types";
 import { backendAuthHeaders, createCounterpartyAccountToBackend, previewReviewRule, resolveApiBaseUrl, userSafeErrorMessage } from "./upload-api";
-import { resolvedLearningAccountCode } from "./portal-review-actions";
+import { appliedLearnedRuleAccountCode, resolvedLearningAccountCode } from "./portal-review-actions";
 
 const statusLabels: Record<PilotStatus, string> = {
   uploaded: "Yüklendi",
@@ -308,12 +308,14 @@ type LearnedRuleAuditCorrection = {
   fromAccount: string;
   toAccount: string;
   reason: string;
+  applicationStatus: string;
 };
 
 type LearnedRuleAuditView = {
   present: boolean;
   status: string;
   auditStatus: string;
+  applicationStatus: string;
   model: string;
   elapsedMs: number;
   corrections: LearnedRuleAuditCorrection[];
@@ -333,6 +335,7 @@ function learnedRuleAuditView(document?: PilotDocument): LearnedRuleAuditView {
       fromAccount: qualityText(item, "from_account", ""),
       toAccount: qualityText(item, "to_account", ""),
       reason: qualityText(item, "reason", ""),
+      applicationStatus: qualityText(item, "application_status", ""),
     };
   }).filter((item) => item.rowId && item.ruleId && item.fromAccount && item.toAccount);
 
@@ -341,6 +344,7 @@ function learnedRuleAuditView(document?: PilotDocument): LearnedRuleAuditView {
     present: Object.keys(audit).length > 0 && status !== "skipped",
     status,
     auditStatus: qualityText(audit, "audit_status", ""),
+    applicationStatus: qualityText(audit, "application_status", ""),
     model: qualityText(audit, "model", ""),
     elapsedMs: Number(audit.elapsed_ms || 0) || 0,
     corrections,
@@ -357,14 +361,6 @@ function draftLineMatchesRuleAuditRow(line: DraftLine, rowId: string) {
   if ((line.source_line_numbers || []).some((lineNo) => String(lineNo) === normalizedRowId)) return true;
   return false;
 }
-
-function appendDecisionNote(existing: string, note: string) {
-  const current = existing.trim();
-  if (!current) return note;
-  if (current.includes(note)) return current;
-  return current + "\n" + note;
-}
-
 
 function normalizeRuleInterpretationView(value: unknown): RuleInterpretationView | null {
   const record = asRecord(value);
@@ -857,7 +853,6 @@ export function JournalPanel({
   const [counterpartyTaxId, setCounterpartyTaxId] = useState("");
   const [counterpartyStatus, setCounterpartyStatus] = useState("");
   const [counterpartyCreating, setCounterpartyCreating] = useState(false);
-  const [ruleAuditFeedback, setRuleAuditFeedback] = useState<Record<string, "rejected">>({});
 
   useEffect(() => {
     setCounterpartyDrawerLineIndex(null);
@@ -872,7 +867,6 @@ export function JournalPanel({
     setRulePreview(null);
     setRulePreviewStatus("");
     setDismissedLearningPromptKey("");
-    setRuleAuditFeedback({});
   }, [document?.id]);
 
   if (!document) {
@@ -965,7 +959,8 @@ export function JournalPanel({
 
   async function previewRuleCandidate(
     decisionNote: string,
-    correctedAccountCode = resolvedLearningAccountCode(correctionDraft, generatedDraftLines),
+    correctedAccountCode = resolvedLearningAccountCode(correctionDraft, generatedDraftLines)
+      || appliedLearnedRuleAccountCode(activeDocument),
   ) {
     const note = decisionNote.trim();
     if (!note) {
@@ -1032,7 +1027,9 @@ export function JournalPanel({
     });
     await previewRuleCandidate(
       note,
-      usablePrecedentAccount || resolvedLearningAccountCode(correctionDraft, generatedDraftLines),
+      usablePrecedentAccount
+        || resolvedLearningAccountCode(correctionDraft, generatedDraftLines)
+        || appliedLearnedRuleAccountCode(activeDocument),
     );
   }
 
@@ -1055,45 +1052,6 @@ export function JournalPanel({
 
   function ruleAuditDraftLineIndex(correction: LearnedRuleAuditCorrection) {
     return activeDraftLines.findIndex((line) => draftLineMatchesRuleAuditRow(line, correction.rowId));
-  }
-
-  function applyLearnedRuleAuditCorrection(correction: LearnedRuleAuditCorrection) {
-    if (reviewReadOnly || !ruleAuditActionable) return;
-    const index = ruleAuditDraftLineIndex(correction);
-    if (index < 0) return;
-    const currentCode = normalizeAccountCodeInput(activeDraftLines[index]?.account_code || "");
-    const fromCode = normalizeAccountCodeInput(correction.fromAccount);
-    const toCode = normalizeAccountCodeInput(correction.toAccount);
-    if (currentCode !== fromCode && currentCode !== toCode) return;
-
-    const baseLines = correctionDraft.manualDraftLines.length
-      ? correctionDraft.manualDraftLines
-      : generatedDraftLines;
-    if (!baseLines[index]) return;
-    const note = `Öğrenilmiş kural ${correction.ruleId} uygulandı: ${correction.fromAccount} → ${correction.toAccount}. ${correction.reason}`;
-    setCorrectionDraft({
-      ...correctionDraft,
-      accountingValidation: "corrected",
-      manualDraftLines: baseLines.map((line, lineIndex) => (
-        lineIndex === index ? { ...line, account_code: correction.toAccount } : line
-      )),
-      reason: appendDecisionNote(correctionDraft.reason, note),
-    });
-    setRuleAuditFeedback((current) => {
-      const next = { ...current };
-      delete next[correction.rowId];
-      return next;
-    });
-  }
-
-  function rejectLearnedRuleAuditCorrection(correction: LearnedRuleAuditCorrection) {
-    if (reviewReadOnly || !ruleAuditActionable) return;
-    const note = `Öğrenilmiş kural ${correction.ruleId} uygulanmadı: ${correction.fromAccount} → ${correction.toAccount}. ${correction.reason}`;
-    setCorrectionDraft({
-      ...correctionDraft,
-      reason: appendDecisionNote(correctionDraft.reason, note),
-    });
-    setRuleAuditFeedback((current) => ({ ...current, [correction.rowId]: "rejected" }));
   }
 
   function addManualDraftLine() {
@@ -1247,8 +1205,14 @@ export function JournalPanel({
                   {ruleAudit.elapsedMs ? ` · ${(ruleAudit.elapsedMs / 1000).toFixed(1)} sn` : ""}
                 </span>
               </div>
-              <span className={`learned-rule-audit-state ${ruleAuditActionable ? "ready" : "warning"}`}>
-                {ruleAuditActionable ? (ruleAudit.corrections.length ? `${ruleAudit.corrections.length} öneri` : "Değişiklik yok") : "Kontrol tamamlanamadı"}
+              <span className={`learned-rule-audit-state ${ruleAuditActionable && ruleAudit.applicationStatus !== "blocked" ? "ready" : "warning"}`}>
+                {!ruleAuditActionable
+                  ? "Kontrol tamamlanamadı"
+                  : ruleAudit.corrections.length
+                    ? ruleAudit.applicationStatus === "applied"
+                      ? `${ruleAudit.corrections.length} kural uygulandı`
+                      : "Kural uygulaması durduruldu"
+                    : "Değişiklik yok"}
               </span>
             </div>
             {!ruleAuditActionable ? (
@@ -1265,26 +1229,26 @@ export function JournalPanel({
                 {ruleAudit.corrections.map((correction) => {
                   const lineIndex = ruleAuditDraftLineIndex(correction);
                   const currentCode = lineIndex >= 0 ? normalizeAccountCodeInput(activeDraftLines[lineIndex]?.account_code || "") : "";
-                  const fromCode = normalizeAccountCodeInput(correction.fromAccount);
                   const toCode = normalizeAccountCodeInput(correction.toAccount);
-                  const applied = Boolean(currentCode && currentCode === toCode);
-                  const stale = Boolean(currentCode && currentCode !== fromCode && currentCode !== toCode);
-                  const rejected = ruleAuditFeedback[correction.rowId] === "rejected";
-                  const accountName = chartAccountNameForCode(document.chartAccounts, correction.toAccount);
-                  const applyDisabled = reviewReadOnly || lineIndex < 0 || stale || applied || rejected;
+                  const applied = correction.applicationStatus === "applied"
+                    && ruleAudit.applicationStatus === "applied"
+                    && Boolean(currentCode && currentCode === toCode);
+                  const fromAccountName = chartAccountNameForCode(document.chartAccounts, correction.fromAccount);
+                  const toAccountName = chartAccountNameForCode(document.chartAccounts, correction.toAccount);
                   return (
-                    <article className={`learned-rule-audit-item${applied ? " applied" : ""}${rejected ? " rejected" : ""}`} key={`${correction.rowId}-${correction.ruleId}`}>
+                    <article className={`learned-rule-audit-item${applied ? " applied" : ""}`} key={`${correction.rowId}-${correction.ruleId}`}>
                       <div className="learned-rule-audit-copy">
                         <span>Kaynak satır {correction.rowId} · Kural {correction.ruleId.slice(0, 8)}</span>
-                        <strong>{correction.fromAccount} → {correction.toAccount}{accountName ? ` · ${accountName}` : ""}</strong>
-                        <small>{correction.reason || "Aktif öğrenilmiş kural bu hesap değişikliğini öneriyor."}</small>
-                        {lineIndex < 0 ? <em>Fiş satırıyla kaynak eşleşmesi bulunamadı; manuel kontrol gerekli.</em> : null}
-                        {stale ? <em>Fiş bu öneriden sonra değişmiş; öneri otomatik uygulanamaz.</em> : null}
-                      </div>
-                      <div className="learned-rule-audit-actions">
-                        {applied ? <span className="learned-rule-audit-feedback">Uygulandı</span> : rejected ? <span className="learned-rule-audit-feedback">Doğru değil</span> : null}
-                        <button disabled={applyDisabled} onClick={() => applyLearnedRuleAuditCorrection(correction)} type="button">Uygula</button>
-                        <button className="secondary" disabled={reviewReadOnly || rejected || applied} onClick={() => rejectLearnedRuleAuditCorrection(correction)} type="button">Doğru değil</button>
+                        <strong>
+                          Muhasebe AI: {correction.fromAccount}{fromAccountName ? ` · ${fromAccountName}` : ""}
+                          {" → "}Kural: {correction.toAccount}{toAccountName ? ` · ${toAccountName}` : ""}
+                        </strong>
+                        <small>{correction.reason || "Aktif öğrenilmiş kural bu hesap değişikliğini uyguladı."}</small>
+                        {applied ? (
+                          <span className="learned-rule-audit-feedback">Kural uygulandı</span>
+                        ) : (
+                          <em>Kural sonucu fişe güvenli biçimde uygulanmadı; mevcut fiş değiştirilmedi.</em>
+                        )}
                       </div>
                     </article>
                   );

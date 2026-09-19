@@ -48,6 +48,28 @@ export function resolvedLearningAccountCode(correctionDraft: CorrectionDraft, or
   return uniqueCodes.length === 1 ? uniqueCodes[0] : "";
 }
 
+export function appliedLearnedRuleAccountCode(document?: PilotDocument) {
+  const details = document?.technicalDetails;
+  if (!details || typeof details !== "object" || Array.isArray(details)) return "";
+  const auditValue = (details as Record<string, unknown>).learned_rule_audit_shadow;
+  if (!auditValue || typeof auditValue !== "object" || Array.isArray(auditValue)) return "";
+  const audit = auditValue as Record<string, unknown>;
+  if (String(audit.application_status || "") !== "applied") return "";
+  const corrections = Array.isArray(audit.corrections) ? audit.corrections : [];
+  const codes = corrections
+    .map((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+      const correction = value as Record<string, unknown>;
+      if (String(correction.application_status || "") !== "applied") return "";
+      const code = normalizedLearningAccountCode(String(correction.to_account || ""));
+      if (!code || NON_BUSINESS_LEARNING_ACCOUNT_ROOTS.has(learningAccountRoot(code))) return "";
+      return code;
+    })
+    .filter(Boolean);
+  const uniqueCodes = Array.from(new Set(codes));
+  return uniqueCodes.length === 1 ? uniqueCodes[0] : "";
+}
+
 export function replaceStatementCounterpart(lines: DraftLine[], accountCode: string) {
   if (!accountCode.trim()) return lines;
   let replaced = false;

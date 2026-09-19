@@ -3,7 +3,7 @@
 import type { Dispatch, SetStateAction } from "react";
 import { statementStatusLabel, statementReviewStatus, reviewActionLabel } from "./portal-formatters";
 import { normalizeRulePrompt, normalizeStatementAiSuggestions, normalizeStatus, safeNumber, safeRecord } from "./portal-normalization";
-import { applyStatementLineDecision, resolvedLearningAccountCode } from "./portal-review-actions";
+import { appliedLearnedRuleAccountCode, applyStatementLineDecision, resolvedLearningAccountCode } from "./portal-review-actions";
 import type { CorrectionDraft, IntakeCategory, LocalSession, PilotClient, PilotData, PilotDocument, PilotStatus, ReviewLearningDecisionOptions } from "./portal-types";
 import { previousCompletedPeriod } from "./portal-periods";
 import { buildUploadIntakeMetadata, documentTypeForUploadFile } from "./upload-intake";
@@ -324,7 +324,8 @@ export async function saveDecisionAction({
 }) {
   if (!selectedDocument) return;
   const reviewer = session?.role === "accountant" ? session.userId : loginUserId.trim() || "mali-musavir";
-  const correctedAccountCode = resolvedLearningAccountCode(correctionDraft, selectedDocument.draftLines);
+  const correctedAccountCode = resolvedLearningAccountCode(correctionDraft, selectedDocument.draftLines)
+    || appliedLearnedRuleAccountCode(selectedDocument);
   const correctedCounterpartyCode = correctionDraft.counterpartyCode.trim();
   const reason = correctionDraft.reason.trim();
   const ruleInstruction = correctionDraft.ruleInstruction.trim();

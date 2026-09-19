@@ -566,7 +566,7 @@ def compact_learned_rule_audit_details(value: object) -> dict[str, object]:
             continue
         correction = {
             key: raw.get(key)
-            for key in ("row_id", "rule_id", "from_account", "to_account", "reason")
+            for key in ("row_id", "rule_id", "from_account", "to_account", "reason", "application_status")
             if key in raw
         }
         if correction:
@@ -585,6 +585,8 @@ def compact_learned_rule_audit_details(value: object) -> dict[str, object]:
         "model": str(audit.get("model") or ""),
         "elapsed_ms": int(audit.get("elapsed_ms") or 0),
         "prompt_version": str(audit.get("prompt_version") or ""),
+        "application_status": str(audit.get("application_status") or ""),
+        "applied_correction_count": int(audit.get("applied_correction_count") or 0),
         "correction_count": len(corrections),
         "corrections": corrections,
         "unresolved_rows": unresolved_rows,

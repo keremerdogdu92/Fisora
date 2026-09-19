@@ -1923,6 +1923,7 @@ def _ai_context(
         )
     )
     semantic_role = str((semantic_rule_constraint or {}).get("semantic_role") or "").strip()
+    semantic_constraint_applied = False
     if semantic_role and direction == "purchase":
         allowed_groups = {
             "stock": {"purchase_stock"},
@@ -1933,6 +1934,7 @@ def _ai_context(
         if constrained:
             account_candidate_details = constrained
             utility_matches = ()
+            semantic_constraint_applied = True
     elif direction == "purchase" and utility_matches:
         account_candidate_details = utility_matches
     semantic_candidates = tuple(
@@ -1940,7 +1942,7 @@ def _ai_context(
         for candidate in account_candidate_details
         if str(candidate.get("code") or "").strip()
     )
-    if utility_matches and direction == "purchase":
+    if semantic_constraint_applied or (utility_matches and direction == "purchase"):
         base_account_codes = ()
     elif direction_uncertainty:
         base_account_codes = (

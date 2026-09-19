@@ -74,6 +74,7 @@ from app.domain.natural_language_rule_builder import build_natural_language_rule
 from app.domain.matching_simulation import (
     AccountSelection,
     SimulatedChartRun,
+    _ai_context,
     _vat_account_for_rate,
     private_benchmark_summary,
     infer_accounting_direction,
@@ -8301,6 +8302,58 @@ Vergiler Dahil Toplam Tutar 120,00
         self.assertEqual(result.ai_resolution_status, "ai_correction_required")
         self.assertEqual(result.selected_expense_account, "")
         self.assertEqual(result.draft_lines, ())
+
+    def test_semantic_rule_constraint_limits_account_codes_in_line_batch_payload(self) -> None:
+        invoice = ParsedInvoice(
+            file_name="semantic-boundary.xml", provider_hint="Medikal Tedarik", page_count=0,
+            text_extractable=True, extracted_char_count=500, scenario="TEMELFATURA",
+            invoice_type="ALIS", invoice_no="SEM-1", ettn="", issue_date="20.07.2026",
+            tax_ids=("1234567890", "9999999999"), vat_rates=("20",),
+            goods_services_total="100.00", vat_total="20.00", special_tax_total="",
+            tax_inclusive_total="120.00", payable_total="120.00", risk_flags=(),
+            suggested_route="journal_candidate", parse_notes=(), line_items=("Cihaz alimi",),
+        )
+        selection = AccountSelection(
+            chart_file_name="chart.xlsx", expense_account="770.01", purchase_vat_account="191.20",
+            supplier_account="320.01", bank_account="102.01", selection_notes=(),
+            stock_account="153.01", non_deductible_account="689.01",
+            account_candidates={
+                "purchase_stock": ({"code": "153.01", "name": "Ticari mallar", "reason": ""},),
+                "purchase_expense": ({"code": "770.01", "name": "Genel gider", "reason": ""},),
+                "non_deductible": ({"code": "689.01", "name": "KKEG", "reason": ""},),
+            },
+        )
+        context = _ai_context(
+            invoice=invoice, selection=selection, client_profile=None, counterparty_match=None,
+            direction="purchase", direction_confidence=95, direction_evidence=("test",),
+            suggested_counterparty="", counterparty_title="Medikal Tedarik",
+            counterparty_tax_id="1234567890",
+            semantic_rule_constraint={
+                "semantic_role": "stock", "semantic_intent": "mal_alim", "rule_key": "rule-stock",
+            },
+        )
+        context = replace(
+            context,
+            canonical_lines=({
+                "canonical_line_id": "line-1", "description": "Cihaz alimi",
+                "taxable_amount": "100.00", "vat_rate": "20",
+            },),
+            candidate_strategy=AiCandidateStrategy(
+                mode="single_stage", stage="line_batch", account_candidate_count=len(context.account_candidates),
+            ),
+        )
+        payload = AiClassificationRequest(
+            raw_line="Cihaz alimi", supplier_hint="Medikal Tedarik",
+            allowed_categories=("bilinmeyen", "mal_alim"), max_input_chars=420, context=context,
+        ).to_schema_payload()
+
+        self.assertEqual(context.account_candidates, ("153.01",))
+        self.assertEqual([item["code"] for item in context.account_candidate_details], ["153.01"])
+        self.assertEqual(payload["output_schema"]["properties"]["suggested_account_code"]["enum"], ["", "153.01"])
+        self.assertEqual(
+            payload["output_schema"]["properties"]["line_decisions"]["items"]["properties"]["suggested_account_code"]["enum"],
+            ["", "153.01"],
+        )
 
     def test_post_simulation_learning_cannot_overwrite_accepted_ai_account_or_journal(self) -> None:
         canonical = _task3_canonical_invoice(("Kargo hizmet bedeli", "100.00", "20", "20.00", "120.00"))

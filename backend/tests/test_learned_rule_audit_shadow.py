@@ -14,8 +14,9 @@ class FakeStructuredResult(dict):
 
 
 class FakeProvider:
-    def __init__(self) -> None:
+    def __init__(self, *, applies: bool = True) -> None:
         self.calls: list[str] = []
+        self.applies = applies
 
     def generate_structured_json(self, *, schema_name, instructions, user_payload, schema):
         self.calls.append(schema_name)
@@ -49,15 +50,55 @@ class FakeProvider:
             opened = user_payload["opened_candidates_by_row"]["1"]
             assert opened[0]["candidate_ref"] == "C1"
             assert "rule_id" not in opened[0]["rule"]
+            invoice_row = user_payload["invoice_context"]["rows"][0]
+            assert "account_code" not in invoice_row
+            assert "reason" not in invoice_row
+            rule = opened[0]["rule"]
+            if rule["binding_mode"] == "semantic_role":
+                assert rule["account_code"] == ""
+                chart_codes = {
+                    item["account_code"]
+                    for item in user_payload["current_client_chart_by_row"]["1"]
+                }
+                assert chart_codes == {"153.01", "153.02"}
+            else:
+                assert user_payload["current_client_chart_by_row"]["1"] == []
+            if not self.applies:
+                return FakeStructuredResult(
+                    {
+                        "row_resolutions": [
+                            {
+                                "row_id": "1",
+                                "candidate_assessments": [
+                                    {
+                                        "candidate_ref": "C1",
+                                        "verdict": "not_applicable",
+                                        "reason": "The full rule does not cover this row.",
+                                    }
+                                ],
+                                "status": "no_applicable_rule",
+                                "candidate_ref": "",
+                                "resolved_account": "",
+                                "reason": "No learned rule applies.",
+                            }
+                        ]
+                    }
+                )
             return FakeStructuredResult(
                 {
-                    "row_decisions": [
+                    "row_resolutions": [
                         {
                             "row_id": "1",
-                            "status": "correction",
+                            "candidate_assessments": [
+                                {
+                                    "candidate_ref": "C1",
+                                    "verdict": "applies",
+                                    "reason": "The opened family rule directly covers this row.",
+                                }
+                            ],
+                            "status": "resolved",
                             "candidate_ref": "C1",
-                            "from_account": "153.02",
-                            "to_account": "153.01",
+                            "resolved_account": "153.01",
                             "reason": "The opened family rule directly covers this row.",
                         }
                     ]
@@ -73,12 +114,14 @@ def _workspace() -> dict:
                 {
                     "account_code": "153.01",
                     "account_name": "Hearing device stock",
+                    "semantic_roles": ["stock", "hearing_device_stock"],
                     "is_detail_account": True,
                     "is_active": True,
                 },
                 {
                     "account_code": "153.02",
                     "account_name": "Accessory stock",
+                    "semantic_roles": ["stock", "hearing_aid_accessory_stock"],
                     "is_detail_account": True,
                     "is_active": True,
                 },
@@ -122,11 +165,32 @@ def _active_rule() -> dict:
         "normalized_terms": ["minifit", "hoparlor"],
         "semantic_role": "stock",
         "semantic_intent": "hearing_device_stock",
+        "binding_mode": "fixed_account",
         "meaning_label": "MINIFIT HOPARLOR family",
+        "trigger_tr": "MINIFIT speaker family on purchase invoices.",
+        "action_tr": "Use exact account 153.01.",
         "guardrail_tr": "Only apply to the MINIFIT speaker family.",
         "account_code": "153.01",
     }
 
+
+
+def _active_semantic_rule() -> dict:
+    rule = _active_rule()
+    rule.update(
+        {
+            "rule_id": "rule-semantic-minifit",
+            "binding_mode": "semantic_role",
+            "semantic_role": "stock",
+            "semantic_intent": "hearing_device_stock",
+            "meaning_label": "MINIFIT HOPARLOR satırı işitme cihazı stok ailesidir.",
+            "trigger_tr": "MINIFIT HOPARLOR ürün ailesi eşleştiğinde.",
+            "action_tr": "İşitme cihazı stok anlamını uygula; exact hesabı güncel plandan seç.",
+            "guardrail_tr": "Geçmiş exact hesaba bağlanma.",
+            "account_code": "",
+        }
+    )
+    return rule
 
 def test_shadow_suggests_correction_without_mutating_draft() -> None:
     provider = FakeProvider()
@@ -263,3 +327,70 @@ def test_search_rules_discovers_exact_counterparty_scope_without_phrase_terms() 
 
     assert result["total_matches"] == 1
     assert result["items"][0]["match_classes"] == ["exact_counterparty"]
+
+def test_semantic_rule_resolves_current_chart_without_seeing_draft_account() -> None:
+    provider = FakeProvider()
+    result = run_learned_rule_audit_shadow(
+        provider=provider,
+        active_rules=[_active_semantic_rule()],
+        source_package=_source_package(),
+        semantic_plan={
+            "accounting_direction": "purchase",
+            "counterparty_name": "DEMANT",
+            "counterparty_identifier": "123",
+        },
+        final_output=_final_output(),
+        workspace=_workspace(),
+    )
+
+    assert result["audit_status"] == "complete"
+    assert result["corrections"] == [
+        {
+            "row_id": "1",
+            "rule_id": "rule-semantic-minifit",
+            "from_account": "153.02",
+            "to_account": "153.01",
+            "reason": "The opened family rule directly covers this row.",
+        }
+    ]
+
+
+def test_harness_does_not_resolve_account_when_no_opened_rule_applies() -> None:
+    provider = FakeProvider(applies=False)
+    result = run_learned_rule_audit_shadow(
+        provider=provider,
+        active_rules=[_active_semantic_rule()],
+        source_package=_source_package(),
+        semantic_plan={
+            "accounting_direction": "purchase",
+            "counterparty_name": "DEMANT",
+            "counterparty_identifier": "123",
+        },
+        final_output=_final_output(),
+        workspace=_workspace(),
+    )
+
+    assert result["audit_status"] == "complete"
+    assert result["corrections"] == []
+    assert result["row_audits"] == [
+        {
+            "row_id": "1",
+            "status": "no_applicable_rule_found",
+            "rule_id": "",
+            "reason": "No learned rule applies.",
+        }
+    ]
+
+
+def test_semantic_rule_is_usable_without_exact_account_code() -> None:
+    from app.services.learned_rule_audit_shadow import _rule_document, _usable_rule
+
+    rule = _active_semantic_rule()
+    assert _usable_rule(rule)
+    document = _rule_document(rule)
+    assert document["binding_mode"] == "semantic_role"
+    assert document["account_code"] == ""
+    assert document["summary"]
+    assert document["trigger"]
+    assert document["action"]
+    assert document["guardrail"]

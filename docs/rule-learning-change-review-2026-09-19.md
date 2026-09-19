@@ -144,49 +144,161 @@ account_code = ""
 
 Bu adımda sadece **kural veri modeli** değerlendirilecek. Kuralın nasıl uygulanacağı henüz tartışılmayacak.
 
+### Adım 2 deney notu — Rule record A/B + ölçek testi (2026-09-19)
+
+Adım 2 veri modelini seçmeden önce mevcut Rule Harness test ortamı yeniden kullanıldı. Eski benchmark corpus'u korunarak iki kayıt biçimi karşılaştırıldı:
+
+- Legacy rule record.
+- Dört alanlı compact rule record: `summary / trigger / action / guardrail` + mevcut deterministic machine fields.
+
+Test ilkesi:
+- Search aşamasına full rule metni verilmez.
+- Candidate aşaması kısa index kullanır.
+- Dört alanın tamamı yalnız `get_rule` ile gerçekten açılan kurallarda final audit'e taşınır.
+- Böylece rule-store 500 / 2.000 / 10.000 kurala büyüse bile bütün rule metinleri context'e basılmaz.
+
+Kontrollü final-stage A/B:
+- 500 rule / 19 vaka:
+  - Legacy: 19/19, false correction 0.
+  - 4 alanlı: 19/19, false correction 0.
+  - Ortalama total token: 5.175 -> 5.692 (~%10 artış).
+  - Ortalama süre: 2.84 sn -> 2.90 sn.
+- 2.000 rule / en ağır 5 vaka:
+  - Legacy: 4/5; başarısız vakada hedef hesap doğru bulundu fakat model final JSON'da 11 satırın yalnız ilk 3'ünü döndürdü ve coverage validation'a takıldı.
+  - 4 alanlı: 5/5, false correction 0.
+  - Ortalama total token: 6.706 -> 7.598.
+
+Gerçek 3-stage 10.000-rule stres testi:
+- Legacy: 5/5; expected rule seen/opened/applied 5/5; false correction 0; ortalama ~20.1k token / ~20.5 sn.
+- 4 alanlı ilk koşuda 2/2 başarılı sonuçtan sonra üç çağrı Gemini 429 provider rate-limit'e girdi.
+- Retry/backoff destekli tekrar koşusunda eksik üç vaka da 3/3 geçti; böylece 4 alanlı 10.000-rule setinin beş ağır vakasının tamamı başarıyla doğrulandı. False correction 0.
+- İlk 429 sonuçları model/record-format kalite hatası olarak sayılmadı; provider error olarak ayrı tutuldu.
+
+Benchmark provider retry sözleşmesi:
+- 429 / Too Many Requests ve geçici 408/5xx/timeout/transport/connection hataları retry edilebilir provider hatasıdır.
+- 429 sonrasında Gemini project-pool cooldown'u ile uyumlu 65 saniye backoff uygulanır.
+- Varsayılan en fazla 2 retry yapılır.
+- Retry bütçesi tükense bile provider error, semantic/functional model failure metriğine karıştırılmaz; ayrı raporlanır.
+- Bu retry yalnız benchmark runner içindir; production runtime davranışı bu deneyle değiştirilmez.
+
+Gemini havuzu doğrulaması:
+- Benchmark env'de 6 benzersiz slot mevcut: 1, 3, 4, 5, 6, 7.
+- 429 stresinden sonra altı slot da ayrı ayrı health probe ile başarılı cevap vermiştir; gözlenen durum kalıcı key kaybı değil geçici burst/rate-limit'tir.
+
+Bu deneyler production davranışını değiştirmedi ve deploy edilmedi.
+
+### Adım 2 semantic-role Harness deneyi — exact hesap saklamadan
+
+Ayrı lab testinde hedef kuralların authoritative kaydından exact hesap kodu tamamen kaldırıldı. Her semantic target rule için model yalnız şu bilgileri gördü:
+
+- `summary / trigger / action / guardrail`
+- `binding_mode=semantic_role`
+- `semantic_role`
+- `semantic_intent`
+- scope / direction / counterparty / line-match alanları
+- `account_code=""`
+
+Benchmark, beklenen exact hesabın full rule JSON'unda geçtiğini görürse model çağrısından önce fail olacak leakage guard ile çalıştırıldı.
+
+İlk 500-rule / 7 zor vaka:
+- Full hesap planını final prompta verme: 5/7 functional success, ortalama ~35.3k token.
+- Burada bir postal-service sonucu aslında doğru correction üretmesine rağmen eski fixed-account conflict validator'ının `semantic account_code=""` değerini ayrı hesap sanması nedeniyle false failure oldu. Validator semantic-aware hale getirildi.
+- Full chart yaklaşımı gereksiz context ürettiği için devam yaklaşımı olarak uygun görülmedi.
+
+Semantic-role family-filtered current-chart deneyi:
+- Host yalnız semantic role dışındaki hesap ailelerini deterministik olarak eler; exact detail hesabı seçmez.
+- 500 rule / 7 vaka: 6/7 functional success, false correction 0, validation error 0.
+- Ortalama total token ~14.2k. Full-chart deneye göre context belirgin biçimde küçüldü.
+- Tek kalan oynak vaka `AMPLIFIER XCEED 3 BTE UP SER MDR`: doğru Xceed rule her seferinde search'te görüldü ve açıldı, fakat final applicability modeli bazı koşularda bariz family eşleşmesini `not_applicable` saydı.
+- Production family-match yönergesi semantic prompta da eklendikten sonra aynı vaka üç tekrar koşusunda 1/3 geçti. Dolayısıyla bu, retrieval değil final applicability kararlılığı riski olarak kaydedildi; mimari kararda göz ardı edilmeyecek.
+
+Geniş tedarikçi semantic rule deneyi:
+- Tek kural: `DUYU normal alışları = stock / mal_alim`.
+- Kuralın içinde `153.01` veya `153.02` hiç saklanmadı; leakage guard ile doğrulandı.
+- Aynı 9 satırlı gerçek faturada her tur yalnız bir satıra ters stok alt hesabı enjekte edildi.
+- Beklenen doğru dağılım cihaz satırlarında mevcut chart'tan `153.01`, KIT/aksesuar satırlarında `153.02` idi.
+- 500-rule store içinde sonuç: **9/9**; rule seen/opened/applied 9/9, false correction 0, unresolved 0.
+- Bu sonuç semantic supplier rule'un muhasebe yönünü/aileyi sabitleyip exact detail hesabı güncel hesap planı + satır içeriğine bırakmasının uygulanabilir olduğunu güçlü biçimde destekliyor.
+
+10.000-rule broad-supplier ölçek tekrarı:
+- Temsilî üç hedef satır çalıştırıldı: cihaz `153.01`, KIT `153.02`, KIT `153.02`.
+- İlk semantic final contract'ında rule seen/opened üçünde de 3/3 olmasına rağmen exact sonuç 2/3 kaldı.
+- Başarısız KIT vakasında model broad semantic rule için açıkça `applies` dedi fakat mevcut yanlış draft hesabı `153.01`'i koruyup "doğru" saydı.
+- Bu nedenle failure retrieval veya semantic applicability değil, **draft-account anchoring** olarak sınıflandırıldı.
+
+Draft-account-blind final resolver deneyi:
+- Final model çağrısından mevcut draft hesap kodu tamamen çıkarıldı.
+- Modelin görevi artık "correction/no-change" kararı vermek değil; yalnız opened semantic rule + invoice row + current family-filtered chart üzerinden `resolved_account` seçmek.
+- Host daha sonra `resolved_account` ile mevcut draft hesabını deterministik karşılaştırarak correction/no-change üretir.
+- Ek model çağrısı eklenmedi; pipeline yine search + candidate + final olmak üzere 3 model çağrısıdır.
+- Problemli KIT satırı 500-rule ortamında üç tekrar **3/3** doğru `153.02` çözüldü.
+- Aynı 9 satırlı gerçek tedarikçi faturasında 500-rule tam set **9/9** geçti; cihaz satırları `153.01`, KIT/aksesuar satırları `153.02`; false correction 0, unresolved 0.
+- 10.000-rule temsilî set de **3/3** geçti; rule seen/opened/applied 3/3, false correction 0, unresolved 0.
+- 10k ortalama toplam token yaklaşık 24.8k, ortalama süre yaklaşık 32.6 sn.
+- Bu sonuç broad supplier semantic rule için exact detail hesabı seçerken mevcut draft hesabını final resolver'dan gizlemenin anchoring sorununu kaldırdığını güçlü biçimde destekliyor.
+- Semantic rule kaydında eski/source exact hesap kodu yine hiçbir yerde saklanmadı; leakage guard korunuyor.
+
+Product/service semantic rule doğrulaması:
+- Blind-final contract'a ayrıca sert gate eklendi: en az bir opened rule `applies` değilse model hesap çözemez; zorunlu `no_applicable_rule` + boş hesap döndürür. Böylece Harness, learned rule yokken kendi başına muhasebe kararı üretmez.
+- Daha önce applicability oynaklığı gösteren Xceed vakası bu sıkı kontratla 500-rule ortamında üç tekrar **3/3** geçti; target `153.01`, false correction 0, validation error 0.
+- 500-rule / 7 farklı zor semantic vaka tam set: **7/7** geçti. Aksesuar stok, cihaz stok, kira/işyeri gideri, personel yemek, kargo/posta ve istisnalı satış dahil; rule seen/opened/applied 7/7, false correction 0, unresolved 0.
+- 500-rule tam sette ortalama yaklaşık 14.7k token / 12.3 sn.
+- 10.000-rule temsilî product/service stress: aksesuar stok `153.02`, Xceed cihaz stok `153.01`, posta/kargo gideri `770.01.005` => **3/3** geçti; rule seen/opened/applied 3/3, false correction 0, unresolved 0.
+- 10k product/service üçlü ortalama yaklaşık 20.4k token / 22.8 sn.
+- Böylece semantic lab'de kalan iki ana hata sınıfı — draft-account anchoring ve learned-rule yokken serbest hesap çözme — ayrı final contract ile kapatılmış görünüyor.
+- Bu bölümdeki sonuçlar önce lab'de elde edildi; aşağıdaki Adım 3/4 kararıyla doğrulanan kontrat production Harness koduna taşındı.
+
 ## Adım 3 — Semantic rule'u kim uygulamalı?
 
-İki yol ayrı ayrı değerlendirilecek.
+### Karar — 2026-09-19
 
-### Yol A — `4d9f0b7` direct semantic constraint
-
-```text
-Aktif semantic rule
-    ↓
-Deterministik eşleşme
-    ↓
-AI context / aday grup etkisi
-    ↓
-Normal muhasebe AI
-```
-
-### Yol B — AI Rule Harness
+Current three-stage AI pipeline için canonical yol **AI Rule Harness** seçildi.
 
 ```text
-Aktif semantic rule
+Planner
     ↓
-Harness rule search
+Muhasebeci AI
     ↓
-AI applicability kararı
+Normal fiş taslağı
     ↓
-Kural sonucu / önerisi
+AI Rule Harness
+    ↓
+Kural arama / açma / applicability
+    ↓
+Kuraldan bağımsız resolved_account
+    ↓
+Host mevcut fişle karşılaştırır
+    ↓
+Gerekirse correction uygulanır
 ```
 
-Kritik mevcut sorun: Harness `_usable_rule()` bugün `account_code` dolu olmasını şart koşuyor. Bu nedenle `account_code=""` olan semantic-role kuralları Harness şu anda **görmüyor**.
+Kritik ayrım: Harness AI artık Muhasebeci AI'ın seçtiği mevcut hesap kodunu veya karar gerekçesini görmez. Böylece semantic resolver önceki yanlış hesaba ankraj olmaz. Muhasebeci AI'ın ilk kararı provenance olarak sistemde korunur; yalnız Harness model context'ine verilmez.
 
-Bu adım sonunda tek bir canonical rule execution yolu seçilecek.
+Bu karar üç-aşamalı güncel AI akışı içindir. Eski simulation/fallback tarafında bulunan direct semantic constraint yardımcı yolu bu adımda sökülmedi; ayrı legacy cleanup konusu olarak kalır ve bu commitin kapsamı değildir.
 
-## Adım 4 — Harness semantic-role rule destekleyecekse nasıl?
+## Adım 4 — Harness semantic-role desteği — uygulandı
 
-Eğer Adım 3'te Harness seçilirse:
+Production Harness kodu semantic-role kuralları çalıştıracak şekilde güncellendi:
 
-- `_usable_rule()` semantic rule kabul edecek şekilde yeniden tasarlanacak.
-- `account_code` zorunluluğu fixed-account kurallara özel hale gelecek.
-- Harness semantic intent / semantic role / scope / counterparty / direction / line-match bilgilerini değerlendirecek.
-- Semantic kuralın sonucu “doğrudan hesap” olmak zorunda olmayacak.
-- Gerekirse Harness sonucu normal muhasebe AI'sına constraint olarak aktarılacak; bunun hangi aşamada olacağı ayrıca tasarlanacak.
+- `_usable_rule()` artık `binding_mode=semantic_role` ve `account_code=""` kuralları kabul eder.
+- `fixed_account` kurallarda exact `account_code` authoritative kalır.
+- `semantic_role` kurallarda eski/source exact hesap kural kaydında taşınmaz.
+- Full rule açıldığında AI'a dört alan verilir: `summary / trigger / action / guardrail` + makine alanları.
+- Search/candidate aşamalarında full dört alan context'e basılmaz; kısa index kullanılır.
+- Semantic final resolver yalnız opened rule + fatura satırı + semantic aileye filtrelenmiş **güncel hesap planı** görür.
+- Final AI correction/no-change kararı vermez; yalnız bağımsız `resolved_account` üretir.
+- Host `resolved_account` ile Muhasebeci AI'ın mevcut draft hesabını deterministik karşılaştırır.
+- En az bir opened rule `applies` değilse hesap çözümü yasaktır: zorunlu `no_applicable_rule` + boş hesap.
+- Birden fazla applicable rule çelişirse validation audit'i incomplete yapar; güvenli auto-apply gerçekleşmez.
+- Semantic kural persistence artık `meaning_label / trigger_tr / action_tr / guardrail_tr` alanlarını saklar.
+- Semantic narrative içinde historical exact hesap metin olarak bile tutulmaz; exact hesap yalnız fixed-account rule'da saklanır.
 
-Bu yapılmadan direct semantic yolu sökülmeyecek; aksi halde semantic kurallar kaydedilir fakat kullanılmaz hale gelebilir.
+Doğrulama:
+- Harness/application/lifecycle/phase0 hedef regresyonu: **54 passed / 1 skipped / 0 failed**.
+- Full backend regression: **1191 passed / 37 skipped / 0 failed**.
+- Gerçek Gemini production-Harness smoke: semantic MINIFIT kuralı ile yanlış draft `153.02` bağımsız olarak `153.01` çözüldü; audit complete, validation error 0, 3 model çağrısı.
+- Lab ölçek sonuçları: 500-rule semantic zor set 7/7; broad supplier 9/9; 10.000-rule temsilî semantic setler 3/3.
+- Bu aşamada deploy yapılmadı.
 
 ## Adım 5 — Tedarikçi bazlı genel kurallar
 

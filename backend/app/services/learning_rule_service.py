@@ -106,6 +106,15 @@ class LearningRuleService:
             scope=str(scope_data["scope"]),
             qualifier=str(scope_data["qualifier"]),
         )
+        semantic_intent = str(candidate.get("semantic_accounting_intent") or "").strip()
+        narrative = _rule_narrative(
+            binding_mode=binding_mode,
+            semantic_role=semantic_role,
+            semantic_intent=semantic_intent,
+            account_code=account_code,
+            decision=decision,
+            interpretation=interpretation,
+        )
         snapshot = {
             "client_id": client_id,
             "scope": scope_data["scope"],
@@ -116,15 +125,17 @@ class LearningRuleService:
             "line_match_mode": scope_data["line_match_mode"],
             "normalized_terms": scope_data["normalized_terms"],
             "semantic_role": semantic_role,
-            "semantic_intent": str(candidate.get("semantic_accounting_intent") or "").strip(),
+            "semantic_intent": semantic_intent,
             "binding_mode": binding_mode,
             "account_code": account_code if binding_mode == "fixed_account" else "",
             "corrected_counterparty_code": str(learning_event.get("corrected_counterparty_code") or "").strip(),
             "category": str(learning_event.get("category") or "").strip(),
             "document_ref": str(decision.get("document_ref") or "").strip(),
             "source_document_label": str(result.get("file_name") or decision.get("document_ref") or "").strip(),
-            "meaning_label": str(interpretation.get("summary_tr") or "").strip(),
-            "guardrail_tr": str(interpretation.get("guardrail_tr") or "").strip(),
+            "meaning_label": narrative["summary_tr"],
+            "trigger_tr": narrative["trigger_tr"],
+            "action_tr": narrative["action_tr"],
+            "guardrail_tr": narrative["guardrail_tr"],
             "reason": str(decision.get("decision_note") or decision.get("reason") or "").strip(),
             "activation_event_id": saved_review_id,
             "source_review_decision_id": saved_review_id,
@@ -157,6 +168,74 @@ class LearningRuleService:
             expected_version=int(created["version"]),
             actor=actor,
         )
+
+
+def _rule_narrative(
+    *,
+    binding_mode: str,
+    semantic_role: str,
+    semantic_intent: str,
+    account_code: str,
+    decision: Mapping[str, Any],
+    interpretation: Mapping[str, Any],
+) -> dict[str, str]:
+    summary = str(interpretation.get("summary_tr") or "").strip()
+    trigger = str(interpretation.get("trigger_tr") or "").strip()
+    action = str(interpretation.get("action_tr") or "").strip()
+    guardrail = str(interpretation.get("guardrail_tr") or "").strip()
+
+    if binding_mode != "semantic_role":
+        return {
+            "summary_tr": summary,
+            "trigger_tr": trigger,
+            "action_tr": action,
+            "guardrail_tr": guardrail,
+        }
+
+    # Semantic authorities must never preserve the historical/source exact account,
+    # even as non-authoritative prose, because it can anchor the later resolver.
+    summary = _without_exact_account(
+        str(decision.get("decision_note") or decision.get("reason") or summary),
+        account_code,
+    )
+    trigger = _without_exact_account(trigger, account_code)
+    guardrail = _without_exact_account(guardrail, account_code)
+    intent_label = semantic_intent or semantic_role
+    if not summary:
+        summary = f"Bu kural muhasebe anlamını {intent_label} olarak belirler."
+    if not trigger:
+        trigger = "Kuralın kayıtlı kapsamı, karşı tarafı, yönü ve satır eşleşmesi sağlandığında uygulanır."
+    action = (
+        f"Muhasebe anlamını {intent_label} olarak uygula; exact detay hesabı "
+        "güncel hesap planı ve fatura satırından çalışma anında seç."
+    )
+    semantic_guardrail = (
+        "Geçmiş/source exact hesap bağlayıcı değildir ve kural kaydında taşınmaz; "
+        "KDV, cari, tutar ve fiş yapısı ayrıca korunur."
+    )
+    guardrail = f"{guardrail} {semantic_guardrail}".strip()
+    return {
+        "summary_tr": summary,
+        "trigger_tr": trigger,
+        "action_tr": action,
+        "guardrail_tr": guardrail,
+    }
+
+
+def _without_exact_account(text: str, account_code: str) -> str:
+    value = str(text or "").strip()
+    code = str(account_code or "").strip()
+    if not value or not code:
+        return value
+    variants = {
+        code,
+        code.replace(".", " "),
+        code.replace(".", ""),
+    }
+    for variant in sorted(variants, key=len, reverse=True):
+        if variant:
+            value = value.replace(variant, "")
+    return re.sub(r"\s{2,}", " ", value).strip()
 
 
 def _selectable_detail_account(code: str, chart_accounts: Mapping[str, Any] | None) -> Mapping[str, Any] | None:

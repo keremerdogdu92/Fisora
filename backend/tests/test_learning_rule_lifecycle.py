@@ -453,6 +453,15 @@ class LearningRuleLifecycleTests(unittest.TestCase):
         self.assertEqual(active["semantic_role"], "stock")
         self.assertEqual(active["semantic_intent"], "mal_alim")
         self.assertEqual(active["account_code"], "")
+        self.assertEqual(active["meaning_label"], "Bu firmadan gelen her sey mal alistir.")
+        self.assertTrue(active["trigger_tr"])
+        self.assertIn("mal_alim", active["action_tr"])
+        semantic_text = " ".join(
+            str(active.get(field) or "")
+            for field in ("meaning_label", "trigger_tr", "action_tr", "guardrail_tr")
+        )
+        self.assertNotIn("153.03.001", semantic_text)
+        self.assertIn("Geçmiş/source exact hesap", active["guardrail_tr"])
 
     def test_supplier_semantic_rule_matches_only_same_client_and_counterparty(self) -> None:
         rule = {

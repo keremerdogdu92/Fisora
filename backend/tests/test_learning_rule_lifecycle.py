@@ -155,6 +155,45 @@ class LearningRuleLifecycleTests(unittest.TestCase):
                 actor="accountant",
             )
 
+    def test_rule_identity_preserves_ordinary_broad_key_and_separates_return_and_line_rules(self) -> None:
+        from app.services.learning_rule_service import _rule_key
+
+        ordinary_broad = _rule_key(
+            client_id="firma-1",
+            direction="purchase",
+            scope="client_counterparty",
+            qualifier="1234567890",
+        )
+        return_broad = _rule_key(
+            client_id="firma-1",
+            direction="purchase",
+            scope="client_counterparty",
+            qualifier="1234567890",
+            invoice_mode="return",
+        )
+        ordinary_line = _rule_key(
+            client_id="firma-1",
+            direction="purchase",
+            scope="client_counterparty",
+            qualifier="1234567890",
+            line_match_mode="normalized_terms_all",
+            normalized_terms=("oiv", "bedeli"),
+        )
+
+        self.assertEqual(
+            ordinary_broad,
+            "client:firma-1:purchase:client_counterparty:1234567890",
+        )
+        self.assertEqual(
+            return_broad,
+            "client:firma-1:purchase:client_counterparty:1234567890:mode:return",
+        )
+        self.assertEqual(
+            ordinary_line,
+            "client:firma-1:purchase:client_counterparty:1234567890:line:oiv-bedeli",
+        )
+        self.assertEqual(len({ordinary_broad, return_broad, ordinary_line}), 3)
+
     def test_confirmed_review_rule_creates_narrow_active_authority(self) -> None:
         service = LearningRuleService(repository=LearningRuleRepository())
         active = service.save_confirmed_review_rule(

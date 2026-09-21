@@ -105,6 +105,9 @@ class LearningRuleService:
             direction=direction,
             scope=str(scope_data["scope"]),
             qualifier=str(scope_data["qualifier"]),
+            invoice_mode=invoice_mode,
+            line_match_mode=str(scope_data["line_match_mode"]),
+            normalized_terms=tuple(scope_data["normalized_terms"]),
         )
         semantic_intent = str(candidate.get("semantic_accounting_intent") or "").strip()
         narrative = _rule_narrative(
@@ -338,8 +341,33 @@ def _semantic_role(
     return ""
 
 
-def _rule_key(*, client_id: str, direction: str, scope: str, qualifier: str) -> str:
-    return ":".join(("client", _key_part(client_id), direction, scope, _key_part(qualifier)))
+def _rule_key(
+    *,
+    client_id: str,
+    direction: str,
+    scope: str,
+    qualifier: str,
+    invoice_mode: str = "ordinary",
+    line_match_mode: str = "all_lines",
+    normalized_terms: tuple[str, ...] = (),
+) -> str:
+    # Keep the historical ordinary broad-rule key stable. Edge-case return rules and
+    # line-specific supplier/service rules get distinct identities so they can coexist.
+    parts = ["client", _key_part(client_id), direction, scope, _key_part(qualifier)]
+    if invoice_mode == "return":
+        parts.extend(("mode", "return"))
+    if (
+        scope in {"client_counterparty", "client_service_profile"}
+        and line_match_mode == "normalized_terms_all"
+    ):
+        line_qualifier = "-".join(
+            _key_part(term)
+            for term in normalized_terms
+            if _key_part(term)
+        )
+        if line_qualifier:
+            parts.extend(("line", line_qualifier))
+    return ":".join(parts)
 
 
 def _same_authority(current: Mapping[str, Any], snapshot: Mapping[str, Any]) -> bool:

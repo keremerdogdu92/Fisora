@@ -10,7 +10,7 @@ Production deploy repo cleanup'tan ayrıdır. Cleanup tamamlanması deploy anlam
 ## Canonical repo durumu
 - Source of truth: origin/main.
 - Office ve Home normalde task sonunda local main == origin/main ve git status temiz olmalı.
-- Current main: d6984fb — feat: resolve semantic learned rules in harness.
+- Current main before C1 cleanup patch: 9d25652.
 - Production baseline: 829c468. Yeni reconciliation/Harness commitleri deploy edilmedi.
 
 Yakın commit zinciri:
@@ -51,19 +51,26 @@ Repo-level tmp/ ignored kalır. Benchmark, JSON result, one-off automation, prov
 
 # Kalan cleanup sırası
 
-## C1 — Supplier-wide/general rules
+## C1 — Supplier-wide/general rules — TAMAMLANDI
 Örnek: 'Bu firmadan gelen her şey mal alımıdır.'
 
-İncelenecek:
-- client + counterparty scope.
-- purchase/sales yönü.
-- ordinary/return invoice ayrımı.
-- utility supplier istisnaları.
-- line-specific/narrow rule ile broad supplier rule conflict.
-- narrow fixed + broad semantic conflict.
-- yeni Harness mimarisinin bu davranışı tek canonical runtime yolu olarak uygulayıp uygulamadığı.
+Canonical kararlar:
+- Rule authority client-scoped kalır; aynı mükellef + counterparty bağlamı korunur.
+- Purchase/sales yönleri ayrı authority'dir.
+- Ordinary supplier-wide davranış değiştirilmedi; historical ordinary broad rule key formatı korunur.
+- Return invoice edge case olarak ayrı 'invoice_mode=return' authority'dir. Ordinary rule return faturaya sızmaz.
+- Supplier-wide 'all_lines' semantic rule ana anlam authority'sidir; sıradan satır kelimeleri tek başına broad supplier kararını bozmaz.
+- Açıkça öğretilmiş 'normalized_terms_all' line-specific rule broad supplier/service rule'dan daha dardır ve yalnız eşleşen satırda üstün gelir.
+- Narrow fixed-account + broad semantic conflict'inde narrow fixed exact hesap authoritative sonuçtur; broad semantic diğer satırlarda fallback olarak kalır.
+- Utility supplier istisnaları aynı specificity modeliyle ele alınır; vergi/ÖİV/ÖTV/atık su vb. line-specific authority broad utility rule'u yalnız ilgili satırda override edebilir.
+- Broad supplier/service authority ile line-specific authority artık aynı rule version identity'sini paylaşmaz; birlikte aktif yaşayabilir.
+- Harness aktif kuralları direction + invoice_mode ile filtreler ve host tarafı daha az spesifik rule seçimini validation error ile bloklar.
+- ffb6827 + d6984fb fixed-vs-semantic mimarisi değiştirilmedi; correction application/provenance akışı aynı kaldı.
 
-İlk adım yalnız inspection. Problem/çelişki bulunursa kullanıcıya anlatılmadan runtime patch yapılmayacak.
+C1 doğrulama:
+- targeted learning/Harness/application: 30 passed / 1 skipped / 0 failed.
+- full backend: 1195 passed / 37 skipped / 0 failed.
+- Deploy yapılmadı.
 
 ## C2 — Three-document evidence / repeat learning
 Korunacak fikir: aynı muhasebe kararı + 3 gerçekten farklı fatura -> learning prompt.
@@ -164,8 +171,6 @@ Her madde: inspect -> mevcut davranışı kısa anlat -> problem/conflict göste
 Tamamlanmış Harness Adım 1-4 yeniden yapılmayacak. Kullanıcı onayı olmadan yeni product behavior icat edilmeyecek. Cleanup sırasında feature loss kabul edilmeyecek. Deploy ayrıca istenmedikçe yapılmayacak.
 
 ## İlk sonraki görev
-C1 — Supplier-wide/general rules.
+C2 — Three-document evidence / repeat learning.
 
-İlk soru: 'Bu firmadan gelen her şey mal alımıdır' gibi broad semantic rule, yeni Harness mimarisinde scope/direction/return/utility/line-specific conflict kurallarını güvenli ve beklenen şekilde uyguluyor mu?
-
-Önce yalnız mevcut kod + test davranışı incelenecek; runtime patch yapmadan önce bulgular kullanıcıya kısa ve sade sunulacak.
+C1 supplier-wide/general rule davranışı canonical olarak kapatıldı. C2'de aynı belge/revision tekrarlarının evidence sayacını şişirip şişirmediği ve 'document_ref' identity/duplicate-prevention kontratı incelenecek.

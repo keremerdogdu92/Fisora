@@ -178,6 +178,12 @@ For no_applicable_rule/unresolved, candidate_ref and resolved_account must be em
 Applicability:
 - Full trigger/scope/counterparty/direction/line-match/guardrail are authoritative.
 - Search overlap is never authority.
+- An all_lines client_counterparty rule is supplier-wide authority: ordinary row wording alone does not defeat it
+  unless the rule trigger/guardrail explicitly excludes that row or a narrower applicable rule overrides it.
+- When multiple applicable rules overlap, a line-specific normalized_terms_all rule is narrower than an all_lines
+  supplier/service rule and governs that row. The broad rule remains the fallback for other rows.
+- When a narrower fixed_account rule overlaps a broader semantic_role rule, the narrower fixed account is the
+  authoritative exact result for that row.
 - Product/service family rules match after ordinary normalization of case, Turkish diacritics, punctuation and
   spacing. Extra model/generation/size/side/serial suffixes do not defeat a direct family match unless explicitly
   excluded by the rule.
@@ -230,17 +236,29 @@ def run_learned_rule_audit_shadow(
     semantic_plan: Mapping[str, object],
     final_output: Mapping[str, object],
     workspace: Mapping[str, object],
+    expected_direction: str = "",
 ) -> dict[str, Any]:
     started = perf_counter()
     rules = [_rule_document(item) for item in active_rules if _usable_rule(item)]
-    direction = str(semantic_plan.get("accounting_direction") or "").strip()
-    rules = [item for item in rules if item["direction"] == direction]
+    raw_direction = str(semantic_plan.get("accounting_direction") or "").strip()
+    invoice_mode = _invoice_mode_from_source_package(source_package, semantic_plan)
+    direction = raw_direction
+    if raw_direction == "return":
+        fallback_direction = str(expected_direction or "").strip()
+        direction = fallback_direction if fallback_direction in {"purchase", "sales"} else ""
+    rules = [
+        item
+        for item in rules
+        if item["direction"] == direction and item["invoice_mode"] == invoice_mode
+    ]
     rows, skipped_rows = _auditable_rows(source_package, final_output)
 
     base = {
         "mode": "shadow",
         "prompt_version": PROMPT_VERSION,
         "direction": direction,
+        "source_direction": raw_direction,
+        "invoice_mode": invoice_mode,
         "active_rule_count": len(rules),
         "audited_row_count": len(rows),
         "skipped_row_count": skipped_rows,
@@ -255,6 +273,7 @@ def run_learned_rule_audit_shadow(
 
     invoice_context = {
         "direction": direction,
+        "invoice_mode": invoice_mode,
         "counterparty": str(semantic_plan.get("counterparty_name") or ""),
         "counterparty_identifier": str(semantic_plan.get("counterparty_identifier") or ""),
         "rows": [_independent_row_view(row) for row in rows],
@@ -421,6 +440,7 @@ def run_learned_rule_audit_shadow(
                     row_id=row_id,
                     applies=applies,
                     opened=opened,
+                    selected_ref=candidate_ref,
                     resolved_account=resolved_account,
                     errors=errors,
                 )
@@ -592,16 +612,27 @@ def _validate_applicable_rule_compatibility(
     row_id: str,
     applies: Sequence[str],
     opened: Mapping[str, Mapping[str, Any]],
+    selected_ref: str,
     resolved_account: str,
     errors: list[str],
 ) -> None:
-    if len(applies) <= 1:
+    applicable = [ref for ref in applies if ref in opened]
+    if not applicable:
         return
+    highest_specificity = max(_rule_specificity(opened[ref]) for ref in applicable)
+    effective_applies = [
+        ref
+        for ref in applicable
+        if _rule_specificity(opened[ref]) == highest_specificity
+    ]
+    if selected_ref and selected_ref not in effective_applies:
+        errors.append(
+            f"less_specific_rule_selected:{row_id}:{selected_ref}:{','.join(sorted(effective_applies))}"
+        )
     fixed_codes = {
         str(opened[ref].get("account_code") or "")
-        for ref in applies
-        if ref in opened
-        and str(opened[ref].get("binding_mode") or "fixed_account") == "fixed_account"
+        for ref in effective_applies
+        if str(opened[ref].get("binding_mode") or "fixed_account") == "fixed_account"
         and str(opened[ref].get("account_code") or "")
     }
     semantic_keys = {
@@ -609,9 +640,8 @@ def _validate_applicable_rule_compatibility(
             str(opened[ref].get("semantic_role") or ""),
             str(opened[ref].get("semantic_intent") or ""),
         )
-        for ref in applies
-        if ref in opened
-        and str(opened[ref].get("binding_mode") or "fixed_account") == "semantic_role"
+        for ref in effective_applies
+        if str(opened[ref].get("binding_mode") or "fixed_account") == "semantic_role"
     }
     if len(fixed_codes) > 1:
         errors.append(f"conflicting_fixed_rules:{row_id}:{','.join(sorted(fixed_codes))}")
@@ -621,6 +651,16 @@ def _validate_applicable_rule_compatibility(
         errors.append(
             f"fixed_semantic_resolution_conflict:{row_id}:{resolved_account}:{','.join(sorted(fixed_codes))}"
         )
+
+
+def _rule_specificity(rule: Mapping[str, Any]) -> int:
+    line_score = 100 if str(rule.get("line_match_mode") or "all_lines") == "normalized_terms_all" else 0
+    scope_score = {
+        "client_counterparty": 30,
+        "client_service_profile": 20,
+        "client_phrase": 10,
+    }.get(str(rule.get("scope") or ""), 0)
+    return line_score + scope_score
 
 def _structured(
     provider: object,
@@ -723,6 +763,9 @@ def _rule_document(value: Mapping[str, Any]) -> dict[str, Any]:
     account_code = str(value.get("account_code") or "").strip() if binding_mode == "fixed_account" else ""
     semantic_role = str(value.get("semantic_role") or "").strip()
     semantic_intent = str(value.get("semantic_intent") or "").strip()
+    invoice_mode = str(value.get("invoice_mode") or "ordinary").strip()
+    if invoice_mode not in {"ordinary", "return"}:
+        invoice_mode = "ordinary"
     summary = str(
         value.get("meaning_label")
         or semantic_intent
@@ -761,6 +804,7 @@ def _rule_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "rule_id": str(value.get("rule_id") or value.get("id") or "").strip(),
         "title": title,
         "direction": str(value.get("direction") or "").strip(),
+        "invoice_mode": invoice_mode,
         "scope": str(value.get("scope") or "").strip(),
         "counterparty": str(value.get("counterparty_tax_id") or "").strip(),
         "search_terms": search_terms,
@@ -790,6 +834,26 @@ def _fallback_trigger(value: Mapping[str, Any], normalized_terms: Sequence[str])
     if normalized_terms:
         parts.append("terms=" + " | ".join(normalized_terms[:4]))
     return "; ".join(part for part in parts if part and not part.endswith("="))
+
+
+def _invoice_mode_from_source_package(
+    source_package: Mapping[str, object],
+    semantic_plan: Mapping[str, object],
+) -> str:
+    # Return invoices are an explicit edge case. Ordinary remains the default so existing
+    # supplier-wide rules keep their current behavior when no return evidence is present.
+    if str(semantic_plan.get("accounting_direction") or "").strip() == "return":
+        return "return"
+    for item in source_package.get("document_header") or ():
+        if not isinstance(item, Mapping):
+            continue
+        label = normalize_text(item.get("label") or "")
+        if not any(token in label for token in ("fatura tipi", "belge tipi", "invoice type", "document type")):
+            continue
+        value = normalize_text(item.get("value") or "")
+        if "iade" in value.split() or "return" in value.split():
+            return "return"
+    return "ordinary"
 
 
 def _search_rules(
@@ -857,6 +921,8 @@ def _search_rules(
                 "meaning": str(rule.get("meaning") or ""),
                 "service_profile": str(rule.get("service_profile") or ""),
                 "binding_mode": str(rule.get("binding_mode") or "fixed_account"),
+                "line_match_mode": str(rule.get("line_match_mode") or "all_lines"),
+                "normalized_terms": list(rule.get("normalized_terms") or ()),
                 "semantic_role": str(rule.get("semantic_role") or ""),
                 "semantic_intent": str(rule.get("semantic_intent") or ""),
                 "account_code": str(rule.get("account_code") or ""),
@@ -916,6 +982,8 @@ def _candidate_catalogs(
                     "meaning": str(raw.get("meaning") or ""),
                     "service_profile": str(raw.get("service_profile") or ""),
                     "binding_mode": str(raw.get("binding_mode") or "fixed_account"),
+                    "line_match_mode": str(raw.get("line_match_mode") or "all_lines"),
+                    "normalized_terms": list(raw.get("normalized_terms") or ()),
                     "semantic_role": str(raw.get("semantic_role") or ""),
                     "semantic_intent": str(raw.get("semantic_intent") or ""),
                     "account_code": str(raw.get("account_code") or ""),

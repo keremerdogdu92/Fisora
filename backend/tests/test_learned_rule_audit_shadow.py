@@ -394,3 +394,99 @@ def test_semantic_rule_is_usable_without_exact_account_code() -> None:
     assert document["trigger"]
     assert document["action"]
     assert document["guardrail"]
+
+
+def test_return_invoice_does_not_reuse_ordinary_supplier_rule() -> None:
+    provider = FakeProvider()
+    source_package = _source_package()
+    source_package["document_header"] = [{"label": "Fatura Tipi", "value": "IADE"}]
+
+    result = run_learned_rule_audit_shadow(
+        provider=provider,
+        active_rules=[_active_rule()],
+        source_package=source_package,
+        semantic_plan={
+            "accounting_direction": "purchase",
+            "counterparty_name": "DEMANT",
+            "counterparty_identifier": "123",
+        },
+        final_output=_final_output(),
+        workspace=_workspace(),
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_active_rules"
+    assert result["invoice_mode"] == "return"
+    assert provider.calls == []
+
+
+def test_return_specific_rule_can_run_with_expected_base_direction() -> None:
+    provider = FakeProvider()
+    return_rule = _active_rule()
+    return_rule["invoice_mode"] = "return"
+
+    result = run_learned_rule_audit_shadow(
+        provider=provider,
+        active_rules=[return_rule],
+        source_package=_source_package(),
+        semantic_plan={
+            "accounting_direction": "return",
+            "counterparty_name": "DEMANT",
+            "counterparty_identifier": "123",
+        },
+        final_output=_final_output(),
+        workspace=_workspace(),
+        expected_direction="purchase",
+    )
+
+    assert result["status"] == "completed"
+    assert result["audit_status"] == "complete"
+    assert result["direction"] == "purchase"
+    assert result["source_direction"] == "return"
+    assert result["invoice_mode"] == "return"
+
+
+def test_line_specific_fixed_rule_outranks_broad_supplier_semantic_rule() -> None:
+    from app.services.learned_rule_audit_shadow import _validate_applicable_rule_compatibility
+
+    opened = {
+        "C1": {
+            "scope": "client_counterparty",
+            "line_match_mode": "all_lines",
+            "binding_mode": "semantic_role",
+            "semantic_role": "expense",
+            "semantic_intent": "utility_expense",
+            "account_code": "",
+        },
+        "C2": {
+            "scope": "client_counterparty",
+            "line_match_mode": "normalized_terms_all",
+            "normalized_terms": ["oiv", "bedeli"],
+            "binding_mode": "fixed_account",
+            "semantic_role": "expense",
+            "semantic_intent": "oiv_expense",
+            "account_code": "770.99",
+        },
+    }
+
+    errors: list[str] = []
+    _validate_applicable_rule_compatibility(
+        row_id="1",
+        applies=["C1", "C2"],
+        opened=opened,
+        selected_ref="C2",
+        resolved_account="770.99",
+        errors=errors,
+    )
+    assert errors == []
+
+    wrong_selection_errors: list[str] = []
+    _validate_applicable_rule_compatibility(
+        row_id="1",
+        applies=["C1", "C2"],
+        opened=opened,
+        selected_ref="C1",
+        resolved_account="770.99",
+        errors=wrong_selection_errors,
+    )
+    assert any(error.startswith("less_specific_rule_selected:1:C1:") for error in wrong_selection_errors)

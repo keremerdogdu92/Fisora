@@ -508,6 +508,7 @@ def _run_learned_rule_audit_shadow_for_three_stage(
     semantic_plan: Mapping[str, object],
     final_output: Mapping[str, object],
     source: Mapping[str, str] | Any,
+    expected_direction: str = "",
 ) -> dict[str, Any] | None:
     if not learned_rule_audit_shadow_enabled(source):
         return None
@@ -560,6 +561,7 @@ def _run_learned_rule_audit_shadow_for_three_stage(
             semantic_plan=semantic_plan,
             final_output=final_output,
             workspace=workspace,
+            expected_direction=expected_direction,
         )
         result["model"] = model
         return result
@@ -1912,6 +1914,7 @@ def _run_gemini_pdf_v2_for_worker(
             semantic_plan=three_stage.semantic_plan,
             final_output=three_stage.final_output,
             source=environ,
+            expected_direction=_intake_direction(str(document.get("intake_category") or "")),
         )
         _apply_learned_rule_audit_corrections(result, shadow, workspace)
         result["gemini_pdf_v2_used"] = True
@@ -3335,6 +3338,7 @@ def _process_html_source_job(
                 semantic_plan=prepared.semantic_plan,
                 final_output=prepared.final_output,
                 source=environ,
+                expected_direction=_intake_direction(str(document.get("intake_category") or "")),
             )
             _apply_learned_rule_audit_corrections(result, shadow, workspace)
             ai_ms = (

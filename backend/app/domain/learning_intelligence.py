@@ -1,3 +1,5 @@
+# File: backend/app/domain/learning_intelligence.py
+# Summary: Enriches accountant learning events, deduplicates document evidence, and builds rule prompts.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -156,6 +158,8 @@ def enrich_learning_event(
     counterparty_tax_id = _digits_only(result.get("counterparty_tax_id") or "")
     counterparty_title = str(result.get("counterparty_title") or result.get("provider_hint") or "").strip()
     counterparty_identity_key = str(result.get("counterparty_identity_key") or "").strip()
+    ettn = _invoice_identity_value(result, "ettn")
+    invoice_no = _invoice_identity_value(result, "invoice_no")
     stored_document_type = str((document or {}).get("document_type") or "").strip().lower()
     utility_context = {
         "provider_id": str(result.get("provider_id") or "").strip(),
@@ -187,6 +191,8 @@ def enrich_learning_event(
             "counterparty_title": counterparty_title,
             "counterparty_identity_key": counterparty_identity_key,
             "utility_context": utility_context,
+            "ettn": ettn,
+            "invoice_no": invoice_no,
             "issue_date": str(result.get("issue_date") or "").strip(),
             "posting_signature": _posting_signature(
                 nace_code=nace_code,
@@ -301,9 +307,10 @@ def _consistent_document_evidence(
     seen: set[str] = set()
     for item in matches:
         document_ref = str(item.get("document_ref") or "").strip()
-        if not document_ref or document_ref in seen:
+        evidence_identity = _learning_evidence_identity(item)
+        if not evidence_identity or evidence_identity in seen:
             continue
-        seen.add(document_ref)
+        seen.add(evidence_identity)
         evidence.append(
             {
                 "document_ref": document_ref,
@@ -311,6 +318,34 @@ def _consistent_document_evidence(
             }
         )
     return evidence
+
+
+def _invoice_identity_value(result: dict[str, Any], field: str) -> str:
+    direct = str(result.get(field) or "").strip()
+    if direct:
+        return direct
+    canonical = result.get("canonical_invoice")
+    canonical = canonical if isinstance(canonical, dict) else {}
+    header = canonical.get("header")
+    header = header if isinstance(header, dict) else {}
+    return str(header.get(field) or "").strip()
+
+
+def _learning_evidence_identity(item: dict[str, Any]) -> str:
+    # A repeat-learning signal represents a distinct commercial document, not a new upload/revision.
+    # Identity priority is ETTN -> invoice number -> internal document reference.
+    ettn = _normalized_identity_token(item.get("ettn"))
+    if ettn:
+        return f"ettn:{ettn}"
+    invoice_no = _normalized_identity_token(item.get("invoice_no"))
+    if invoice_no:
+        return f"invoice_no:{invoice_no}"
+    document_ref = str(item.get("document_ref") or "").strip()
+    return f"document_ref:{document_ref}" if document_ref else ""
+
+
+def _normalized_identity_token(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
 
 def _matching_utility_precedent(

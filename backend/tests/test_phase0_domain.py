@@ -12570,6 +12570,167 @@ TOPLAM: 1200.00"""
         self.assertEqual(len(enriched["rule_prompt"]["evidence_documents"]), 3)
         self.assertIn("kolay", enriched["normalized_terms"])
 
+    def test_learning_evidence_identity_prefers_ettn_over_invoice_no_and_document_ref(self) -> None:
+        base_event = {
+            "document_ref": "revision-c.xml",
+            "scope": "client_rule",
+            "action": "approve_with_changes",
+            "category": "e_fatura_hizmeti",
+            "corrected_account_code": "770.05",
+            "corrected_counterparty_code": "320.01.888",
+            "reason": "Kolay Soft e-fatura hizmeti.",
+            "statement_line_no": 0,
+        }
+        prior_events = [
+            {
+                **base_event,
+                "document_ref": "revision-a.xml",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "ettn": "ETTN-SAME-1",
+                "invoice_no": "INV-OLD-A",
+            },
+            {
+                **base_event,
+                "document_ref": "revision-b.xml",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "ettn": "ETTN-SAME-1",
+                "invoice_no": "INV-OLD-B",
+            },
+        ]
+        document = {
+            "document_ref": "revision-c.xml",
+            "result": {
+                "invoice_type": "ALIS",
+                "provider_hint": "Kolay Soft",
+                "product_line_hint": "Kolay Soft e-fatura hizmeti",
+                "product_category": "bilinmeyen",
+                "canonical_invoice": {
+                    "header": {
+                        "ettn": "ETTN-SAME-1",
+                        "invoice_no": "INV-CURRENT",
+                    },
+                },
+                "issue_date": "2026-09-21",
+            },
+        }
+
+        enriched = enrich_learning_event(
+            base_event,
+            client_id="client-1",
+            decision=base_event,
+            document=document,
+            prior_learning_events=prior_events,
+        )
+
+        self.assertEqual(enriched["ettn"], "ETTN-SAME-1")
+        self.assertEqual(enriched["client_consistent_decision_count"], 1)
+        self.assertEqual(
+            [item["document_ref"] for item in enriched["rule_prompt"]["evidence_documents"]],
+            ["revision-c.xml"],
+        )
+
+    def test_learning_evidence_identity_uses_invoice_no_when_ettn_is_missing(self) -> None:
+        base_event = {
+            "document_ref": "revision-c.pdf",
+            "scope": "client_rule",
+            "action": "approve_with_changes",
+            "category": "e_fatura_hizmeti",
+            "corrected_account_code": "770.05",
+            "corrected_counterparty_code": "320.01.888",
+            "reason": "Kolay Soft e-fatura hizmeti.",
+            "statement_line_no": 0,
+        }
+        prior_events = [
+            {
+                **base_event,
+                "document_ref": "revision-a.pdf",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "ettn": "",
+                "invoice_no": "ABC-2026-0001",
+                "issue_date": "2026-09-18",
+            },
+            {
+                **base_event,
+                "document_ref": "revision-b.pdf",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+                "ettn": "",
+                "invoice_no": "ABC20260001",
+                "issue_date": "2026-09-19",
+            },
+        ]
+        document = {
+            "document_ref": "revision-c.pdf",
+            "result": {
+                "invoice_type": "ALIS",
+                "provider_hint": "Kolay Soft",
+                "product_line_hint": "Kolay Soft e-fatura hizmeti",
+                "product_category": "bilinmeyen",
+                "invoice_no": "ABC 2026 0001",
+                "issue_date": "2026-09-21",
+            },
+        }
+
+        enriched = enrich_learning_event(
+            base_event,
+            client_id="client-1",
+            decision=base_event,
+            document=document,
+            prior_learning_events=prior_events,
+        )
+
+        self.assertEqual(enriched["invoice_no"], "ABC 2026 0001")
+        self.assertEqual(enriched["client_consistent_decision_count"], 1)
+
+    def test_learning_evidence_identity_falls_back_to_document_ref(self) -> None:
+        base_event = {
+            "document_ref": "doc-3",
+            "scope": "client_rule",
+            "action": "approve_with_changes",
+            "category": "e_fatura_hizmeti",
+            "corrected_account_code": "770.05",
+            "corrected_counterparty_code": "320.01.888",
+            "reason": "Kolay Soft e-fatura hizmeti.",
+            "statement_line_no": 0,
+        }
+        prior_events = [
+            {
+                **base_event,
+                "document_ref": "doc-1",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+            },
+            {
+                **base_event,
+                "document_ref": "doc-2",
+                "client_id": "client-1",
+                "accounting_intent": "e_fatura_yazilim_gideri",
+            },
+        ]
+        document = {
+            "document_ref": "doc-3",
+            "result": {
+                "invoice_type": "ALIS",
+                "provider_hint": "Kolay Soft",
+                "product_line_hint": "Kolay Soft e-fatura hizmeti",
+                "product_category": "bilinmeyen",
+            },
+        }
+
+        enriched = enrich_learning_event(
+            base_event,
+            client_id="client-1",
+            decision=base_event,
+            document=document,
+            prior_learning_events=prior_events,
+        )
+
+        self.assertEqual(enriched["client_consistent_decision_count"], 3)
+        self.assertEqual(enriched["rule_prompt"]["status"], "client_repeat_prompt")
+
     def test_utility_rule_from_other_client_is_offered_as_client_specific_precedent(self) -> None:
         event = {
             "document_ref": "aski-2026-09.pdf",

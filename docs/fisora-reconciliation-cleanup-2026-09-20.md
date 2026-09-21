@@ -10,7 +10,7 @@ Production deploy repo cleanup'tan ayrıdır. Cleanup tamamlanması deploy anlam
 ## Canonical repo durumu
 - Source of truth: origin/main.
 - Office ve Home normalde task sonunda local main == origin/main ve git status temiz olmalı.
-- Current main before C1 cleanup patch: 9d25652.
+- Current main before C2 cleanup patch: 7f9a070.
 - Production baseline: 829c468. Yeni reconciliation/Harness commitleri deploy edilmedi.
 
 Yakın commit zinciri:
@@ -72,17 +72,28 @@ C1 doğrulama:
 - full backend: 1195 passed / 37 skipped / 0 failed.
 - Deploy yapılmadı.
 
-## C2 — Three-document evidence / repeat learning
-Korunacak fikir: aynı muhasebe kararı + 3 gerçekten farklı fatura -> learning prompt.
+## C2 — Three-document evidence / repeat learning — TAMAMLANDI
+Korunan fikir: aynı muhasebe kararı + 3 gerçekten farklı fatura -> learning prompt.
 
-İncelenecek:
-- aynı document tekrar işlenince sayaç artıyor mu?
-- document_ref gerçekten unique evidence authority mi?
-- aynı fatura farklı revision ile tekrar gelirse yeni evidence sayılıyor mu?
-- issue_date display-only mi, identity'nin parçası mı?
-- duplicate prevention sağlam mı?
-- threshold her rule tipi için hep 3 mü?
-- evidence documents UI'ya eksiksiz gidiyor mu?
+Canonical kararlar:
+- Evidence bir upload/revision değil, distinct commercial document temsil eder.
+- Evidence identity sırası kesin olarak: ETTN -> fatura no -> document_ref.
+- Aynı ETTN farklı upload/revision/document_ref ile tekrar gelirse tek evidence sayılır.
+- ETTN yoksa aynı fatura no farklı upload/revision/document_ref ile tekrar gelirse tek evidence sayılır.
+- ETTN ve fatura no yoksa document_ref fallback identity olarak kullanılır.
+- Aynı document_ref reprocess/review tekrarında sayaç şişmez.
+- issue_date identity değildir; yalnız UI/display evidence tarihidir.
+- Repeat-learning eşiği 3 distinct evidence document'tır.
+- Müşavirin explicit rule request'i ve office utility precedent akışları 3 evidence threshold'una bağlı değildir.
+- evidence_documents UI'ya son 3 distinct evidence olarak taşınmaya devam eder.
+- Production three-stage ETTN'nin canonical_invoice.header altında bulunduğu şekil de desteklenir.
+- Mevcut historical learning event'ler yeni identity alanları yoksa document_ref fallback ile backward-compatible kalır; data migration yapılmadı.
+
+C2 doğrulama:
+- identity targeted: 4 passed / 0 failed.
+- learning + review + upload relevant regression: 355 passed / 0 failed.
+- full backend: 1198 passed / 37 skipped / 0 failed.
+- Deploy yapılmadı.
 
 ## C3 — Learning UI cleanup
 4d9f0b7 ile gelen 'Fisora bir tekrar fark etti' kartı incelenecek.
@@ -171,6 +182,6 @@ Her madde: inspect -> mevcut davranışı kısa anlat -> problem/conflict göste
 Tamamlanmış Harness Adım 1-4 yeniden yapılmayacak. Kullanıcı onayı olmadan yeni product behavior icat edilmeyecek. Cleanup sırasında feature loss kabul edilmeyecek. Deploy ayrıca istenmedikçe yapılmayacak.
 
 ## İlk sonraki görev
-C2 — Three-document evidence / repeat learning.
+C3 — Learning UI cleanup.
 
-C1 supplier-wide/general rule davranışı canonical olarak kapatıldı. C2'de aynı belge/revision tekrarlarının evidence sayacını şişirip şişirmediği ve 'document_ref' identity/duplicate-prevention kontratı incelenecek.
+C2 three-document evidence davranışı canonical olarak kapatıldı. C3'te stale learning CTA/panel anlatımı, automatic correction provenance ve repeat-learning UI mapping'leri current happy path'e göre incelenecek.
